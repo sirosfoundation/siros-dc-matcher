@@ -149,7 +149,7 @@ fn reports_what_it_observed_through_the_abi() {
 #[test]
 fn unreadable_blob_is_reported_not_swallowed() {
     let captured = run(
-        &matcher_wasm(),
+        matcher_wasm(),
         Invocation {
             request: openid4vp_request(),
             credentials: vec![7; 42],
@@ -177,7 +177,7 @@ fn future_blob_version_is_named_in_the_diagnostic() {
     db.version = VERSION + 9;
 
     let captured = run(
-        &matcher_wasm(),
+        matcher_wasm(),
         Invocation {
             request: openid4vp_request(),
             credentials: db.to_cbor().expect("encoding"),

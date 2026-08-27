@@ -136,12 +136,15 @@ jobs:
         run: |
           set -euo pipefail
           found=0
-          for f in $(find bindings -name '*.kt' -o -name '*.swift'); do
+          # -print0 and a null-delimited read: unquoted $(find ...) splits on
+          # whitespace, so a generated path containing a space would silently
+          # be checked as two paths that do not exist.
+          while IFS= read -r -d '' f; do
             test -s "$f" || { echo "::error::$f is empty"; exit 1; }
             grep -q "SirosBlobBuilder" "$f" || { echo "::error::$f has no SirosBlobBuilder"; exit 1; }
             echo "$f: $(wc -l < "$f") lines"
             found=$((found + 1))
-          done
+          done < <(find bindings \( -name '*.kt' -o -name '*.swift' \) -print0)
           test "$found" -ge 2 || {
             echo "::error::expected Kotlin and Swift bindings, found $found — UniFFI saw no interface"
             exit 1

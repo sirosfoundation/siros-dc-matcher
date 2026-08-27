@@ -126,6 +126,27 @@ struct BuilderState {
     debug: bool,
 }
 
+impl SirosBlobBuilder {
+    /// Access the builder's state, recovering from a poisoned lock.
+    ///
+    /// A `Mutex` is poisoned when a thread panics while holding it. The usual
+    /// reason to refuse a poisoned lock is that the data behind it may be
+    /// half-updated and its invariants broken — but this state is three
+    /// append-only collections and a flag, with no invariant spanning them, so
+    /// there is nothing for a panic to have corrupted.
+    ///
+    /// Recovering rather than returning an error matters here because the
+    /// alternative that was written first — `if let Ok(mut s) = lock()` —
+    /// dropped the update and returned normally. A caller would add a
+    /// credential, be told nothing, and find it missing from the blob. Silent
+    /// data loss across an FFI boundary is close to undebuggable.
+    fn state(&self) -> std::sync::MutexGuard<'_, BuilderState> {
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+}
+
 #[uniffi::export]
 impl SirosBlobBuilder {
     /// A builder carrying the default SIROS matching profile.
@@ -138,9 +159,7 @@ impl SirosBlobBuilder {
 
     /// Add a credential.
     pub fn add_credential(&self, credential: FfiCredential) {
-        if let Ok(mut s) = self.state.lock() {
-            s.credentials.push(credential);
-        }
+        self.state().credentials.push(credential);
     }
 
     /// Add an icon, referenced by [`FfiCredential::icon_id`].
@@ -149,10 +168,9 @@ impl SirosBlobBuilder {
     /// one issuer, and repeating that issuer's logo per credential makes the
     /// registered payload grow with credentials rather than with issuers.
     pub fn add_icon(&self, id: String, bytes: Vec<u8>) {
-        if let Ok(mut s) = self.state.lock() {
-            s.icons.retain(|(existing, _)| existing != &id);
-            s.icons.push((id, bytes));
-        }
+        let mut s = self.state();
+        s.icons.retain(|(existing, _)| existing != &id);
+        s.icons.push((id, bytes));
     }
 
     /// Declare a ZK proof system this wallet can actually produce.
@@ -160,9 +178,7 @@ impl SirosBlobBuilder {
     /// Without this, a `mso_mdoc_zk` request matches nothing — which is the
     /// correct outcome for a wallet that cannot produce the proof.
     pub fn add_zk_system(&self, capability: FfiCapability) {
-        if let Ok(mut s) = self.state.lock() {
-            s.zk_systems.push(capability);
-        }
+        self.state().zk_systems.push(capability);
     }
 
     /// Put matcher diagnostics into entry metadata.
@@ -170,9 +186,7 @@ impl SirosBlobBuilder {
     /// Development only. It writes matcher internals somewhere the platform
     /// stores them.
     pub fn set_debug(&self, debug: bool) {
-        if let Ok(mut s) = self.state.lock() {
-            s.debug = debug;
-        }
+        self.state().debug = debug;
     }
 
     /// Encode the blob to register.
@@ -184,9 +198,7 @@ impl SirosBlobBuilder {
     /// its picture with nothing said. [`BlobError::Encoding`] if serialisation
     /// fails.
     pub fn build(&self) -> Result<Vec<u8>, BlobError> {
-        let s = self.state.lock().map_err(|_| BlobError::Encoding {
-            reason: "builder state was poisoned by an earlier panic".into(),
-        })?;
+        let s = self.state();
 
         let mut icons = Vec::new();
         let mut offsets: BTreeMap<&str, IconRef> = BTreeMap::new();
@@ -448,5 +460,49 @@ mod tests {
         assert!(p.format_matches("mso_mdoc_zk", "mso_mdoc"));
         assert!(!p.format_matches("mso_mdoc_zk", "dc+sd-jwt"));
         assert!(!p.format_matches("something-new", "mso_mdoc"));
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod poison_tests {
+    use super::*;
+
+    /// A panic in another thread must not cost a later caller their data.
+    ///
+    /// The first version of this builder dropped the update and returned
+    /// normally when the lock was poisoned: a caller added a credential, was
+    /// told nothing, and found it missing from the blob. Across an FFI
+    /// boundary that is close to undebuggable, so it gets a test.
+    #[test]
+    fn a_poisoned_lock_does_not_swallow_later_updates() {
+        let builder = std::sync::Arc::new(SirosBlobBuilder::new());
+
+        let b = std::sync::Arc::clone(&builder);
+        let _ = std::thread::spawn(move || {
+            let _guard = b.state.lock().unwrap();
+            panic!("poison the lock");
+        })
+        .join();
+
+        builder.add_credential(FfiCredential {
+            id: "cred-after-poison".into(),
+            format: "mso_mdoc".into(),
+            doctype: Some("org.iso.18013.5.1.mDL".into()),
+            vct: None,
+            title: "Driving Licence".into(),
+            subtitle: "Transportstyrelsen".into(),
+            icon_id: None,
+            claims: vec![],
+        });
+
+        let blob = builder.build().expect("build after poisoning");
+        let db = CredentialDatabase::from_cbor(&blob).unwrap();
+        assert_eq!(
+            db.credentials.len(),
+            1,
+            "the credential added after poisoning was lost"
+        );
+        assert_eq!(db.credentials[0].id, "cred-after-poison");
     }
 }
