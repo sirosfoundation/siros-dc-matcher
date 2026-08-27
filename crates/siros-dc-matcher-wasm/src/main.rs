@@ -15,10 +15,10 @@
 //!
 //! # Status
 //!
-//! Phase 1: the swap is real end to end, but the matching is not. This emits a
-//! single fixed entry for any request whose protocol it recognises, which is
-//! exactly enough to prove that a wallet-supplied matcher reaches the picker.
-//! DCQL evaluation arrives in Phase 3 and the profile in Phase 4 — see
+//! Phase 2: the swap is real end to end and the registered blob is decoded,
+//! but the matching is not. This emits a single fixed entry for any request
+//! whose protocol it recognises, reporting what it read. DCQL evaluation
+//! arrives in Phase 3 and the profile evaluator in Phase 4 — see
 //! `docs/plan.md`.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -26,6 +26,7 @@
 
 mod abi;
 
+use siros_dc_matcher_core::db::CredentialDatabase;
 use siros_dc_matcher_core::sink::Entry;
 
 /// Protocols this matcher answers to.
@@ -57,7 +58,19 @@ fn main() {
     // registered blob survived the round-trip, and whether the platform's
     // verified caller reaches the sandbox.
     let (package, origin) = abi::calling_app_info();
-    let credentials_len = abi::credentials_bytes().len();
+    let blob = abi::credentials_bytes();
+    let credentials_len = blob.len();
+
+    // Decoding the registered blob is the first thing the real matcher does,
+    // so it is worth exercising now rather than at the same time as DCQL. A
+    // failure here is reported through the entry instead of being swallowed:
+    // "the wallet registered a blob this matcher cannot read" and "the wallet
+    // has no matching credential" look identical in the picker, and only one
+    // of them is a bug.
+    let (blob_status, credential_count) = match CredentialDatabase::from_cbor(&blob) {
+        Ok(db) => ("ok".to_string(), Some(db.credentials.len())),
+        Err(e) => (e.to_string(), None),
+    };
 
     // Metadata survives the picker round-trip, so it is where the wallet reads
     // back what this matcher decided. Phase 5 fills it with the matched query
@@ -73,6 +86,8 @@ fn main() {
         // trustworthy statement of who is asking.
         "verified_origin": origin,
         "credentials_bytes": credentials_len,
+        "blob_status": blob_status,
+        "credential_count": credential_count,
     })
     .to_string();
 
@@ -95,7 +110,10 @@ fn main() {
         SET_ID,
         0,
         "Registered blob",
-        &format!("{credentials_len} bytes"),
+        &match credential_count {
+            Some(n) => format!("{credentials_len} bytes, {n} credentials"),
+            None => format!("{credentials_len} bytes, unreadable"),
+        },
     );
 }
 

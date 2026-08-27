@@ -103,6 +103,52 @@ jobs:
           name: matcher-wasm
           path: target/wasm32-wasip1/release/matcher.wasm
 
+  bindings:
+    name: Bindings generate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - run: cargo build -p siros-dc-matcher-ffi --release
+
+      # UniFFI reads a library's interface out of metadata symbols embedded in
+      # it. Strip those and generation produces nothing at all — no error, no
+      # files, exit code 0. `cargo build` stays green while every binding
+      # silently disappears, so the only way to catch it is to generate and
+      # look at what came out.
+      - name: Generate Kotlin and Swift bindings
+        run: |
+          set -euo pipefail
+          for lang in kotlin swift; do
+            cargo run -p siros-dc-matcher-ffi --features bindgen --bin uniffi-bindgen -- \
+              generate --library target/release/libsiros_dc_matcher_ffi.so \
+              --language "$lang" --out-dir bindings
+          done
+
+      # Kotlin lands under uniffi/<namespace>/, Swift at the top level, so
+      # these are found rather than assumed — a hardcoded path that stops
+      # existing would make this check pass by matching nothing.
+      - name: Check the bindings are not empty
+        run: |
+          set -euo pipefail
+          found=0
+          for f in $(find bindings -name '*.kt' -o -name '*.swift'); do
+            test -s "$f" || { echo "::error::$f is empty"; exit 1; }
+            grep -q "SirosBlobBuilder" "$f" || { echo "::error::$f has no SirosBlobBuilder"; exit 1; }
+            echo "$f: $(wc -l < "$f") lines"
+            found=$((found + 1))
+          done
+          test "$found" -ge 2 || {
+            echo "::error::expected Kotlin and Swift bindings, found $found — UniFFI saw no interface"
+            exit 1
+          }
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bindings
+          path: bindings/
+
   publishable:
     name: siros-dcql is publishable
     runs-on: ubuntu-latest

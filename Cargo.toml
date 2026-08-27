@@ -24,11 +24,24 @@ serde_json = "1"
 ciborium = "0.2"
 
 # The matcher runs inside the credential picker, where a trap is
-# indistinguishable from "no matching credential". Optimise the WASM profile
-# for size and abort rather than unwind — see docs/non-functional.md.
+# indistinguishable from "no matching credential". Optimise for size, and
+# abort rather than unwind.
+#
+# `strip = "debuginfo"`, NOT `strip = true`. This profile also builds the
+# UniFFI cdylib, and UniFFI discovers a library's interface by reading
+# metadata symbols out of it. Stripping symbols makes binding generation
+# produce nothing at all — no error, no files, exit code 0 — which is a
+# genuinely miserable thing to debug. Debug info is still dropped, so the
+# matcher keeps almost all of the size win.
 [profile.release]
 opt-level = "z"
 lto = true
 codegen-units = 1
 panic = "abort"
+strip = "debuginfo"
+
+# The matcher is the only artifact that ships inside someone else's process,
+# and it is the only one nothing needs to read symbols from — so it, and only
+# it, gets fully stripped.
+[profile.release.package.siros-dc-matcher-wasm]
 strip = true

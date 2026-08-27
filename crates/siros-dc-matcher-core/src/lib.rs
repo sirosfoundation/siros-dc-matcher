@@ -10,5 +10,6 @@
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
 
+pub mod db;
 pub mod profile;
 pub mod sink;
