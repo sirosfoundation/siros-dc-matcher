@@ -44,6 +44,13 @@ const PROTOCOLS: [&str; 4] = [
 /// The set every Phase 1 entry belongs to. One set, one entry.
 const SET_ID: &str = "siros-phase1";
 
+/// Credential id for the fixed Phase 1 entry.
+///
+/// Named rather than repeated so the entry and its fields cannot drift apart:
+/// the platform keys fields by credential id, so a field carrying a different
+/// id silently fails to attach.
+const PLACEHOLDER_ID: &str = "siros-phase1-placeholder";
+
 fn main() {
     let request = abi::request_bytes();
     let Some(protocol) = first_known_protocol(&request) else {
@@ -96,19 +103,26 @@ fn main() {
         SET_ID,
         0,
         &Entry {
-            credential_id: "siros-phase1-placeholder",
+            credential_id: PLACEHOLDER_ID,
             title: "SIROS test credential",
             subtitle: "Emitted by siros-dc-matcher",
             metadata: &metadata,
         },
     );
-    abi::emit::field(SET_ID, 0, "Matcher", "siros-dc-matcher (phase 1)");
+    abi::emit::field(
+        SET_ID,
+        0,
+        PLACEHOLDER_ID,
+        "Matcher",
+        "siros-dc-matcher (phase 1)",
+    );
     // Surfaced in the picker itself, not just in metadata: on a device the
     // metadata is only readable once the entry has been selected, and a blob
     // that failed to register is exactly the case where nobody gets that far.
     abi::emit::field(
         SET_ID,
         0,
+        PLACEHOLDER_ID,
         "Registered blob",
         &match credential_count {
             Some(n) => format!("{credentials_len} bytes, {n} credentials"),

@@ -15,8 +15,15 @@ use std::process::Command;
 ///
 /// Builds on demand rather than assuming a prior `cargo build`, so that a bare
 /// `cargo test` in a fresh checkout exercises the real artifact instead of
-/// quietly skipping.
-fn matcher_wasm() -> Vec<u8> {
+/// quietly skipping. Cached per test binary — every test needs the module, and
+/// spawning Cargo once per test costs seconds even when the build itself is a
+/// no-op.
+fn matcher_wasm() -> &'static [u8] {
+    static WASM: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+    WASM.get_or_init(build_matcher_wasm)
+}
+
+fn build_matcher_wasm() -> Vec<u8> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .canonicalize()
@@ -82,7 +89,7 @@ fn openid4vp_request() -> Vec<u8> {
 #[test]
 fn emits_an_entry_for_a_known_protocol() {
     let captured = run(
-        &matcher_wasm(),
+        matcher_wasm(),
         Invocation {
             request: openid4vp_request(),
             credentials: vec![0xA1, 0x00, 0x01],
@@ -106,7 +113,7 @@ fn emits_an_entry_for_a_known_protocol() {
 #[test]
 fn reports_what_it_observed_through_the_abi() {
     let captured = run(
-        &matcher_wasm(),
+        matcher_wasm(),
         Invocation {
             request: openid4vp_request(),
             credentials: credential_blob(3),
@@ -195,7 +202,7 @@ fn future_blob_version_is_named_in_the_diagnostic() {
 #[test]
 fn unknown_protocol_emits_nothing() {
     let captured = run(
-        &matcher_wasm(),
+        matcher_wasm(),
         Invocation {
             request: br#"{"requests":[{"protocol":"some-future-thing","data":{}}]}"#.to_vec(),
             ..Default::default()
@@ -218,7 +225,7 @@ fn malformed_input_does_not_trap() {
         br#"{"unexpected":"shape"}"#,
     ] {
         let captured = run(
-            &matcher_wasm(),
+            matcher_wasm(),
             Invocation {
                 request: request.to_vec(),
                 credentials: vec![0xFF; 3],
@@ -235,7 +242,7 @@ fn malformed_input_does_not_trap() {
 #[test]
 fn empty_credential_blob_is_handled() {
     let captured = run(
-        &matcher_wasm(),
+        matcher_wasm(),
         Invocation {
             request: openid4vp_request(),
             credentials: Vec::new(),

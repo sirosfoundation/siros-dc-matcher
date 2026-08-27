@@ -22,7 +22,18 @@ pub trait PickerSink {
     fn add_entry(&mut self, set_id: &str, index: usize, entry: &Entry<'_>);
 
     /// Add a displayable field to an entry already added to the set.
-    fn add_field(&mut self, set_id: &str, index: usize, name: &str, value: &str);
+    ///
+    /// `credential_id` must be the id the entry was added with: the platform
+    /// keys fields by credential id as well as by set position, so a mismatch
+    /// leaves the field silently unattached.
+    fn add_field(
+        &mut self,
+        set_id: &str,
+        index: usize,
+        credential_id: &str,
+        name: &str,
+        value: &str,
+    );
 }
 
 /// One credential offered in the picker.
