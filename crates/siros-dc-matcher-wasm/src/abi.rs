@@ -183,8 +183,8 @@ fn trim_nul(buf: &[u8]) -> String {
 /// set can be satisfied by a *combination* of credentials that the picker must
 /// present and select as one unit, which the flat v1 functions cannot express.
 ///
-/// The v1 fallback described in `docs/abi.md` is deliberately not implemented
-/// here, because a runtime check cannot deliver it. WebAssembly imports are
+/// A v1 fallback is deliberately not implemented here, because a runtime check
+/// cannot deliver one — as `docs/abi.md` explains. WebAssembly imports are
 /// resolved at instantiation: a module that *declares* `credman_v2` will fail
 /// to load on a host that lacks it, however carefully it inspects
 /// [`wasm_version`] first. Supporting such a host means shipping a second
@@ -239,14 +239,17 @@ pub mod emit {
     }
 
     /// Add a displayable field to an entry already added to the set.
-    pub fn field(set_id: &str, index: usize, name: &str, value: &str) {
-        let _ = (set_id, index, name, value);
+    ///
+    /// `credential_id` must be the same id passed to [`entry`]. The platform
+    /// keys fields by credential id as well as by set position, so passing
+    /// anything else — an empty string included — risks the field never
+    /// attaching to the entry in a real picker, with nothing said about it.
+    pub fn field(set_id: &str, index: usize, credential_id: &str, name: &str, value: &str) {
+        let _ = (set_id, index, credential_id, name, value);
         #[cfg(target_arch = "wasm32")]
         {
             let (set_id, name, value) = (super::c(set_id), super::c(name), super::c(value));
-            // The platform keys fields by credential id as well as set
-            // position; Phase 5 threads the real id through here.
-            let cred_id = super::c("");
+            let cred_id = super::c(credential_id);
             // SAFETY: every pointer is to a CString alive for the whole call.
             unsafe {
                 super::imports::AddFieldToEntrySet(

@@ -12,6 +12,7 @@
 //! is never vendored into this repository.
 
 #![deny(missing_docs)]
+#![deny(unsafe_code)]
 
 use anyhow::{Context, Result};
 use wasmtime::{Caller, Engine, Extern, Linker, Memory, Module, Store};
@@ -240,13 +241,14 @@ fn add_credman(linker: &mut Linker<State>) -> Result<()> {
         "credman_v2",
         "AddFieldToEntrySet",
         |mut c: Caller<'_, State>,
-         _cred_id: i32,
+         cred_id: i32,
          name: i32,
          value: i32,
          set_id: i32,
          index: i32|
          -> Result<()> {
-            let (set_id, name, value) = (
+            let (cred_id, set_id, name, value) = (
+                read_cstr(&mut c, cred_id)?,
                 read_cstr(&mut c, set_id)?,
                 read_cstr(&mut c, name)?,
                 read_cstr(&mut c, value)?,
@@ -254,19 +256,32 @@ fn add_credman(linker: &mut Linker<State>) -> Result<()> {
             // A field for an entry that was never added is a matcher bug, and
             // silently dropping it would hide exactly that bug.
             let out = &mut c.data_mut().out;
-            match out
+            let Some(entry) = out
                 .entries
                 .iter_mut()
                 .find(|e| e.set_id == set_id && e.index == index)
-            {
-                Some(entry) => {
-                    entry.fields.push((name, value));
-                    Ok(())
-                }
-                None => Err(anyhow::anyhow!(
+            else {
+                return Err(anyhow::anyhow!(
                     "field {name:?} added to unknown entry {set_id}[{index}]"
-                )),
+                ));
+            };
+
+            // The credential id is checked, not ignored. The platform keys
+            // fields by credential id as well as set position, so a guest
+            // passing the wrong one — or an empty one — produces fields that
+            // never attach in a real picker. A host that accepted any id
+            // would let that ship while every test stayed green, which is the
+            // one failure mode a test host exists to prevent.
+            if cred_id != entry.credential_id {
+                return Err(anyhow::anyhow!(
+                    "field {name:?} for entry {set_id}[{index}] carries credential id {cred_id:?}, \
+                     but the entry was added as {:?}",
+                    entry.credential_id
+                ));
             }
+
+            entry.fields.push((name, value));
+            Ok(())
         },
     )?;
 
