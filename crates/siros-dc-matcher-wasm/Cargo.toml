@@ -15,3 +15,4 @@ path = "src/main.rs"
 
 [dependencies]
 siros-dc-matcher-core = { workspace = true }
+serde_json = { workspace = true }
