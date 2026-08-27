@@ -22,9 +22,7 @@ use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 use siros_dc_matcher_core::db::{Claim, Credential, CredentialDatabase, IconRef};
-use siros_dc_matcher_core::profile::{
-    Capability, FormatRule, MatchProfile, MetaRule, Op, Parser, ProtocolRule, Requirement,
-};
+use siros_dc_matcher_core::profile::{Capability, MatchProfile, ZK_CAPABILITY};
 
 uniffi::setup_scaffolding!();
 
@@ -250,7 +248,7 @@ impl SirosBlobBuilder {
             });
         }
 
-        let mut profile = default_profile();
+        let mut profile = MatchProfile::siros_default();
         profile.debug = s.debug;
         if !s.zk_systems.is_empty() {
             profile.capabilities.insert(
@@ -284,82 +282,6 @@ impl SirosBlobBuilder {
 impl Default for SirosBlobBuilder {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-/// Capability name a `mso_mdoc_zk` format rule refers to.
-const ZK_CAPABILITY: &str = "zk_system";
-
-/// The profile SIROS wallets register.
-///
-/// `mso_mdoc_zk` maps onto ordinary `mso_mdoc` storage because producing a ZK
-/// proof is a presentation-time transform, not a storage format — there is no
-/// separate ZK credential on the device to find. It carries a capability
-/// requirement so the entry is only offered when the wallet can actually
-/// produce the proof the verifier asked for.
-fn default_profile() -> MatchProfile {
-    MatchProfile {
-        protocols: vec![
-            ProtocolRule {
-                id: "openid4vp-v1-unsigned".into(),
-                parser: Parser::Openid4vpV1,
-            },
-            ProtocolRule {
-                id: "openid4vp-v1-signed".into(),
-                parser: Parser::Openid4vpV1,
-            },
-            ProtocolRule {
-                id: "openid4vp-v1-multisigned".into(),
-                parser: Parser::Openid4vpV1,
-            },
-            ProtocolRule {
-                id: "org.iso.mdoc".into(),
-                parser: Parser::IsoMdocApi,
-            },
-        ],
-        formats: vec![
-            FormatRule {
-                query_format: "mso_mdoc".into(),
-                stored_formats: vec!["mso_mdoc".into()],
-                requires: vec![],
-            },
-            FormatRule {
-                query_format: "dc+sd-jwt".into(),
-                stored_formats: vec!["dc+sd-jwt".into()],
-                requires: vec![],
-            },
-            FormatRule {
-                query_format: "mso_mdoc_zk".into(),
-                stored_formats: vec!["mso_mdoc".into()],
-                requires: vec![Requirement {
-                    capability: ZK_CAPABILITY.into(),
-                    from_meta: "zk_system_type".into(),
-                }],
-            },
-        ],
-        meta_rules: vec![
-            MetaRule {
-                meta_key: "doctype_value".into(),
-                field: Some("doctype".into()),
-                op: Op::Eq,
-            },
-            MetaRule {
-                meta_key: "vct_values".into(),
-                field: Some("vct".into()),
-                op: Op::In,
-            },
-            // Carried through to the wallet rather than used for matching: a
-            // pseudonym context changes what is produced, not which credential
-            // can produce it.
-            MetaRule {
-                meta_key: "ppid_context".into(),
-                field: None,
-                op: Op::Ignore,
-            },
-        ],
-        capabilities: BTreeMap::new(),
-        unknown_format: siros_dc_matcher_core::profile::UnknownFormat::Reject,
-        debug: false,
     }
 }
 
@@ -456,7 +378,7 @@ mod tests {
     /// The ZK format rule is present by default, and maps onto plain mdoc.
     #[test]
     fn default_profile_routes_zk_requests_to_mdoc_storage() {
-        let p = default_profile();
+        let p = MatchProfile::siros_default();
         assert!(p.format_matches("mso_mdoc_zk", "mso_mdoc"));
         assert!(!p.format_matches("mso_mdoc_zk", "dc+sd-jwt"));
         assert!(!p.format_matches("something-new", "mso_mdoc"));

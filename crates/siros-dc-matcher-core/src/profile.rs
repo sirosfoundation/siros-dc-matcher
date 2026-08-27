@@ -10,6 +10,8 @@
 //! there is no arithmetic and no user-supplied expression. Anything past that
 //! boundary is a matcher release, not a config change.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 /// Comparison operators available to a [`MetaRule`]. Closed by design.
@@ -182,6 +184,83 @@ impl MatchProfile {
             .iter()
             .find(|p| p.id == protocol)
             .map(|p| p.parser)
+    }
+}
+
+/// Capability name a `mso_mdoc_zk` format rule refers to.
+pub const ZK_CAPABILITY: &str = "zk_system";
+
+/// `mso_mdoc_zk` maps onto ordinary `mso_mdoc` storage because producing a ZK
+/// proof is a presentation-time transform, not a storage format — there is no
+/// separate ZK credential on the device to find. It carries a capability
+/// requirement so the entry is only offered when the wallet can actually
+/// produce the proof the verifier asked for.
+impl MatchProfile {
+    /// The profile SIROS wallets register.
+    pub fn siros_default() -> Self {
+        Self {
+            protocols: vec![
+                ProtocolRule {
+                    id: "openid4vp-v1-unsigned".into(),
+                    parser: Parser::Openid4vpV1,
+                },
+                ProtocolRule {
+                    id: "openid4vp-v1-signed".into(),
+                    parser: Parser::Openid4vpV1,
+                },
+                ProtocolRule {
+                    id: "openid4vp-v1-multisigned".into(),
+                    parser: Parser::Openid4vpV1,
+                },
+                ProtocolRule {
+                    id: "org.iso.mdoc".into(),
+                    parser: Parser::IsoMdocApi,
+                },
+            ],
+            formats: vec![
+                FormatRule {
+                    query_format: "mso_mdoc".into(),
+                    stored_formats: vec!["mso_mdoc".into()],
+                    requires: vec![],
+                },
+                FormatRule {
+                    query_format: "dc+sd-jwt".into(),
+                    stored_formats: vec!["dc+sd-jwt".into()],
+                    requires: vec![],
+                },
+                FormatRule {
+                    query_format: "mso_mdoc_zk".into(),
+                    stored_formats: vec!["mso_mdoc".into()],
+                    requires: vec![Requirement {
+                        capability: ZK_CAPABILITY.into(),
+                        from_meta: "zk_system_type".into(),
+                    }],
+                },
+            ],
+            meta_rules: vec![
+                MetaRule {
+                    meta_key: "doctype_value".into(),
+                    field: Some("doctype".into()),
+                    op: Op::Eq,
+                },
+                MetaRule {
+                    meta_key: "vct_values".into(),
+                    field: Some("vct".into()),
+                    op: Op::In,
+                },
+                // Carried through to the wallet rather than used for matching: a
+                // pseudonym context changes what is produced, not which credential
+                // can produce it.
+                MetaRule {
+                    meta_key: "ppid_context".into(),
+                    field: None,
+                    op: Op::Ignore,
+                },
+            ],
+            capabilities: BTreeMap::new(),
+            unknown_format: UnknownFormat::Reject,
+            debug: false,
+        }
     }
 }
 

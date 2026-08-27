@@ -21,10 +21,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use siros_dc_matcher_core::db::{Claim, Credential, CredentialDatabase, IconRef, VERSION};
-use siros_dc_matcher_core::profile::{
-    Capability, FormatRule, MatchProfile, MetaRule, Op, Parser, ProtocolRule, Requirement,
-    UnknownFormat,
-};
+use siros_dc_matcher_core::profile::{Capability, MatchProfile};
 
 /// A blob exercising every field the format has, including the ZK path.
 ///
@@ -43,53 +40,11 @@ fn reference_database() -> CredentialDatabase {
         }],
     );
 
-    let profile = MatchProfile {
-        protocols: vec![
-            ProtocolRule {
-                id: "openid4vp-v1-signed".into(),
-                parser: Parser::Openid4vpV1,
-            },
-            ProtocolRule {
-                id: "org.iso.mdoc".into(),
-                parser: Parser::IsoMdocApi,
-            },
-        ],
-        formats: vec![
-            FormatRule {
-                query_format: "mso_mdoc".into(),
-                stored_formats: vec!["mso_mdoc".into()],
-                requires: vec![],
-            },
-            FormatRule {
-                query_format: "mso_mdoc_zk".into(),
-                stored_formats: vec!["mso_mdoc".into()],
-                requires: vec![Requirement {
-                    capability: "zk_system".into(),
-                    from_meta: "zk_system_type".into(),
-                }],
-            },
-        ],
-        meta_rules: vec![
-            MetaRule {
-                meta_key: "doctype_value".into(),
-                field: Some("doctype".into()),
-                op: Op::Eq,
-            },
-            MetaRule {
-                meta_key: "vct_values".into(),
-                field: Some("vct".into()),
-                op: Op::In,
-            },
-            MetaRule {
-                meta_key: "ppid_context".into(),
-                field: None,
-                op: Op::Ignore,
-            },
-        ],
-        capabilities,
-        unknown_format: UnknownFormat::Reject,
-        debug: false,
-    };
+    // Built from the profile wallets actually register, not a restatement of
+    // it. A fixture that describes the default separately drifts from it, and
+    // then guards a format nothing ships.
+    let mut profile = MatchProfile::siros_default();
+    profile.capabilities = capabilities;
 
     CredentialDatabase {
         version: VERSION,
