@@ -24,9 +24,10 @@ Workspace, BSD-2-Clause licence, the provenance rule in `CONTRIBUTING.md`
 before any matching code exists, CI mirroring the house setup, and the
 crates.io publishing path for `siros-dcql`.
 
-**Done.** Outstanding: the crates.io owner account and `CARGO_REGISTRY_TOKEN`
-secret, plus the `SONAR_TOKEN` secret — all require account access rather than
-code.
+**Done.** All four workflows green on the first commit. One item outstanding,
+and it needs an account rather than code: the crates.io owner and the
+`CARGO_REGISTRY_TOKEN` repository secret, without which the Phase 3 release job
+cannot publish `siros-dcql`.
 
 ## Phase 1 — Prove the swap on hardware
 
