@@ -1,0 +1,24 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+
+# Generated UniFFI bindings (produced by `make bindings`, uploaded as CI artifact)
+/bindings/
+
+# Differential-testing oracle, fetched at test time — never vendored.
+# See CONTRIBUTING.md § Provenance.
+/tests/oracle/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Agent worktrees and session scratch — never part of a commit.
+.claude/

@@ -1,0 +1,17 @@
+[package]
+name = "siros-dc-matcher-wasm"
+version = "0.1.0"
+description = "The SIROS DC API matcher, built for the Android Credential Manager WASM sandbox"
+publish = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "matcher"
+path = "src/main.rs"
+
+[dependencies]
+siros-dc-matcher-core = { workspace = true }

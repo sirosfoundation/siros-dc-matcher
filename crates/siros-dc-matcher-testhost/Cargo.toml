@@ -1,0 +1,14 @@
+[package]
+name = "siros-dc-matcher-testhost"
+version = "0.1.0"
+description = "A Credential Manager host implementation, so the matcher is testable off-device"
+publish = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+# wasmtime is added in Phase 1 alongside the first real emission path.
+[dependencies]
+serde_json = { workspace = true }

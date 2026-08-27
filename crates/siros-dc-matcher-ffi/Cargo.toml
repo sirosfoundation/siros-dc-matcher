@@ -1,0 +1,21 @@
+[package]
+name = "siros-dc-matcher-ffi"
+version = "0.1.0"
+description = "Kotlin/Swift bindings for the SIROS DC API matcher"
+publish = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["lib", "cdylib", "staticlib"]
+name = "siros_dc_matcher_ffi"
+
+# UniFFI is wired in Phase 2, when there is a credential blob worth building
+# from Kotlin and Swift. Adding the scaffolding earlier would only be
+# scaffolding to maintain.
+[dependencies]
+siros-dc-matcher-core = { workspace = true }
+siros-dcql = { workspace = true }

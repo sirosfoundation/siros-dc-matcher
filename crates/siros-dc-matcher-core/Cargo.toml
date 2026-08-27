@@ -1,0 +1,16 @@
+[package]
+name = "siros-dc-matcher-core"
+version = "0.1.0"
+description = "Credential database, match profile and picker emission for the SIROS DC API matcher"
+publish = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+siros-dcql = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+ciborium = { workspace = true }

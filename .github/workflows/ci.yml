@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # The matcher runs in the credential picker with a hard time budget, and it
+  # ships inside every wallet APK. Google's own matcher is ~139 KB and
+  # Multipaz's ~277 KB; 300 KB is the ceiling we hold ourselves to. Raise this
+  # deliberately, in the same PR as the change that needs it.
+  WASM_SIZE_BUDGET: 307200
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - run: cargo test --workspace --all-features
+
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+  wasm:
+    name: Build matcher.wasm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          targets: wasm32-wasip1
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - run: cargo build -p siros-dc-matcher-wasm --target wasm32-wasip1 --release
+
+      # A matcher that traps emits no entries, which the user cannot tell
+      # apart from "no matching credential". Check the module actually links
+      # against the host ABI rather than assuming a successful build means a
+      # working binary.
+      - name: Verify host ABI imports and exports
+        run: |
+          python3 - <<'PY'
+          import re, sys
+          d = open("target/wasm32-wasip1/release/matcher.wasm", "rb").read()
+          names = {m.decode() for m in re.findall(rb"[A-Za-z_][A-Za-z0-9_]{2,40}", d[:8192])}
+          required = [
+              "credman", "wasi_snapshot_preview1", "_start", "memory",
+              "GetCallingAppInfo", "GetRequestSize", "GetRequestBuffer",
+              "GetCredentialsSize", "ReadCredentialsBuffer", "GetWasmVersion",
+          ]
+          missing = [r for r in required if r not in names]
+          if missing:
+              sys.exit("matcher.wasm is missing host ABI symbols: " + ", ".join(missing))
+          print("host ABI intact:", ", ".join(required))
+          PY
+
+      - name: Enforce size budget
+        run: |
+          SIZE=$(stat -c%s target/wasm32-wasip1/release/matcher.wasm)
+          echo "matcher.wasm: $SIZE bytes (budget $WASM_SIZE_BUDGET)"
+          if [ "$SIZE" -gt "$WASM_SIZE_BUDGET" ]; then
+            echo "::error::matcher.wasm is $SIZE bytes, over the $WASM_SIZE_BUDGET budget."
+            echo "Raise WASM_SIZE_BUDGET in this workflow, in the same PR, and say why."
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: matcher-wasm
+          path: target/wasm32-wasip1/release/matcher.wasm
+
+  publishable:
+    name: siros-dcql is publishable
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      # siros-dcql goes to crates.io, so it must not acquire a dependency on
+      # an unpublished workspace sibling. That is easy to add by accident and
+      # only fails at release time otherwise.
+      - run: cargo publish --dry-run -p siros-dcql

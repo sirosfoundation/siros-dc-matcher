@@ -1,0 +1,7 @@
+# Pinned so the published matcher.wasm is reproducible from source: the
+# binary is something we ask other people to run inside their credential
+# picker, and "built from this commit" has to be checkable.
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]
+targets = ["wasm32-wasip1"]
