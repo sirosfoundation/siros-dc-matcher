@@ -9,8 +9,8 @@ The full write-up, including the requirements analysis this came from, is at
 
 | Phase | Work | Estimate |
 |---|---|---|
-| 0 | Repo bootstrap under the settled licensing rules | ~2 days |
-| 1 | Prove the matcher swap on hardware | ~1 week |
+| 0 | Repo bootstrap under the settled licensing rules | done |
+| 1 | Prove the matcher swap on hardware | in progress |
 | 2 | Credential blob format and builder | ~1 week |
 | 3 | The DCQL engine | ~2 weeks |
 | 4 | Profile evaluator and the ZK path | ~1 week |
@@ -31,13 +31,22 @@ cannot publish `siros-dcql`.
 
 ## Phase 1 — Prove the swap on hardware
 
-A matcher that reads the request and unconditionally emits one hardcoded entry,
-plus the wasmtime test host implementing every import in `abi.rs`. Register it
-from the Kotlin sample app in place of `OpenId4VpRegistry`, and confirm the
-entry appears in a real picker on a real device.
+A matcher that reads the request and emits one fixed entry, plus the wasmtime
+test host implementing every import in `abi.rs`. Register it from the Kotlin
+sample app in place of `OpenId4VpRegistry`, and confirm the entry appears in a
+real picker on a real device.
 
 Everything after this is incremental. If this does not work, nothing else
 matters.
+
+The entry reports what the matcher observed — host ABI version, verified
+calling package and origin, and the size of the registered blob — rather than
+being inert. That turns a hardware run into evidence about each leg of the
+plumbing separately, instead of a single pass/fail.
+
+**Software side done:** `matcher.wasm` builds at ~85 KB, runs under the test
+host, and 16 tests pass including malformed-input cases that must never trap.
+**Outstanding:** the on-device confirmation, which needs a phone.
 
 ## Phase 2 — Blob format and builder
 

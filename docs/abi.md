@@ -34,8 +34,14 @@ workspace produces the same import and export shape as the C++ reference.
   entries, which is indistinguishable from "no matching credential". There is
   no error surface at all. Hence `panic = "abort"` and the denied `unwrap` /
   `expect` lints.
-- **`credman_v2` is not universal.** Feature-detect with `GetWasmVersion` and
-  fall back to v1 emission. A missing import is a link failure, not a runtime
-  `None`.
+- **A v1 fallback cannot be a runtime branch.** WebAssembly imports resolve at
+  instantiation, so a module that *declares* `credman_v2` fails to load on a
+  host that lacks it, however carefully it inspects `GetWasmVersion` first.
+  Supporting such a host means shipping a second binary that declares only the
+  v1 functions — not an `if` inside this one. Every Play Services version
+  currently shipping resolves the v2 imports, so that second binary does not
+  exist yet.
+- **`GetWasmVersion` is still worth reading.** It goes into entry metadata, so
+  a field report says which host ABI produced the behaviour.
 - **No network, no filesystem, hard time budget.** Everything the matcher needs
   arrives through the two buffers above.

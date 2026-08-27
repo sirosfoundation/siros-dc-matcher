@@ -50,6 +50,31 @@ mod imports {
         pub fn ReadCredentialsBuffer(buffer: *mut u8, offset: usize, len: usize) -> usize;
         pub fn GetWasmVersion(version: *mut u32);
     }
+
+    #[link(wasm_import_module = "credman_v2")]
+    extern "C" {
+        pub fn AddEntrySet(set_id: *const core::ffi::c_char, set_length: i32);
+        #[allow(clippy::too_many_arguments)]
+        pub fn AddEntryToSet(
+            cred_id: *const core::ffi::c_char,
+            icon: *const core::ffi::c_char,
+            icon_len: usize,
+            title: *const core::ffi::c_char,
+            subtitle: *const core::ffi::c_char,
+            disclaimer: *const core::ffi::c_char,
+            warning: *const core::ffi::c_char,
+            metadata: *const core::ffi::c_char,
+            set_id: *const core::ffi::c_char,
+            set_index: i32,
+        );
+        pub fn AddFieldToEntrySet(
+            cred_id: *const core::ffi::c_char,
+            field_display_name: *const core::ffi::c_char,
+            field_display_value: *const core::ffi::c_char,
+            set_id: *const core::ffi::c_char,
+            set_index: i32,
+        );
+    }
 }
 
 /// Host ABI version, used to decide whether `credman_v2` is available.
@@ -148,6 +173,105 @@ pub fn calling_app_info() -> (String, String) {
 fn trim_nul(buf: &[u8]) -> String {
     let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
     String::from_utf8_lossy(buf.split_at(end).0).into_owned()
+}
+
+/// Emission — handing matched credentials back to the picker.
+///
+/// # Why only the v2 path
+///
+/// `credman_v2`'s set-based functions are what DCQL `credential_sets` needs: a
+/// set can be satisfied by a *combination* of credentials that the picker must
+/// present and select as one unit, which the flat v1 functions cannot express.
+///
+/// The v1 fallback described in `docs/abi.md` is deliberately not implemented
+/// here, because a runtime check cannot deliver it. WebAssembly imports are
+/// resolved at instantiation: a module that *declares* `credman_v2` will fail
+/// to load on a host that lacks it, however carefully it inspects
+/// [`wasm_version`] first. Supporting such a host means shipping a second
+/// binary, not branching inside this one. Every Play Services version that
+/// currently ships resolves these imports, so that second binary does not
+/// exist yet — see the Phase 5 note in `docs/plan.md`.
+///
+/// [`wasm_version`] is still worth reading: it goes into entry metadata, so a
+/// field report says which host ABI produced the behaviour.
+pub mod emit {
+    /// Declare a set of `len` entries that the user selects as one unit.
+    pub fn entry_set(set_id: &str, len: usize) {
+        let _ = (set_id, len);
+        #[cfg(target_arch = "wasm32")]
+        {
+            let set_id = super::c(set_id);
+            // SAFETY: both arguments outlive the call.
+            unsafe { super::imports::AddEntrySet(set_id.as_ptr(), len as i32) };
+        }
+    }
+
+    /// Add one credential to a set previously declared by [`entry_set`].
+    ///
+    /// `metadata` is opaque to the platform and survives the picker
+    /// round-trip, so it carries the decision this matcher already made rather
+    /// than leaving the wallet to re-derive it after selection.
+    pub fn entry(set_id: &str, index: usize, e: &siros_dc_matcher_core::sink::Entry<'_>) {
+        let _ = (set_id, index, e);
+        #[cfg(target_arch = "wasm32")]
+        {
+            let (set_id, cred_id) = (super::c(set_id), super::c(e.credential_id));
+            let (title, subtitle) = (super::c(e.title), super::c(e.subtitle));
+            let metadata = super::c(e.metadata);
+            let empty = super::c("");
+            // SAFETY: every pointer is to a CString alive for the whole call,
+            // and the icon length matches the empty icon slice we pass.
+            unsafe {
+                super::imports::AddEntryToSet(
+                    cred_id.as_ptr(),
+                    core::ptr::null(),
+                    0,
+                    title.as_ptr(),
+                    subtitle.as_ptr(),
+                    empty.as_ptr(),
+                    empty.as_ptr(),
+                    metadata.as_ptr(),
+                    set_id.as_ptr(),
+                    index as i32,
+                )
+            };
+        }
+    }
+
+    /// Add a displayable field to an entry already added to the set.
+    pub fn field(set_id: &str, index: usize, name: &str, value: &str) {
+        let _ = (set_id, index, name, value);
+        #[cfg(target_arch = "wasm32")]
+        {
+            let (set_id, name, value) = (super::c(set_id), super::c(name), super::c(value));
+            // The platform keys fields by credential id as well as set
+            // position; Phase 5 threads the real id through here.
+            let cred_id = super::c("");
+            // SAFETY: every pointer is to a CString alive for the whole call.
+            unsafe {
+                super::imports::AddFieldToEntrySet(
+                    cred_id.as_ptr(),
+                    name.as_ptr(),
+                    value.as_ptr(),
+                    set_id.as_ptr(),
+                    index as i32,
+                )
+            };
+        }
+    }
+}
+
+/// Encode a Rust string as the NUL-terminated `char*` the ABI expects.
+///
+/// Interior NULs are truncated rather than rejected. A credential whose title
+/// contains a NUL is pathological, but dropping the whole picker entry over it
+/// would present as "no matching credential" with no way to tell why.
+#[cfg(target_arch = "wasm32")]
+fn c(s: &str) -> std::ffi::CString {
+    let bytes = s.as_bytes();
+    let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+    // SAFETY-adjacent: split_at(end) cannot contain a NUL, so this cannot fail.
+    std::ffi::CString::new(bytes.split_at(end).0).unwrap_or_default()
 }
 
 #[cfg(test)]

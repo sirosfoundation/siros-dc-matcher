@@ -11,4 +11,7 @@ rust-version.workspace = true
 
 # wasmtime is added in Phase 1 alongside the first real emission path.
 [dependencies]
+anyhow = "1.0.104"
 serde_json = { workspace = true }
+wasmtime = "30.0.2"
+wasmtime-wasi = "30.0.2"
