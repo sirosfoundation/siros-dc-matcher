@@ -10,8 +10,8 @@ The full write-up, including the requirements analysis this came from, is at
 | Phase | Work | Estimate |
 |---|---|---|
 | 0 | Repo bootstrap under the settled licensing rules | done |
-| 1 | Prove the matcher swap on hardware | in progress |
-| 2 | Credential blob format and builder | ~1 week |
+| 1 | Prove the matcher swap on hardware | done |
+| 2 | Credential blob format and builder | done |
 | 3 | The DCQL engine | ~2 weeks |
 | 4 | Profile evaluator and the ZK path | ~1 week |
 | 5 | Entry emission and display | ~3 days |
@@ -48,12 +48,27 @@ plumbing separately, instead of a single pass/fail.
 host, and 16 tests pass including malformed-input cases that must never trap.
 **Outstanding:** the on-device confirmation, which needs a phone.
 
-## Phase 2 — Blob format and builder
+## Phase 2 — Blob format and builder ✅
 
 Versioned CBOR schema for credentials, display properties, icons and the match
-profile. Encoder exposed through UniFFI so the Kotlin and Swift SDKs stop
-hand-building registry payloads. Golden vectors committed so encoder and
-matcher cannot drift apart.
+profile, in `siros-dc-matcher-core::db`. `SirosBlobBuilder` exposes it through
+UniFFI, and owns the profile itself — wallets differ in what they *hold* and
+what they *can do*, not usually in how DCQL should be interpreted, and keeping
+the interpretation in one place is what stops two SDKs drifting apart on it.
+
+Golden vectors are committed under `crates/siros-dc-matcher-core/tests/golden/`.
+Round-trip tests cannot catch encoder/matcher drift, because both ends move
+together in a round trip; a committed byte vector is the only thing that
+notices when today's encoder stops producing what a shipped matcher decodes.
+
+The matcher now decodes the blob it is handed and reports what it found, so a
+blob it cannot read is distinguishable from a wallet with nothing to offer —
+identical in the picker, and only one of them is a bug.
+
+**Watch item:** `matcher.wasm` grew from 85 KB to 183 KB when CBOR decoding
+landed. Still inside the 300 KB budget, but Phase 3 adds DCQL on top of it. If
+the budget gets tight, the request-side JSON parser is the thing to replace,
+not the blob format.
 
 ## Phase 3 — The DCQL engine
 

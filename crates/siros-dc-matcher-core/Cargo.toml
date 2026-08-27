@@ -14,3 +14,7 @@ siros-dcql = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 ciborium = { workspace = true }
+serde_bytes = "0.11.19"
+
+[dev-dependencies]
+serde_json.workspace = true

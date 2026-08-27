@@ -5,6 +5,8 @@
 //! observable by installing it on a phone. Here the shipping binary — the same
 //! bytes a wallet registers — is exercised in ordinary `cargo test`.
 
+use siros_dc_matcher_core::db::{Claim, Credential, CredentialDatabase, VERSION};
+use siros_dc_matcher_core::profile::MatchProfile;
 use siros_dc_matcher_testhost::{run, Invocation};
 use std::path::PathBuf;
 use std::process::Command;
@@ -49,6 +51,34 @@ fn build_matcher_wasm() -> Vec<u8> {
     std::fs::read(&wasm).unwrap_or_else(|e| panic!("reading {}: {e}", wasm.display()))
 }
 
+/// A real registered blob, built with the same encoder a wallet uses.
+///
+/// Using the actual encoder rather than hand-rolled bytes is the point: this
+/// is the one test where the writing side and the reading side meet, and a
+/// fixture written by hand would only ever agree with itself.
+fn credential_blob(credentials: usize) -> Vec<u8> {
+    let mut db = CredentialDatabase::new(MatchProfile::default());
+    db.version = VERSION;
+    for i in 0..credentials {
+        db.credentials.push(Credential {
+            id: format!("cred-{i}"),
+            format: "mso_mdoc".into(),
+            doctype: Some("org.iso.18013.5.1.mDL".into()),
+            vct: None,
+            title: "Driving Licence".into(),
+            subtitle: "Transportstyrelsen".into(),
+            icon: None,
+            claims: vec![Claim {
+                path: vec!["org.iso.18013.5.1".into(), "family_name".into()],
+                value: "Johansson".into(),
+                display: "Family name".into(),
+                display_value: None,
+            }],
+        });
+    }
+    db.to_cbor().expect("encoding blob")
+}
+
 fn openid4vp_request() -> Vec<u8> {
     br#"{"requests":[{"protocol":"openid4vp-v1-signed","data":{"dcql_query":{"credentials":[]}}}]}"#
         .to_vec()
@@ -86,7 +116,7 @@ fn reports_what_it_observed_through_the_abi() {
         matcher_wasm(),
         Invocation {
             request: openid4vp_request(),
-            credentials: vec![7; 42],
+            credentials: credential_blob(3),
             calling_package: "com.android.chrome".into(),
             origin: "https://verifier.example.org".into(),
             wasm_version: 3,
@@ -103,11 +133,68 @@ fn reports_what_it_observed_through_the_abi() {
     assert_eq!(meta["host_abi"], 3);
     assert_eq!(meta["calling_package"], "com.android.chrome");
     assert_eq!(meta["verified_origin"], "https://verifier.example.org");
-    // Proves the registered blob survived the round-trip into the sandbox.
-    assert_eq!(meta["credentials_bytes"], 42);
+    // The encoder and the matcher agree: a blob written by the wallet-side
+    // builder is read back inside the sandbox, with its credentials intact.
+    assert_eq!(meta["blob_status"], "ok");
+    assert_eq!(meta["credential_count"], 3);
     assert!(entry
         .fields
-        .contains(&("Registered blob".into(), "42 bytes".into())));
+        .iter()
+        .any(|(k, v)| k == "Registered blob" && v.ends_with("3 credentials")));
+}
+
+/// A blob the matcher cannot read must say so, rather than looking like a
+/// wallet with nothing to offer. The two are indistinguishable in the picker
+/// and only one of them is a bug.
+#[test]
+fn unreadable_blob_is_reported_not_swallowed() {
+    let captured = run(
+        matcher_wasm(),
+        Invocation {
+            request: openid4vp_request(),
+            credentials: vec![7; 42],
+            ..Default::default()
+        },
+    )
+    .expect("matcher ran");
+
+    let entry = captured
+        .entry("siros-phase1", 0)
+        .expect("one entry emitted");
+    let meta: serde_json::Value = serde_json::from_str(&entry.metadata).expect("metadata is JSON");
+    assert_ne!(meta["blob_status"], "ok");
+    assert_eq!(meta["credential_count"], serde_json::Value::Null);
+    assert!(entry
+        .fields
+        .iter()
+        .any(|(k, v)| k == "Registered blob" && v.contains("unreadable")));
+}
+
+/// A blob from a newer wallet must be distinguishable from a corrupt one.
+#[test]
+fn future_blob_version_is_named_in_the_diagnostic() {
+    let mut db = CredentialDatabase::new(MatchProfile::default());
+    db.version = VERSION + 9;
+
+    let captured = run(
+        matcher_wasm(),
+        Invocation {
+            request: openid4vp_request(),
+            credentials: db.to_cbor().expect("encoding"),
+            ..Default::default()
+        },
+    )
+    .expect("matcher ran");
+
+    let entry = captured
+        .entry("siros-phase1", 0)
+        .expect("one entry emitted");
+    let meta: serde_json::Value = serde_json::from_str(&entry.metadata).expect("metadata is JSON");
+    let status = meta["blob_status"].as_str().unwrap_or_default();
+    assert!(
+        status.contains(&(VERSION + 9).to_string()),
+        "diagnostic should name the version it could not read, got {status:?}"
+    );
 }
 
 /// An unrecognised protocol must produce nothing — and must not trap, which

@@ -13,9 +13,17 @@ rust-version.workspace = true
 crate-type = ["lib", "cdylib", "staticlib"]
 name = "siros_dc_matcher_ffi"
 
-# UniFFI is wired in Phase 2, when there is a credential blob worth building
-# from Kotlin and Swift. Adding the scaffolding earlier would only be
-# scaffolding to maintain.
+[[bin]]
+name = "uniffi-bindgen"
+path = "uniffi-bindgen.rs"
+required-features = ["bindgen"]
+
+[features]
+default = []
+bindgen = ["uniffi/cli"]
+
 [dependencies]
 siros-dc-matcher-core = { workspace = true }
 siros-dcql = { workspace = true }
+uniffi = { version = "0.28", features = ["build"] }
+thiserror = "2"

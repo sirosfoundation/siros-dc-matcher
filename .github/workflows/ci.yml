@@ -3,8 +3,11 @@ name: CI
 on:
   push:
     branches: [main]
+  # No branch filter. `branches: [main]` silently gives a stacked pull request
+  # — one targeting another feature branch rather than main — no CI at all:
+  # not a failure, not a skip, simply no checks, which reads as "nothing to
+  # run" rather than "nothing was run".
   pull_request:
-    branches: [main]
 
 permissions:
   contents: read
@@ -29,7 +32,7 @@ jobs:
         with:
           targets: wasm32-wasip1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - run: cargo test --workspace --all-features
+      - run: cargo test --locked --workspace --all-features
 
   fmt:
     name: Format
@@ -51,10 +54,10 @@ jobs:
           components: clippy
           targets: wasm32-wasip1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
       # The binary that actually ships is the wasm one; host-target lints alone
       # would not cover the cfg(target_arch = "wasm32") ABI code at all.
-      - run: cargo clippy -p siros-dc-matcher-wasm --target wasm32-wasip1 --release -- -D warnings
+      - run: cargo clippy --locked -p siros-dc-matcher-wasm --target wasm32-wasip1 --release -- -D warnings
 
   wasm:
     name: Build matcher.wasm
@@ -65,7 +68,7 @@ jobs:
         with:
           targets: wasm32-wasip1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - run: cargo build -p siros-dc-matcher-wasm --target wasm32-wasip1 --release
+      - run: cargo build --locked -p siros-dc-matcher-wasm --target wasm32-wasip1 --release
 
       # A matcher that traps emits no entries, which the user cannot tell
       # apart from "no matching credential". Check the module actually links
@@ -103,6 +106,55 @@ jobs:
           name: matcher-wasm
           path: target/wasm32-wasip1/release/matcher.wasm
 
+  bindings:
+    name: Bindings generate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - run: cargo build --locked -p siros-dc-matcher-ffi --release
+
+      # UniFFI reads a library's interface out of metadata symbols embedded in
+      # it. Strip those and generation produces nothing at all — no error, no
+      # files, exit code 0. `cargo build` stays green while every binding
+      # silently disappears, so the only way to catch it is to generate and
+      # look at what came out.
+      - name: Generate Kotlin and Swift bindings
+        run: |
+          set -euo pipefail
+          for lang in kotlin swift; do
+            cargo run --locked -p siros-dc-matcher-ffi --features bindgen --bin uniffi-bindgen -- \
+              generate --library target/release/libsiros_dc_matcher_ffi.so \
+              --language "$lang" --out-dir bindings
+          done
+
+      # Kotlin lands under uniffi/<namespace>/, Swift at the top level, so
+      # these are found rather than assumed — a hardcoded path that stops
+      # existing would make this check pass by matching nothing.
+      - name: Check the bindings are not empty
+        run: |
+          set -euo pipefail
+          found=0
+          # -print0 and a null-delimited read: unquoted $(find ...) splits on
+          # whitespace, so a generated path containing a space would silently
+          # be checked as two paths that do not exist.
+          while IFS= read -r -d '' f; do
+            test -s "$f" || { echo "::error::$f is empty"; exit 1; }
+            grep -q "SirosBlobBuilder" "$f" || { echo "::error::$f has no SirosBlobBuilder"; exit 1; }
+            echo "$f: $(wc -l < "$f") lines"
+            found=$((found + 1))
+          done < <(find bindings \( -name '*.kt' -o -name '*.swift' \) -print0)
+          test "$found" -ge 2 || {
+            echo "::error::expected Kotlin and Swift bindings, found $found — UniFFI saw no interface"
+            exit 1
+          }
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: bindings
+          path: bindings/
+
   publishable:
     name: siros-dcql is publishable
     runs-on: ubuntu-latest
@@ -113,4 +165,4 @@ jobs:
       # siros-dcql goes to crates.io, so it must not acquire a dependency on
       # an unpublished workspace sibling. That is easy to add by accident and
       # only fails at release time otherwise.
-      - run: cargo publish --dry-run -p siros-dcql
+      - run: cargo publish --locked --dry-run -p siros-dcql
