@@ -37,14 +37,6 @@ impl PathComponent {
     }
 }
 
-// Deserialising `null` into a unit-like variant does not fall out of
-// `untagged` on its own, so the two null-ish cases are handled explicitly.
-impl<'de> serde::de::Deserialize<'de> for Box<PathComponent> {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        PathComponent::deserialize(d).map(Box::new)
-    }
-}
-
 /// Why a claims path pointer could not be processed.
 ///
 /// The distinction matters: §7.1.1 says a *type* mismatch aborts processing,
@@ -73,7 +65,10 @@ pub enum PathError {
 impl core::fmt::Display for PathError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Self::TypeMismatch { at } => write!(f, "path component {at} applied to the wrong kind of element"),
+            Self::TypeMismatch { at } => write!(
+                f,
+                "path component {at} applied to the wrong kind of element"
+            ),
             Self::Empty => write!(f, "path selected nothing"),
             Self::Malformed => write!(f, "path is not valid for this credential format"),
         }
@@ -91,7 +86,10 @@ impl core::fmt::Display for PathError {
 ///
 /// [`PathError::TypeMismatch`] per steps 2.1–2.3, and [`PathError::Empty`]
 /// per step 3 when the selection ends up empty.
-pub fn resolve_json<'a>(root: &'a Value, path: &[PathComponent]) -> Result<Vec<&'a Value>, PathError> {
+pub fn resolve_json<'a>(
+    root: &'a Value,
+    path: &[PathComponent],
+) -> Result<Vec<&'a Value>, PathError> {
     // Step 1: select the root element.
     let mut selected: Vec<&Value> = vec![root];
 
@@ -188,7 +186,8 @@ mod tests {
     #[test]
     fn integer_selects_one_array_element() {
         let c = json!({"degrees": [{"type": "BA"}, {"type": "MA"}]});
-        let got = resolve_json(&c, &[key("degrees"), PathComponent::Index(1), key("type")]).unwrap();
+        let got =
+            resolve_json(&c, &[key("degrees"), PathComponent::Index(1), key("type")]).unwrap();
         assert_eq!(got, vec![&json!("MA")]);
     }
 
@@ -198,7 +197,10 @@ mod tests {
     #[test]
     fn missing_key_is_empty_not_a_type_error() {
         let c = json!({"given_name": "Erika"});
-        assert_eq!(resolve_json(&c, &[key("family_name")]), Err(PathError::Empty));
+        assert_eq!(
+            resolve_json(&c, &[key("family_name")]),
+            Err(PathError::Empty)
+        );
     }
 
     /// A missing key removes only *that* element; siblings survive. This is
@@ -263,7 +265,10 @@ mod tests {
             mdoc_components(&[key("org.iso.18013.5.1"), key("family_name")]),
             Ok(("org.iso.18013.5.1", "family_name"))
         );
-        assert_eq!(mdoc_components(&[key("only_one")]), Err(PathError::Malformed));
+        assert_eq!(
+            mdoc_components(&[key("only_one")]),
+            Err(PathError::Malformed)
+        );
         assert_eq!(
             mdoc_components(&[key("a"), key("b"), key("c")]),
             Err(PathError::Malformed)
@@ -280,7 +285,8 @@ mod tests {
     /// nothing while looking entirely reasonable.
     #[test]
     fn dotted_iso_namespace_is_one_component() {
-        let (ns, id) = mdoc_components(&[key("org.iso.18013.5.1"), key("age_over_18")]).unwrap();
+        let path = [key("org.iso.18013.5.1"), key("age_over_18")];
+        let (ns, id) = mdoc_components(&path).unwrap();
         assert_eq!(ns, "org.iso.18013.5.1");
         assert_eq!(id, "age_over_18");
     }
@@ -288,11 +294,20 @@ mod tests {
     /// Wire form: strings, integers and nulls all round-trip.
     #[test]
     fn components_deserialise_from_the_wire_form() {
-        let p: Vec<PathComponent> = serde_json::from_str(r#"["degrees", null, 0, "type"]"#).unwrap();
+        let p: Vec<PathComponent> =
+            serde_json::from_str(r#"["degrees", null, 0, "type"]"#).unwrap();
         assert_eq!(
             p,
-            vec![key("degrees"), PathComponent::Null, PathComponent::Index(0), key("type")]
+            vec![
+                key("degrees"),
+                PathComponent::Null,
+                PathComponent::Index(0),
+                key("type")
+            ]
         );
-        assert_eq!(serde_json::to_string(&p).unwrap(), r#"["degrees",null,0,"type"]"#);
+        assert_eq!(
+            serde_json::to_string(&p).unwrap(),
+            r#"["degrees",null,0,"type"]"#
+        );
     }
 }
