@@ -12,7 +12,7 @@ The full write-up, including the requirements analysis this came from, is at
 | 0 | Repo bootstrap under the settled licensing rules | done |
 | 1 | Prove the matcher swap on hardware | done |
 | 2 | Credential blob format and builder | done |
-| 3 | The DCQL engine | ~2 weeks |
+| 3 | The DCQL engine | done (publish blocked) |
 | 4 | Profile evaluator and the ZK path | ~1 week |
 | 5 | Entry emission and display | ~3 days |
 | 6 | Kotlin SDK integration | ~1 week |
@@ -70,15 +70,39 @@ landed. Still inside the 300 KB budget, but Phase 3 adds DCQL on top of it. If
 the budget gets tight, the request-side JSON parser is the thing to replace,
 not the blob format.
 
-## Phase 3 — The DCQL engine
+## Phase 3 — The DCQL engine ✅
 
-Full DCQL 1.0 in `siros-dcql`: credential queries, claim paths, `claim_sets`,
-claim `values` filters, `credential_sets` with required and optional options,
-and combination enumeration with the single-member consolidation the picker
-needs. Spec vectors, property tests, and differential runs against the oracle
-in the shared test host.
+Full DCQL 1.0 in `siros-dcql`: the query model (§6.1–6.3), claims path
+pointers (§7.1 JSON and §7.2 mdoc), and selection (§6.4) — `claims`,
+`claim_sets` with first-satisfiable-option preference, `values` filtering,
+and `credential_sets` with required and optional options.
 
-Ends with `siros-dcql 0.1.0` published to crates.io.
+Two rules drove the design, and both silently change what a wallet offers if
+missed:
+
+- **A credential missing a requested claim must not be offered at all**
+  (§6.4.1). Not a weak match — not a match. Filtering on format and metadata
+  alone, which is what the Kotlin SDK does today, offers credentials that
+  cannot satisfy the request.
+- **An absent `credential_sets` means every query must be satisfied** (§6.4),
+  not "no constraint". Reading it the other way reports a request as
+  satisfiable when half of it cannot be answered.
+
+`meta` is deliberately not interpreted here: §6.1 defines it per credential
+format, so a generic engine cannot evaluate it. That is what the `Policy`
+trait is for, and where the match profile plugs in at Phase 4.
+
+Tested against the specification's own vectors from
+`openid/OpenID4VP/1.0/examples/query_lang`, committed under
+`crates/siros-dcql/tests/spec_vectors/`. They caught a real weakness in the
+test fixtures — nested paths like `["address", "street_address"]` and `values`
+restrictions — which is exactly why vectors written by someone else are worth
+more than ones shaped by this implementation's assumptions.
+
+**Outstanding:** publishing `siros-dcql 0.1.0` needs the crates.io owner and
+`CARGO_REGISTRY_TOKEN`, which is still the one item blocked on an account
+rather than on code. The release job is written and `cargo publish --dry-run`
+passes in CI on every PR.
 
 ## Phase 4 — Profile evaluator and the ZK path
 
