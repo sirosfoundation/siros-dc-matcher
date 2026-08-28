@@ -321,3 +321,30 @@ fn an_empty_wallet_satisfies_nothing() {
     assert!(!r.satisfiable);
     assert!(r.query("c").unwrap().candidates.is_empty());
 }
+
+/// §6 — `credentials` is REQUIRED and non-empty, but parsing does not enforce
+/// it and every set check is vacuously true over an empty set. Without a
+/// guard, an empty query reports as satisfiable and the picker offers an entry
+/// backed by nothing.
+#[test]
+fn an_empty_query_is_not_satisfiable() {
+    let q = query(r#"{"credentials":[]}"#);
+    let creds = [pid(json!({"given_name": "Erika"}))];
+    assert!(!execute(&q, &creds, &ExactFormat).satisfiable);
+}
+
+/// A request whose sets are all optional passes "all required sets satisfied"
+/// vacuously. Conformant, and useless in a picker: the wallet would be offered
+/// with no credential behind it.
+#[test]
+fn all_optional_sets_with_nothing_matching_is_not_satisfiable() {
+    let q = query(
+        r#"{"credentials":[{"id":"a","format":"mso_mdoc","meta":{}}],
+            "credential_sets":[{"options":[["a"]],"required":false}]}"#,
+    );
+    let no_mdoc = [pid(json!({"given_name": "Erika"}))];
+
+    let r = execute(&q, &no_mdoc, &ExactFormat);
+    assert!(!r.query("a").unwrap().is_satisfied());
+    assert!(!r.satisfiable);
+}

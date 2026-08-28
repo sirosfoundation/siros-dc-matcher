@@ -148,7 +148,18 @@ pub fn execute<C: Credential>(
         })
         .collect();
 
-    let satisfiable = match &query.credential_sets {
+    // `credentials` is REQUIRED and non-empty (§6), but parsing does not
+    // enforce it, and every check below is vacuously true over an empty set:
+    // an empty query would be reported satisfiable and the picker would offer
+    // an entry backed by nothing.
+    if query.credentials.is_empty() {
+        return QueryResult {
+            matches,
+            satisfiable: false,
+        };
+    }
+
+    let required_sets_met = match &query.credential_sets {
         // "If `credential_sets` is not provided, the Verifier requests
         // presentations for all Credentials in `credentials`" (§6.4) — every
         // query must be satisfied, which is the opposite of unconstrained.
@@ -166,9 +177,15 @@ pub fn execute<C: Credential>(
         }),
     };
 
+    // A request whose sets are all optional passes the check above with
+    // nothing matched, because "all required sets are satisfied" is vacuously
+    // true. Conformant, and useless in a picker: the wallet would be offered
+    // to the user with no credential behind it.
+    let anything_to_offer = matches.iter().any(QueryMatch::is_satisfied);
+
     QueryResult {
+        satisfiable: required_sets_met && anything_to_offer,
         matches,
-        satisfiable,
     }
 }
 

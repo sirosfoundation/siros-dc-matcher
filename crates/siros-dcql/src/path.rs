@@ -84,12 +84,21 @@ impl core::fmt::Display for PathError {
 ///
 /// # Errors
 ///
-/// [`PathError::TypeMismatch`] per steps 2.1–2.3, and [`PathError::Empty`]
-/// per step 3 when the selection ends up empty.
+/// [`PathError::Malformed`] for an empty pointer, [`PathError::TypeMismatch`]
+/// per steps 2.1–2.3, and [`PathError::Empty`] per step 3 when the selection
+/// ends up empty.
 pub fn resolve_json<'a>(
     root: &'a Value,
     path: &[PathComponent],
 ) -> Result<Vec<&'a Value>, PathError> {
+    // §7: "A claims path pointer MUST be a non-empty array". Processing an
+    // empty one would fall through to step 3 with the root still selected and
+    // hand back the entire credential — a query too malformed to say what it
+    // wants would select everything in it.
+    if path.is_empty() {
+        return Err(PathError::Malformed);
+    }
+
     // Step 1: select the root element.
     let mut selected: Vec<&Value> = vec![root];
 
@@ -256,6 +265,14 @@ mod tests {
             resolve_json(&c, &[key("degrees"), PathComponent::Null]),
             Err(PathError::Empty)
         );
+    }
+
+    /// §7 — "A claims path pointer MUST be a non-empty array". An empty one
+    /// would otherwise return the whole credential.
+    #[test]
+    fn an_empty_pointer_is_malformed_not_the_whole_credential() {
+        let c = json!({"given_name": "Erika", "family_name": "Mustermann"});
+        assert_eq!(resolve_json(&c, &[]), Err(PathError::Malformed));
     }
 
     /// §7.2.1 step 1 — mdoc pointers are exactly two strings.
