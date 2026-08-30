@@ -212,10 +212,11 @@ impl MatchProfile {
                     id: "openid4vp-v1-multisigned".into(),
                     parser: Parser::Openid4vpV1,
                 },
-                ProtocolRule {
-                    id: "org.iso.mdoc".into(),
-                    parser: Parser::IsoMdocApi,
-                },
+                // org.iso.mdoc is deliberately absent. The profile states
+                // what this wallet answers, and the matcher has no ISO
+                // 18013-7 reader yet — advertising it would make a request
+                // offering only that protocol look supported and then match
+                // nothing. Add it here in the same change that adds a parser.
             ],
             formats: vec![
                 FormatRule {
