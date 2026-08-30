@@ -916,7 +916,7 @@ private fun uniffiCheckContractApiVersion(lib: UniffiLib) {
 
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: UniffiLib) {
-    if (lib.uniffi_siros_dc_matcher_ffi_checksum_func_match_dc_api_request() != 65030.toShort()) {
+    if (lib.uniffi_siros_dc_matcher_ffi_checksum_func_match_dc_api_request() != 60054.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_siros_dc_matcher_ffi_checksum_func_match_dcql() != 59469.toShort()) {
@@ -2045,15 +2045,26 @@ sealed class MatchException: kotlin.Exception() {
     }
     
     /**
-     * No protocol in the request is one this wallet's profile answers.
+     * No protocol in the request is one this wallet can read.
      *
      * Distinct from "nothing matched": the wallet may hold exactly what was
      * asked for and still be unable to speak the protocol it was asked in.
+     *
+     * Carries what was offered, because a variant with no fields loses its
+     * message crossing the boundary — UniFFI renders it as the case name
+     * alone, so a host app logging the error would learn nothing about why.
+     * The protocols the verifier named are the one thing that makes this
+     * actionable.
      */
     class UnsupportedProtocol(
+        
+        /**
+         * The protocols the request offered, in the order given.
+         */
+        val `offered`: List<kotlin.String>
         ) : MatchException() {
         override val message
-            get() = ""
+            get() = "offered=${ `offered` }"
     }
     
 
@@ -2078,7 +2089,9 @@ public object FfiConverterTypeMatchError : FfiConverterRustBuffer<MatchException
             2 -> MatchException.Request(
                 FfiConverterString.read(buf),
                 )
-            3 -> MatchException.UnsupportedProtocol()
+            3 -> MatchException.UnsupportedProtocol(
+                FfiConverterSequenceString.read(buf),
+                )
             else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
         }
     }
@@ -2098,6 +2111,7 @@ public object FfiConverterTypeMatchError : FfiConverterRustBuffer<MatchException
             is MatchException.UnsupportedProtocol -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
                 4UL
+                + FfiConverterSequenceString.allocationSize(value.`offered`)
             )
         }
     }
@@ -2116,6 +2130,7 @@ public object FfiConverterTypeMatchError : FfiConverterRustBuffer<MatchException
             }
             is MatchException.UnsupportedProtocol -> {
                 buf.putInt(3)
+                FfiConverterSequenceString.write(value.`offered`, buf)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
@@ -2366,7 +2381,14 @@ public object FfiConverterMapStringString: FfiConverterRustBuffer<Map<kotlin.Str
          *
          * The request is the `{"requests":[{"protocol":…,"data":…}]}` envelope, which
          * is a list because one call can offer the same request under several
-         * protocols. The first protocol the wallet's registered profile answers wins.
+         * protocols.
+         *
+         * The first entry wins that the profile answers *and* that yields a query —
+         * not simply the first the profile lists. ISO 18013-7 carries a CBOR
+         * DeviceRequest rather than DCQL, so an entry naming it is skipped even
+         * though the profile may name it, and a later entry the wallet can actually
+         * read is used instead. Declining rather than failing is what makes the
+         * verifier's protocol negotiation work.
          *
          * # Errors
          *

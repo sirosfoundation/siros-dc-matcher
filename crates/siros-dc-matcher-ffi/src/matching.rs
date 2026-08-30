@@ -27,9 +27,9 @@
 use std::collections::HashMap;
 
 use siros_dc_matcher_core::db::CredentialDatabase;
-use siros_dc_matcher_core::evaluator::{credentials, ProfilePolicy};
+use siros_dc_matcher_core::evaluator::{credentials, resolve, ProfilePolicy};
 use siros_dc_matcher_core::profile::Parser;
-use siros_dcql::{execute, DcqlQuery, PathComponent};
+use siros_dcql::{execute, DcqlQuery};
 
 use crate::FfiCapability;
 
@@ -56,12 +56,21 @@ pub enum MatchError {
         /// What went wrong.
         reason: String,
     },
-    /// No protocol in the request is one this wallet's profile answers.
+    /// No protocol in the request is one this wallet can read.
     ///
     /// Distinct from "nothing matched": the wallet may hold exactly what was
     /// asked for and still be unable to speak the protocol it was asked in.
-    #[error("no supported protocol in the request")]
-    UnsupportedProtocol,
+    ///
+    /// Carries what was offered, because a variant with no fields loses its
+    /// message crossing the boundary — UniFFI renders it as the case name
+    /// alone, so a host app logging the error would learn nothing about why.
+    /// The protocols the verifier named are the one thing that makes this
+    /// actionable.
+    #[error("no protocol in the request is supported; offered: {offered:?}")]
+    UnsupportedProtocol {
+        /// The protocols the request offered, in the order given.
+        offered: Vec<String>,
+    },
 }
 
 /// One credential answering one credential query.
@@ -114,7 +123,14 @@ pub struct FfiMatchOutcome {
 ///
 /// The request is the `{"requests":[{"protocol":…,"data":…}]}` envelope, which
 /// is a list because one call can offer the same request under several
-/// protocols. The first protocol the wallet's registered profile answers wins.
+/// protocols.
+///
+/// The first entry wins that the profile answers *and* that yields a query —
+/// not simply the first the profile lists. ISO 18013-7 carries a CBOR
+/// DeviceRequest rather than DCQL, so an entry naming it is skipped even
+/// though the profile may name it, and a later entry the wallet can actually
+/// read is used instead. Declining rather than failing is what makes the
+/// verifier's protocol negotiation work.
 ///
 /// # Errors
 ///
@@ -127,10 +143,14 @@ pub fn match_dc_api_request(
     let db = decode(&blob)?;
     let parsed: serde_json::Value = serde_json::from_str(&request_json).map_err(request_err)?;
 
-    let query = parsed
+    let requests = parsed
         .get("requests")
         .and_then(serde_json::Value::as_array)
-        .ok_or(MatchError::UnsupportedProtocol)?
+        .ok_or_else(|| MatchError::UnsupportedProtocol {
+            offered: Vec::new(),
+        })?;
+
+    let query = requests
         .iter()
         .find_map(|entry| {
             let protocol = entry.get("protocol")?.as_str()?;
@@ -144,7 +164,12 @@ pub fn match_dc_api_request(
                 Parser::IsoMdocApi => None,
             }
         })
-        .ok_or(MatchError::UnsupportedProtocol)?;
+        .ok_or_else(|| MatchError::UnsupportedProtocol {
+            offered: requests
+                .iter()
+                .filter_map(|e| Some(e.get("protocol")?.as_str()?.to_owned()))
+                .collect(),
+        })?;
 
     Ok(evaluate(&db, &query))
 }
@@ -191,42 +216,39 @@ fn evaluate(db: &CredentialDatabase, query: &DcqlQuery) -> FfiMatchOutcome {
                 .members
                 .iter()
                 .map(|(query_id, candidate)| {
-                    let credential_query = query.credential(query_id);
+                    // Resolved by core, not here: the matcher binary derives
+                    // exactly the same details for its picker metadata, and
+                    // two derivations are how the two would come to disagree
+                    // about which capability satisfied a query.
+                    let resolved = query
+                        .credential(query_id)
+                        .map(|cq| resolve(&db.profile, &policy, cq, candidate));
                     FfiMatchedCredential {
                         query_id: query_id.clone(),
                         credential_id: candidate.credential_id.clone(),
-                        claims: candidate
-                            .claims
-                            .iter()
-                            .map(|claim| {
-                                claim
-                                    .path
+                        claims: resolved
+                            .as_ref()
+                            .map(|r| r.claims.clone())
+                            .unwrap_or_default(),
+                        capabilities: resolved
+                            .as_ref()
+                            .map(|r| {
+                                r.capabilities
                                     .iter()
-                                    .filter_map(PathComponent::as_key)
-                                    .map(str::to_owned)
+                                    .map(|c| FfiCapability {
+                                        system: c.system.clone(),
+                                        params: c
+                                            .params
+                                            .iter()
+                                            .map(|(k, v)| (k.clone(), v.clone()))
+                                            .collect(),
+                                    })
                                     .collect()
                             })
-                            .collect(),
-                        capabilities: credential_query
-                            .and_then(|cq| {
-                                let rule = db.profile.format_rule(&cq.format)?;
-                                if rule.requires.is_empty() {
-                                    return None;
-                                }
-                                policy.capability_for(cq, &rule.requires)
-                            })
-                            .unwrap_or_default()
-                            .into_iter()
-                            .map(|c| FfiCapability {
-                                system: c.system.clone(),
-                                params: c
-                                    .params
-                                    .iter()
-                                    .map(|(k, v)| (k.clone(), v.clone()))
-                                    .collect(),
-                            })
-                            .collect(),
-                        meta: carried_meta(credential_query),
+                            .unwrap_or_default(),
+                        meta: resolved
+                            .map(|r| r.meta.into_iter().collect())
+                            .unwrap_or_default(),
                     }
                 })
                 .collect(),
@@ -238,28 +260,4 @@ fn evaluate(db: &CredentialDatabase, query: &DcqlQuery) -> FfiMatchOutcome {
         combinations,
         dropped: u32::try_from(enumerated.dropped).unwrap_or(u32::MAX),
     }
-}
-
-/// `meta` entries the wallet needs but that do not decide a match.
-///
-/// Only scalars: a nested object has no single string form, and inventing one
-/// would hand the caller a value it cannot use. Anything structural belongs in
-/// a typed field rather than smuggled through here.
-fn carried_meta(query: Option<&siros_dcql::CredentialQuery>) -> HashMap<String, String> {
-    let Some(query) = query else {
-        return HashMap::new();
-    };
-    query
-        .meta
-        .iter()
-        .filter_map(|(key, value)| {
-            let text = match value {
-                serde_json::Value::String(s) => s.clone(),
-                serde_json::Value::Number(n) => n.to_string(),
-                serde_json::Value::Bool(b) => b.to_string(),
-                _ => return None,
-            };
-            Some((key.clone(), text))
-        })
-        .collect()
 }

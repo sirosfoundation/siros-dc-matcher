@@ -1551,12 +1551,22 @@ public enum MatchError {
          */reason: String
     )
     /**
-     * No protocol in the request is one this wallet's profile answers.
+     * No protocol in the request is one this wallet can read.
      *
      * Distinct from "nothing matched": the wallet may hold exactly what was
      * asked for and still be unable to speak the protocol it was asked in.
+     *
+     * Carries what was offered, because a variant with no fields loses its
+     * message crossing the boundary — UniFFI renders it as the case name
+     * alone, so a host app logging the error would learn nothing about why.
+     * The protocols the verifier named are the one thing that makes this
+     * actionable.
      */
-    case UnsupportedProtocol
+    case UnsupportedProtocol(
+        /**
+         * The protocols the request offered, in the order given.
+         */offered: [String]
+    )
 }
 
 
@@ -1579,7 +1589,9 @@ public struct FfiConverterTypeMatchError: FfiConverterRustBuffer {
         case 2: return .Request(
             reason: try FfiConverterString.read(from: &buf)
             )
-        case 3: return .UnsupportedProtocol
+        case 3: return .UnsupportedProtocol(
+            offered: try FfiConverterSequenceString.read(from: &buf)
+            )
 
          default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -1602,9 +1614,10 @@ public struct FfiConverterTypeMatchError: FfiConverterRustBuffer {
             FfiConverterString.write(reason, into: &buf)
             
         
-        case .UnsupportedProtocol:
+        case let .UnsupportedProtocol(offered):
             writeInt(&buf, Int32(3))
-        
+            FfiConverterSequenceString.write(offered, into: &buf)
+            
         }
     }
 }
@@ -1822,7 +1835,14 @@ fileprivate struct FfiConverterDictionaryStringString: FfiConverterRustBuffer {
  *
  * The request is the `{"requests":[{"protocol":…,"data":…}]}` envelope, which
  * is a list because one call can offer the same request under several
- * protocols. The first protocol the wallet's registered profile answers wins.
+ * protocols.
+ *
+ * The first entry wins that the profile answers *and* that yields a query —
+ * not simply the first the profile lists. ISO 18013-7 carries a CBOR
+ * DeviceRequest rather than DCQL, so an entry naming it is skipped even
+ * though the profile may name it, and a later entry the wallet can actually
+ * read is used instead. Declining rather than failing is what makes the
+ * verifier's protocol negotiation work.
  *
  * # Errors
  *
@@ -1871,7 +1891,7 @@ private var initializationResult: InitializationResult = {
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
-    if (uniffi_siros_dc_matcher_ffi_checksum_func_match_dc_api_request() != 65030) {
+    if (uniffi_siros_dc_matcher_ffi_checksum_func_match_dc_api_request() != 60054) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_siros_dc_matcher_ffi_checksum_func_match_dcql() != 59469) {

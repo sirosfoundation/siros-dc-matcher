@@ -181,7 +181,12 @@ fn an_unspeakable_protocol_is_its_own_error() {
     let request = json!({"requests": [{"protocol": "some-future-thing", "data": {}}]}).to_string();
 
     match match_dc_api_request(blob, request) {
-        Err(MatchError::UnsupportedProtocol) => {}
+        // What was offered comes back: a variant with no fields loses its
+        // message crossing the boundary, so the protocols the verifier named
+        // are the only thing that makes this actionable in a host app's log.
+        Err(MatchError::UnsupportedProtocol { offered }) => {
+            assert_eq!(offered, vec!["some-future-thing".to_string()]);
+        }
         other => panic!("expected UnsupportedProtocol, got {other:?}"),
     }
 }

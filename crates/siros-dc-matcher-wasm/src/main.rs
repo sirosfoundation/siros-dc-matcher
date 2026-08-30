@@ -24,7 +24,7 @@
 mod abi;
 
 use siros_dc_matcher_core::db::CredentialDatabase;
-use siros_dc_matcher_core::evaluator::{credentials, ProfilePolicy};
+use siros_dc_matcher_core::evaluator::{credentials, resolve, ProfilePolicy};
 use siros_dc_matcher_core::profile::Parser;
 use siros_dc_matcher_core::sink::Entry;
 use siros_dcql::{execute, DcqlQuery};
@@ -110,20 +110,15 @@ fn main() {
         abi::emit::entry_set(&set_id, resolved.len());
 
         for (position, (query_id, candidate, credential)) in resolved.iter().enumerate() {
-            // Which capability satisfied this query, if the format required
-            // one. The wallet needs it to know *which* proof to produce, and
-            // it is the matcher that already decided — recomputing it there
-            // means parsing the request again and possibly reaching a
-            // different answer.
-            let capabilities = query
+            // Resolved by core, which the FFI also calls: the wallet needs to
+            // know which proof to produce, and deriving that in two places is
+            // how the two would come to disagree.
+            let resolved = query
                 .credential(query_id)
-                .and_then(|cq| {
-                    let rule = db.profile.format_rule(&cq.format)?;
-                    if rule.requires.is_empty() {
-                        return None;
-                    }
-                    policy.capability_for(cq, &rule.requires)
-                })
+                .map(|cq| resolve(&db.profile, &policy, cq, candidate));
+            let capabilities = resolved
+                .as_ref()
+                .map(|r| r.capabilities.clone())
                 .unwrap_or_default();
 
             let metadata = serde_json::json!({
@@ -132,11 +127,7 @@ fn main() {
                 "query_id": query_id,
                 "credential_id": credential.id,
                 "capabilities": capabilities,
-                "claims": candidate
-                    .claims
-                    .iter()
-                    .map(|c| c.path.clone())
-                    .collect::<Vec<_>>(),
+                "claims": resolved.as_ref().map(|r| r.claims.clone()).unwrap_or_default(),
                 // The platform's own attestation of who is asking — the only
                 // trustworthy statement of that, since anything naming an
                 // origin inside the request body is the request describing

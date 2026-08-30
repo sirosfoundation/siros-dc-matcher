@@ -20,6 +20,8 @@
 //! capability requirement, so the entry is offered only when this wallet can
 //! actually produce the proof the verifier named.
 
+use std::collections::BTreeMap;
+
 use serde_json::Value;
 use siros_dcql::{Credential as _, CredentialQuery, PathComponent, PathError};
 
@@ -273,4 +275,67 @@ pub fn credentials(db: &CredentialDatabase) -> Vec<BlobCredential<'_>> {
         .iter()
         .map(|credential| BlobCredential { credential })
         .collect()
+}
+
+/// What a caller needs about one matched credential, beyond its identity.
+///
+/// Shared because two consumers derive it: the matcher binary, which puts it in
+/// picker metadata, and the FFI, which hands it to a wallet. Deriving it twice
+/// is how the two would come to disagree about which ZK system satisfied a
+/// query — the drift this crate exists to stop.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Resolved<'a> {
+    /// Exactly the claims to disclose, as path components.
+    pub claims: Vec<Vec<String>>,
+    /// The capability chosen to satisfy the query, if its format needed one.
+    pub capabilities: Vec<&'a Capability>,
+    /// `meta` scalars the wallet needs but which did not decide the match —
+    /// `ppid_context` above all, which changes what is produced rather than
+    /// which credential can produce it.
+    pub meta: BTreeMap<String, String>,
+}
+
+/// Resolve the details of one match.
+pub fn resolve<'a>(
+    profile: &'a MatchProfile,
+    policy: &ProfilePolicy<'a>,
+    query: &CredentialQuery,
+    candidate: &siros_dcql::Candidate,
+) -> Resolved<'a> {
+    let capabilities = profile
+        .format_rule(&query.format)
+        .filter(|rule| !rule.requires.is_empty())
+        .and_then(|rule| policy.capability_for(query, &rule.requires))
+        .unwrap_or_default();
+
+    Resolved {
+        claims: candidate
+            .claims
+            .iter()
+            .map(|claim| {
+                claim
+                    .path
+                    .iter()
+                    .filter_map(PathComponent::as_key)
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .collect(),
+        capabilities,
+        meta: query
+            .meta
+            .iter()
+            .filter_map(|(key, value)| {
+                // Scalars only: a nested object has no single string form, and
+                // inventing one would hand the caller a value it cannot use.
+                let text = match value {
+                    Value::String(s) => s.clone(),
+                    Value::Number(n) => n.to_string(),
+                    Value::Bool(b) => b.to_string(),
+                    _ => return None,
+                };
+                Some((key.clone(), text))
+            })
+            .collect(),
+    }
 }
