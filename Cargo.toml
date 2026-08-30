@@ -23,25 +23,25 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ciborium = "0.2"
 
-# The matcher runs inside the credential picker, where a trap is
-# indistinguishable from "no matching credential". Optimise for size, and
-# abort rather than unwind.
-#
-# `strip = "debuginfo"`, NOT `strip = true`. This profile also builds the
-# UniFFI cdylib, and UniFFI discovers a library's interface by reading
-# metadata symbols out of it. Stripping symbols makes binding generation
-# produce nothing at all — no error, no files, exit code 0 — which is a
-# genuinely miserable thing to debug. Debug info is still dropped, so the
-# matcher keeps almost all of the size win.
+# Host and mobile builds. Unwinding, deliberately: UniFFI turns panics into
+# errors with `catch_unwind`, which cannot work without it — an aborting build
+# silently removes the error handling the generated bindings appear to provide,
+# and makes the blast radius of any bug the whole application rather than one
+# failed call. That matters most for a library fed DCQL written by a verifier,
+# which is untrusted input arriving over the network.
 [profile.release]
 opt-level = "z"
 lto = true
 codegen-units = 1
-panic = "abort"
+panic = "unwind"
 strip = "debuginfo"
 
-# The matcher is the only artifact that ships inside someone else's process,
-# and it is the only one nothing needs to read symbols from — so it, and only
-# it, gets fully stripped.
-[profile.release.package.siros-dc-matcher-wasm]
+# The matcher, and only the matcher. It runs inside the credential picker,
+# where a trap is indistinguishable from "no matching credential" and there is
+# no error channel to unwind towards — so aborting costs nothing and saves the
+# unwinding tables. A custom profile rather than a per-package one because
+# Cargo does not allow `panic` in a package profile.
+[profile.wasm-release]
+inherits = "release"
+panic = "abort"
 strip = true

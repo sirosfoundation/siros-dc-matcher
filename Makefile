@@ -39,8 +39,8 @@ all: matcher bindings
 # ── The matcher binary ───────────────────────────────────────────────
 
 matcher:
-	cargo build --locked -p siros-dc-matcher-wasm --target wasm32-wasip1 --release
-	@ls -l $(BUILD_DIR)/wasm32-wasip1/release/matcher.wasm
+	cargo build --locked -p siros-dc-matcher-wasm --target wasm32-wasip1 --profile wasm-release
+	@ls -l $(BUILD_DIR)/wasm32-wasip1/wasm-release/matcher.wasm
 
 # ── Binding generation ───────────────────────────────────────────────
 #
@@ -90,7 +90,7 @@ aar: android
 	# CBOR-writing encoder and a matcher that predates it.
 	@mkdir -p $(AAR_DIR)/assets
 	$(MAKE) matcher
-	cp $(BUILD_DIR)/wasm32-wasip1/release/matcher.wasm $(AAR_DIR)/assets/
+	cp $(BUILD_DIR)/wasm32-wasip1/wasm-release/matcher.wasm $(AAR_DIR)/assets/
 	# Only native libraries and the asset ship here; the UniFFI Kotlin bindings
 	# are consumed as vendored source, so an empty classes.jar (required by the
 	# AAR layout) is enough. JNA arrives transitively via the POM.

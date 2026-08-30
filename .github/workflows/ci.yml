@@ -57,7 +57,7 @@ jobs:
       - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
       # The binary that actually ships is the wasm one; host-target lints alone
       # would not cover the cfg(target_arch = "wasm32") ABI code at all.
-      - run: cargo clippy --locked -p siros-dc-matcher-wasm --target wasm32-wasip1 --release -- -D warnings
+      - run: cargo clippy --locked -p siros-dc-matcher-wasm --target wasm32-wasip1 --profile wasm-release -- -D warnings
 
   wasm:
     name: Build matcher.wasm
@@ -68,7 +68,7 @@ jobs:
         with:
           targets: wasm32-wasip1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - run: cargo build --locked -p siros-dc-matcher-wasm --target wasm32-wasip1 --release
+      - run: cargo build --locked -p siros-dc-matcher-wasm --target wasm32-wasip1 --profile wasm-release
 
       # A matcher that traps emits no entries, which the user cannot tell
       # apart from "no matching credential". Check the module actually links
@@ -78,7 +78,7 @@ jobs:
         run: |
           python3 - <<'PY'
           import re, sys
-          d = open("target/wasm32-wasip1/release/matcher.wasm", "rb").read()
+          d = open("target/wasm32-wasip1/wasm-release/matcher.wasm", "rb").read()
           names = {m.decode() for m in re.findall(rb"[A-Za-z_][A-Za-z0-9_]{2,40}", d[:8192])}
           required = [
               "credman", "wasi_snapshot_preview1", "_start", "memory",
@@ -93,7 +93,7 @@ jobs:
 
       - name: Enforce size budget
         run: |
-          SIZE=$(stat -c%s target/wasm32-wasip1/release/matcher.wasm)
+          SIZE=$(stat -c%s target/wasm32-wasip1/wasm-release/matcher.wasm)
           echo "matcher.wasm: $SIZE bytes (budget $WASM_SIZE_BUDGET)"
           if [ "$SIZE" -gt "$WASM_SIZE_BUDGET" ]; then
             echo "::error::matcher.wasm is $SIZE bytes, over the $WASM_SIZE_BUDGET budget."
@@ -104,7 +104,7 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: matcher-wasm
-          path: target/wasm32-wasip1/release/matcher.wasm
+          path: target/wasm32-wasip1/wasm-release/matcher.wasm
 
   bindings:
     name: Bindings generate
@@ -136,6 +136,45 @@ jobs:
       # vendors the .kt as source, so a stale copy here becomes a stale copy
       # there — and the symptom is a linker or signature error a long way from
       # the cause.
+      # The FFI library must unwind. UniFFI converts a panic in exported code
+      # into an error using catch_unwind, which cannot happen at all in an
+      # aborting build — the bindings still look like they handle errors while
+      # any panic takes down the host application. It shipped that way in
+      # v0.1.0, because the workspace release profile is written for the
+      # matcher, which runs in a sandbox with no error channel and should
+      # abort.
+      #
+      # Checked on the artifact, not in a test: `cargo test` always builds with
+      # unwinding regardless of profile, so a test can never observe what
+      # ships. Measured on this crate, .gcc_except_table — the unwinding
+      # landing-pad tables — is ~146 KB when unwinding and ~13 KB when
+      # aborting, the residue of a precompiled std. The floor sits far below
+      # one and far above the other.
+      - name: The FFI library unwinds
+        run: |
+          set -euo pipefail
+          # readelf -W keeps each section on one line, and Python parses the
+          # hex size — `strtonum` is a gawk extension and /usr/bin/awk is mawk
+          # on some runners, where it would silently yield 0 and fail the build
+          # for the wrong reason.
+          BYTES=$(readelf -WS target/release/libsiros_dc_matcher_ffi.so \
+            | python3 -c "
+          import re, sys
+          for line in sys.stdin:
+              m = re.search(r'\.gcc_except_table\s+\S+\s+\S+\s+\S+\s+(\S+)', line)
+              if m:
+                  print(int(m.group(1), 16)); break
+          else:
+              print(0)
+          ")
+          echo ".gcc_except_table: $BYTES bytes"
+          if [ "$BYTES" -lt 50000 ]; then
+            echo "::error::The FFI library looks like an aborting build ($BYTES bytes of"
+            echo "::error::unwinding tables). UniFFI cannot turn panics into errors, and any"
+            echo "::error::panic will kill the host app. Check [profile.release] panic."
+            exit 1
+          fi
+
       - name: Committed bindings are up to date
         run: make check-bindings
 
