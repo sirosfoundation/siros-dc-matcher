@@ -43,5 +43,5 @@ strip = "debuginfo"
 # Cargo does not allow `panic` in a package profile.
 [profile.wasm-release]
 inherits = "release"
-panic = "unwind"
+panic = "abort"
 strip = true

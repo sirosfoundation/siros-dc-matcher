@@ -153,9 +153,20 @@ jobs:
       - name: The FFI library unwinds
         run: |
           set -euo pipefail
-          LIB=target/release/libsiros_dc_matcher_ffi.so
-          BYTES=$(readelf -S "$LIB" | grep -A1 gcc_except_table | tail -1 \
-                  | awk '{print strtonum("0x"$1)}')
+          # readelf -W keeps each section on one line, and Python parses the
+          # hex size — `strtonum` is a gawk extension and /usr/bin/awk is mawk
+          # on some runners, where it would silently yield 0 and fail the build
+          # for the wrong reason.
+          BYTES=$(readelf -WS target/release/libsiros_dc_matcher_ffi.so \
+            | python3 -c "
+          import re, sys
+          for line in sys.stdin:
+              m = re.search(r'\.gcc_except_table\s+\S+\s+\S+\s+\S+\s+(\S+)', line)
+              if m:
+                  print(int(m.group(1), 16)); break
+          else:
+              print(0)
+          ")
           echo ".gcc_except_table: $BYTES bytes"
           if [ "$BYTES" -lt 50000 ]; then
             echo "::error::The FFI library looks like an aborting build ($BYTES bytes of"
