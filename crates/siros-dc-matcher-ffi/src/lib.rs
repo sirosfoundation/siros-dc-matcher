@@ -428,4 +428,3 @@ mod poison_tests {
         assert_eq!(db.credentials[0].id, "cred-after-poison");
     }
 }
-
