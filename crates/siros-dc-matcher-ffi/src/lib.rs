@@ -24,6 +24,8 @@ use std::sync::Mutex;
 use siros_dc_matcher_core::db::{Claim, Credential, CredentialDatabase, IconRef};
 use siros_dc_matcher_core::profile::{Capability, MatchProfile, ZK_CAPABILITY};
 
+pub mod matching;
+
 uniffi::setup_scaffolding!();
 
 /// Why a blob could not be built.

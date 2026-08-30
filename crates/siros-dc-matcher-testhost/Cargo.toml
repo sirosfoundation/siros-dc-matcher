@@ -17,4 +17,4 @@ wasmtime = "30.0.2"
 wasmtime-wasi = "30.0.2"
 
 [dev-dependencies]
-siros-dc-matcher-core = { path = "../siros-dc-matcher-core" }
+siros-dc-matcher-core = { path = "../siros-dc-matcher-core", features = ["test-fixtures"] }

@@ -64,6 +64,13 @@ bindings-swift: $(BUILD_DIR)/debug/$(LIB_NAME).$(HOST_LIB_EXT)
 		generate --library $(BUILD_DIR)/debug/$(LIB_NAME).$(HOST_LIB_EXT) \
 		--language swift --out-dir $(SWIFT_DIR)
 
+# Phony on purpose. With the library as a plain file target and no
+# prerequisites, make considers it up to date the moment it exists — so
+# `make bindings` would regenerate from a stale library after the first build,
+# and `check-bindings` would compare fresh source against old bindings and
+# report success. Cargo is the incremental build system here; make should not
+# try to be a second one.
+.PHONY: $(BUILD_DIR)/debug/$(LIB_NAME).$(HOST_LIB_EXT)
 $(BUILD_DIR)/debug/$(LIB_NAME).$(HOST_LIB_EXT):
 	cargo build --locked -p siros-dc-matcher-ffi
 

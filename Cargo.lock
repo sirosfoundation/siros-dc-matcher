@@ -1745,6 +1745,7 @@ dependencies = [
 name = "siros-dc-matcher-ffi"
 version = "0.1.0"
 dependencies = [
+ "serde_json",
  "siros-dc-matcher-core",
  "siros-dcql",
  "thiserror 2.0.20",

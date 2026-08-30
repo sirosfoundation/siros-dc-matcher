@@ -112,7 +112,7 @@ pub enum Parser {
 /// Checked before an entry is offered, not during presentation. Offering an
 /// entry the wallet cannot honour walks the user through a consent screen and
 /// then fails — the worst possible place to discover a capability gap.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Capability {
     /// System identifier, e.g. `longfellow-libzk-v1`.
     pub system: String,

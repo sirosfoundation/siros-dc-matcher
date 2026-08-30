@@ -11,45 +11,13 @@ use std::collections::BTreeMap;
 use serde_json::json;
 use siros_dc_matcher_core::db::{Claim, Credential, CredentialDatabase};
 use siros_dc_matcher_core::evaluator::{credentials, ProfilePolicy};
-use siros_dc_matcher_core::profile::{Capability, MatchProfile, ZK_CAPABILITY};
+use siros_dc_matcher_core::fixtures;
+use siros_dc_matcher_core::profile::Capability;
 use siros_dcql::{execute, DcqlQuery};
 
 /// A wallet holding one ordinary mdoc driving licence.
 fn wallet(zk_systems: Vec<Capability>) -> CredentialDatabase {
-    let mut profile = MatchProfile::siros_default();
-    if !zk_systems.is_empty() {
-        profile
-            .capabilities
-            .insert(ZK_CAPABILITY.to_string(), zk_systems);
-    }
-
-    let mut db = CredentialDatabase::new(profile);
-    db.credentials.push(Credential {
-        id: "mdl-1".into(),
-        // Stored as an ordinary mdoc. There is no such thing as a stored ZK
-        // credential — the proof is produced at presentation time.
-        format: "mso_mdoc".into(),
-        doctype: Some("org.iso.18013.5.1.mDL".into()),
-        vct: None,
-        title: "Driving Licence".into(),
-        subtitle: "Transportstyrelsen".into(),
-        icon: None,
-        claims: vec![
-            Claim {
-                path: vec!["org.iso.18013.5.1".into(), "age_over_18".into()],
-                value: "true".into(),
-                display: "Over 18".into(),
-                display_value: Some("Yes".into()),
-            },
-            Claim {
-                path: vec!["org.iso.18013.5.1".into(), "family_name".into()],
-                value: "Johansson".into(),
-                display: "Family name".into(),
-                display_value: None,
-            },
-        ],
-    });
-    db
+    fixtures::wallet(zk_systems)
 }
 
 fn longfellow(num_attributes: &str) -> Capability {
