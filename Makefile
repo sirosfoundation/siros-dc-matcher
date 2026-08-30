@@ -167,6 +167,8 @@ check-bindings: bindings
 	@git diff --exit-code $(BINDINGS_DIR) || \
 		(echo "ERROR: committed bindings are stale. Run 'make bindings' and commit." && exit 1)
 
+# Note what this does *not* remove: bindings/ is committed, because the Kotlin
+# SDK vendors the generated .kt as source. Deleting it here would dirty the
+# working tree and invite a commit of the deletions.
 clean:
 	cargo clean
-	rm -rf $(BINDINGS_DIR)

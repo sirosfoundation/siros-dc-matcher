@@ -28,6 +28,6 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
-          args: >
-            -Dsonar.organization=${{ github.repository_owner }}
-            -Dsonar.projectKey=${{ github.repository_owner }}_${{ github.event.repository.name }}
+        # Project key, organization and exclusions live in
+        # sonar-project.properties, so they are visible in the repo and apply
+        # to any local scan too, rather than only inside this workflow.
