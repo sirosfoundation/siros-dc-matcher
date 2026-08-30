@@ -31,7 +31,7 @@ fn build_matcher_wasm() -> Vec<u8> {
         .join("../..")
         .canonicalize()
         .expect("workspace root");
-    let wasm = root.join("target/wasm32-wasip1/release/matcher.wasm");
+    let wasm = root.join("target/wasm32-wasip1/wasm-release/matcher.wasm");
 
     let out = Command::new(env!("CARGO"))
         .current_dir(&root)
@@ -41,7 +41,8 @@ fn build_matcher_wasm() -> Vec<u8> {
             "siros-dc-matcher-wasm",
             "--target",
             "wasm32-wasip1",
-            "--release",
+            "--profile",
+            "wasm-release",
         ])
         .output()
         .expect("running cargo build for the wasm target");
