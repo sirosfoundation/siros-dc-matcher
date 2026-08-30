@@ -87,18 +87,29 @@ fn main() {
     }
 
     for (index, combination) in enumerated.combinations.iter().enumerate() {
+        // Resolve every member before declaring the set. Skipping one after
+        // the fact would leave the declared length disagreeing with the
+        // entries actually added, and a gap in the positions — which the host
+        // is right to treat as a matcher bug. A combination we cannot fully
+        // emit is not offered at all.
+        let resolved: Option<Vec<_>> = combination
+            .members
+            .iter()
+            .map(|(query_id, candidate)| {
+                db.credentials
+                    .iter()
+                    .find(|c| c.id == candidate.credential_id)
+                    .map(|credential| (query_id, candidate, credential))
+            })
+            .collect();
+        let Some(resolved) = resolved else {
+            continue;
+        };
+
         let set_id = format!("{SET_PREFIX}-{index}");
-        abi::emit::entry_set(&set_id, combination.members.len());
+        abi::emit::entry_set(&set_id, resolved.len());
 
-        for (position, (query_id, candidate)) in combination.members.iter().enumerate() {
-            let Some(credential) = db
-                .credentials
-                .iter()
-                .find(|c| c.id == candidate.credential_id)
-            else {
-                continue;
-            };
-
+        for (position, (query_id, candidate, credential)) in resolved.iter().enumerate() {
             // Which capability satisfied this query, if the format required
             // one. The wallet needs it to know *which* proof to produce, and
             // it is the matcher that already decided — recomputing it there

@@ -507,3 +507,59 @@ fn an_unsatisfiable_request_yields_no_combinations() {
     assert!(!result.satisfiable);
     assert!(result.combinations(16).combinations.is_empty());
 }
+
+/// Every set optional means nothing is required, so there is no combination to
+/// enumerate. Returning one empty combination would hand the picker an option
+/// containing no credentials at all.
+#[test]
+fn all_optional_sets_produce_no_combination_rather_than_an_empty_one() {
+    let q = query(
+        r#"{"credentials":[{"id":"nice","format":"dc+sd-jwt","meta":{},
+             "claims":[{"path":["given_name"]}]}],
+            "credential_sets":[{"options":[["nice"]],"required":false}]}"#,
+    );
+    let creds = [pid(json!({"given_name": "Erika"}))];
+
+    let result = execute(&q, &creds, &ExactFormat);
+    assert!(result.satisfiable, "an optional set imposes nothing");
+
+    let combos = result.combinations(16);
+    assert!(
+        combos.combinations.is_empty(),
+        "expected no combinations, got {:?}",
+        combos.combinations
+    );
+}
+
+/// The product is computed, not built: asking for two of a thousand
+/// possibilities must not materialise a thousand.
+#[test]
+fn only_the_requested_number_of_combinations_is_built() {
+    let q = query(
+        r#"{"credentials":[{"id":"a","format":"dc+sd-jwt","meta":{},
+                            "claims":[{"path":["given_name"]}]},
+                           {"id":"b","format":"dc+sd-jwt","meta":{},
+                            "claims":[{"path":["given_name"]}]}],
+            "credential_sets":[{"options":[["a","b"]]}]}"#,
+    );
+    let creds: Vec<_> = (0..40)
+        .map(|i| {
+            JsonCredential::new(
+                &format!("pid-{i}"),
+                "dc+sd-jwt",
+                json!({"given_name": "Erika"}),
+            )
+        })
+        .collect();
+
+    // 40 candidates for each of two queries: 1600 possibilities.
+    let combos = execute(&q, &creds, &ExactFormat).combinations(2);
+    assert_eq!(combos.combinations.len(), 2);
+    assert_eq!(combos.dropped, 1598, "the rest are counted, not built");
+
+    // The two built are distinct, so the bound does not collapse them.
+    assert_ne!(combos.combinations[0], combos.combinations[1]);
+    for combination in &combos.combinations {
+        assert_eq!(combination.members.len(), 2);
+    }
+}

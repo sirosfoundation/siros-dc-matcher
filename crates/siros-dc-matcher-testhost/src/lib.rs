@@ -139,23 +139,22 @@ fn compiled(wasm: &[u8]) -> Result<(Engine, Module)> {
     use std::sync::{Mutex, OnceLock};
 
     static ENGINE: OnceLock<Engine> = OnceLock::new();
-    static MODULES: OnceLock<Mutex<HashMap<u64, Module>>> = OnceLock::new();
+    #[allow(clippy::type_complexity)]
+    static MODULES: OnceLock<Mutex<HashMap<Vec<u8>, Module>>> = OnceLock::new();
 
     let engine = ENGINE.get_or_init(Engine::default).clone();
-    let key = {
-        use std::hash::{Hash, Hasher};
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        wasm.hash(&mut hasher);
-        hasher.finish()
-    };
 
+    // Keyed by the bytes themselves, not a hash of them. A collision would
+    // silently run the wrong module, and "the wrong module ran" is close to
+    // undiagnosable from a failing assertion. Only a handful of modules are
+    // ever cached, so the copies cost nothing worth saving.
     let cache = MODULES.get_or_init(|| Mutex::new(HashMap::new()));
     let mut cache = cache.lock().unwrap_or_else(|e| e.into_inner());
-    let module = match cache.get(&key) {
+    let module = match cache.get(wasm) {
         Some(module) => module.clone(),
         None => {
             let module = Module::new(&engine, wasm).context("compiling matcher module")?;
-            cache.insert(key, module.clone());
+            cache.insert(wasm.to_vec(), module.clone());
             module
         }
     };

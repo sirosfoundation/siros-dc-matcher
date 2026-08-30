@@ -261,6 +261,17 @@ impl QueryResult {
                 .collect(),
         };
 
+        // Every set optional: nothing is required, so there is no combination
+        // to enumerate. Returning one empty combination here would hand the
+        // picker an option containing no credentials at all. What to offer
+        // from the optional sets is the caller's decision.
+        if groups.is_empty() {
+            return Combinations {
+                combinations: Vec::new(),
+                dropped: 0,
+            };
+        }
+
         // Choose one option per required group, then one candidate per query
         // in the chosen options.
         let mut out: Vec<Combination> = vec![Combination {
@@ -269,17 +280,21 @@ impl QueryResult {
         let mut dropped = 0usize;
 
         for options in &groups {
-            let mut next = Vec::new();
+            let mut next: Vec<Combination> = Vec::new();
             for partial in &out {
                 for option in options {
-                    for members in candidate_products(self, option) {
-                        if next.len() < limit {
-                            let mut combined = partial.members.clone();
-                            combined.extend(members);
-                            next.push(Combination { members: combined });
-                        } else {
-                            dropped += 1;
-                        }
+                    // Generate only what still fits. The full product can be
+                    // enormous — ten candidates across three queries is a
+                    // thousand — and materialising it to then keep 32 defeats
+                    // the point of a limit. What is skipped is counted from
+                    // the arithmetic rather than by building it.
+                    let budget = limit.saturating_sub(next.len());
+                    let (products, skipped) = candidate_products(self, option, budget);
+                    dropped = dropped.saturating_add(skipped);
+                    for members in products {
+                        let mut combined = partial.members.clone();
+                        combined.extend(members);
+                        next.push(Combination { members: combined });
                     }
                 }
             }
@@ -296,24 +311,52 @@ impl QueryResult {
     }
 }
 
-/// Every way to pick one candidate for each query id in `option`.
-fn candidate_products(result: &QueryResult, option: &[String]) -> Vec<Vec<(String, Candidate)>> {
-    let mut products: Vec<Vec<(String, Candidate)>> = vec![Vec::new()];
+/// Up to `budget` ways to pick one candidate for each query id in `option`,
+/// and how many further ways existed.
+///
+/// The count is a product of the per-query candidate counts, so it is computed
+/// rather than reached by building every combination and discarding most of
+/// them.
+fn candidate_products(
+    result: &QueryResult,
+    option: &[String],
+    budget: usize,
+) -> (Vec<Vec<(String, Candidate)>>, usize) {
+    let mut total: usize = 1;
     for id in option {
         let Some(query_match) = result.query(id) else {
-            return Vec::new();
+            return (Vec::new(), 0);
         };
-        let mut next = Vec::new();
-        for partial in &products {
-            for candidate in &query_match.candidates {
-                let mut extended = partial.clone();
-                extended.push((id.clone(), candidate.clone()));
-                next.push(extended);
-            }
-        }
-        products = next;
+        total = total.saturating_mul(query_match.candidates.len());
     }
-    products
+    if total == 0 {
+        return (Vec::new(), 0);
+    }
+
+    let take = total.min(budget);
+    let mut products: Vec<Vec<(String, Candidate)>> = Vec::with_capacity(take);
+
+    // Index arithmetic rather than a growing cartesian product: the nth
+    // combination is a mixed-radix reading of n across the per-query candidate
+    // counts, so only the ones actually wanted are built.
+    for n in 0..take {
+        let mut remainder = n;
+        let mut members = Vec::with_capacity(option.len());
+        for id in option {
+            let Some(query_match) = result.query(id) else {
+                return (Vec::new(), 0);
+            };
+            let width = query_match.candidates.len();
+            let Some(candidate) = query_match.candidates.get(remainder % width) else {
+                return (Vec::new(), 0);
+            };
+            members.push((id.clone(), candidate.clone()));
+            remainder /= width;
+        }
+        products.push(members);
+    }
+
+    (products, total - take)
 }
 
 /// Which claims to disclose for one credential, or `None` if this credential
