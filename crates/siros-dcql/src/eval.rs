@@ -14,7 +14,7 @@
 use serde_json::Value;
 
 use crate::path::{PathComponent, PathError};
-use crate::query::{ClaimsQuery, CredentialQuery, DcqlQuery};
+use crate::query::{ClaimsQuery, CredentialQuery, CredentialSetQuery, DcqlQuery};
 
 /// A credential the wallet holds, as far as DCQL is concerned.
 pub trait Credential {
@@ -96,10 +96,25 @@ impl QueryMatch {
 }
 
 /// One way to satisfy the whole request.
+///
+/// Every member is presented *together*: this is what the picker offers as a
+/// single choice, and what the user consents to as a unit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Combination {
     /// Which credential answers which query, with the claims to disclose.
     pub members: Vec<(String, Candidate)>,
+}
+
+/// The combinations that satisfy a request, and whether the list was cut short.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Combinations {
+    /// Ways to satisfy the request, in wallet order.
+    pub combinations: Vec<Combination>,
+    /// How many were discarded to stay within the caller's limit.
+    ///
+    /// Named rather than left implicit: a picker that silently shows the first
+    /// few of many is telling the user those are the only options they have.
+    pub dropped: usize,
 }
 
 /// The outcome of evaluating a query.
@@ -112,6 +127,9 @@ pub struct QueryResult {
     /// False means the wallet "MUST NOT return any Credential(s)" (§6.4) —
     /// so nothing should be offered, not even the part that did match.
     pub satisfiable: bool,
+    /// The request's credential sets, kept so combinations can be enumerated
+    /// without handing the query around alongside its own result.
+    pub credential_sets: Option<Vec<CredentialSetQuery>>,
 }
 
 impl QueryResult {
@@ -156,6 +174,7 @@ pub fn execute<C: Credential>(
         return QueryResult {
             matches,
             satisfiable: false,
+            credential_sets: query.credential_sets.clone(),
         };
     }
 
@@ -186,7 +205,115 @@ pub fn execute<C: Credential>(
     QueryResult {
         satisfiable: required_sets_met && anything_to_offer,
         matches,
+        credential_sets: query.credential_sets.clone(),
     }
+}
+
+impl QueryResult {
+    /// Enumerate the ways this wallet can satisfy the request.
+    ///
+    /// A combination is a set of credentials presented *together*, which is
+    /// what a picker offers as one selectable option. Alternatives are
+    /// separate combinations.
+    ///
+    /// `limit` bounds the result, because the count is a product: three
+    /// queries with four candidates each is sixty-four combinations, and a
+    /// picker cannot use them all. Whatever is dropped is counted in
+    /// [`Combinations::dropped`] rather than silently discarded — a list of
+    /// options that quietly omits some is a list the user cannot reason about.
+    ///
+    /// Optional credential sets (§6.2 `required: false`) are not enumerated.
+    /// The wallet MAY include them, so whether to offer one is a UI decision
+    /// about what to ask the user for, not a matching decision, and folding
+    /// them in here would multiply the combination count for choices the
+    /// verifier said it can do without.
+    pub fn combinations(&self, limit: usize) -> Combinations {
+        if !self.satisfiable {
+            return Combinations {
+                combinations: Vec::new(),
+                dropped: 0,
+            };
+        }
+
+        // Each required group is a set of query ids that must all be answered
+        // by one combination. Without `credential_sets` that is every query
+        // (§6.4); with them it is one satisfiable option per required set.
+        let groups: Vec<Vec<Vec<String>>> = match &self.credential_sets {
+            None => vec![vec![self
+                .matches
+                .iter()
+                .map(|m| m.query_id.clone())
+                .collect()]],
+            Some(sets) => sets
+                .iter()
+                .filter(|s| s.required)
+                .map(|set| {
+                    set.options
+                        .iter()
+                        .filter(|option| {
+                            option
+                                .iter()
+                                .all(|id| self.query(id).is_some_and(QueryMatch::is_satisfied))
+                        })
+                        .cloned()
+                        .collect()
+                })
+                .collect(),
+        };
+
+        // Choose one option per required group, then one candidate per query
+        // in the chosen options.
+        let mut out: Vec<Combination> = vec![Combination {
+            members: Vec::new(),
+        }];
+        let mut dropped = 0usize;
+
+        for options in &groups {
+            let mut next = Vec::new();
+            for partial in &out {
+                for option in options {
+                    for members in candidate_products(self, option) {
+                        if next.len() < limit {
+                            let mut combined = partial.members.clone();
+                            combined.extend(members);
+                            next.push(Combination { members: combined });
+                        } else {
+                            dropped += 1;
+                        }
+                    }
+                }
+            }
+            out = next;
+            if out.is_empty() {
+                break;
+            }
+        }
+
+        Combinations {
+            combinations: out,
+            dropped,
+        }
+    }
+}
+
+/// Every way to pick one candidate for each query id in `option`.
+fn candidate_products(result: &QueryResult, option: &[String]) -> Vec<Vec<(String, Candidate)>> {
+    let mut products: Vec<Vec<(String, Candidate)>> = vec![Vec::new()];
+    for id in option {
+        let Some(query_match) = result.query(id) else {
+            return Vec::new();
+        };
+        let mut next = Vec::new();
+        for partial in &products {
+            for candidate in &query_match.candidates {
+                let mut extended = partial.clone();
+                extended.push((id.clone(), candidate.clone()));
+                next.push(extended);
+            }
+        }
+        products = next;
+    }
+    products
 }
 
 /// Which claims to disclose for one credential, or `None` if this credential

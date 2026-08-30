@@ -219,13 +219,23 @@ pub mod emit {
             let (title, subtitle) = (super::c(e.title), super::c(e.subtitle));
             let metadata = super::c(e.metadata);
             let empty = super::c("");
-            // SAFETY: every pointer is to a CString alive for the whole call,
-            // and the icon length matches the empty icon slice we pass.
+            // A null pointer with length 0 for "no icon". The bytes, when
+            // there are some, are borrowed straight from the decoded blob —
+            // they outlive the call, and copying a bitmap per entry inside a
+            // sandbox with a time budget is worth avoiding.
+            let (icon_ptr, icon_len) = match e.icon {
+                Some(bytes) if !bytes.is_empty() => {
+                    (bytes.as_ptr() as *const core::ffi::c_char, bytes.len())
+                }
+                _ => (core::ptr::null(), 0),
+            };
+            // SAFETY: every pointer is to a value alive for the whole call,
+            // and icon_len is the true length of the slice icon_ptr came from.
             unsafe {
                 super::imports::AddEntryToSet(
                     cred_id.as_ptr(),
-                    core::ptr::null(),
-                    0,
+                    icon_ptr,
+                    icon_len,
                     title.as_ptr(),
                     subtitle.as_ptr(),
                     empty.as_ptr(),

@@ -86,7 +86,7 @@ pub struct ClaimsQuery {
 }
 
 /// A constraint on which combinations of credentials satisfy the request (§6.2).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CredentialSetQuery {
     /// Each option is a set of [`CredentialQuery::id`]s that together satisfy
     /// this use case. Satisfying any one option satisfies the set.

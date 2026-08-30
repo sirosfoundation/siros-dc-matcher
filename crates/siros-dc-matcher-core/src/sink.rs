@@ -47,4 +47,10 @@ pub struct Entry<'a> {
     pub subtitle: &'a str,
     /// Opaque payload handed back to the wallet on selection.
     pub metadata: &'a str,
+    /// Icon bytes, borrowed from the registered blob.
+    ///
+    /// `None` when the credential has no icon, or when its reference did not
+    /// fall inside the blob's icon buffer — a credential should lose its
+    /// picture over that, not its entry.
+    pub icon: Option<&'a [u8]>,
 }

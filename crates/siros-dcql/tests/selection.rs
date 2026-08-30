@@ -348,3 +348,162 @@ fn all_optional_sets_with_nothing_matching_is_not_satisfiable() {
     assert!(!r.query("a").unwrap().is_satisfied());
     assert!(!r.satisfiable);
 }
+
+// ---------------------------------------------------------------------------
+// Combination enumeration
+// ---------------------------------------------------------------------------
+
+/// With no `credential_sets`, every query must be answered, so a combination
+/// spans all of them (§6.4).
+#[test]
+fn a_combination_spans_every_query_when_no_sets_are_given() {
+    let q = query(
+        r#"{"credentials":[{"id":"a","format":"dc+sd-jwt","meta":{},
+                            "claims":[{"path":["given_name"]}]},
+                           {"id":"b","format":"dc+sd-jwt","meta":{},
+                            "claims":[{"path":["family_name"]}]}]}"#,
+    );
+    let creds = [pid(
+        json!({"given_name": "Erika", "family_name": "Mustermann"}),
+    )];
+
+    let combos = execute(&q, &creds, &ExactFormat).combinations(16);
+    assert_eq!(combos.dropped, 0);
+    assert_eq!(combos.combinations.len(), 1);
+
+    let members = &combos.combinations[0].members;
+    assert_eq!(members.len(), 2, "both queries in one combination");
+    assert_eq!(members[0].0, "a");
+    assert_eq!(members[1].0, "b");
+}
+
+/// Alternatives are separate combinations — the user picks one.
+#[test]
+fn each_alternative_credential_is_its_own_combination() {
+    let q = query(
+        r#"{"credentials":[{"id":"a","format":"dc+sd-jwt","meta":{},
+             "claims":[{"path":["given_name"]}]}]}"#,
+    );
+    let creds = [
+        JsonCredential::new("pid-1", "dc+sd-jwt", json!({"given_name": "Erika"})),
+        JsonCredential::new("pid-2", "dc+sd-jwt", json!({"given_name": "Max"})),
+    ];
+
+    let combos = execute(&q, &creds, &ExactFormat).combinations(16);
+    let ids: Vec<_> = combos
+        .combinations
+        .iter()
+        .map(|c| c.members[0].1.credential_id.clone())
+        .collect();
+    assert_eq!(ids, ["pid-1", "pid-2"]);
+}
+
+/// Each option of a required set is a distinct way to satisfy it, and a
+/// multi-member option produces one combination covering both queries.
+#[test]
+fn each_satisfiable_option_becomes_a_combination() {
+    let q = query(
+        r#"{"credentials":[{"id":"full","format":"dc+sd-jwt","meta":{},
+                            "claims":[{"path":["given_name"]}]},
+                           {"id":"part1","format":"dc+sd-jwt","meta":{},
+                            "claims":[{"path":["family_name"]}]},
+                           {"id":"part2","format":"dc+sd-jwt","meta":{},
+                            "claims":[{"path":["birth_date"]}]}],
+            "credential_sets":[{"options":[["full"],["part1","part2"]]}]}"#,
+    );
+    let creds = [pid(json!({
+        "given_name": "Erika", "family_name": "Mustermann", "birth_date": "1979-04-12"
+    }))];
+
+    let combos = execute(&q, &creds, &ExactFormat).combinations(16);
+    assert_eq!(combos.combinations.len(), 2, "one per satisfiable option");
+
+    let sizes: Vec<_> = combos
+        .combinations
+        .iter()
+        .map(|c| c.members.len())
+        .collect();
+    assert_eq!(sizes, [1, 2], "the second option needs both credentials");
+}
+
+/// An option the wallet cannot satisfy is not offered, but a sibling option
+/// that it can satisfy still is.
+#[test]
+fn unsatisfiable_options_are_left_out() {
+    let q = query(
+        r#"{"credentials":[{"id":"have","format":"dc+sd-jwt","meta":{},
+                            "claims":[{"path":["given_name"]}]},
+                           {"id":"lack","format":"mso_mdoc","meta":{}}],
+            "credential_sets":[{"options":[["lack"],["have"]]}]}"#,
+    );
+    let creds = [pid(json!({"given_name": "Erika"}))];
+
+    let combos = execute(&q, &creds, &ExactFormat).combinations(16);
+    assert_eq!(combos.combinations.len(), 1);
+    assert_eq!(combos.combinations[0].members[0].0, "have");
+}
+
+/// Optional sets are not enumerated: the wallet MAY include them, so offering
+/// one is a UI decision rather than a matching one, and folding them in would
+/// multiply the count for choices the verifier said it can do without.
+#[test]
+fn optional_sets_do_not_multiply_the_combinations() {
+    let q = query(
+        r#"{"credentials":[{"id":"need","format":"dc+sd-jwt","meta":{},
+                            "claims":[{"path":["given_name"]}]},
+                           {"id":"nice","format":"dc+sd-jwt","meta":{},
+                            "claims":[{"path":["family_name"]}]}],
+            "credential_sets":[{"options":[["need"]]},
+                               {"options":[["nice"]],"required":false}]}"#,
+    );
+    let creds = [pid(
+        json!({"given_name": "Erika", "family_name": "Mustermann"}),
+    )];
+
+    let combos = execute(&q, &creds, &ExactFormat).combinations(16);
+    assert_eq!(combos.combinations.len(), 1);
+    assert_eq!(combos.combinations[0].members[0].0, "need");
+}
+
+/// The count is a product, so it has to be bounded — and whatever is dropped
+/// is counted. A picker showing the first few of many is telling the user
+/// those are the only options they have.
+#[test]
+fn the_combination_count_is_bounded_and_the_remainder_is_counted() {
+    let q = query(
+        r#"{"credentials":[{"id":"a","format":"dc+sd-jwt","meta":{},
+             "claims":[{"path":["given_name"]}]}]}"#,
+    );
+    let creds: Vec<_> = (0..10)
+        .map(|i| {
+            JsonCredential::new(
+                &format!("pid-{i}"),
+                "dc+sd-jwt",
+                json!({"given_name": "Erika"}),
+            )
+        })
+        .collect();
+
+    let combos = execute(&q, &creds, &ExactFormat).combinations(4);
+    assert_eq!(combos.combinations.len(), 4);
+    assert_eq!(
+        combos.dropped, 6,
+        "the remainder must be reported, not hidden"
+    );
+}
+
+/// An unsatisfiable request yields no combinations — §6.4 says the wallet
+/// must not return any credential, so there is nothing to offer.
+#[test]
+fn an_unsatisfiable_request_yields_no_combinations() {
+    let q = query(
+        r#"{"credentials":[{"id":"a","format":"dc+sd-jwt","meta":{},
+                            "claims":[{"path":["given_name"]}]},
+                           {"id":"b","format":"mso_mdoc","meta":{}}]}"#,
+    );
+    let creds = [pid(json!({"given_name": "Erika"}))];
+
+    let result = execute(&q, &creds, &ExactFormat);
+    assert!(!result.satisfiable);
+    assert!(result.combinations(16).combinations.is_empty());
+}
