@@ -28,3 +28,6 @@ siros-dcql = { workspace = true }
 serde_json = { workspace = true }
 uniffi = { version = "0.28", features = ["build"] }
 thiserror = "2"
+
+[dev-dependencies]
+siros-dc-matcher-core = { workspace = true, features = ["test-fixtures"] }

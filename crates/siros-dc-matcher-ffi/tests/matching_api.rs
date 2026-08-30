@@ -7,42 +7,14 @@
 use std::collections::HashMap;
 
 use serde_json::json;
-use siros_dc_matcher_core::db::{Claim, Credential, CredentialDatabase};
-use siros_dc_matcher_core::profile::{Capability, MatchProfile, ZK_CAPABILITY};
+use siros_dc_matcher_core::fixtures;
+use siros_dc_matcher_core::profile::Capability;
 use siros_dc_matcher_ffi::matching::{match_dc_api_request, match_dcql, MatchError};
 
 fn wallet(zk: Option<Capability>) -> Vec<u8> {
-    let mut profile = MatchProfile::siros_default();
-    if let Some(cap) = zk {
-        profile
-            .capabilities
-            .insert(ZK_CAPABILITY.to_string(), vec![cap]);
-    }
-    let mut db = CredentialDatabase::new(profile);
-    db.credentials.push(Credential {
-        id: "mdl-1".into(),
-        format: "mso_mdoc".into(),
-        doctype: Some("org.iso.18013.5.1.mDL".into()),
-        vct: None,
-        title: "Driving Licence".into(),
-        subtitle: "Transportstyrelsen".into(),
-        icon: None,
-        claims: vec![
-            Claim {
-                path: vec!["org.iso.18013.5.1".into(), "age_over_18".into()],
-                value: "true".into(),
-                display: "Over 18".into(),
-                display_value: Some("Yes".into()),
-            },
-            Claim {
-                path: vec!["org.iso.18013.5.1".into(), "family_name".into()],
-                value: "Johansson".into(),
-                display: "Family name".into(),
-                display_value: None,
-            },
-        ],
-    });
-    db.to_cbor().expect("encoding")
+    fixtures::wallet(zk.into_iter().collect())
+        .to_cbor()
+        .expect("encoding")
 }
 
 fn dcql(format: &str, claims: serde_json::Value, meta: serde_json::Value) -> String {
@@ -98,10 +70,7 @@ fn only_the_requested_claims_come_back() {
 /// to work it out again.
 #[test]
 fn a_zk_request_returns_the_chosen_system() {
-    let blob = wallet(Some(Capability {
-        system: "longfellow-libzk-v1".into(),
-        params: std::collections::BTreeMap::new(),
-    }));
+    let blob = wallet(Some(fixtures::longfellow(None)));
     let query = dcql(
         "mso_mdoc_zk",
         age_claim(),

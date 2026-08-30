@@ -9,6 +9,11 @@ repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
 
+[features]
+# A canonical test wallet, shared by the suites that would otherwise each
+# write their own and drift.
+test-fixtures = []
+
 [dependencies]
 siros-dcql = { workspace = true }
 serde = { workspace = true }

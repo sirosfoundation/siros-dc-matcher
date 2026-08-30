@@ -6,13 +6,13 @@
 //! bytes a wallet registers — is exercised in ordinary `cargo test`, against
 //! blobs built with the encoder a wallet actually uses.
 
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::Command;
 
 use serde_json::{json, Value};
-use siros_dc_matcher_core::db::{Claim, Credential, CredentialDatabase};
-use siros_dc_matcher_core::profile::{Capability, MatchProfile, ZK_CAPABILITY};
+use siros_dc_matcher_core::db::CredentialDatabase;
+use siros_dc_matcher_core::fixtures;
+use siros_dc_matcher_core::profile::{Capability, MatchProfile};
 use siros_dc_matcher_testhost::{run, Captured, Invocation};
 
 /// Build (if needed) and load the matcher binary under test.
@@ -57,36 +57,11 @@ fn build_matcher_wasm() -> Vec<u8> {
 
 /// A wallet holding one mdoc driving licence, optionally able to prove in ZK.
 fn wallet(zk: Option<Capability>) -> CredentialDatabase {
-    let mut profile = MatchProfile::siros_default();
-    if let Some(cap) = zk {
-        profile
-            .capabilities
-            .insert(ZK_CAPABILITY.to_string(), vec![cap]);
-    }
-    let mut db = CredentialDatabase::new(profile);
-    db.credentials.push(Credential {
-        id: "mdl-1".into(),
-        format: "mso_mdoc".into(),
-        doctype: Some("org.iso.18013.5.1.mDL".into()),
-        vct: None,
-        title: "Driving Licence".into(),
-        subtitle: "Transportstyrelsen".into(),
-        icon: None,
-        claims: vec![Claim {
-            path: vec!["org.iso.18013.5.1".into(), "age_over_18".into()],
-            value: "true".into(),
-            display: "Over 18".into(),
-            display_value: Some("Yes".into()),
-        }],
-    });
-    db
+    fixtures::wallet(zk.into_iter().collect())
 }
 
 fn longfellow(num_attributes: &str) -> Capability {
-    Capability {
-        system: "longfellow-libzk-v1".into(),
-        params: BTreeMap::from([("num_attributes".to_string(), num_attributes.to_string())]),
-    }
+    fixtures::longfellow(Some(num_attributes))
 }
 
 fn request(format: &str, meta: Value) -> Vec<u8> {
