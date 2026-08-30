@@ -12,7 +12,7 @@ use serde_json::json;
 use siros_dc_matcher_core::db::{Claim, Credential, CredentialDatabase};
 use siros_dc_matcher_core::evaluator::{credentials, ProfilePolicy};
 use siros_dc_matcher_core::fixtures;
-use siros_dc_matcher_core::profile::{Capability, MatchProfile, ZK_CAPABILITY};
+use siros_dc_matcher_core::profile::Capability;
 use siros_dcql::{execute, DcqlQuery};
 
 /// A wallet holding one ordinary mdoc driving licence.
