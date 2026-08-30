@@ -18,8 +18,9 @@ a WebAssembly sandbox, in Kotlin, and in Swift.
 
 ## Status
 
-Early. The type model is in place; evaluation lands next. The API will move
-before 1.0.
+Published as [`siros-dcql`](https://crates.io/crates/siros-dcql). Query model,
+claims path pointers and selection are implemented and tested against the
+specification's own examples. The API will move before 1.0.
 
 ## Licence
 

@@ -12,7 +12,7 @@ The full write-up, including the requirements analysis this came from, is at
 | 0 | Repo bootstrap under the settled licensing rules | done |
 | 1 | Prove the matcher swap on hardware | done |
 | 2 | Credential blob format and builder | done |
-| 3 | The DCQL engine | done (publish blocked) |
+| 3 | The DCQL engine | done, published |
 | 4 | Profile evaluator and the ZK path | ~1 week |
 | 5 | Entry emission and display | ~3 days |
 | 6 | Kotlin SDK integration | ~1 week |
@@ -99,10 +99,20 @@ test fixtures — nested paths like `["address", "street_address"]` and `values`
 restrictions — which is exactly why vectors written by someone else are worth
 more than ones shaped by this implementation's assumptions.
 
-**Outstanding:** publishing `siros-dcql 0.1.0` needs the crates.io owner and
-`CARGO_REGISTRY_TOKEN`, which is still the one item blocked on an account
-rather than on code. The release job is written and `cargo publish --dry-run`
-passes in CI on every PR.
+**Published:** [`siros-dcql 0.1.0`](https://crates.io/crates/siros-dcql), the
+first SIROS crate on crates.io.
+
+Releases authenticate by **trusted publishing** rather than a stored token:
+crates.io exchanges the workflow's OIDC identity for a credential that lives
+30 minutes and is revoked when the job ends, so there is no long-lived
+registry secret in this repository to leak or rotate. The Trusted Publisher is
+bound to `sirosfoundation/siros-dc-matcher`, `release.yml`, environment
+`crates-io` — renaming any of those without updating the configuration on
+crates.io breaks publishing.
+
+Note the ordering constraint that shaped this: a Trusted Publisher can only be
+created after a crate exists, so 0.1.0 was published by hand and everything
+after it is keyless.
 
 ## Phase 4 — Profile evaluator and the ZK path
 
