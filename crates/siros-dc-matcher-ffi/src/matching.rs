@@ -105,9 +105,27 @@ pub struct FfiCombination {
     pub members: Vec<FfiMatchedCredential>,
 }
 
+/// The credentials answering one credential query.
+///
+/// Complete, and independent of [`FfiMatchOutcome::combinations`]. Callers that
+/// only need "which credentials qualify for this query" must read this rather
+/// than unioning the combinations: the combination list is *capped*, because
+/// its length is a product of the per-query candidate counts, so a union of it
+/// can omit credentials that do qualify. Filtering on such a union silently
+/// drops them from what a user is offered.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiQueryMatch {
+    /// The DCQL credential query.
+    pub query_id: String,
+    /// Every credential that satisfies it.
+    pub credentials: Vec<FfiMatchedCredential>,
+}
+
 /// The outcome of matching.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct FfiMatchOutcome {
+    /// Per-query candidates, complete and uncapped.
+    pub matches: Vec<FfiQueryMatch>,
     /// Whether the wallet can satisfy the request at all.
     ///
     /// False means §6.4's "MUST NOT return any Credential(s)" — nothing should
@@ -208,6 +226,56 @@ fn evaluate(db: &CredentialDatabase, query: &DcqlQuery) -> FfiMatchOutcome {
     let result = execute(query, &held, &policy);
     let enumerated = result.combinations(MAX_COMBINATIONS);
 
+    let member = |query_id: &String, candidate: &siros_dcql::Candidate| {
+        // Resolved by core, not here: the matcher binary derives exactly the
+        // same details for its picker metadata, and two derivations are how
+        // the two would come to disagree about which capability satisfied a
+        // query.
+        let resolved = query
+            .credential(query_id)
+            .map(|cq| resolve(&db.profile, &policy, cq, candidate));
+        FfiMatchedCredential {
+            query_id: query_id.clone(),
+            credential_id: candidate.credential_id.clone(),
+            claims: resolved
+                .as_ref()
+                .map(|r| r.claims.clone())
+                .unwrap_or_default(),
+            capabilities: resolved
+                .as_ref()
+                .map(|r| {
+                    r.capabilities
+                        .iter()
+                        .map(|c| FfiCapability {
+                            system: c.system.clone(),
+                            params: c
+                                .params
+                                .iter()
+                                .map(|(k, v)| (k.clone(), v.clone()))
+                                .collect(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+            meta: resolved
+                .map(|r| r.meta.into_iter().collect())
+                .unwrap_or_default(),
+        }
+    };
+
+    let matches = result
+        .matches
+        .iter()
+        .map(|query_match| FfiQueryMatch {
+            query_id: query_match.query_id.clone(),
+            credentials: query_match
+                .candidates
+                .iter()
+                .map(|candidate| member(&query_match.query_id, candidate))
+                .collect(),
+        })
+        .collect();
+
     let combinations = enumerated
         .combinations
         .iter()
@@ -215,47 +283,13 @@ fn evaluate(db: &CredentialDatabase, query: &DcqlQuery) -> FfiMatchOutcome {
             members: combination
                 .members
                 .iter()
-                .map(|(query_id, candidate)| {
-                    // Resolved by core, not here: the matcher binary derives
-                    // exactly the same details for its picker metadata, and
-                    // two derivations are how the two would come to disagree
-                    // about which capability satisfied a query.
-                    let resolved = query
-                        .credential(query_id)
-                        .map(|cq| resolve(&db.profile, &policy, cq, candidate));
-                    FfiMatchedCredential {
-                        query_id: query_id.clone(),
-                        credential_id: candidate.credential_id.clone(),
-                        claims: resolved
-                            .as_ref()
-                            .map(|r| r.claims.clone())
-                            .unwrap_or_default(),
-                        capabilities: resolved
-                            .as_ref()
-                            .map(|r| {
-                                r.capabilities
-                                    .iter()
-                                    .map(|c| FfiCapability {
-                                        system: c.system.clone(),
-                                        params: c
-                                            .params
-                                            .iter()
-                                            .map(|(k, v)| (k.clone(), v.clone()))
-                                            .collect(),
-                                    })
-                                    .collect()
-                            })
-                            .unwrap_or_default(),
-                        meta: resolved
-                            .map(|r| r.meta.into_iter().collect())
-                            .unwrap_or_default(),
-                    }
-                })
+                .map(|(query_id, candidate)| member(query_id, candidate))
                 .collect(),
         })
         .collect();
 
     FfiMatchOutcome {
+        matches,
         satisfiable: result.satisfiable,
         combinations,
         dropped: u32::try_from(enumerated.dropped).unwrap_or(u32::MAX),

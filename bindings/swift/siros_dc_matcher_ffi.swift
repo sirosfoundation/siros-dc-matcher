@@ -1203,6 +1203,10 @@ public func FfiConverterTypeFfiCredential_lower(_ value: FfiCredential) -> RustB
  */
 public struct FfiMatchOutcome {
     /**
+     * Per-query candidates, complete and uncapped.
+     */
+    public var matches: [FfiQueryMatch]
+    /**
      * Whether the wallet can satisfy the request at all.
      *
      * False means §6.4's "MUST NOT return any Credential(s)" — nothing should
@@ -1222,6 +1226,9 @@ public struct FfiMatchOutcome {
     // declare one manually.
     public init(
         /**
+         * Per-query candidates, complete and uncapped.
+         */matches: [FfiQueryMatch], 
+        /**
          * Whether the wallet can satisfy the request at all.
          *
          * False means §6.4's "MUST NOT return any Credential(s)" — nothing should
@@ -1233,6 +1240,7 @@ public struct FfiMatchOutcome {
         /**
          * How many further combinations existed beyond the returned ones.
          */dropped: UInt32) {
+        self.matches = matches
         self.satisfiable = satisfiable
         self.combinations = combinations
         self.dropped = dropped
@@ -1243,6 +1251,9 @@ public struct FfiMatchOutcome {
 
 extension FfiMatchOutcome: Equatable, Hashable {
     public static func ==(lhs: FfiMatchOutcome, rhs: FfiMatchOutcome) -> Bool {
+        if lhs.matches != rhs.matches {
+            return false
+        }
         if lhs.satisfiable != rhs.satisfiable {
             return false
         }
@@ -1256,6 +1267,7 @@ extension FfiMatchOutcome: Equatable, Hashable {
     }
 
     public func hash(into hasher: inout Hasher) {
+        hasher.combine(matches)
         hasher.combine(satisfiable)
         hasher.combine(combinations)
         hasher.combine(dropped)
@@ -1270,6 +1282,7 @@ public struct FfiConverterTypeFfiMatchOutcome: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiMatchOutcome {
         return
             try FfiMatchOutcome(
+                matches: FfiConverterSequenceTypeFfiQueryMatch.read(from: &buf), 
                 satisfiable: FfiConverterBool.read(from: &buf), 
                 combinations: FfiConverterSequenceTypeFfiCombination.read(from: &buf), 
                 dropped: FfiConverterUInt32.read(from: &buf)
@@ -1277,6 +1290,7 @@ public struct FfiConverterTypeFfiMatchOutcome: FfiConverterRustBuffer {
     }
 
     public static func write(_ value: FfiMatchOutcome, into buf: inout [UInt8]) {
+        FfiConverterSequenceTypeFfiQueryMatch.write(value.matches, into: &buf)
         FfiConverterBool.write(value.satisfiable, into: &buf)
         FfiConverterSequenceTypeFfiCombination.write(value.combinations, into: &buf)
         FfiConverterUInt32.write(value.dropped, into: &buf)
@@ -1439,6 +1453,94 @@ public func FfiConverterTypeFfiMatchedCredential_lift(_ buf: RustBuffer) throws 
 #endif
 public func FfiConverterTypeFfiMatchedCredential_lower(_ value: FfiMatchedCredential) -> RustBuffer {
     return FfiConverterTypeFfiMatchedCredential.lower(value)
+}
+
+
+/**
+ * The credentials answering one credential query.
+ *
+ * Complete, and independent of [`FfiMatchOutcome::combinations`]. Callers that
+ * only need "which credentials qualify for this query" must read this rather
+ * than unioning the combinations: the combination list is *capped*, because
+ * its length is a product of the per-query candidate counts, so a union of it
+ * can omit credentials that do qualify. Filtering on such a union silently
+ * drops them from what a user is offered.
+ */
+public struct FfiQueryMatch {
+    /**
+     * The DCQL credential query.
+     */
+    public var queryId: String
+    /**
+     * Every credential that satisfies it.
+     */
+    public var credentials: [FfiMatchedCredential]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * The DCQL credential query.
+         */queryId: String, 
+        /**
+         * Every credential that satisfies it.
+         */credentials: [FfiMatchedCredential]) {
+        self.queryId = queryId
+        self.credentials = credentials
+    }
+}
+
+
+
+extension FfiQueryMatch: Equatable, Hashable {
+    public static func ==(lhs: FfiQueryMatch, rhs: FfiQueryMatch) -> Bool {
+        if lhs.queryId != rhs.queryId {
+            return false
+        }
+        if lhs.credentials != rhs.credentials {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(queryId)
+        hasher.combine(credentials)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFfiQueryMatch: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiQueryMatch {
+        return
+            try FfiQueryMatch(
+                queryId: FfiConverterString.read(from: &buf), 
+                credentials: FfiConverterSequenceTypeFfiMatchedCredential.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: FfiQueryMatch, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.queryId, into: &buf)
+        FfiConverterSequenceTypeFfiMatchedCredential.write(value.credentials, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiQueryMatch_lift(_ buf: RustBuffer) throws -> FfiQueryMatch {
+    return try FfiConverterTypeFfiQueryMatch.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiQueryMatch_lower(_ value: FfiQueryMatch) -> RustBuffer {
+    return FfiConverterTypeFfiQueryMatch.lower(value)
 }
 
 
@@ -1775,6 +1877,31 @@ fileprivate struct FfiConverterSequenceTypeFfiMatchedCredential: FfiConverterRus
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeFfiMatchedCredential.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeFfiQueryMatch: FfiConverterRustBuffer {
+    typealias SwiftType = [FfiQueryMatch]
+
+    public static func write(_ value: [FfiQueryMatch], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeFfiQueryMatch.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [FfiQueryMatch] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [FfiQueryMatch]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeFfiQueryMatch.read(from: &buf))
         }
         return seq
     }
