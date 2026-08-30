@@ -208,6 +208,43 @@ wallet logic every consumer needs, and all three currently live in
 becomes a thin shim over the FFI engine, and the activity consumes the
 matcher's metadata instead of re-deriving it.
 
+## Sharing the DCQL engine
+
+Analysis: <https://claude.ai/code/artifact/6cddad4c-e183-498e-969f-6f1cf3602dba>
+
+Kotlin and Swift each carry their own DCQL implementation. Both filter on
+format and type metadata alone — neither checks that a credential actually has
+the requested claims (§6.4.1), and neither implements `claim_sets` or
+`values`. They have drifted from the specification and from each other, in a
+component whose failures are invisible: a wallet that is not offered looks
+exactly like a wallet with nothing to offer.
+
+**Step 1 — the FFI library must unwind.** Done. It shipped aborting in v0.1.0,
+which meant UniFFI could not turn panics into errors at all. Necessary before
+verifier-written DCQL goes anywhere near that boundary.
+
+**Step 2 — expose matching.** Done. `match_dc_api_request` for the DC API
+envelope and `match_dcql` for the bare query the wallet's own flow receives.
+Both take the registered blob, which already carries the claims and the
+profile.
+
+The trade to keep in view: this makes the blob's fidelity load-bearing for
+*correctness*, where before it only affected display. A claim the wallet does
+not register is a claim no verifier can match. The alternative — a callback
+into the caller's credential store — is faithful to whatever shape a credential
+really has, at the cost of re-entrancy across two language boundaries and a
+bridge crossing per claim, and it buys nothing until a requestable claim lives
+inside an array. No format SIROS issues today does.
+
+**Step 3 — Kotlin delegates**, with the existing matcher kept for one release
+as a fallback and a differential oracle.
+
+**Step 4 — enable claim enforcement separately**, so a change in what is
+offered has exactly one candidate cause.
+
+**Step 5 — Swift follows**, last because the XCFramework has never been built
+and iOS has no device coverage yet.
+
 ## Phase 7 — Swift parity and first release
 
 XCFramework build, `CredentialMatcher.swift` replaced by the shared engine, and

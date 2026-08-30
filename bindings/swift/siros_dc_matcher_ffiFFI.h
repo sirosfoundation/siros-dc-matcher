@@ -292,6 +292,16 @@ RustBuffer uniffi_siros_dc_matcher_ffi_fn_method_sirosblobbuilder_build(void*_No
 void uniffi_siros_dc_matcher_ffi_fn_method_sirosblobbuilder_set_debug(void*_Nonnull ptr, int8_t debug, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SIROS_DC_MATCHER_FFI_FN_FUNC_MATCH_DC_API_REQUEST
+#define UNIFFI_FFIDEF_UNIFFI_SIROS_DC_MATCHER_FFI_FN_FUNC_MATCH_DC_API_REQUEST
+RustBuffer uniffi_siros_dc_matcher_ffi_fn_func_match_dc_api_request(RustBuffer blob, RustBuffer request_json, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SIROS_DC_MATCHER_FFI_FN_FUNC_MATCH_DCQL
+#define UNIFFI_FFIDEF_UNIFFI_SIROS_DC_MATCHER_FFI_FN_FUNC_MATCH_DCQL
+RustBuffer uniffi_siros_dc_matcher_ffi_fn_func_match_dcql(RustBuffer blob, RustBuffer dcql_json, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_FFI_SIROS_DC_MATCHER_FFI_RUSTBUFFER_ALLOC
 #define UNIFFI_FFIDEF_FFI_SIROS_DC_MATCHER_FFI_RUSTBUFFER_ALLOC
 RustBuffer ffi_siros_dc_matcher_ffi_rustbuffer_alloc(uint64_t size, RustCallStatus *_Nonnull out_status
@@ -570,6 +580,18 @@ void ffi_siros_dc_matcher_ffi_rust_future_free_void(uint64_t handle
 #ifndef UNIFFI_FFIDEF_FFI_SIROS_DC_MATCHER_FFI_RUST_FUTURE_COMPLETE_VOID
 #define UNIFFI_FFIDEF_FFI_SIROS_DC_MATCHER_FFI_RUST_FUTURE_COMPLETE_VOID
 void ffi_siros_dc_matcher_ffi_rust_future_complete_void(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SIROS_DC_MATCHER_FFI_CHECKSUM_FUNC_MATCH_DC_API_REQUEST
+#define UNIFFI_FFIDEF_UNIFFI_SIROS_DC_MATCHER_FFI_CHECKSUM_FUNC_MATCH_DC_API_REQUEST
+uint16_t uniffi_siros_dc_matcher_ffi_checksum_func_match_dc_api_request(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SIROS_DC_MATCHER_FFI_CHECKSUM_FUNC_MATCH_DCQL
+#define UNIFFI_FFIDEF_UNIFFI_SIROS_DC_MATCHER_FFI_CHECKSUM_FUNC_MATCH_DCQL
+uint16_t uniffi_siros_dc_matcher_ffi_checksum_func_match_dcql(void
+    
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_SIROS_DC_MATCHER_FFI_CHECKSUM_METHOD_SIROSBLOBBUILDER_ADD_CREDENTIAL

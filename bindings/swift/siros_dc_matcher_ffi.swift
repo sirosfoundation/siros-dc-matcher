@@ -399,6 +399,22 @@ fileprivate class UniffiHandleMap<T> {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterUInt32: FfiConverterPrimitive {
+    typealias FfiType = UInt32
+    typealias SwiftType = UInt32
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt32 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterBool : FfiConverter {
     typealias FfiType = Int8
     typealias SwiftType = Bool
@@ -941,6 +957,73 @@ public func FfiConverterTypeFfiClaim_lower(_ value: FfiClaim) -> RustBuffer {
 
 
 /**
+ * One way to satisfy the request: every member presented together.
+ */
+public struct FfiCombination {
+    /**
+     * The credentials making up this option.
+     */
+    public var members: [FfiMatchedCredential]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * The credentials making up this option.
+         */members: [FfiMatchedCredential]) {
+        self.members = members
+    }
+}
+
+
+
+extension FfiCombination: Equatable, Hashable {
+    public static func ==(lhs: FfiCombination, rhs: FfiCombination) -> Bool {
+        if lhs.members != rhs.members {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(members)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFfiCombination: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiCombination {
+        return
+            try FfiCombination(
+                members: FfiConverterSequenceTypeFfiMatchedCredential.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: FfiCombination, into buf: inout [UInt8]) {
+        FfiConverterSequenceTypeFfiMatchedCredential.write(value.members, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiCombination_lift(_ buf: RustBuffer) throws -> FfiCombination {
+    return try FfiConverterTypeFfiCombination.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiCombination_lower(_ value: FfiCombination) -> RustBuffer {
+    return FfiConverterTypeFfiCombination.lower(value)
+}
+
+
+/**
  * One credential the wallet holds.
  */
 public struct FfiCredential {
@@ -1116,6 +1199,250 @@ public func FfiConverterTypeFfiCredential_lower(_ value: FfiCredential) -> RustB
 
 
 /**
+ * The outcome of matching.
+ */
+public struct FfiMatchOutcome {
+    /**
+     * Whether the wallet can satisfy the request at all.
+     *
+     * False means §6.4's "MUST NOT return any Credential(s)" — nothing should
+     * be offered, not even the part that matched.
+     */
+    public var satisfiable: Bool
+    /**
+     * Ways to satisfy it. Alternatives are separate entries.
+     */
+    public var combinations: [FfiCombination]
+    /**
+     * How many further combinations existed beyond the returned ones.
+     */
+    public var dropped: UInt32
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Whether the wallet can satisfy the request at all.
+         *
+         * False means §6.4's "MUST NOT return any Credential(s)" — nothing should
+         * be offered, not even the part that matched.
+         */satisfiable: Bool, 
+        /**
+         * Ways to satisfy it. Alternatives are separate entries.
+         */combinations: [FfiCombination], 
+        /**
+         * How many further combinations existed beyond the returned ones.
+         */dropped: UInt32) {
+        self.satisfiable = satisfiable
+        self.combinations = combinations
+        self.dropped = dropped
+    }
+}
+
+
+
+extension FfiMatchOutcome: Equatable, Hashable {
+    public static func ==(lhs: FfiMatchOutcome, rhs: FfiMatchOutcome) -> Bool {
+        if lhs.satisfiable != rhs.satisfiable {
+            return false
+        }
+        if lhs.combinations != rhs.combinations {
+            return false
+        }
+        if lhs.dropped != rhs.dropped {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(satisfiable)
+        hasher.combine(combinations)
+        hasher.combine(dropped)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFfiMatchOutcome: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiMatchOutcome {
+        return
+            try FfiMatchOutcome(
+                satisfiable: FfiConverterBool.read(from: &buf), 
+                combinations: FfiConverterSequenceTypeFfiCombination.read(from: &buf), 
+                dropped: FfiConverterUInt32.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: FfiMatchOutcome, into buf: inout [UInt8]) {
+        FfiConverterBool.write(value.satisfiable, into: &buf)
+        FfiConverterSequenceTypeFfiCombination.write(value.combinations, into: &buf)
+        FfiConverterUInt32.write(value.dropped, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiMatchOutcome_lift(_ buf: RustBuffer) throws -> FfiMatchOutcome {
+    return try FfiConverterTypeFfiMatchOutcome.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiMatchOutcome_lower(_ value: FfiMatchOutcome) -> RustBuffer {
+    return FfiConverterTypeFfiMatchOutcome.lower(value)
+}
+
+
+/**
+ * One credential answering one credential query.
+ */
+public struct FfiMatchedCredential {
+    /**
+     * The DCQL credential query this answers.
+     */
+    public var queryId: String
+    /**
+     * The wallet-side credential identifier.
+     */
+    public var credentialId: String
+    /**
+     * Exactly the claims to disclose — and no others (§6.4).
+     *
+     * Each is a path: for ISO mdoc, `[namespace, element_identifier]`.
+     */
+    public var claims: [[String]]
+    /**
+     * The capability chosen to satisfy this query, if its format needed one.
+     *
+     * Returned rather than left to the caller because the engine has already
+     * decided. Working it out again means parsing the request a second time,
+     * in a second implementation, and possibly reaching a different answer.
+     */
+    public var capabilities: [FfiCapability]
+    /**
+     * `meta` entries the wallet needs at presentation time but which do not
+     * affect matching — `ppid_context` above all, which both SDKs read today.
+     *
+     * A pseudonym context changes what is produced, not which credential can
+     * produce it, so it is carried rather than matched on.
+     */
+    public var meta: [String: String]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * The DCQL credential query this answers.
+         */queryId: String, 
+        /**
+         * The wallet-side credential identifier.
+         */credentialId: String, 
+        /**
+         * Exactly the claims to disclose — and no others (§6.4).
+         *
+         * Each is a path: for ISO mdoc, `[namespace, element_identifier]`.
+         */claims: [[String]], 
+        /**
+         * The capability chosen to satisfy this query, if its format needed one.
+         *
+         * Returned rather than left to the caller because the engine has already
+         * decided. Working it out again means parsing the request a second time,
+         * in a second implementation, and possibly reaching a different answer.
+         */capabilities: [FfiCapability], 
+        /**
+         * `meta` entries the wallet needs at presentation time but which do not
+         * affect matching — `ppid_context` above all, which both SDKs read today.
+         *
+         * A pseudonym context changes what is produced, not which credential can
+         * produce it, so it is carried rather than matched on.
+         */meta: [String: String]) {
+        self.queryId = queryId
+        self.credentialId = credentialId
+        self.claims = claims
+        self.capabilities = capabilities
+        self.meta = meta
+    }
+}
+
+
+
+extension FfiMatchedCredential: Equatable, Hashable {
+    public static func ==(lhs: FfiMatchedCredential, rhs: FfiMatchedCredential) -> Bool {
+        if lhs.queryId != rhs.queryId {
+            return false
+        }
+        if lhs.credentialId != rhs.credentialId {
+            return false
+        }
+        if lhs.claims != rhs.claims {
+            return false
+        }
+        if lhs.capabilities != rhs.capabilities {
+            return false
+        }
+        if lhs.meta != rhs.meta {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(queryId)
+        hasher.combine(credentialId)
+        hasher.combine(claims)
+        hasher.combine(capabilities)
+        hasher.combine(meta)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFfiMatchedCredential: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiMatchedCredential {
+        return
+            try FfiMatchedCredential(
+                queryId: FfiConverterString.read(from: &buf), 
+                credentialId: FfiConverterString.read(from: &buf), 
+                claims: FfiConverterSequenceSequenceString.read(from: &buf), 
+                capabilities: FfiConverterSequenceTypeFfiCapability.read(from: &buf), 
+                meta: FfiConverterDictionaryStringString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: FfiMatchedCredential, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.queryId, into: &buf)
+        FfiConverterString.write(value.credentialId, into: &buf)
+        FfiConverterSequenceSequenceString.write(value.claims, into: &buf)
+        FfiConverterSequenceTypeFfiCapability.write(value.capabilities, into: &buf)
+        FfiConverterDictionaryStringString.write(value.meta, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiMatchedCredential_lift(_ buf: RustBuffer) throws -> FfiMatchedCredential {
+    return try FfiConverterTypeFfiMatchedCredential.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiMatchedCredential_lower(_ value: FfiMatchedCredential) -> RustBuffer {
+    return FfiConverterTypeFfiMatchedCredential.lower(value)
+}
+
+
+/**
  * Why a blob could not be built.
  */
 public enum BlobError {
@@ -1199,6 +1526,98 @@ extension BlobError: Foundation.LocalizedError {
     }
 }
 
+
+/**
+ * Why a request could not be matched.
+ */
+public enum MatchError {
+
+    
+    
+    /**
+     * The registered blob could not be decoded.
+     */
+    case Blob(
+        /**
+         * What went wrong.
+         */reason: String
+    )
+    /**
+     * The request was not valid JSON, or not shaped like a request.
+     */
+    case Request(
+        /**
+         * What went wrong.
+         */reason: String
+    )
+    /**
+     * No protocol in the request is one this wallet's profile answers.
+     *
+     * Distinct from "nothing matched": the wallet may hold exactly what was
+     * asked for and still be unable to speak the protocol it was asked in.
+     */
+    case UnsupportedProtocol
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeMatchError: FfiConverterRustBuffer {
+    typealias SwiftType = MatchError
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> MatchError {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        
+
+        
+        case 1: return .Blob(
+            reason: try FfiConverterString.read(from: &buf)
+            )
+        case 2: return .Request(
+            reason: try FfiConverterString.read(from: &buf)
+            )
+        case 3: return .UnsupportedProtocol
+
+         default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: MatchError, into buf: inout [UInt8]) {
+        switch value {
+
+        
+
+        
+        
+        case let .Blob(reason):
+            writeInt(&buf, Int32(1))
+            FfiConverterString.write(reason, into: &buf)
+            
+        
+        case let .Request(reason):
+            writeInt(&buf, Int32(2))
+            FfiConverterString.write(reason, into: &buf)
+            
+        
+        case .UnsupportedProtocol:
+            writeInt(&buf, Int32(3))
+        
+        }
+    }
+}
+
+
+extension MatchError: Equatable, Hashable {}
+
+extension MatchError: Foundation.LocalizedError {
+    public var errorDescription: String? {
+        String(reflecting: self)
+    }
+}
+
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
@@ -1251,6 +1670,31 @@ fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeFfiCapability: FfiConverterRustBuffer {
+    typealias SwiftType = [FfiCapability]
+
+    public static func write(_ value: [FfiCapability], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeFfiCapability.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [FfiCapability] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [FfiCapability]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeFfiCapability.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeFfiClaim: FfiConverterRustBuffer {
     typealias SwiftType = [FfiClaim]
 
@@ -1268,6 +1712,81 @@ fileprivate struct FfiConverterSequenceTypeFfiClaim: FfiConverterRustBuffer {
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeFfiClaim.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeFfiCombination: FfiConverterRustBuffer {
+    typealias SwiftType = [FfiCombination]
+
+    public static func write(_ value: [FfiCombination], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeFfiCombination.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [FfiCombination] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [FfiCombination]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeFfiCombination.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeFfiMatchedCredential: FfiConverterRustBuffer {
+    typealias SwiftType = [FfiMatchedCredential]
+
+    public static func write(_ value: [FfiMatchedCredential], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeFfiMatchedCredential.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [FfiMatchedCredential] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [FfiMatchedCredential]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeFfiMatchedCredential.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceSequenceString: FfiConverterRustBuffer {
+    typealias SwiftType = [[String]]
+
+    public static func write(_ value: [[String]], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterSequenceString.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [[String]] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [[String]]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterSequenceString.read(from: &buf))
         }
         return seq
     }
@@ -1298,6 +1817,44 @@ fileprivate struct FfiConverterDictionaryStringString: FfiConverterRustBuffer {
         return dict
     }
 }
+/**
+ * Match a full Digital Credentials API request.
+ *
+ * The request is the `{"requests":[{"protocol":…,"data":…}]}` envelope, which
+ * is a list because one call can offer the same request under several
+ * protocols. The first protocol the wallet's registered profile answers wins.
+ *
+ * # Errors
+ *
+ * See [`MatchError`].
+ */
+public func matchDcApiRequest(blob: Data, requestJson: String)throws  -> FfiMatchOutcome {
+    return try  FfiConverterTypeFfiMatchOutcome.lift(try rustCallWithError(FfiConverterTypeMatchError.lift) {
+    uniffi_siros_dc_matcher_ffi_fn_func_match_dc_api_request(
+        FfiConverterData.lower(blob),
+        FfiConverterString.lower(requestJson),$0
+    )
+})
+}
+/**
+ * Match a bare DCQL query.
+ *
+ * The wallet's own presentation flow receives a DCQL query directly rather
+ * than a DC API envelope, so it has no protocol to select and none to fail
+ * on.
+ *
+ * # Errors
+ *
+ * See [`MatchError`].
+ */
+public func matchDcql(blob: Data, dcqlJson: String)throws  -> FfiMatchOutcome {
+    return try  FfiConverterTypeFfiMatchOutcome.lift(try rustCallWithError(FfiConverterTypeMatchError.lift) {
+    uniffi_siros_dc_matcher_ffi_fn_func_match_dcql(
+        FfiConverterData.lower(blob),
+        FfiConverterString.lower(dcqlJson),$0
+    )
+})
+}
 
 private enum InitializationResult {
     case ok
@@ -1313,6 +1870,12 @@ private var initializationResult: InitializationResult = {
     let scaffolding_contract_version = ffi_siros_dc_matcher_ffi_uniffi_contract_version()
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
+    }
+    if (uniffi_siros_dc_matcher_ffi_checksum_func_match_dc_api_request() != 65030) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_siros_dc_matcher_ffi_checksum_func_match_dcql() != 59469) {
+        return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_add_credential() != 64015) {
         return InitializationResult.apiChecksumMismatch
