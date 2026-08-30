@@ -132,6 +132,13 @@ jobs:
       # Kotlin lands under uniffi/<namespace>/, Swift at the top level, so
       # these are found rather than assumed — a hardcoded path that stops
       # existing would make this check pass by matching nothing.
+      # Committed bindings must match a fresh generation. The Kotlin SDK
+      # vendors the .kt as source, so a stale copy here becomes a stale copy
+      # there — and the symptom is a linker or signature error a long way from
+      # the cause.
+      - name: Committed bindings are up to date
+        run: make check-bindings
+
       - name: Check the bindings are not empty
         run: |
           set -euo pipefail

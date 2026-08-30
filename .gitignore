@@ -2,8 +2,11 @@
 /target/
 **/*.rs.bk
 
-# Generated UniFFI bindings (produced by `make bindings`, uploaded as CI artifact)
-/bindings/
+# UniFFI bindings ARE committed. The Kotlin SDK vendors the generated .kt as
+# source (the same way it vendors zk-cred-*), so it has to be reviewable here
+# and diffable when the FFI surface changes. `make check-bindings` compares the
+# working tree against a fresh generation — which only means anything if the
+# files are tracked.
 
 # Differential-testing oracle, fetched at test time — never vendored.
 # See CONTRIBUTING.md § Provenance.

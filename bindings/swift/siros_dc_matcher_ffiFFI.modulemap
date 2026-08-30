@@ -1,0 +1,4 @@
+module siros_dc_matcher_ffiFFI {
+    header "siros_dc_matcher_ffiFFI.h"
+    export *
+}
