@@ -140,10 +140,19 @@ impl<'a> ProfilePolicy<'a> {
 /// all — which then matches a circuit this wallet does not have, and fails
 /// after the user has consented.
 ///
-/// A parameter the verifier does not mention is not a constraint. One it does
-/// mention must match exactly: a ZK circuit is built for a fixed attribute
-/// count, so the right `system` with the wrong `num_attributes` is a proof
-/// this wallet cannot produce.
+/// Parameters constrain a match only where both sides name them.
+///
+/// A parameter the verifier does not mention is not a constraint, and one the
+/// *wallet* does not declare is not one either. That asymmetry is deliberate:
+/// some proof systems declare a nominal capability — "this system, any
+/// attribute count" — and verify fetchability lazily at proof time, so
+/// requiring them to enumerate every circuit up front would reject requests
+/// they can in fact satisfy.
+///
+/// Where the wallet does declare a parameter, it must match exactly. A ZK
+/// circuit is built for a fixed attribute count, so a wallet that knows its
+/// circuits and says `num_attributes: 4` cannot produce a ten-attribute proof,
+/// and an entry offered on that basis fails after the user has consented.
 fn satisfies(held: &Capability, requested: &Value) -> bool {
     let Some(entry) = requested.as_object() else {
         return false;
@@ -156,7 +165,8 @@ fn satisfies(held: &Capability, requested: &Value) -> bool {
         .filter(|(k, _)| k.as_str() != "id" && k.as_str() != "system")
         .all(|(key, value)| match held.params.get(key) {
             Some(ours) => as_text(value).as_deref() == Some(ours.as_str()),
-            None => false,
+            // Undeclared on our side: not a constraint.
+            None => true,
         })
 }
 
