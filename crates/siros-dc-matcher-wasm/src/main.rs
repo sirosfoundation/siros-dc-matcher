@@ -15,10 +15,7 @@
 //!
 //! # Status
 //!
-//! Phase 2: the swap is real end to end and the registered blob is decoded,
-//! but the matching is not. This emits a single fixed entry for any request
-//! whose protocol it recognises, reporting what it read. DCQL evaluation
-//! arrives in Phase 3 and the profile evaluator in Phase 4 — see
+//! Phase 4: real matching. Entry display and icons are Phase 5 — see
 //! `docs/plan.md`.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -27,173 +24,153 @@
 mod abi;
 
 use siros_dc_matcher_core::db::CredentialDatabase;
+use siros_dc_matcher_core::evaluator::{credentials, ProfilePolicy};
+use siros_dc_matcher_core::profile::Parser;
 use siros_dc_matcher_core::sink::Entry;
+use siros_dcql::{execute, DcqlQuery};
 
-/// Protocols this matcher answers to.
+/// The set every entry belongs to.
 ///
-/// Recognised here rather than in the profile because Phase 1 has no profile
-/// yet; Phase 4 moves this list into the registered blob, where adding one
-/// costs a re-registration instead of a release.
-const PROTOCOLS: [&str; 4] = [
-    "openid4vp-v1-unsigned",
-    "openid4vp-v1-signed",
-    "openid4vp-v1-multisigned",
-    "org.iso.mdoc",
-];
-
-/// The set every Phase 1 entry belongs to. One set, one entry.
-const SET_ID: &str = "siros-phase1";
-
-/// Credential id for the fixed Phase 1 entry.
-///
-/// Named rather than repeated so the entry and its fields cannot drift apart:
-/// the platform keys fields by credential id, so a field carrying a different
-/// id silently fails to attach.
-const PLACEHOLDER_ID: &str = "siros-phase1-placeholder";
+/// One set for now: DCQL `credential_sets` can require a *combination* of
+/// credentials selected together, and expressing that properly is Phase 5.
+const SET_ID: &str = "siros";
 
 fn main() {
     let request = abi::request_bytes();
-    let Some(protocol) = first_known_protocol(&request) else {
-        // Emitting nothing is correct: an unrecognised protocol means we have
-        // nothing to offer, which is what "no entries" tells the picker.
+    let blob = abi::credentials_bytes();
+
+    // The platform's own attestation of who is asking — the only trustworthy
+    // statement of that, since anything naming an origin inside the request
+    // body is the request describing itself. The wallet learns the origin from
+    // the platform too, so carrying it here lets the wallet check that the
+    // matcher was shown the same caller it was.
+    let (_package, origin) = abi::calling_app_info();
+
+    let Ok(db) = CredentialDatabase::from_cbor(&blob) else {
+        // Nothing can be offered from a blob we cannot read. It is worth
+        // saying plainly that this is indistinguishable from "no matching
+        // credential" in the picker — the wallet-side registration is where
+        // such a failure has to be caught.
         return;
     };
 
-    // Phase 1 exists to prove the plumbing, so read every input the real
-    // matcher will depend on and report what came back. On a device this turns
-    // "an entry appeared" into evidence about each leg separately: whether the
-    // registered blob survived the round-trip, and whether the platform's
-    // verified caller reaches the sandbox.
-    let (package, origin) = abi::calling_app_info();
-    let blob = abi::credentials_bytes();
-    let credentials_len = blob.len();
-
-    // Decoding the registered blob is the first thing the real matcher does,
-    // so it is worth exercising now rather than at the same time as DCQL. A
-    // failure here is reported through the entry instead of being swallowed:
-    // "the wallet registered a blob this matcher cannot read" and "the wallet
-    // has no matching credential" look identical in the picker, and only one
-    // of them is a bug.
-    let (blob_status, credential_count) = match CredentialDatabase::from_cbor(&blob) {
-        Ok(db) => ("ok".to_string(), Some(db.credentials.len())),
-        Err(e) => (e.to_string(), None),
+    let Some((protocol, query)) = first_supported_request(&request, &db) else {
+        return;
     };
 
-    // Metadata survives the picker round-trip, so it is where the wallet reads
-    // back what this matcher decided. Phase 5 fills it with the matched query
-    // id and chosen capability.
-    let metadata = serde_json::json!({
-        "matcher": "siros-dc-matcher",
-        "phase": 1,
-        "protocol": protocol,
-        "host_abi": abi::wasm_version(),
-        "calling_package": package,
-        // Empty for a native caller; a real origin only when a browser is
-        // acting for a page. This is the platform's own attestation — the only
-        // trustworthy statement of who is asking.
-        "verified_origin": origin,
-        "credentials_bytes": credentials_len,
-        "blob_status": blob_status,
-        "credential_count": credential_count,
-    })
-    .to_string();
+    let held = credentials(&db);
+    let policy = ProfilePolicy::new(&db.profile);
+    let result = execute(&query, &held, &policy);
 
-    abi::emit::entry_set(SET_ID, 1);
-    abi::emit::entry(
-        SET_ID,
-        0,
-        &Entry {
-            credential_id: PLACEHOLDER_ID,
-            title: "SIROS test credential",
-            subtitle: "Emitted by siros-dc-matcher",
-            metadata: &metadata,
-        },
-    );
-    abi::emit::field(
-        SET_ID,
-        0,
-        PLACEHOLDER_ID,
-        "Matcher",
-        "siros-dc-matcher (phase 1)",
-    );
-    // Surfaced in the picker itself, not just in metadata: on a device the
-    // metadata is only readable once the entry has been selected, and a blob
-    // that failed to register is exactly the case where nobody gets that far.
-    abi::emit::field(
-        SET_ID,
-        0,
-        PLACEHOLDER_ID,
-        "Registered blob",
-        &match credential_count {
-            Some(n) => format!("{credentials_len} bytes, {n} credentials"),
-            None => format!("{credentials_len} bytes, unreadable"),
-        },
-    );
+    // "If the Wallet cannot deliver all non-optional Credentials requested by
+    // the Verifier according to these rules, it MUST NOT return any
+    // Credential(s)" — OpenID4VP 1.0 §6.4. Offering the half that matched
+    // would be worse than offering nothing: the user consents to a
+    // presentation that cannot satisfy the verifier.
+    if !result.satisfiable {
+        return;
+    }
+
+    let mut entries = Vec::new();
+    for query_match in &result.matches {
+        for candidate in &query_match.candidates {
+            if let Some(credential) = db
+                .credentials
+                .iter()
+                .find(|c| c.id == candidate.credential_id)
+            {
+                entries.push((query_match.query_id.as_str(), candidate, credential));
+            }
+        }
+    }
+    if entries.is_empty() {
+        return;
+    }
+
+    abi::emit::entry_set(SET_ID, entries.len());
+    for (index, (query_id, candidate, credential)) in entries.iter().enumerate() {
+        // Metadata survives the picker round-trip, so it carries the decision
+        // this matcher already made. Without it the wallet would re-derive
+        // which query matched and which capability was chosen, from a request
+        // it has to parse again — and could reach a different answer.
+        let metadata = serde_json::json!({
+            "matcher": "siros-dc-matcher",
+            "protocol": protocol,
+            "query_id": query_id,
+            "credential_id": credential.id,
+            "verified_origin": origin,
+            "host_abi": abi::wasm_version(),
+            "claims": candidate
+                .claims
+                .iter()
+                .map(|c| c.path.clone())
+                .collect::<Vec<_>>(),
+        })
+        .to_string();
+
+        abi::emit::entry(
+            SET_ID,
+            index,
+            &Entry {
+                credential_id: &credential.id,
+                title: &credential.title,
+                subtitle: &credential.subtitle,
+                metadata: &metadata,
+            },
+        );
+
+        // Only the claims this match actually discloses. Showing every claim
+        // the credential holds would misrepresent the request the user is
+        // being asked to consent to.
+        for claim in &candidate.claims {
+            if let Some(stored) = credential.claims.iter().find(|c| {
+                c.path.iter().map(String::as_str).eq(claim
+                    .path
+                    .iter()
+                    .filter_map(siros_dcql::PathComponent::as_key))
+            }) {
+                abi::emit::field(
+                    SET_ID,
+                    index,
+                    &credential.id,
+                    &stored.display,
+                    stored.display_value.as_deref().unwrap_or(&stored.value),
+                );
+            }
+        }
+    }
 }
 
-/// The first protocol in the request that this matcher recognises.
+/// The first request this wallet's profile says it can answer, with its DCQL
+/// query.
 ///
-/// The request is shaped `{"requests":[{"protocol":…,"data":…}]}` — a list,
-/// because one DC API call can offer the same request under several protocols
-/// and let the wallet pick. Taking the first *recognised* one rather than the
-/// first one is what makes that negotiation work.
-fn first_known_protocol(request: &[u8]) -> Option<String> {
+/// The request is a list because one DC API call can offer the same request
+/// under several protocols and let the wallet pick. Taking the first
+/// *supported* one rather than the first one is what makes that negotiation
+/// work — and which protocols are supported comes from the registered profile,
+/// so adding one costs a re-registration rather than a new binary.
+fn first_supported_request(request: &[u8], db: &CredentialDatabase) -> Option<(String, DcqlQuery)> {
     let parsed: serde_json::Value = serde_json::from_slice(request).ok()?;
     parsed
         .get("requests")?
         .as_array()?
         .iter()
-        .filter_map(|r| r.get("protocol")?.as_str())
-        .find(|p| PROTOCOLS.contains(p))
-        .map(str::to_owned)
+        .find_map(|entry| {
+            let protocol = entry.get("protocol")?.as_str()?;
+            let parser = db.profile.parser_for(protocol)?;
+            let query = extract_query(parser, entry.get("data")?)?;
+            Some((protocol.to_string(), query))
+        })
 }
 
-#[cfg(test)]
-#[allow(clippy::unwrap_used)]
-mod tests {
-    use super::first_known_protocol;
-
-    #[test]
-    fn finds_a_known_protocol() {
-        let r = br#"{"requests":[{"protocol":"openid4vp-v1-signed","data":{}}]}"#;
-        assert_eq!(
-            first_known_protocol(r).as_deref(),
-            Some("openid4vp-v1-signed")
-        );
-    }
-
-    /// An unknown protocol earlier in the list must not mask a known one after
-    /// it — that is the whole point of the request being a list.
-    #[test]
-    fn skips_unknown_protocols_to_find_a_known_one() {
-        let r = br#"{"requests":[{"protocol":"some-future-thing"},
-                                 {"protocol":"org.iso.mdoc"}]}"#;
-        assert_eq!(first_known_protocol(r).as_deref(), Some("org.iso.mdoc"));
-    }
-
-    #[test]
-    fn returns_none_when_nothing_is_recognised() {
-        let r = br#"{"requests":[{"protocol":"some-future-thing"}]}"#;
-        assert_eq!(first_known_protocol(r), None);
-    }
-
-    /// Malformed input must return None, never trap. A trap emits no entries,
-    /// which is indistinguishable from having no matching credential.
-    #[test]
-    fn malformed_input_does_not_trap() {
-        assert_eq!(first_known_protocol(b"not json at all"), None);
-        assert_eq!(first_known_protocol(b""), None);
-        assert_eq!(
-            first_known_protocol(br#"{"requests":"not an array"}"#),
-            None
-        );
-        assert_eq!(
-            first_known_protocol(br#"{"requests":[{"no":"protocol"}]}"#),
-            None
-        );
-        assert_eq!(
-            first_known_protocol(br#"{"requests":[{"protocol":42}]}"#),
-            None
-        );
+/// The DCQL query carried by one protocol's request data.
+fn extract_query(parser: Parser, data: &serde_json::Value) -> Option<DcqlQuery> {
+    match parser {
+        Parser::Openid4vpV1 => serde_json::from_value(data.get("dcql_query")?.clone()).ok(),
+        // ISO 18013-7 carries a CBOR DeviceRequest rather than DCQL, so it
+        // needs its own reader rather than a different JSON pointer. Returning
+        // None declines the protocol, which lets the caller fall through to
+        // another one the verifier offered instead of failing the request.
+        Parser::IsoMdocApi => None,
     }
 }

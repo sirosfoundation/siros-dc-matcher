@@ -13,7 +13,7 @@ The full write-up, including the requirements analysis this came from, is at
 | 1 | Prove the matcher swap on hardware | done |
 | 2 | Credential blob format and builder | done |
 | 3 | The DCQL engine | done, published |
-| 4 | Profile evaluator and the ZK path | ~1 week |
+| 4 | Profile evaluator and the ZK path | done |
 | 5 | Entry emission and display | ~3 days |
 | 6 | Kotlin SDK integration | ~1 week |
 | 7 | Swift parity and first release | ~3 days |
@@ -114,17 +114,45 @@ Note the ordering constraint that shaped this: a Trusted Publisher can only be
 created after a crate exists, so 0.1.0 was published by hand and everything
 after it is keyless.
 
-## Phase 4 — Profile evaluator and the ZK path
+## Phase 4 — Profile evaluator and the ZK path ✅
 
-Format rules, meta rules, capability predicates, protocol dispatch, and the
-strict/permissive fallback. Then the reason this project exists:
-`mso_mdoc_zk` matching stored `mso_mdoc` credentials, gated on a satisfiable
-`zk_system_type` entry *including its params* — `num_attributes` among them —
-and `ppid_context` carried through.
+`evaluator::ProfilePolicy` supplies the half of matching DCQL leaves to the
+deployment: format rules, meta rules, capability predicates, protocol
+dispatch, and the strict/permissive fallback. §6.1 defines `meta` per
+credential format, so a generic engine has nothing to evaluate it against —
+that is why this lives here and not in `siros-dcql`.
 
-Checking capability before the picker rather than during presentation is the
-point. An entry the wallet cannot honour walks the user through consent and
-then fails.
+**A `mso_mdoc_zk` request now reaches an ordinary stored `mso_mdoc`**, gated
+on a `zk_system_type` entry this wallet can actually satisfy. Verified through
+the real `matcher.wasm` in the test host, not just in unit tests.
+
+Two details that are easy to get wrong and were got wrong before:
+
+- **Parameters are sibling keys of `id`/`system`**, not a nested `params`
+  object. A parser looking for `params` still finds `id` and `system`, so it
+  parses without error while reading no parameters at all — and then matches a
+  circuit the wallet does not have.
+- **`num_attributes` is part of the match.** A ZK circuit is built for a fixed
+  attribute count, so the right system with the wrong count is a proof this
+  wallet cannot produce. Checking it before the picker is the whole point: an
+  entry the wallet cannot honour walks the user through consent and then
+  fails, which is how this first surfaced as
+  `MDOC_VERIFIER_HASH_PARSING_FAILURE`.
+
+`ppid_context` is carried to the wallet rather than used for matching — a
+pseudonym context changes what is produced, not which credential can produce
+it.
+
+**Known limitation:** claims path pointers resolve only when every component
+is a string. The blob records paths as strings, so a pointer containing `null`
+or an array index cannot match. ISO mdoc is unaffected (§7.2.1 requires two
+string components) and nested JSON *objects* are fine; only arrays are out of
+reach, and no format SIROS issues today puts a requestable claim in one.
+Widening it means giving the blob real value structure — a wire-format change,
+deliberately not smuggled in here.
+
+**Size watch:** `matcher.wasm` is 229 KB against the 300 KB budget, 75% used.
+Phase 5's display work is small, but the headroom is no longer generous.
 
 ## Phase 5 — Entry emission and display
 
@@ -133,6 +161,12 @@ handling, and the `metadata` payload carrying the matched query id, the chosen
 ZK system and the requested claims forward into the wallet activity.
 
 ## Phase 6 — Kotlin SDK integration
+
+**Blocking detail:** the sample app currently registers the Phase 1 ad-hoc
+JSON blob, and the matcher now decodes versioned CBOR. Anyone pairing today's
+`matcher.wasm` with today's sample app gets no matches at all — correctly, and
+confusingly. Wiring `SirosBlobBuilder` through the SDK is what closes that,
+and it has to land in the same change as a refreshed `matcher.wasm` asset.
 
 `SirosDigitalCredentialRegistry : DigitalCredentialRegistry`, shipped **in the
 SDK rather than the sample app**. Registration, entry building and matching are

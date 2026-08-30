@@ -11,5 +11,6 @@
 #![deny(unsafe_code)]
 
 pub mod db;
+pub mod evaluator;
 pub mod profile;
 pub mod sink;
