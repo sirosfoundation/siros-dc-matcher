@@ -26,8 +26,11 @@ use siros_dcql::{Credential as _, CredentialQuery, PathComponent, PathError};
 use crate::db::{Claim, Credential, CredentialDatabase};
 use crate::profile::{Capability, MatchProfile, Op, UnknownFormat};
 
-/// A credential from the registered blob, paired with the database that holds
-/// it so claim lookup has somewhere to resolve against.
+/// A credential from the registered blob, wrapped so DCQL can evaluate it.
+///
+/// It needs nothing but the credential: the blob stores each claim under a
+/// concrete path, so resolution is a lookup within this credential rather than
+/// a walk over a surrounding document.
 pub struct BlobCredential<'a> {
     /// The credential itself.
     pub credential: &'a Credential,

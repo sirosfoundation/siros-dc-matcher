@@ -29,21 +29,20 @@ use siros_dc_matcher_core::profile::Parser;
 use siros_dc_matcher_core::sink::Entry;
 use siros_dcql::{execute, DcqlQuery};
 
-/// The set every entry belongs to.
+/// Prefix for the per-entry set ids.
 ///
-/// One set for now: DCQL `credential_sets` can require a *combination* of
-/// credentials selected together, and expressing that properly is Phase 5.
-const SET_ID: &str = "siros";
+/// A set is a group of entries the picker selects *together*, so candidates
+/// for the same query — which are alternatives the user chooses between — must
+/// not share one. Each entry gets its own single-member set.
+///
+/// Real multi-credential sets arrive with DCQL `credential_sets` combinations
+/// in Phase 5, where a set genuinely means "these, together".
+const SET_PREFIX: &str = "siros";
 
 fn main() {
     let request = abi::request_bytes();
     let blob = abi::credentials_bytes();
 
-    // The platform's own attestation of who is asking — the only trustworthy
-    // statement of that, since anything naming an origin inside the request
-    // body is the request describing itself. The wallet learns the origin from
-    // the platform too, so carrying it here lets the wallet check that the
-    // matcher was shown the same caller it was.
     let (_package, origin) = abi::calling_app_info();
 
     let Ok(db) = CredentialDatabase::from_cbor(&blob) else {
@@ -87,30 +86,51 @@ fn main() {
         return;
     }
 
-    abi::emit::entry_set(SET_ID, entries.len());
     for (index, (query_id, candidate, credential)) in entries.iter().enumerate() {
+        let set_id = format!("{SET_PREFIX}-{index}");
+
+        // Which capability satisfied this query, if the format required one.
+        // The wallet needs it to know *which* proof to produce, and it is the
+        // matcher that already decided — recomputing it there means parsing
+        // the request again and possibly reaching a different answer.
+        let capabilities = query
+            .credential(query_id)
+            .and_then(|cq| {
+                let rule = db.profile.format_rule(&cq.format)?;
+                if rule.requires.is_empty() {
+                    return None;
+                }
+                policy.capability_for(cq, &rule.requires)
+            })
+            .unwrap_or_default();
+
         // Metadata survives the picker round-trip, so it carries the decision
-        // this matcher already made. Without it the wallet would re-derive
-        // which query matched and which capability was chosen, from a request
-        // it has to parse again — and could reach a different answer.
+        // this matcher already made.
         let metadata = serde_json::json!({
             "matcher": "siros-dc-matcher",
             "protocol": protocol,
             "query_id": query_id,
             "credential_id": credential.id,
-            "verified_origin": origin,
-            "host_abi": abi::wasm_version(),
+            "capabilities": capabilities,
             "claims": candidate
                 .claims
                 .iter()
                 .map(|c| c.path.clone())
                 .collect::<Vec<_>>(),
+            // The platform's own attestation of who is asking — the only
+            // trustworthy statement of that, since anything naming an origin
+            // inside the request body is the request describing itself. The
+            // wallet is told it separately, so carrying it lets the wallet
+            // check that the matcher was shown the same caller.
+            "verified_origin": origin,
+            "host_abi": abi::wasm_version(),
         })
         .to_string();
 
+        abi::emit::entry_set(&set_id, 1);
         abi::emit::entry(
-            SET_ID,
-            index,
+            &set_id,
+            0,
             &Entry {
                 credential_id: &credential.id,
                 title: &credential.title,
@@ -130,8 +150,8 @@ fn main() {
                     .filter_map(siros_dcql::PathComponent::as_key))
             }) {
                 abi::emit::field(
-                    SET_ID,
-                    index,
+                    &set_id,
+                    0,
                     &credential.id,
                     &stored.display,
                     stored.display_value.as_deref().unwrap_or(&stored.value),

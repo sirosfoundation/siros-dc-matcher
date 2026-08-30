@@ -116,6 +116,83 @@ fn invoke(db: &CredentialDatabase, request: Vec<u8>) -> Captured {
     .expect("matcher ran")
 }
 
+/// Candidates are alternatives, so each gets its own single-member set. A
+/// shared set would tell the picker they are presented together, and the user
+/// would be consenting to disclose every candidate at once.
+#[test]
+fn each_candidate_gets_its_own_set() {
+    let mut db = wallet(None);
+    let mut second = db.credentials[0].clone();
+    second.id = "mdl-2".into();
+    second.title = "Second Licence".into();
+    db.credentials.push(second);
+
+    let captured = invoke(
+        &db,
+        request(
+            "mso_mdoc",
+            json!({"doctype_value": "org.iso.18013.5.1.mDL"}),
+        ),
+    );
+
+    assert_eq!(
+        captured.sets,
+        vec![("siros-0".to_string(), 1), ("siros-1".to_string(), 1)],
+        "two alternatives must be two single-member sets"
+    );
+    assert_eq!(
+        captured.entry("siros-0", 0).expect("first").credential_id,
+        "mdl-1"
+    );
+    assert_eq!(
+        captured.entry("siros-1", 0).expect("second").credential_id,
+        "mdl-2"
+    );
+}
+
+/// The chosen capability travels with the entry, so the wallet knows which
+/// proof to produce without recomputing the decision from the request.
+#[test]
+fn the_chosen_zk_capability_is_carried_in_metadata() {
+    let db = wallet(Some(longfellow("4")));
+    let captured = invoke(
+        &db,
+        request(
+            "mso_mdoc_zk",
+            json!({
+                "doctype_value": "org.iso.18013.5.1.mDL",
+                "zk_system_type": [
+                    {"id": "a", "system": "some-future-zk-system", "num_attributes": "4"},
+                    {"id": "b", "system": "longfellow-libzk-v1", "num_attributes": "4"}
+                ]
+            }),
+        ),
+    );
+
+    let entry = captured
+        .entry("siros-0", 0)
+        .expect("the ZK request should match");
+    let meta: Value = serde_json::from_str(&entry.metadata).expect("metadata is JSON");
+    assert_eq!(meta["capabilities"][0]["system"], "longfellow-libzk-v1");
+    assert_eq!(meta["capabilities"][0]["params"]["num_attributes"], "4");
+}
+
+/// A plain request requires no capability, so none is claimed.
+#[test]
+fn a_non_zk_match_carries_no_capability() {
+    let db = wallet(None);
+    let captured = invoke(
+        &db,
+        request(
+            "mso_mdoc",
+            json!({"doctype_value": "org.iso.18013.5.1.mDL"}),
+        ),
+    );
+    let entry = captured.entry("siros-0", 0).expect("one entry");
+    let meta: Value = serde_json::from_str(&entry.metadata).expect("metadata is JSON");
+    assert_eq!(meta["capabilities"], json!([]));
+}
+
 /// An ordinary mdoc request produces a real entry for the credential that
 /// matched — not a placeholder.
 #[test]
@@ -129,7 +206,7 @@ fn a_matching_credential_is_offered() {
         ),
     );
 
-    let entry = captured.entry("siros", 0).expect("one entry");
+    let entry = captured.entry("siros-0", 0).expect("one entry");
     assert_eq!(entry.credential_id, "mdl-1");
     assert_eq!(entry.title, "Driving Licence");
     assert_eq!(entry.subtitle, "Transportstyrelsen");
@@ -159,7 +236,7 @@ fn a_zk_request_reaches_a_plain_mdoc_end_to_end() {
     );
 
     let entry = captured
-        .entry("siros", 0)
+        .entry("siros-0", 0)
         .expect("the ZK request should match");
     assert_eq!(entry.credential_id, "mdl-1");
 }
@@ -195,7 +272,7 @@ fn metadata_carries_the_matchers_decision() {
         ),
     );
 
-    let entry = captured.entry("siros", 0).expect("one entry");
+    let entry = captured.entry("siros-0", 0).expect("one entry");
     let meta: Value = serde_json::from_str(&entry.metadata).expect("metadata is JSON");
     assert_eq!(meta["query_id"], "q1");
     assert_eq!(meta["credential_id"], "mdl-1");

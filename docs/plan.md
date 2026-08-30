@@ -151,7 +151,17 @@ reach, and no format SIROS issues today puts a requestable claim in one.
 Widening it means giving the blob real value structure — a wire-format change,
 deliberately not smuggled in here.
 
-**Size watch:** `matcher.wasm` is 229 KB against the 300 KB budget, 75% used.
+`org.iso.mdoc` is deliberately absent from the default profile. The profile
+states what this wallet answers, and there is no ISO 18013-7 reader yet —
+advertising it would make a request offering only that protocol look supported
+and then match nothing. It goes back in the same change that adds a parser.
+
+Candidates are emitted as separate single-member sets. A set means "these
+entries are selected *together*", so putting alternatives in one would tell the
+picker the user is disclosing all of them at once. Genuine multi-credential
+sets arrive with `credential_sets` combinations in Phase 5.
+
+**Size watch:** `matcher.wasm` is 232 KB against the 300 KB budget, 75% used.
 Phase 5's display work is small, but the headroom is no longer generous.
 
 ## Phase 5 — Entry emission and display
