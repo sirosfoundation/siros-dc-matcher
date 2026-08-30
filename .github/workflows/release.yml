@@ -164,12 +164,49 @@ jobs:
             target/siros_dc_matcher_ffi-*.aar
             target/siros-dc-matcher-*.pom
 
+  ios:
+    name: Build the XCFramework
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    env:
+      IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+
+      - run: make xcframework
+
+      # Swift Package Manager consumes this as a binaryTarget by URL and
+      # checksum, so both have to be published. `swift package
+      # compute-checksum` is the only thing SPM will accept — a plain sha256 of
+      # the zip is a different value and fails validation at resolve time with
+      # a message that does not say why.
+      - name: Package and checksum
+        run: |
+          set -euo pipefail
+          cd target
+          zip -qr siros_dc_matcher_ffi.xcframework.zip siros_dc_matcher_ffi.xcframework
+          swift package compute-checksum siros_dc_matcher_ffi.xcframework.zip \
+            | tee siros_dc_matcher_ffi.xcframework.zip.checksum
+          echo "checksum above is what Package.swift must carry"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: xcframework
+          path: |
+            target/siros_dc_matcher_ffi.xcframework.zip
+            target/siros_dc_matcher_ffi.xcframework.zip.checksum
+
   release:
     name: Create Release
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    needs: [wasm, crate, android]
+    needs: [wasm, crate, android, ios]
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
@@ -179,6 +216,10 @@ jobs:
         with:
           name: aar
           path: artifacts/
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: xcframework
+          path: artifacts/
       - uses: softprops/action-gh-release@c12583777ecdfd3be55c69cf75464299dc01057e # v3
         with:
           generate_release_notes: true
@@ -187,3 +228,5 @@ jobs:
             artifacts/matcher.wasm.sha256
             artifacts/siros_dc_matcher_ffi-*.aar
             artifacts/siros-dc-matcher-*.pom
+            artifacts/siros_dc_matcher_ffi.xcframework.zip
+            artifacts/siros_dc_matcher_ffi.xcframework.zip.checksum

@@ -242,8 +242,16 @@ as a fallback and a differential oracle.
 **Step 4 — enable claim enforcement separately**, so a change in what is
 offered has exactly one candidate cause.
 
-**Step 5 — Swift follows**, last because the XCFramework has never been built
-and iOS has no device coverage yet.
+**Step 5 — Swift follows.** The XCFramework now builds: verified on the Mac
+mini (Xcode 26.6), producing an `ios-arm64` device slice and an
+`ios-arm64_x86_64-simulator` slice, with headers nested per-crate so two
+static-archive XCFrameworks linked together do not collide on a flat
+`Headers/module.modulemap`.
+
+The release publishes it, because the Swift SDK consumes such artifacts as an
+SPM `binaryTarget` by URL and checksum — and the checksum must come from
+`swift package compute-checksum`, not a plain `sha256`: SPM rejects the latter
+at resolve time with a message that does not explain why.
 
 ## Phase 7 — Swift parity and first release
 

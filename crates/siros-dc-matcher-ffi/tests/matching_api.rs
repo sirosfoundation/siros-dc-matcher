@@ -179,3 +179,81 @@ fn malformed_input_is_an_error_not_a_panic() {
         Err(MatchError::Request { .. })
     ));
 }
+
+/// Per-query candidates are complete even when the combination list is capped.
+///
+/// The combination count is a product, so it is bounded; a caller unioning the
+/// combinations to learn "which credentials qualify" would miss some, and
+/// filtering on that union silently drops credentials a user could present.
+/// `matches` exists so no caller has to.
+#[test]
+fn per_query_candidates_are_complete_when_combinations_are_capped() {
+    // Two queries, forty credentials each: sixteen hundred combinations
+    // against a cap of thirty-two.
+    let mut db = fixtures::wallet(Vec::new());
+    let template = db.credentials[0].clone();
+    for i in 2..=40 {
+        let mut extra = template.clone();
+        extra.id = format!("mdl-{i}");
+        db.credentials.push(extra);
+    }
+    let blob = db.to_cbor().expect("encoding");
+
+    let claims = json!([{"path": ["org.iso.18013.5.1", "age_over_18"]}]);
+    let meta = json!({"doctype_value": "org.iso.18013.5.1.mDL"});
+    let query = json!({"credentials": [
+        {"id": "a", "format": "mso_mdoc", "meta": meta, "claims": claims},
+        {"id": "b", "format": "mso_mdoc", "meta": meta, "claims": claims}
+    ]})
+    .to_string();
+
+    let out = match_dcql(blob, query).expect("matched");
+    assert!(out.dropped > 0, "this fixture is meant to exceed the cap");
+
+    for query_id in ["a", "b"] {
+        let m = out
+            .matches
+            .iter()
+            .find(|m| m.query_id == query_id)
+            .unwrap_or_else(|| panic!("no matches for {query_id}"));
+        assert_eq!(m.credentials.len(), 40, "every candidate for {query_id}");
+    }
+
+    // The union of the capped combinations is genuinely short of that — which
+    // is the whole reason `matches` exists.
+    let from_combinations: std::collections::BTreeSet<_> = out
+        .combinations
+        .iter()
+        .flat_map(|c| c.members.iter())
+        .filter(|m| m.query_id == "a")
+        .map(|m| m.credential_id.clone())
+        .collect();
+    assert!(
+        from_combinations.len() < 40,
+        "expected the capped union to be incomplete, got {}",
+        from_combinations.len()
+    );
+}
+
+/// The per-query view carries the same detail as a combination member.
+#[test]
+fn per_query_candidates_carry_claims_and_capabilities() {
+    let blob = wallet(Some(fixtures::longfellow(None)));
+    let query = dcql(
+        "mso_mdoc_zk",
+        age_claim(),
+        json!({
+            "doctype_value": "org.iso.18013.5.1.mDL",
+            "zk_system_type": [{"id": "1", "system": "longfellow-libzk-v1"}]
+        }),
+    );
+
+    let out = match_dcql(blob, query).expect("matched");
+    let candidate = &out.matches[0].credentials[0];
+    assert_eq!(candidate.credential_id, "mdl-1");
+    assert_eq!(
+        candidate.claims,
+        vec![vec!["org.iso.18013.5.1", "age_over_18"]]
+    );
+    assert_eq!(candidate.capabilities[0].system, "longfellow-libzk-v1");
+}
