@@ -1,6 +1,6 @@
 [package]
 name = "siros-dcql"
-version = "0.1.0"
+version = "0.2.0"
 description = "Digital Credentials Query Language (DCQL) engine, as defined by OpenID for Verifiable Presentations 1.0"
 keywords = ["dcql", "openid4vp", "credentials", "mdoc", "sd-jwt"]
 categories = ["authentication", "parser-implementations", "encoding"]

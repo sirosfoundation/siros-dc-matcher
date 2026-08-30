@@ -53,6 +53,8 @@ pub struct CapturedEntry {
     pub subtitle: String,
     /// Opaque payload handed back to the wallet on selection.
     pub metadata: String,
+    /// Icon bytes the matcher passed, if any.
+    pub icon: Vec<u8>,
     /// Display fields attached to this entry, in emission order.
     pub fields: Vec<(String, String)>,
 }
@@ -97,8 +99,7 @@ struct State {
 /// Returns an error if the module fails to compile, fails to instantiate
 /// (typically a host import it needs and we do not provide), or traps.
 pub fn run(wasm: &[u8], input: Invocation) -> Result<Captured> {
-    let engine = Engine::default();
-    let module = Module::new(&engine, wasm).context("compiling matcher module")?;
+    let (engine, module) = compiled(wasm)?;
 
     let mut store = Store::new(
         &engine,
@@ -125,6 +126,39 @@ pub fn run(wasm: &[u8], input: Invocation) -> Result<Captured> {
         .context("matcher trapped — in a real picker this shows the user nothing at all")?;
 
     Ok(store.into_data().out)
+}
+
+/// Compile a module once per process, reusing it across runs.
+///
+/// Compiling is by far the slowest part of a run — the matcher is a few
+/// hundred kilobytes and every test needs it — so recompiling per test turned
+/// a fast suite into a slow one. Keyed by the bytes, because the guard tests
+/// run hand-written modules of their own.
+fn compiled(wasm: &[u8]) -> Result<(Engine, Module)> {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+
+    static ENGINE: OnceLock<Engine> = OnceLock::new();
+    #[allow(clippy::type_complexity)]
+    static MODULES: OnceLock<Mutex<HashMap<Vec<u8>, Module>>> = OnceLock::new();
+
+    let engine = ENGINE.get_or_init(Engine::default).clone();
+
+    // Keyed by the bytes themselves, not a hash of them. A collision would
+    // silently run the wrong module, and "the wrong module ran" is close to
+    // undiagnosable from a failing assertion. Only a handful of modules are
+    // ever cached, so the copies cost nothing worth saving.
+    let cache = MODULES.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut cache = cache.lock().unwrap_or_else(|e| e.into_inner());
+    let module = match cache.get(wasm) {
+        Some(module) => module.clone(),
+        None => {
+            let module = Module::new(&engine, wasm).context("compiling matcher module")?;
+            cache.insert(wasm.to_vec(), module.clone());
+            module
+        }
+    };
+    Ok((engine, module))
 }
 
 /// Register the `credman` and `credman_v2` imports the matcher links against.
@@ -213,8 +247,8 @@ fn add_credman(linker: &mut Linker<State>) -> Result<()> {
         "AddEntryToSet",
         |mut c: Caller<'_, State>,
          cred_id: i32,
-         _icon: i32,
-         _icon_len: i32,
+         icon: i32,
+         icon_len: i32,
          title: i32,
          subtitle: i32,
          _disclaimer: i32,
@@ -223,6 +257,10 @@ fn add_credman(linker: &mut Linker<State>) -> Result<()> {
          set_id: i32,
          index: i32|
          -> Result<()> {
+            // Read the icon by pointer and length, not as a C string: it is
+            // arbitrary bytes and a PNG contains NULs, so treating it as text
+            // would silently truncate at the first one.
+            let icon = read_bytes(&mut c, icon, icon_len)?;
             let entry = CapturedEntry {
                 set_id: read_cstr(&mut c, set_id)?,
                 index,
@@ -230,6 +268,7 @@ fn add_credman(linker: &mut Linker<State>) -> Result<()> {
                 title: read_cstr(&mut c, title)?,
                 subtitle: read_cstr(&mut c, subtitle)?,
                 metadata: read_cstr(&mut c, metadata)?,
+                icon,
                 fields: Vec::new(),
             };
             c.data_mut().out.entries.push(entry);
@@ -304,6 +343,25 @@ fn write_bytes(c: &mut Caller<'_, State>, ptr: i32, bytes: &[u8]) -> Result<()> 
     let mem = memory(c)?;
     mem.write(c, ptr as usize, bytes)
         .context("matcher passed a pointer outside its own memory")
+}
+
+/// Read `len` bytes from guest memory.
+///
+/// A null pointer or zero length means "no value", which is how the ABI says
+/// an entry has no icon.
+fn read_bytes(c: &mut Caller<'_, State>, ptr: i32, len: i32) -> Result<Vec<u8>> {
+    if ptr == 0 || len <= 0 {
+        return Ok(Vec::new());
+    }
+    let mem = memory(c)?;
+    let data = mem.data(&c);
+    let start = ptr as usize;
+    let end = start
+        .checked_add(len as usize)
+        .context("icon length overflows the address space")?;
+    data.get(start..end)
+        .map(<[u8]>::to_vec)
+        .context("matcher passed an icon outside its own memory")
 }
 
 /// Read a NUL-terminated string the guest passed as `char*`.

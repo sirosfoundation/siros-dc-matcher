@@ -29,7 +29,8 @@ pub mod path;
 pub mod query;
 
 pub use eval::{
-    execute, Candidate, Credential, ExactFormat, Policy, QueryMatch, QueryResult, SelectedClaim,
+    execute, Candidate, Combination, Combinations, Credential, ExactFormat, Policy, QueryMatch,
+    QueryResult, SelectedClaim,
 };
 pub use path::{mdoc_components, resolve_json, PathComponent, PathError};
 pub use query::{ClaimsQuery, CredentialQuery, CredentialSetQuery, DcqlQuery};

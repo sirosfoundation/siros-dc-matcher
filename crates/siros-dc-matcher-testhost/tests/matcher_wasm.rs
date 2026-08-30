@@ -362,3 +362,134 @@ fn an_empty_wallet_offers_nothing() {
     let captured = invoke(&db, request("mso_mdoc", json!({})));
     assert!(captured.is_empty());
 }
+
+/// A credential set whose single option needs two credentials produces one
+/// set with two members — the first case where a set means what its name says.
+#[test]
+fn a_multi_credential_option_is_one_set_with_two_members() {
+    let mut db = wallet(None);
+    let mut second = db.credentials[0].clone();
+    second.id = "mdl-2".into();
+    second.title = "Second Licence".into();
+    db.credentials.push(second);
+
+    let request = json!({"requests": [{
+        "protocol": "openid4vp-v1-signed",
+        "data": {"dcql_query": {
+            "credentials": [
+                {"id": "q1", "format": "mso_mdoc", "meta": {"doctype_value": "org.iso.18013.5.1.mDL"},
+                 "claims": [{"path": ["org.iso.18013.5.1", "age_over_18"]}]},
+                {"id": "q2", "format": "mso_mdoc", "meta": {"doctype_value": "org.iso.18013.5.1.mDL"},
+                 "claims": [{"path": ["org.iso.18013.5.1", "age_over_18"]}]}
+            ],
+            "credential_sets": [{"options": [["q1", "q2"]]}]
+        }}
+    }]})
+    .to_string()
+    .into_bytes();
+
+    let captured = invoke(&db, request);
+
+    // Two credentials, two queries: four ways to fill the option, each one a
+    // set of two entries presented together.
+    assert_eq!(captured.sets.len(), 4);
+    for (_, len) in &captured.sets {
+        assert_eq!(*len, 2, "the option needs both queries answered");
+    }
+    let first = captured.entry("siros-0", 0).expect("first member");
+    let second = captured.entry("siros-0", 1).expect("second member");
+    assert_ne!(
+        (&first.credential_id, first.metadata.contains("\"q1\"")),
+        (&second.credential_id, second.metadata.contains("\"q1\"")),
+        "the two members answer different queries"
+    );
+}
+
+/// Icons reach the picker as bytes, read by pointer and length. A PNG contains
+/// NULs, so anything treating them as text would truncate at the first one.
+#[test]
+fn an_icon_is_emitted_as_raw_bytes() {
+    let mut db = wallet(None);
+    // PNG magic, NUL included on purpose.
+    db.icons = vec![0x89, b'P', b'N', b'G', 0x00, 0x1A, 0x0A];
+    db.credentials[0].icon = Some(siros_dc_matcher_core::db::IconRef { start: 0, len: 7 });
+
+    let captured = invoke(
+        &db,
+        request(
+            "mso_mdoc",
+            json!({"doctype_value": "org.iso.18013.5.1.mDL"}),
+        ),
+    );
+
+    let entry = captured.entry("siros-0", 0).expect("one entry");
+    assert_eq!(entry.icon, vec![0x89, b'P', b'N', b'G', 0x00, 0x1A, 0x0A]);
+}
+
+/// A credential with no icon emits none, rather than an empty-but-present one.
+#[test]
+fn a_credential_without_an_icon_emits_none() {
+    let db = wallet(None);
+    let captured = invoke(
+        &db,
+        request(
+            "mso_mdoc",
+            json!({"doctype_value": "org.iso.18013.5.1.mDL"}),
+        ),
+    );
+    assert!(captured
+        .entry("siros-0", 0)
+        .expect("one entry")
+        .icon
+        .is_empty());
+}
+
+/// An icon reference outside the blob's buffer costs that credential its
+/// picture, not its entry.
+#[test]
+fn an_out_of_range_icon_reference_does_not_lose_the_entry() {
+    let mut db = wallet(None);
+    db.icons = vec![1, 2, 3];
+    db.credentials[0].icon = Some(siros_dc_matcher_core::db::IconRef {
+        start: 2,
+        len: 9999,
+    });
+
+    let captured = invoke(
+        &db,
+        request(
+            "mso_mdoc",
+            json!({"doctype_value": "org.iso.18013.5.1.mDL"}),
+        ),
+    );
+    let entry = captured
+        .entry("siros-0", 0)
+        .expect("the entry must survive");
+    assert_eq!(entry.credential_id, "mdl-1");
+    assert!(entry.icon.is_empty());
+}
+
+/// When more combinations exist than the matcher will offer, the number
+/// dropped is reported rather than hidden.
+#[test]
+fn dropped_combinations_are_reported_in_metadata() {
+    let mut db = wallet(None);
+    for i in 2..=40 {
+        let mut extra = db.credentials[0].clone();
+        extra.id = format!("mdl-{i}");
+        db.credentials.push(extra);
+    }
+
+    let captured = invoke(
+        &db,
+        request(
+            "mso_mdoc",
+            json!({"doctype_value": "org.iso.18013.5.1.mDL"}),
+        ),
+    );
+
+    assert_eq!(captured.sets.len(), 32, "capped at MAX_COMBINATIONS");
+    let entry = captured.entry("siros-0", 0).expect("one entry");
+    let meta: Value = serde_json::from_str(&entry.metadata).expect("metadata is JSON");
+    assert_eq!(meta["combinations_dropped"], 8);
+}

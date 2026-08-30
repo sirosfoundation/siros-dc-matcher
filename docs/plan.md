@@ -14,7 +14,7 @@ The full write-up, including the requirements analysis this came from, is at
 | 2 | Credential blob format and builder | done |
 | 3 | The DCQL engine | done, published |
 | 4 | Profile evaluator and the ZK path | done |
-| 5 | Entry emission and display | ~3 days |
+| 5 | Entry emission and display | done |
 | 6 | Kotlin SDK integration | ~1 week |
 | 7 | Swift parity and first release | ~3 days |
 
@@ -164,11 +164,34 @@ sets arrive with `credential_sets` combinations in Phase 5.
 **Size watch:** `matcher.wasm` is 232 KB against the 300 KB budget, 75% used.
 Phase 5's display work is small, but the headroom is no longer generous.
 
-## Phase 5 — Entry emission and display
+## Phase 5 — Entry emission and display ✅
 
-`credman_v2` entry sets with a v1 fallback, field display properties, icon
-handling, and the `metadata` payload carrying the matched query id, the chosen
-ZK system and the requested claims forward into the wallet activity.
+Real `credential_sets` combinations. A combination is what the picker offers as
+one selectable option: every member is presented together and consented to as a
+unit, so a set now means what its name says. Alternatives are separate sets.
+
+The count is a product — three queries with four candidates each is
+sixty-four — so it is capped, and the number dropped travels in entry metadata.
+A picker showing the first few of many is telling the user those are the only
+options they have.
+
+Optional credential sets (§6.2 `required: false`) are deliberately not
+enumerated. The wallet MAY include them, so offering one is a decision about
+what to ask the user, not about what matches, and folding them in would
+multiply the count for choices the verifier said it can do without.
+
+Icons are emitted by pointer and length, borrowed straight from the decoded
+blob — a PNG contains NULs, so anything treating them as text truncates at the
+first one, and copying a bitmap per entry inside a sandbox with a time budget
+is worth avoiding. An icon reference outside the blob's buffer costs that
+credential its picture, not its entry.
+
+The v1 emission fallback remains out of scope for the reason in `docs/abi.md`:
+it cannot be a runtime branch, only a second binary.
+
+`siros-dcql` goes to 0.2.0 — `QueryResult` gained a public field, which is
+breaking for struct-literal construction even though the type is produced by
+`execute` rather than built by callers.
 
 ## Phase 6 — Kotlin SDK integration
 

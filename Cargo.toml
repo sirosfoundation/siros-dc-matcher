@@ -16,7 +16,7 @@ authors = ["SIROS Foundation"]
 rust-version = "1.82"
 
 [workspace.dependencies]
-siros-dcql = { version = "0.1.0", path = "crates/siros-dcql" }
+siros-dcql = { version = "0.2.0", path = "crates/siros-dcql" }
 siros-dc-matcher-core = { path = "crates/siros-dc-matcher-core" }
 
 serde = { version = "1", features = ["derive"] }

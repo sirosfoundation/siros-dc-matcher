@@ -39,6 +39,14 @@ use siros_dcql::{execute, DcqlQuery};
 /// in Phase 5, where a set genuinely means "these, together".
 const SET_PREFIX: &str = "siros";
 
+/// How many combinations to offer at most.
+///
+/// The count is a product — three queries with four candidates each is
+/// sixty-four — and a picker cannot use them all. The number dropped travels
+/// in entry metadata rather than vanishing, because a list of options that
+/// quietly omits some is one the user cannot reason about.
+const MAX_COMBINATIONS: usize = 32;
+
 fn main() {
     let request = abi::request_bytes();
     let blob = abi::credentials_bytes();
@@ -70,92 +78,108 @@ fn main() {
         return;
     }
 
-    let mut entries = Vec::new();
-    for query_match in &result.matches {
-        for candidate in &query_match.candidates {
-            if let Some(credential) = db
-                .credentials
-                .iter()
-                .find(|c| c.id == candidate.credential_id)
-            {
-                entries.push((query_match.query_id.as_str(), candidate, credential));
-            }
-        }
-    }
-    if entries.is_empty() {
+    // A combination is what the picker offers as one selectable option: every
+    // member is presented together and consented to as a unit. Alternatives
+    // are separate combinations, and therefore separate sets.
+    let enumerated = result.combinations(MAX_COMBINATIONS);
+    if enumerated.combinations.is_empty() {
         return;
     }
 
-    for (index, (query_id, candidate, credential)) in entries.iter().enumerate() {
-        let set_id = format!("{SET_PREFIX}-{index}");
-
-        // Which capability satisfied this query, if the format required one.
-        // The wallet needs it to know *which* proof to produce, and it is the
-        // matcher that already decided — recomputing it there means parsing
-        // the request again and possibly reaching a different answer.
-        let capabilities = query
-            .credential(query_id)
-            .and_then(|cq| {
-                let rule = db.profile.format_rule(&cq.format)?;
-                if rule.requires.is_empty() {
-                    return None;
-                }
-                policy.capability_for(cq, &rule.requires)
-            })
-            .unwrap_or_default();
-
-        // Metadata survives the picker round-trip, so it carries the decision
-        // this matcher already made.
-        let metadata = serde_json::json!({
-            "matcher": "siros-dc-matcher",
-            "protocol": protocol,
-            "query_id": query_id,
-            "credential_id": credential.id,
-            "capabilities": capabilities,
-            "claims": candidate
-                .claims
-                .iter()
-                .map(|c| c.path.clone())
-                .collect::<Vec<_>>(),
-            // The platform's own attestation of who is asking — the only
-            // trustworthy statement of that, since anything naming an origin
-            // inside the request body is the request describing itself. The
-            // wallet is told it separately, so carrying it lets the wallet
-            // check that the matcher was shown the same caller.
-            "verified_origin": origin,
-            "host_abi": abi::wasm_version(),
-        })
-        .to_string();
-
-        abi::emit::entry_set(&set_id, 1);
-        abi::emit::entry(
-            &set_id,
-            0,
-            &Entry {
-                credential_id: &credential.id,
-                title: &credential.title,
-                subtitle: &credential.subtitle,
-                metadata: &metadata,
-            },
-        );
-
-        // Only the claims this match actually discloses. Showing every claim
-        // the credential holds would misrepresent the request the user is
-        // being asked to consent to.
-        for claim in &candidate.claims {
-            if let Some(stored) = credential.claims.iter().find(|c| {
-                c.path.iter().map(String::as_str).eq(claim
-                    .path
+    for (index, combination) in enumerated.combinations.iter().enumerate() {
+        // Resolve every member before declaring the set. Skipping one after
+        // the fact would leave the declared length disagreeing with the
+        // entries actually added, and a gap in the positions — which the host
+        // is right to treat as a matcher bug. A combination we cannot fully
+        // emit is not offered at all.
+        let resolved: Option<Vec<_>> = combination
+            .members
+            .iter()
+            .map(|(query_id, candidate)| {
+                db.credentials
                     .iter()
-                    .filter_map(siros_dcql::PathComponent::as_key))
-            }) {
-                abi::emit::field(
-                    &set_id,
-                    0,
-                    &credential.id,
-                    &stored.display,
-                    stored.display_value.as_deref().unwrap_or(&stored.value),
-                );
+                    .find(|c| c.id == candidate.credential_id)
+                    .map(|credential| (query_id, candidate, credential))
+            })
+            .collect();
+        let Some(resolved) = resolved else {
+            continue;
+        };
+
+        let set_id = format!("{SET_PREFIX}-{index}");
+        abi::emit::entry_set(&set_id, resolved.len());
+
+        for (position, (query_id, candidate, credential)) in resolved.iter().enumerate() {
+            // Which capability satisfied this query, if the format required
+            // one. The wallet needs it to know *which* proof to produce, and
+            // it is the matcher that already decided — recomputing it there
+            // means parsing the request again and possibly reaching a
+            // different answer.
+            let capabilities = query
+                .credential(query_id)
+                .and_then(|cq| {
+                    let rule = db.profile.format_rule(&cq.format)?;
+                    if rule.requires.is_empty() {
+                        return None;
+                    }
+                    policy.capability_for(cq, &rule.requires)
+                })
+                .unwrap_or_default();
+
+            let metadata = serde_json::json!({
+                "matcher": "siros-dc-matcher",
+                "protocol": protocol,
+                "query_id": query_id,
+                "credential_id": credential.id,
+                "capabilities": capabilities,
+                "claims": candidate
+                    .claims
+                    .iter()
+                    .map(|c| c.path.clone())
+                    .collect::<Vec<_>>(),
+                // The platform's own attestation of who is asking — the only
+                // trustworthy statement of that, since anything naming an
+                // origin inside the request body is the request describing
+                // itself. The wallet is told it separately, so carrying it
+                // lets the wallet check the matcher was shown the same caller.
+                "verified_origin": origin,
+                "host_abi": abi::wasm_version(),
+                // How many further options existed. A picker showing the first
+                // few of many is telling the user those are all they have.
+                "combinations_dropped": enumerated.dropped,
+            })
+            .to_string();
+
+            abi::emit::entry(
+                &set_id,
+                position,
+                &Entry {
+                    credential_id: &credential.id,
+                    title: &credential.title,
+                    subtitle: &credential.subtitle,
+                    metadata: &metadata,
+                    icon: db.icon_bytes(credential),
+                },
+            );
+
+            // Only the claims this match actually discloses. Showing every
+            // claim the credential holds would misrepresent the request the
+            // user is being asked to consent to.
+            for claim in &candidate.claims {
+                if let Some(stored) = credential.claims.iter().find(|c| {
+                    c.path.iter().map(String::as_str).eq(claim
+                        .path
+                        .iter()
+                        .filter_map(siros_dcql::PathComponent::as_key))
+                }) {
+                    abi::emit::field(
+                        &set_id,
+                        position,
+                        &credential.id,
+                        &stored.display,
+                        stored.display_value.as_deref().unwrap_or(&stored.value),
+                    );
+                }
             }
         }
     }
