@@ -74,14 +74,26 @@ jobs:
           VERSION=$(cargo metadata --locked --no-deps --format-version 1 \
             | jq -r '.packages[] | select(.name=="siros-dcql") | .version')
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          if curl -sS --fail-with-body -A "siros-release (github-actions)" \
-               "https://crates.io/api/v1/crates/siros-dcql/$VERSION" >/dev/null 2>&1; then
-            echo "siros-dcql $VERSION is already published; skipping"
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "siros-dcql $VERSION is new; publishing"
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
+
+          # Decide on the status code, never on "did curl succeed". A rate
+          # limit, an outage or a DNS failure is not evidence that the version
+          # is unpublished, and treating it as such would both hide the outage
+          # and start a publish on a guess.
+          HTTP=$(curl -sS -o /dev/null -w '%{http_code}' \
+                   -A "siros-release (github-actions)" \
+                   "https://crates.io/api/v1/crates/siros-dcql/$VERSION") || HTTP=000
+          case "$HTTP" in
+            200)
+              echo "siros-dcql $VERSION is already published; skipping"
+              echo "skip=true" >> "$GITHUB_OUTPUT" ;;
+            404)
+              echo "siros-dcql $VERSION is new; publishing"
+              echo "skip=false" >> "$GITHUB_OUTPUT" ;;
+            *)
+              echo "::error::crates.io returned HTTP $HTTP for siros-dcql $VERSION."
+              echo "::error::Cannot tell whether this version exists, so not guessing."
+              exit 1 ;;
+          esac
 
       # Publishing is idempotent-hostile: a version can never be replaced or
       # reused. Beyond the already-published case handled above, fail loudly
