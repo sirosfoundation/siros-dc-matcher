@@ -135,28 +135,64 @@ fn a_circuit_we_do_not_have_is_not_offered() {
 }
 
 /// Parameters are sibling keys of `id`/`system`, not a nested `params` object.
-/// A parser that looks for `params` reads no parameters at all and matches
-/// anything — silently, because `id` and `system` still parse.
+///
+/// The load-bearing half: a real request whose parameter contradicts what this
+/// wallet declared must not match. A parser that looked for a nested `params`
+/// object would read no parameters at all here — `id` and `system` still parse,
+/// so it would fail silently — and then match a circuit the wallet lacks.
 #[test]
-fn parameters_are_siblings_of_system_not_a_nested_object() {
+fn a_sibling_parameter_is_read_and_a_nested_one_is_not() {
     let db = wallet(vec![longfellow("4")]);
 
-    // The real wire shape, with a mismatched parameter: must not match.
     let real = zk_query(json!([{
         "id": "1", "system": "longfellow-libzk-v1", "num_attributes": "99"
     }]));
-    assert!(matches(&db, &real).is_empty());
+    assert!(
+        matches(&db, &real).is_empty(),
+        "a sibling num_attributes must be read and must not match"
+    );
 
-    // The shape a `params`-reading parser would expect. `num_attributes` is
-    // not a parameter here, so nothing constrains it — and this must still
-    // not silently succeed by ignoring the nesting.
+    // Nested under `params`, which is not the wire format. `num_attributes` is
+    // therefore not requested at all, and the wallet's declared value is not
+    // contradicted — so this matches, on the system alone. That is the same
+    // rule as any other undeclared parameter: constraints come from what both
+    // sides actually name.
     let nested = zk_query(json!([{
         "id": "1", "system": "longfellow-libzk-v1", "params": {"num_attributes": "99"}
     }]));
-    assert!(
-        matches(&db, &nested).is_empty(),
-        "an unknown top-level key is an unmatched parameter, not a free pass"
+    assert_eq!(
+        matches(&db, &nested),
+        ["mdl-1"],
+        "a shape outside the wire format constrains nothing"
     );
+}
+
+/// A wallet that declares only the system — a *nominal* capability — is not
+/// constrained by parameters it never claimed. Some proof systems work this
+/// way: they support any attribute count for a system they implement and check
+/// whether the specific circuit is fetchable only at proof time. Requiring them
+/// to enumerate circuits up front would reject requests they can satisfy.
+#[test]
+fn a_nominal_capability_is_not_constrained_by_undeclared_parameters() {
+    let db = wallet(vec![Capability {
+        system: "longfellow-libzk-v1".into(),
+        params: BTreeMap::new(),
+    }]);
+
+    for count in ["1", "4", "10", "99"] {
+        let q = zk_query(json!([{
+            "id": "1", "system": "longfellow-libzk-v1", "num_attributes": count
+        }]));
+        assert_eq!(
+            matches(&db, &q),
+            ["mdl-1"],
+            "num_attributes={count} should match"
+        );
+    }
+
+    // The system itself is still checked.
+    let other = zk_query(json!([{"id": "1", "system": "some-other-system"}]));
+    assert!(matches(&db, &other).is_empty());
 }
 
 /// Verifier preference order: the first entry the wallet can satisfy wins.
