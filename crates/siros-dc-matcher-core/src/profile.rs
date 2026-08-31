@@ -92,6 +92,31 @@ pub struct MetaTrigger {
     pub when_meta_present: String,
     /// Capability name, looked up in the profile's capability map.
     pub capability: String,
+    /// A `meta` key saying whether the capability is genuinely *required*.
+    ///
+    /// Naming acceptable proof systems does not by itself say whether the
+    /// verifier insists on one. Two readings are possible and the
+    /// specification distinguishes neither: "I require a proof, here are the
+    /// systems I accept", or "I will take a proof if you have one, otherwise
+    /// an ordinary presentation". They differ in who gets offered — under the
+    /// second, a wallet with no proof system should still appear.
+    ///
+    /// Set to `false` in the request, the capability becomes preferred rather
+    /// than required: the wallet is offered either way, and the chosen system
+    /// is still reported when it has one, so it can produce a proof if it can.
+    ///
+    /// Absent from the request — or unset here — means required. That is the
+    /// safer default and preserves what every verifier sending
+    /// `zk_system_type` today already gets.
+    ///
+    /// Deliberately a sibling of `zk_system_type` in `meta`, not a key inside
+    /// each entry: every key in an entry other than `id` and `system` is a
+    /// *circuit parameter*, so a per-entry flag would be matched against the
+    /// wallet's declared parameters instead of read. Per-entry would also
+    /// allow contradictions — one system required, another optional — that
+    /// mean nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub required_flag: Option<String>,
 }
 
 /// How one `meta` key constrains a match.
@@ -291,6 +316,7 @@ impl MatchProfile {
             meta_triggers: vec![MetaTrigger {
                 when_meta_present: "zk_system_type".into(),
                 capability: ZK_CAPABILITY.into(),
+                required_flag: Some("zk_required".into()),
             }],
             capabilities: BTreeMap::new(),
             unknown_format: UnknownFormat::Reject,

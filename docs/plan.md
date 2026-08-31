@@ -151,12 +151,34 @@ key whatever the format was; `mso_mdoc_zk` is still matched, and still requires
 a named system, because asking for a proof without saying which must not be
 answered with a plain presentation.
 
-One consequence worth stating: a wallet that cannot produce any named system is
-no longer offered for such a request, even though the format alone would have
-matched. That is deliberate — the verifier asked for a proof — but it does mean
-a verifier who intends `zk_system_type` as an *offer* rather than a requirement
-would see fewer wallets. Nothing in the specification distinguishes the two
-readings today.
+Naming acceptable systems does not by itself say whether the verifier
+*insists* on a proof. Two readings are possible — "I require one, here are the
+systems I accept" and "I will take one if you have it, otherwise an ordinary
+presentation" — and they differ in who gets offered. A verifier says which with
+**`meta.zk_required`**:
+
+| request | wallet without a proof system | wallet with one |
+|---|---|---|
+| `zk_system_type` only | not offered | offered, system reported |
+| `zk_system_type` + `zk_required: false` | offered | offered, system reported |
+| format `mso_mdoc_zk` | not offered | offered, system reported |
+
+Absent means required: that is the safer reading, and it preserves what every
+verifier sending `zk_system_type` today already gets.
+
+`zk_required` sits beside `zk_system_type` in `meta`, deliberately not inside
+each entry. Every key in an entry other than `id` and `system` is a *circuit
+parameter*, so a per-entry flag would be matched against the wallet's declared
+parameters rather than read as a flag. Per-entry would also permit
+contradictions — one system required, another optional — that mean nothing.
+
+The flag does not rescue the `mso_mdoc_zk` format: asking for that format is
+asking for a proof, whatever a sibling key says, and the format is the more
+specific statement.
+
+This is a **pre-standardisation extension**, like `digestId` before it. It
+needs raising with multipaz before anyone relies on it for interop — a verifier
+that does not know the key simply omits it, and gets today's behaviour.
 
 **Known limitation:** claims path pointers resolve only when every component
 is a string. The blob records paths as strings, so a pointer containing `null`
