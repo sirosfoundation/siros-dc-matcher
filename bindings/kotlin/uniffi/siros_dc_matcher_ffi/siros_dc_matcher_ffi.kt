@@ -1916,7 +1916,7 @@ public object FfiConverterTypeFfiMatchedCredential: FfiConverterRustBuffer<FfiMa
 /**
  * The credentials answering one credential query.
  *
- * Complete, and independent of [`FfiMatchOutcome::combinations`]. Callers that
+ * Complete, and independent of `FfiMatchOutcome.combinations`. Callers that
  * only need "which credentials qualify for this query" must read this rather
  * than unioning the combinations: the combination list is *capped*, because
  * its length is a product of the per-query candidate counts, so a union of it
