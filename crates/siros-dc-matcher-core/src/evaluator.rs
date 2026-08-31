@@ -221,23 +221,20 @@ impl siros_dcql::Policy<BlobCredential<'_>> for ProfilePolicy<'_> {
     fn matches(&self, query: &CredentialQuery, credential: &BlobCredential<'_>) -> bool {
         let stored = credential.format();
 
-        let rule = match self.profile.format_rule(&query.format) {
+        match self.profile.format_rule(&query.format) {
             Some(rule) => {
                 if !rule.stored_formats.iter().any(|f| f == stored) {
                     return false;
                 }
-                Some(rule)
             }
             // An undescribed format. Rejecting is the production setting;
             // the permissive one exists for interop debugging and will offer
             // credentials the wallet may not be able to present.
             None => match self.profile.unknown_format {
                 UnknownFormat::Reject => return false,
-                UnknownFormat::MatchAny => None,
+                UnknownFormat::MatchAny => {}
             },
-        };
-
-        let _ = rule;
+        }
 
         // Capability first: it is the cheapest check and the one whose failure
         // is least visible later. An entry offered without the capability

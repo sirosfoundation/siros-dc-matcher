@@ -332,8 +332,9 @@ fn the_zk_format_still_matches_and_still_needs_a_named_system() {
     );
 }
 
-/// An ordinary mdoc query with a plain `mso_mdoc` query still matches when the
-/// ZK signal is absent — the trigger must not fire on nothing.
+/// A query in the plain `mso_mdoc` format, carrying whatever `meta` a test
+/// needs. Used both with and without the ZK signal, since the point is that
+/// the format is the same either way and only `meta` differs.
 fn plain_mdoc_query_with(meta: serde_json::Value) -> DcqlQuery {
     serde_json::from_value(json!({
         "credentials": [{
