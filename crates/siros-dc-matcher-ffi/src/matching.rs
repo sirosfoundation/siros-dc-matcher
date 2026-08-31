@@ -108,12 +108,11 @@ pub struct FfiCombination {
 /// The credentials answering one credential query.
 ///
 /// Complete, and independent of the `combinations` field on `FfiMatchOutcome`.
-/// Callers that
-/// only need "which credentials qualify for this query" must read this rather
-/// than unioning the combinations: the combination list is *capped*, because
-/// its length is a product of the per-query candidate counts, so a union of it
-/// can omit credentials that do qualify. Filtering on such a union silently
-/// drops them from what a user is offered.
+/// Callers that only need "which credentials qualify for this query" must read
+/// this rather than unioning the combinations: the combination list is
+/// *capped*, because its length is a product of the per-query candidate
+/// counts, so a union of it can omit credentials that do qualify. Filtering on
+/// such a union silently drops them from what a user is offered.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct FfiQueryMatch {
     /// The DCQL credential query.
