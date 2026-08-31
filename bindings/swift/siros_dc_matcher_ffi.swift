@@ -515,7 +515,7 @@ public protocol SirosBlobBuilderProtocol : AnyObject {
     func addCredential(credential: FfiCredential) 
     
     /**
-     * Add an icon, referenced by the `icon_id` field on `FfiCredential`.
+     * Add an icon, referenced by a credential's icon id.
      *
      * Stored once and shared: wallets routinely hold several credentials from
      * one issuer, and repeating that issuer's logo per credential makes the
@@ -536,10 +536,9 @@ public protocol SirosBlobBuilderProtocol : AnyObject {
      *
      * # Errors
      *
-     * `BlobError::UnknownIcon` when a credential names an icon that was
-     * never added — a dangling reference would otherwise cost that credential
-     * its picture with nothing said. `BlobError::Encoding` if serialisation
-     * fails.
+     * An unknown-icon error when a credential names an icon that was never
+     * added — a dangling reference would otherwise cost that credential its
+     * picture with nothing said. An encoding error if serialisation fails.
      */
     func build() throws  -> Data
     
@@ -633,7 +632,7 @@ open func addCredential(credential: FfiCredential) {try! rustCall() {
 }
     
     /**
-     * Add an icon, referenced by the `icon_id` field on `FfiCredential`.
+     * Add an icon, referenced by a credential's icon id.
      *
      * Stored once and shared: wallets routinely hold several credentials from
      * one issuer, and repeating that issuer's logo per credential makes the
@@ -665,10 +664,9 @@ open func addZkSystem(capability: FfiCapability) {try! rustCall() {
      *
      * # Errors
      *
-     * `BlobError::UnknownIcon` when a credential names an icon that was
-     * never added — a dangling reference would otherwise cost that credential
-     * its picture with nothing said. `BlobError::Encoding` if serialisation
-     * fails.
+     * An unknown-icon error when a credential names an icon that was never
+     * added — a dangling reference would otherwise cost that credential its
+     * picture with nothing said. An encoding error if serialisation fails.
      */
 open func build()throws  -> Data {
     return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeBlobError.lift) {
@@ -1057,7 +1055,7 @@ public struct FfiCredential {
      */
     public var subtitle: String
     /**
-     * Icon added via `add_icon` on `SirosBlobBuilder`, by its id.
+     * An icon added to the blob when it was built, by its id.
      */
     public var iconId: String?
     /**
@@ -1092,7 +1090,7 @@ public struct FfiCredential {
          * Secondary line, typically the issuer.
          */subtitle: String, 
         /**
-         * Icon added via `add_icon` on `SirosBlobBuilder`, by its id.
+         * An icon added to the blob when it was built, by its id.
          */iconId: String?, 
         /**
          * Claims available for matching and display.
@@ -1973,7 +1971,8 @@ fileprivate struct FfiConverterDictionaryStringString: FfiConverterRustBuffer {
  *
  * # Errors
  *
- * See `MatchError`.
+ * See the match error type — `MatchError` in Rust and Swift,
+ * `MatchException` in Kotlin.
  */
 public func matchDcApiRequest(blob: Data, requestJson: String)throws  -> FfiMatchOutcome {
     return try  FfiConverterTypeFfiMatchOutcome.lift(try rustCallWithError(FfiConverterTypeMatchError.lift) {
@@ -1992,7 +1991,8 @@ public func matchDcApiRequest(blob: Data, requestJson: String)throws  -> FfiMatc
  *
  * # Errors
  *
- * See `MatchError`.
+ * See the match error type — `MatchError` in Rust and Swift,
+ * `MatchException` in Kotlin.
  */
 public func matchDcql(blob: Data, dcqlJson: String)throws  -> FfiMatchOutcome {
     return try  FfiConverterTypeFfiMatchOutcome.lift(try rustCallWithError(FfiConverterTypeMatchError.lift) {
@@ -2018,22 +2018,22 @@ private var initializationResult: InitializationResult = {
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
-    if (uniffi_siros_dc_matcher_ffi_checksum_func_match_dc_api_request() != 26758) {
+    if (uniffi_siros_dc_matcher_ffi_checksum_func_match_dc_api_request() != 49337) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_siros_dc_matcher_ffi_checksum_func_match_dcql() != 60868) {
+    if (uniffi_siros_dc_matcher_ffi_checksum_func_match_dcql() != 1962) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_add_credential() != 64015) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_add_icon() != 58381) {
+    if (uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_add_icon() != 3617) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_add_zk_system() != 50234) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_build() != 64100) {
+    if (uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_build() != 30642) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_set_debug() != 60199) {

@@ -916,22 +916,22 @@ private fun uniffiCheckContractApiVersion(lib: UniffiLib) {
 
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: UniffiLib) {
-    if (lib.uniffi_siros_dc_matcher_ffi_checksum_func_match_dc_api_request() != 26758.toShort()) {
+    if (lib.uniffi_siros_dc_matcher_ffi_checksum_func_match_dc_api_request() != 49337.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_siros_dc_matcher_ffi_checksum_func_match_dcql() != 60868.toShort()) {
+    if (lib.uniffi_siros_dc_matcher_ffi_checksum_func_match_dcql() != 1962.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_add_credential() != 64015.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_add_icon() != 58381.toShort()) {
+    if (lib.uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_add_icon() != 3617.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_add_zk_system() != 50234.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_build() != 64100.toShort()) {
+    if (lib.uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_build() != 30642.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_set_debug() != 60199.toShort()) {
@@ -1288,7 +1288,7 @@ public interface SirosBlobBuilderInterface {
     fun `addCredential`(`credential`: FfiCredential)
     
     /**
-     * Add an icon, referenced by the `icon_id` field on `FfiCredential`.
+     * Add an icon, referenced by a credential's icon id.
      *
      * Stored once and shared: wallets routinely hold several credentials from
      * one issuer, and repeating that issuer's logo per credential makes the
@@ -1309,10 +1309,9 @@ public interface SirosBlobBuilderInterface {
      *
      * # Errors
      *
-     * `BlobError::UnknownIcon` when a credential names an icon that was
-     * never added — a dangling reference would otherwise cost that credential
-     * its picture with nothing said. `BlobError::Encoding` if serialisation
-     * fails.
+     * An unknown-icon error when a credential names an icon that was never
+     * added — a dangling reference would otherwise cost that credential its
+     * picture with nothing said. An encoding error if serialisation fails.
      */
     fun `build`(): kotlin.ByteArray
     
@@ -1443,7 +1442,7 @@ open class SirosBlobBuilder: Disposable, AutoCloseable, SirosBlobBuilderInterfac
 
     
     /**
-     * Add an icon, referenced by the `icon_id` field on `FfiCredential`.
+     * Add an icon, referenced by a credential's icon id.
      *
      * Stored once and shared: wallets routinely hold several credentials from
      * one issuer, and repeating that issuer's logo per credential makes the
@@ -1482,10 +1481,9 @@ open class SirosBlobBuilder: Disposable, AutoCloseable, SirosBlobBuilderInterfac
      *
      * # Errors
      *
-     * `BlobError::UnknownIcon` when a credential names an icon that was
-     * never added — a dangling reference would otherwise cost that credential
-     * its picture with nothing said. `BlobError::Encoding` if serialisation
-     * fails.
+     * An unknown-icon error when a credential names an icon that was never
+     * added — a dangling reference would otherwise cost that credential its
+     * picture with nothing said. An encoding error if serialisation fails.
      */
     @Throws(BlobException::class)override fun `build`(): kotlin.ByteArray {
             return FfiConverterByteArray.lift(
@@ -1729,7 +1727,7 @@ data class FfiCredential (
      */
     var `subtitle`: kotlin.String, 
     /**
-     * Icon added via `add_icon` on `SirosBlobBuilder`, by its id.
+     * An icon added to the blob when it was built, by its id.
      */
     var `iconId`: kotlin.String?, 
     /**
@@ -2475,7 +2473,8 @@ public object FfiConverterMapStringString: FfiConverterRustBuffer<Map<kotlin.Str
          *
          * # Errors
          *
-         * See `MatchError`.
+         * See the match error type — `MatchError` in Rust and Swift,
+         * `MatchException` in Kotlin.
          */
     @Throws(MatchException::class) fun `matchDcApiRequest`(`blob`: kotlin.ByteArray, `requestJson`: kotlin.String): FfiMatchOutcome {
             return FfiConverterTypeFfiMatchOutcome.lift(
@@ -2496,7 +2495,8 @@ public object FfiConverterMapStringString: FfiConverterRustBuffer<Map<kotlin.Str
          *
          * # Errors
          *
-         * See `MatchError`.
+         * See the match error type — `MatchError` in Rust and Swift,
+         * `MatchException` in Kotlin.
          */
     @Throws(MatchException::class) fun `matchDcql`(`blob`: kotlin.ByteArray, `dcqlJson`: kotlin.String): FfiMatchOutcome {
             return FfiConverterTypeFfiMatchOutcome.lift(
