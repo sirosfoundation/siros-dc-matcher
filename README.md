@@ -59,7 +59,7 @@ CI also enforces two things a green build does not imply:
 - **Host ABI symbols.** A matcher that fails to link traps, and a trapping
   matcher emits no entries — indistinguishable to a user from "no matching
   credential". The imports and exports are checked in the built module.
-- **A 300 KB size budget** for `matcher.wasm`, which runs in someone else's
+- **A 307,200-byte (300 KiB) size budget** for `matcher.wasm`, which runs in someone else's
   process. Raising it takes a line in `.github/workflows/ci.yml` and a reason.
 
 ### Bindings and mobile artifacts
