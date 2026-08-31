@@ -1,6 +1,6 @@
 [package]
 name = "siros-dc-matcher-core"
-version = "0.1.0"
+version = "0.2.0"
 description = "Credential database, match profile and picker emission for the SIROS DC API matcher"
 publish = false
 edition.workspace = true
