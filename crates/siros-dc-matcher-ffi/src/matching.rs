@@ -152,7 +152,8 @@ pub struct FfiMatchOutcome {
 ///
 /// # Errors
 ///
-/// See `MatchError`.
+/// See the match error type — `MatchError` in Rust and Swift,
+/// `MatchException` in Kotlin.
 #[uniffi::export]
 pub fn match_dc_api_request(
     blob: Vec<u8>,
@@ -200,7 +201,8 @@ pub fn match_dc_api_request(
 ///
 /// # Errors
 ///
-/// See `MatchError`.
+/// See the match error type — `MatchError` in Rust and Swift,
+/// `MatchException` in Kotlin.
 #[uniffi::export]
 pub fn match_dcql(blob: Vec<u8>, dcql_json: String) -> Result<FfiMatchOutcome, MatchError> {
     let db = decode(&blob)?;

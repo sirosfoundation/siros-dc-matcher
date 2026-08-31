@@ -84,7 +84,7 @@ pub struct FfiCredential {
     pub title: String,
     /// Secondary line, typically the issuer.
     pub subtitle: String,
-    /// Icon added via `add_icon` on `SirosBlobBuilder`, by its id.
+    /// An icon added to the blob when it was built, by its id.
     pub icon_id: Option<String>,
     /// Claims available for matching and display.
     pub claims: Vec<FfiClaim>,
@@ -162,7 +162,7 @@ impl SirosBlobBuilder {
         self.state().credentials.push(credential);
     }
 
-    /// Add an icon, referenced by the `icon_id` field on `FfiCredential`.
+    /// Add an icon, referenced by a credential's icon id.
     ///
     /// Stored once and shared: wallets routinely hold several credentials from
     /// one issuer, and repeating that issuer's logo per credential makes the
@@ -193,10 +193,9 @@ impl SirosBlobBuilder {
     ///
     /// # Errors
     ///
-    /// `BlobError::UnknownIcon` when a credential names an icon that was
-    /// never added — a dangling reference would otherwise cost that credential
-    /// its picture with nothing said. `BlobError::Encoding` if serialisation
-    /// fails.
+    /// An unknown-icon error when a credential names an icon that was never
+    /// added — a dangling reference would otherwise cost that credential its
+    /// picture with nothing said. An encoding error if serialisation fails.
     pub fn build(&self) -> Result<Vec<u8>, BlobError> {
         let s = self.state();
 
