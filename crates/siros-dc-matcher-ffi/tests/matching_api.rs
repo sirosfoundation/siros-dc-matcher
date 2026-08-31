@@ -257,3 +257,54 @@ fn per_query_candidates_carry_claims_and_capabilities() {
     );
     assert_eq!(candidate.capabilities[0].system, "longfellow-libzk-v1");
 }
+
+/// `matches` is per-query and survives an unsatisfiable request; `satisfiable`
+/// is the only thing that says whether to offer any of it.
+///
+/// This is not a curiosity. A caller that reads `matches` without checking
+/// `satisfiable` offers the half of a two-credential request that the wallet
+/// can answer, and the user consents to a presentation that cannot satisfy the
+/// verifier — the §6.4 "MUST NOT return any Credential(s)" case. Reading
+/// `combinations` hides the mistake, because that list is empty exactly when
+/// the request is unsatisfiable, so the check is easy to leave out and hard to
+/// notice missing.
+#[test]
+fn matches_survives_an_unsatisfiable_request_but_combinations_do_not() {
+    let blob = wallet(None);
+    // Two queries, one of which the wallet cannot answer. Absent
+    // `credential_sets` means the verifier asks for all of them (§6.4).
+    let query = json!({"credentials": [
+        {
+            "id": "answerable",
+            "format": "mso_mdoc",
+            "meta": {"doctype_value": "org.iso.18013.5.1.mDL"},
+            "claims": age_claim(),
+        },
+        {
+            "id": "unanswerable",
+            "format": "mso_mdoc",
+            "meta": {"doctype_value": "org.iso.18013.5.1.mDL"},
+            "claims": [{"path": ["org.iso.18013.5.1", "portrait"]}],
+        },
+    ]})
+    .to_string();
+
+    let out = match_dcql(blob, query).expect("matched");
+
+    assert!(!out.satisfiable, "half a request is not a satisfiable one");
+    assert!(
+        out.combinations.is_empty(),
+        "nothing may be offered, so there is no way to satisfy it"
+    );
+
+    let answerable = out
+        .matches
+        .iter()
+        .find(|m| m.query_id == "answerable")
+        .expect("the query that matched is still reported");
+    assert!(
+        !answerable.credentials.is_empty(),
+        "`matches` reports per-query candidates regardless of the whole; \
+         a caller must consult `satisfiable` before offering them"
+    );
+}
