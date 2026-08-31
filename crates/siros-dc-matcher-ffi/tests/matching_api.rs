@@ -259,7 +259,8 @@ fn per_query_candidates_carry_claims_and_capabilities() {
 }
 
 /// `matches` is per-query and survives an unsatisfiable request; `satisfiable`
-/// is the only thing that says whether to offer any of it.
+/// is the authoritative answer to whether any of it may be offered, and the
+/// check a caller reading `matches` has to make.
 ///
 /// This is not a curiosity. A caller that reads `matches` without checking
 /// `satisfiable` offers the half of a two-credential request that the wallet
