@@ -3,7 +3,7 @@
 A credential matcher for the W3C Digital Credentials API on Android, plus the
 DCQL engine behind it, as a Rust workspace.
 
-On Android a wallet does not answer a `navigator.credentials.get({digital: …})`
+On Android, a wallet does not answer a `navigator.credentials.get({digital: …})`
 call directly. It registers a snapshot of its credentials with Play Services
 ahead of time, and Play Services runs a **matcher** — a WebAssembly module —
 inside the credential-picker process to decide which credentials to offer. The
@@ -31,7 +31,7 @@ rustup target add wasm32-wasip1
 Then:
 
 ```sh
-cargo test --workspace --all-features   # 121 tests
+cargo test --workspace --all-features   # libraries, FFI, and matcher.wasm
 make matcher                            # target/wasm32-wasip1/wasm-release/matcher.wasm
 ```
 
@@ -123,8 +123,8 @@ change.
 The registered blob contains claim *values*, not only labels, because the
 matcher evaluates a verifier's DCQL query against them before any UI is shown.
 This is inherent to how the Credential Manager registry works and is equally
-true of the stock matcher. Recorded here so it is understood up front rather
-than rediscovered as a finding.
+true of the stock matcher. It is recorded here so that it is understood up
+front rather than rediscovered later as a finding.
 
 ## Acknowledgements
 
