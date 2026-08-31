@@ -108,9 +108,40 @@ impl<'a> ProfilePolicy<'a> {
         Self { profile }
     }
 
-    /// Whether the wallet can satisfy the capability a format rule requires.
+    /// Every capability requirement that applies to this query.
     ///
-    /// Returns the capability that matched, so the caller can tell the wallet
+    /// Two sources, deliberately. A format rule can require one — `mso_mdoc_zk`
+    /// naming no proof system has asked for a proof without saying which, and
+    /// must not be answered with an ordinary presentation. And a
+    /// [`crate::profile::MetaTrigger`] fires on the *presence* of a `meta`
+    /// key whatever the format, because what actually signals a ZK
+    /// presentation is `zk_system_type`; the `mso_mdoc_zk` format says the
+    /// same thing and is expected to be retired.
+    fn requirements(&self, query: &CredentialQuery) -> Vec<crate::profile::Requirement> {
+        let mut out: Vec<crate::profile::Requirement> = self
+            .profile
+            .format_rule(&query.format)
+            .map(|rule| rule.requires.clone())
+            .unwrap_or_default();
+
+        for trigger in &self.profile.meta_triggers {
+            if !query.meta.contains_key(&trigger.when_meta_present) {
+                continue;
+            }
+            let requirement = crate::profile::Requirement {
+                capability: trigger.capability.clone(),
+                from_meta: trigger.when_meta_present.clone(),
+            };
+            if !out.contains(&requirement) {
+                out.push(requirement);
+            }
+        }
+        out
+    }
+
+    /// Whether the wallet can satisfy the capabilities this query requires.
+    ///
+    /// Returns the capabilities that matched, so the caller can tell the wallet
     /// *which* system was chosen rather than making it work that out again
     /// after the user has selected the entry.
     pub fn capability_for(
@@ -206,13 +237,18 @@ impl siros_dcql::Policy<BlobCredential<'_>> for ProfilePolicy<'_> {
             },
         };
 
+        let _ = rule;
+
         // Capability first: it is the cheapest check and the one whose failure
         // is least visible later. An entry offered without the capability
         // walks the user through consent and then cannot deliver.
-        if let Some(rule) = rule {
-            if !rule.requires.is_empty() && self.capability_for(query, &rule.requires).is_none() {
-                return false;
-            }
+        //
+        // Both sources, via requirements(): the format rule's own, and any
+        // MetaTrigger fired by a `meta` key being present. A ZK request is
+        // signalled by `zk_system_type`, not by the format.
+        let required = self.requirements(query);
+        if !required.is_empty() && self.capability_for(query, &required).is_none() {
+            return false;
         }
 
         self.profile
@@ -302,11 +338,12 @@ pub fn resolve<'a>(
     query: &CredentialQuery,
     candidate: &siros_dcql::Candidate,
 ) -> Resolved<'a> {
-    let capabilities = profile
-        .format_rule(&query.format)
-        .filter(|rule| !rule.requires.is_empty())
-        .and_then(|rule| policy.capability_for(query, &rule.requires))
-        .unwrap_or_default();
+    let required = policy.requirements(query);
+    let capabilities = if required.is_empty() {
+        Vec::new()
+    } else {
+        policy.capability_for(query, &required).unwrap_or_default()
+    };
 
     Resolved {
         claims: candidate
