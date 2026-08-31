@@ -31,7 +31,7 @@ rustup target add wasm32-wasip1
 Then:
 
 ```sh
-cargo test --workspace --all-features   # libraries, FFI, and matcher.wasm
+cargo test --locked --workspace --all-features   # libraries, FFI, and matcher.wasm
 make matcher                            # target/wasm32-wasip1/wasm-release/matcher.wasm
 ```
 
@@ -50,6 +50,7 @@ cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 cargo clippy --locked -p siros-dc-matcher-wasm --target wasm32-wasip1 \
   --profile wasm-release -- -D warnings
 make check-bindings    # committed bindings match the current API
+cargo publish --locked --dry-run -p siros-dcql
 ```
 
 CI also enforces two things a green build does not imply:
