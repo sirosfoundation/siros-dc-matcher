@@ -115,7 +115,7 @@ fn main() {
             // how the two would come to disagree.
             let resolved = query
                 .credential(query_id)
-                .map(|cq| resolve(&db.profile, &policy, cq, candidate));
+                .map(|cq| resolve(&policy, cq, candidate));
             let capabilities = resolved
                 .as_ref()
                 .map(|r| r.capabilities.clone())

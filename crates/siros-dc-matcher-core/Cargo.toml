@@ -22,4 +22,9 @@ ciborium = { workspace = true }
 serde_bytes = "0.11.19"
 
 [dev-dependencies]
+# This crate, on itself, to switch on `test-fixtures` for its own integration
+# tests. Without it they compile only when some *other* workspace crate happens
+# to enable the feature and Cargo unifies it — so `cargo test -p
+# siros-dc-matcher-core` alone would fail while `--workspace` passed.
+siros-dc-matcher-core = { path = ".", features = ["test-fixtures"] }
 serde_json.workspace = true

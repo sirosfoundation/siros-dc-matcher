@@ -1738,6 +1738,7 @@ dependencies = [
  "serde",
  "serde_bytes",
  "serde_json",
+ "siros-dc-matcher-core",
  "siros-dcql",
 ]
 

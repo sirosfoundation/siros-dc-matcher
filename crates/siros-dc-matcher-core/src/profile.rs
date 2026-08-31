@@ -64,12 +64,34 @@ pub struct FormatRule {
 /// Checking this before the picker rather than during presentation is the
 /// whole point: offering an entry the wallet cannot honour walks the user
 /// through a consent screen and then fails.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Requirement {
     /// Capability name, looked up in the profile's capability map.
     pub capability: String,
     /// `meta` key carrying the verifier's acceptable values.
     pub from_meta: String,
+}
+
+/// A capability required by the *presence* of a `meta` key, whatever format
+/// the verifier asked for.
+///
+/// What actually signals a ZK presentation is `zk_system_type` — a list of the
+/// proof systems the verifier will accept. The `mso_mdoc_zk` format was an
+/// early way of saying the same thing and is expected to be retired, so a
+/// verifier may well send an ordinary `mso_mdoc` query carrying
+/// `zk_system_type`. Keying the capability check on the format would miss
+/// exactly that request: the wallet would be offered, and would then produce a
+/// plain presentation for a verifier expecting a proof.
+///
+/// Format rules keep their own [`FormatRule::requires`] as well. A verifier
+/// naming `mso_mdoc_zk` and *no* system has asked for a proof without saying
+/// which, and must not be answered with an ordinary presentation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MetaTrigger {
+    /// The `meta` key whose presence turns the requirement on.
+    pub when_meta_present: String,
+    /// Capability name, looked up in the profile's capability map.
+    pub capability: String,
 }
 
 /// How one `meta` key constrains a match.
@@ -144,6 +166,10 @@ pub struct MatchProfile {
     /// How `meta` keys constrain a match.
     #[serde(default)]
     pub meta_rules: Vec<MetaRule>,
+    /// Capabilities required by the presence of a `meta` key, whatever the
+    /// requested format. See [`MetaTrigger`].
+    #[serde(default)]
+    pub meta_triggers: Vec<MetaTrigger>,
     /// Capabilities, keyed by the name a [`Requirement`] refers to.
     #[serde(default)]
     pub capabilities: std::collections::BTreeMap<String, Vec<Capability>>,
@@ -258,6 +284,14 @@ impl MatchProfile {
                     op: Op::Ignore,
                 },
             ],
+            // What signals a ZK presentation is the presence of
+            // `zk_system_type`, not the requested format. `mso_mdoc_zk` says
+            // the same thing and is expected to be retired, so it is still
+            // matched above but is not what the check depends on.
+            meta_triggers: vec![MetaTrigger {
+                when_meta_present: "zk_system_type".into(),
+                capability: ZK_CAPABILITY.into(),
+            }],
             capabilities: BTreeMap::new(),
             unknown_format: UnknownFormat::Reject,
             debug: false,

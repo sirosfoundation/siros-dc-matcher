@@ -143,6 +143,21 @@ Two details that are easy to get wrong and were got wrong before:
 pseudonym context changes what is produced, not which credential can produce
 it.
 
+**What signals a ZK presentation is `zk_system_type`, not the format.** The
+`mso_mdoc_zk` format says the same thing and is expected to be retired, so a
+verifier may send an ordinary `mso_mdoc` query carrying `zk_system_type`. A
+`MetaTrigger` in the profile fires the capability check on the presence of that
+key whatever the format was; `mso_mdoc_zk` is still matched, and still requires
+a named system, because asking for a proof without saying which must not be
+answered with a plain presentation.
+
+One consequence worth stating: a wallet that cannot produce any named system is
+no longer offered for such a request, even though the format alone would have
+matched. That is deliberate — the verifier asked for a proof — but it does mean
+a verifier who intends `zk_system_type` as an *offer* rather than a requirement
+would see fewer wallets. Nothing in the specification distinguishes the two
+readings today.
+
 **Known limitation:** claims path pointers resolve only when every component
 is a string. The blob records paths as strings, so a pointer containing `null`
 or an array index cannot match. ISO mdoc is unaffected (§7.2.1 requires two

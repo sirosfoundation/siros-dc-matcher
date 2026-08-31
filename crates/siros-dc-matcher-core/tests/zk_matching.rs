@@ -265,3 +265,84 @@ fn a_different_doctype_does_not_match() {
         .insert("doctype_value".into(), json!("org.iso.23220.photoid.1"));
     assert!(matches(&db, &q).is_empty());
 }
+
+// ---------------------------------------------------------------------------
+// What actually signals a ZK presentation
+// ---------------------------------------------------------------------------
+
+/// `zk_system_type` on an ordinary `mso_mdoc` query is a ZK request.
+///
+/// The `mso_mdoc_zk` format says the same thing and is expected to be retired,
+/// so a verifier may well ask this way. Keying the capability check on the
+/// format would miss it: the wallet would be offered and would then produce a
+/// plain presentation for a verifier expecting a proof.
+#[test]
+fn zk_system_type_on_a_plain_mdoc_query_is_a_zk_request() {
+    let capable = wallet(vec![longfellow("4")]);
+    let q = plain_mdoc_query_with(json!({
+        "doctype_value": "org.iso.18013.5.1.mDL",
+        "zk_system_type": [{"id": "1", "system": "longfellow-libzk-v1", "num_attributes": "4"}]
+    }));
+    assert_eq!(matches(&capable, &q), ["mdl-1"]);
+}
+
+/// And the gate bites: a wallet that cannot produce the named proof is not
+/// offered, even though the format alone would have matched.
+#[test]
+fn a_plain_mdoc_query_naming_a_system_we_lack_is_not_offered() {
+    let incapable = wallet(vec![]);
+    let q = plain_mdoc_query_with(json!({
+        "doctype_value": "org.iso.18013.5.1.mDL",
+        "zk_system_type": [{"id": "1", "system": "longfellow-libzk-v1"}]
+    }));
+    assert!(
+        matches(&incapable, &q).is_empty(),
+        "the verifier asked for a proof this wallet cannot produce"
+    );
+
+    // The same wallet still answers the same query without the ZK signal.
+    let plain = plain_mdoc_query_with(json!({"doctype_value": "org.iso.18013.5.1.mDL"}));
+    assert_eq!(matches(&incapable, &plain), ["mdl-1"]);
+}
+
+/// The retired-but-still-sent format keeps working, and keeps requiring a
+/// system: naming `mso_mdoc_zk` with no `zk_system_type` asks for a proof
+/// without saying which, and must not be answered with a plain presentation.
+#[test]
+fn the_zk_format_still_matches_and_still_needs_a_named_system() {
+    let capable = wallet(vec![longfellow("4")]);
+
+    let named = zk_query(json!([{
+        "id": "1", "system": "longfellow-libzk-v1", "num_attributes": "4"
+    }]));
+    assert_eq!(matches(&capable, &named), ["mdl-1"]);
+
+    let unnamed: DcqlQuery = serde_json::from_value(json!({
+        "credentials": [{
+            "id": "zk",
+            "format": "mso_mdoc_zk",
+            "meta": {"doctype_value": "org.iso.18013.5.1.mDL"},
+            "claims": [{"path": ["org.iso.18013.5.1", "age_over_18"]}]
+        }]
+    }))
+    .expect("valid DCQL");
+    assert!(
+        matches(&capable, &unnamed).is_empty(),
+        "a ZK format with no named system must not fall back to a plain presentation"
+    );
+}
+
+/// A query in the plain `mso_mdoc` format, carrying whatever `meta` a test
+/// needs. Used both with and without the ZK signal, since the point is that
+/// the format is the same either way and only `meta` differs.
+fn plain_mdoc_query_with(meta: serde_json::Value) -> DcqlQuery {
+    serde_json::from_value(json!({
+        "credentials": [{
+            "id": "zk",
+            "format": "mso_mdoc",
+            "meta": meta,
+            "claims": [{"path": ["org.iso.18013.5.1", "age_over_18"]}]
+        }]
+    }))
+    .expect("valid DCQL")
+}
