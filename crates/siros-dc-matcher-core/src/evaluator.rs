@@ -333,7 +333,6 @@ pub struct Resolved<'a> {
 
 /// Resolve the details of one match.
 pub fn resolve<'a>(
-    profile: &'a MatchProfile,
     policy: &ProfilePolicy<'a>,
     query: &CredentialQuery,
     candidate: &siros_dcql::Candidate,

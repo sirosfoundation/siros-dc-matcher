@@ -233,7 +233,7 @@ fn evaluate(db: &CredentialDatabase, query: &DcqlQuery) -> FfiMatchOutcome {
         // query.
         let resolved = query
             .credential(query_id)
-            .map(|cq| resolve(&db.profile, &policy, cq, candidate));
+            .map(|cq| resolve(&policy, cq, candidate));
         FfiMatchedCredential {
             query_id: query_id.clone(),
             credential_id: candidate.credential_id.clone(),
