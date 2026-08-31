@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 
 use serde_json::json;
 use siros_dc_matcher_core::db::{Claim, Credential, CredentialDatabase};
-use siros_dc_matcher_core::evaluator::{credentials, ProfilePolicy};
+use siros_dc_matcher_core::evaluator::{credentials, resolve, ProfilePolicy};
 use siros_dc_matcher_core::fixtures;
 use siros_dc_matcher_core::profile::Capability;
 use siros_dcql::{execute, DcqlQuery};
@@ -345,4 +345,96 @@ fn plain_mdoc_query_with(meta: serde_json::Value) -> DcqlQuery {
         }]
     }))
     .expect("valid DCQL")
+}
+
+// ---------------------------------------------------------------------------
+// zk_required: whether naming proof systems demands one
+// ---------------------------------------------------------------------------
+
+/// `zk_required: false` makes the proof preferred rather than demanded, so a
+/// wallet that cannot produce one is still offered.
+///
+/// Without this a verifier had no way to say "a proof if you have one,
+/// otherwise an ordinary presentation" — naming systems always excluded every
+/// wallet that could not satisfy them.
+#[test]
+fn zk_required_false_still_offers_a_wallet_that_cannot_prove() {
+    let incapable = wallet(vec![]);
+    let q = plain_mdoc_query_with(json!({
+        "doctype_value": "org.iso.18013.5.1.mDL",
+        "zk_system_type": [{"id": "1", "system": "longfellow-libzk-v1"}],
+        "zk_required": false
+    }));
+    assert_eq!(matches(&incapable, &q), ["mdl-1"]);
+}
+
+/// And a wallet that *can* prove is still told which system to use, so it can
+/// produce a proof even though it was not obliged to.
+#[test]
+fn zk_required_false_still_reports_the_chosen_system() {
+    let capable = wallet(vec![longfellow("4")]);
+    let q = plain_mdoc_query_with(json!({
+        "doctype_value": "org.iso.18013.5.1.mDL",
+        "zk_system_type": [{"id": "1", "system": "longfellow-libzk-v1", "num_attributes": "4"}],
+        "zk_required": false
+    }));
+
+    let creds = credentials(&capable);
+    let policy = ProfilePolicy::new(&capable.profile);
+    let result = execute(&q, &creds, &policy);
+    let candidate = &result.query("zk").expect("query").candidates[0];
+    let resolved = resolve(&policy, q.credential("zk").expect("query"), candidate);
+
+    assert_eq!(
+        resolved.capabilities.first().map(|c| c.system.as_str()),
+        Some("longfellow-libzk-v1"),
+        "an optional proof the wallet can produce should still be reported"
+    );
+}
+
+/// Absent means required. Every verifier sending `zk_system_type` today gets
+/// exactly what it gets now, and the safer reading is the default: not
+/// offering beats offering a presentation that cannot satisfy the verifier.
+#[test]
+fn an_absent_flag_means_required() {
+    let incapable = wallet(vec![]);
+    let q = plain_mdoc_query_with(json!({
+        "doctype_value": "org.iso.18013.5.1.mDL",
+        "zk_system_type": [{"id": "1", "system": "longfellow-libzk-v1"}]
+    }));
+    assert!(matches(&incapable, &q).is_empty());
+}
+
+/// `zk_required: true` is the default said out loud.
+#[test]
+fn an_explicit_true_is_the_same_as_absent() {
+    let incapable = wallet(vec![]);
+    let q = plain_mdoc_query_with(json!({
+        "doctype_value": "org.iso.18013.5.1.mDL",
+        "zk_system_type": [{"id": "1", "system": "longfellow-libzk-v1"}],
+        "zk_required": true
+    }));
+    assert!(matches(&incapable, &q).is_empty());
+}
+
+/// The flag does not rescue the `mso_mdoc_zk` format. Asking for that format
+/// is asking for a proof, whatever a sibling key claims — the two together are
+/// contradictory, and the format is the more specific statement.
+#[test]
+fn the_flag_does_not_override_an_explicit_zk_format() {
+    let incapable = wallet(vec![]);
+    let q: DcqlQuery = serde_json::from_value(json!({
+        "credentials": [{
+            "id": "zk",
+            "format": "mso_mdoc_zk",
+            "meta": {
+                "doctype_value": "org.iso.18013.5.1.mDL",
+                "zk_system_type": [{"id": "1", "system": "longfellow-libzk-v1"}],
+                "zk_required": false
+            },
+            "claims": [{"path": ["org.iso.18013.5.1", "age_over_18"]}]
+        }]
+    }))
+    .expect("valid DCQL");
+    assert!(matches(&incapable, &q).is_empty());
 }

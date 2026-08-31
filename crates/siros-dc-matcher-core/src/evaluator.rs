@@ -86,6 +86,23 @@ impl siros_dcql::Credential for BlobCredential<'_> {
     }
 }
 
+/// Whether a trigger's capability is required, or merely preferred.
+///
+/// Required unless the request explicitly says otherwise: a verifier naming
+/// proof systems and saying nothing more is asking for a proof, and offering a
+/// wallet that cannot produce one leads to a consented presentation that
+/// cannot satisfy them.
+fn trigger_is_required(trigger: &crate::profile::MetaTrigger, query: &CredentialQuery) -> bool {
+    let Some(flag) = trigger.required_flag.as_deref() else {
+        return true;
+    };
+    query
+        .meta
+        .get(flag)
+        .and_then(Value::as_bool)
+        .unwrap_or(true)
+}
+
 /// A stored claim's value as JSON, for DCQL `values` comparison.
 ///
 /// Values are stored as strings, but a verifier writes `"values": [true]` or
@@ -118,6 +135,42 @@ impl<'a> ProfilePolicy<'a> {
     /// presentation is `zk_system_type`; the `mso_mdoc_zk` format says the
     /// same thing and is expected to be retired.
     fn requirements(&self, query: &CredentialQuery) -> Vec<crate::profile::Requirement> {
+        let mut out: Vec<crate::profile::Requirement> = self
+            .profile
+            .format_rule(&query.format)
+            .map(|rule| rule.requires.clone())
+            .unwrap_or_default();
+
+        for trigger in &self.profile.meta_triggers {
+            if !query.meta.contains_key(&trigger.when_meta_present) {
+                continue;
+            }
+            // Named systems, but the verifier said a proof is not required.
+            // The capability is then preferred rather than demanded: the
+            // wallet is offered either way, and resolve() still reports the
+            // system it chose, so a wallet that *can* prove still will.
+            if !trigger_is_required(trigger, query) {
+                continue;
+            }
+            let requirement = crate::profile::Requirement {
+                capability: trigger.capability.clone(),
+                from_meta: trigger.when_meta_present.clone(),
+            };
+            if !out.contains(&requirement) {
+                out.push(requirement);
+            }
+        }
+        out
+    }
+
+    /// Every capability requirement this query could involve, whether or not
+    /// the verifier insists on it.
+    ///
+    /// [`Self::requirements`] answers "what must hold for this to match".
+    /// This answers "what would apply if the wallet can manage it", which is
+    /// what a caller needs in order to report the chosen system for a request
+    /// that names proof systems without requiring one.
+    fn applicable_capabilities(&self, query: &CredentialQuery) -> Vec<crate::profile::Requirement> {
         let mut out: Vec<crate::profile::Requirement> = self
             .profile
             .format_rule(&query.format)
@@ -334,11 +387,16 @@ pub fn resolve<'a>(
     query: &CredentialQuery,
     candidate: &siros_dcql::Candidate,
 ) -> Resolved<'a> {
-    let required = policy.requirements(query);
-    let capabilities = if required.is_empty() {
+    // Every capability that *could* apply, not only the required ones: a
+    // verifier may name proof systems without insisting on one, and a wallet
+    // able to satisfy such a request should still be told which system to use.
+    let applicable = policy.applicable_capabilities(query);
+    let capabilities = if applicable.is_empty() {
         Vec::new()
     } else {
-        policy.capability_for(query, &required).unwrap_or_default()
+        policy
+            .capability_for(query, &applicable)
+            .unwrap_or_default()
     };
 
     Resolved {
