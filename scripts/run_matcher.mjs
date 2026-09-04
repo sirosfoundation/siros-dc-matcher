@@ -16,9 +16,9 @@
 // behaviours that have cost the most time — a null icon dropping the entry, and
 // a duplicate set id discarding the whole output — so it reports both instead.
 
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, extname, join, resolve } from 'node:path';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const WASM = join(root, 'target/wasm32-wasip1/wasm-release/matcher.wasm');
@@ -47,7 +47,38 @@ function defaultRequest() {
   return JSON.stringify({ requests: [{ protocol: 'openid4vp-v1-signed', data: { request: jws } }] });
 }
 
-const [, , requestPath] = process.argv;
+/**
+ * Resolve a request path given on the command line.
+ *
+ * The argument is the tool's whole interface, so it cannot be an allowlist —
+ * but it can be checked: an absolute, resolved path to an existing regular
+ * `.json` file, and nothing else. That rejects the directory traversal a
+ * relative path invites and, more usefully in practice, says which of those
+ * four things was wrong instead of failing inside `readFile`.
+ */
+async function resolveRequestPath(argument) {
+  const path = resolve(argument);
+  if (extname(path).toLowerCase() !== '.json') {
+    throw new Error(`not a .json file: ${path}`);
+  }
+  const info = await stat(path).catch(() => null);
+  if (info === null) throw new Error(`no such file: ${path}`);
+  if (!info.isFile()) throw new Error(`not a regular file: ${path}`);
+  return path;
+}
+
+const [, , requestArgument] = process.argv;
+let requestPath = null;
+if (requestArgument) {
+  try {
+    requestPath = await resolveRequestPath(requestArgument);
+  } catch (e) {
+    // A usage mistake, not a crash. A stack trace here buries the one line
+    // that says what was wrong with the path.
+    console.error(`run_matcher: ${e.message}`);
+    process.exit(2);
+  }
+}
 const requestText = requestPath ? await readFile(requestPath, 'utf8') : defaultRequest();
 const request = Buffer.from(requestText, 'utf8');
 const credentials = await readFile(BLOB);
@@ -88,7 +119,11 @@ const credman = {
 
 const credman_v2 = {
   AddEntrySet: (setId, length) => sets.push({ id: str(setId), length }),
-  AddEntryToSet(credId, icon, iconLen, title, subtitle, disclaimer, warning, metadata, setId, index) {
+  // Ten arguments, in the host's order. Taken as a list and named here rather
+  // than declared one by one: the shape is the platform's, so a linter's view
+  // on how many parameters a function should have has nowhere to go.
+  AddEntryToSet(...args) {
+    const [credId, icon, iconLen, title, subtitle, disclaimer, warning, metadata, setId, index] = args;
     if (icon === 0 || iconLen === 0) nullIcons++;
     entries.push({
       setId: str(setId), index, credentialId: str(credId),
@@ -105,7 +140,11 @@ const credman_v2 = {
 // The host's WASI is a subset. These are the only two the shipped binary
 // imports, and both come from rustc's CRT rather than from our code.
 const wasi_snapshot_preview1 = {
-  environ_sizes_get: (countPtr, sizePtr) => (u32(countPtr, 0), u32(sizePtr, 0), 0),
+  environ_sizes_get: (countPtr, sizePtr) => {
+    u32(countPtr, 0);
+    u32(sizePtr, 0);
+    return 0;
+  },
   environ_get: () => 0,
   proc_exit: () => {},
   fd_write: () => 0,
@@ -119,7 +158,8 @@ const { instance } = await WebAssembly.instantiate(await readFile(WASM), {
 memory = instance.exports.memory;
 instance.exports._start();
 
-console.log(`request: ${request.length} bytes${requestPath ? ` from ${requestPath}` : ' (built-in signed example)'}`);
+const source = requestPath ? `from ${requestPath}` : '(built-in signed example)';
+console.log(`request: ${request.length} bytes ${source}`);
 console.log(`blob:    ${credentials.length} bytes\n`);
 
 if (sets.length === 0) {
