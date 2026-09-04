@@ -399,6 +399,33 @@ def rewrite_start_section(payload, remap):
     return uleb128(remap(idx))
 
 
+def const_expr_end(buf, off):
+    """Return the offset just past the `end` of the constant expression
+    starting at `off`. Walked instruction by instruction, never by scanning
+    for an 0x0B byte: that byte is a perfectly good LEB payload (`i32.const
+    11` is `41 0B`), and stopping there would truncate the expression and
+    desync everything after it. The spec limits const exprs to these
+    opcodes, so anything else is a malformed module, not a gap to paper
+    over."""
+    while True:
+        op = buf[off]
+        off += 1
+        if op == 0x0B:  # end
+            return off
+        if op in (0x41, 0x42):  # i32.const / i64.const: sleb
+            _, off = read_sleb128(buf, off)
+        elif op == 0x43:  # f32.const
+            off += 4
+        elif op == 0x44:  # f64.const
+            off += 8
+        elif op in (0x23, 0xD2):  # global.get globalidx / ref.func funcidx
+            _, off = read_uleb128(buf, off)
+        elif op == 0xD0:  # ref.null: reftype byte
+            off += 1
+        else:
+            raise ValueError(f"unexpected opcode {op:#x} in const expr at {off-1:#x}")
+
+
 def rewrite_element_section(payload, remap):
     count, p = read_uleb128(payload, 0)
     out = bytearray(uleb128(count))
@@ -408,10 +435,12 @@ def rewrite_element_section(payload, remap):
             raise ValueError(f"unhandled element segment flags={flags}")
         out += uleb128(flags)
         start = p
-        while payload[p] != 0x0B:
-            p += 1
-        p += 1
-        out += payload[start:p]  # offset expr copied verbatim (no func refs in it)
+        p = const_expr_end(payload, p)
+        # The offset expr is an i32 const expr in practice, but a `ref.func`
+        # in it would carry a funcidx too, and walk_and_remap already knows
+        # every opcode a const expr may hold - so run it through the same
+        # walker rather than copying verbatim.
+        out += walk_and_remap(payload[start:p], remap)
         n, p = read_uleb128(payload, p)
         out += uleb128(n)
         for _ in range(n):
