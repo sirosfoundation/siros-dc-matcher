@@ -194,7 +194,15 @@ fn main() {
                     // picker. #19 gave the diagnostic entries this fallback;
                     // a real entry needs it at least as much, because a user
                     // is looking for that credential.
-                    icon: Some(db.icon_bytes(credential).unwrap_or(FALLBACK_ICON_PNG)),
+                    // `filter`, not just `unwrap_or`: a zero-length `IconRef`
+                    // yields `Some(&[])`, and the emitter maps an empty slice
+                    // to the same null pointer as `None` — so without this the
+                    // fallback misses exactly the case it was added for.
+                    icon: Some(
+                        db.icon_bytes(credential)
+                            .filter(|bytes| !bytes.is_empty())
+                            .unwrap_or(FALLBACK_ICON_PNG),
+                    ),
                 },
             );
 

@@ -61,8 +61,14 @@ async function resolveRequestPath(argument) {
   if (extname(path).toLowerCase() !== '.json') {
     throw new Error(`not a .json file: ${path}`);
   }
-  const info = await stat(path).catch(() => null);
-  if (info === null) throw new Error(`no such file: ${path}`);
+  // Report what `stat` actually said. Collapsing every error into "no such
+  // file" sends someone hunting for a typo when the answer was EACCES.
+  let info;
+  try {
+    info = await stat(path);
+  } catch (e) {
+    throw new Error(e.code === 'ENOENT' ? `no such file: ${path}` : `cannot stat ${path}: ${e.message}`);
+  }
   if (!info.isFile()) throw new Error(`not a regular file: ${path}`);
   return path;
 }

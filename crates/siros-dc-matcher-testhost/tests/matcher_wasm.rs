@@ -452,6 +452,31 @@ fn an_out_of_range_icon_reference_does_not_lose_the_entry() {
     assert!(!entry.icon.is_empty(), "a null icon is a dropped entry");
 }
 
+/// A zero-length icon reference is a missing icon, not a present empty one.
+///
+/// `icon_bytes` returns `Some(&[])` for it, and the emitter maps an empty slice
+/// to the same null pointer it uses for `None` — so a fallback that only
+/// handles `None` misses the case and the host drops the entry anyway.
+#[test]
+fn a_zero_length_icon_reference_still_falls_back() {
+    let mut db = wallet(None);
+    db.icons = vec![1, 2, 3];
+    db.credentials[0].icon = Some(siros_dc_matcher_core::db::IconRef { start: 1, len: 0 });
+
+    let captured = invoke(
+        &db,
+        request(
+            "mso_mdoc",
+            json!({"doctype_value": "org.iso.18013.5.1.mDL"}),
+        ),
+    );
+    let icon = &captured
+        .entry("siros-0", 0)
+        .expect("the entry must survive")
+        .icon;
+    assert!(!icon.is_empty(), "an empty icon is a dropped entry");
+}
+
 /// When more combinations exist than the matcher will offer, the number
 /// dropped is reported rather than hidden.
 #[test]
