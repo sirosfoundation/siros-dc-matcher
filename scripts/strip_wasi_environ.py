@@ -28,6 +28,15 @@ TARGET_MODULE = "wasi_snapshot_preview1"
 TARGET_FIELDS = ("environ_get", "environ_sizes_get")
 
 
+def check(cond, message):
+    """Input validation that survives `python -O`. `assert` is stripped under
+    optimisation, and a patcher that then carries on with a malformed module
+    would write a corrupt binary without a word - the one failure mode this
+    whole script exists to avoid."""
+    if not cond:
+        raise ValueError(message)
+
+
 def read_uleb128(buf, off):
     result = 0
     shift = 0
@@ -286,14 +295,14 @@ def rewrite_import_section(payload, target_module, target_fields):
             kept.append(payload[entry_start:p])
         else:
             raise ValueError(f"unknown import kind {kind}")
-    assert p == len(payload), "import section not fully consumed"
+    check(p == len(payload), "import section not fully consumed")
     new_payload = uleb128(len(kept)) + b"".join(kept)
     return new_payload, func_idx, removed_func_indices
 
 
 def make_remap(total_imported_funcs_old, removed):
     removed_sorted = sorted(idx for idx, _, _ in removed)
-    assert len(removed_sorted) == 2
+    check(len(removed_sorted) == 2, f"expected 2 removed imports, got {len(removed_sorted)}")
     idx_low, idx_high = removed_sorted
     new_base = total_imported_funcs_old - 2
 
@@ -350,7 +359,7 @@ def rewrite_code_section(payload, remap, removed_order):
         body = payload[p2:p2 + size]
         bodies.append(body)
         p = p2 + size
-    assert p == len(payload), "code section not fully consumed"
+    check(p == len(payload), "code section not fully consumed")
 
     new_bodies = []
     for _, _, field in removed_order:
@@ -395,8 +404,35 @@ def rewrite_start_section(payload, remap):
     than using this section, so the shipped build has none; but an input that
     does have one would otherwise run the wrong function after the shift."""
     idx, p = read_uleb128(payload, 0)
-    assert p == len(payload), "start section not fully consumed"
+    check(p == len(payload), "start section not fully consumed")
     return uleb128(remap(idx))
+
+
+def const_expr_end(buf, off):
+    """Return the offset just past the `end` of the constant expression
+    starting at `off`. Walked instruction by instruction, never by scanning
+    for an 0x0B byte: that byte is a perfectly good LEB payload (`i32.const
+    11` is `41 0B`), and stopping there would truncate the expression and
+    desync everything after it. The spec limits const exprs to these
+    opcodes, so anything else is a malformed module, not a gap to paper
+    over."""
+    while True:
+        op = buf[off]
+        off += 1
+        if op == 0x0B:  # end
+            return off
+        if op in (0x41, 0x42):  # i32.const / i64.const: sleb
+            _, off = read_sleb128(buf, off)
+        elif op == 0x43:  # f32.const
+            off += 4
+        elif op == 0x44:  # f64.const
+            off += 8
+        elif op in (0x23, 0xD2):  # global.get globalidx / ref.func funcidx
+            _, off = read_uleb128(buf, off)
+        elif op == 0xD0:  # ref.null: reftype byte
+            off += 1
+        else:
+            raise ValueError(f"unexpected opcode {op:#x} in const expr at {off-1:#x}")
 
 
 def rewrite_element_section(payload, remap):
@@ -408,30 +444,32 @@ def rewrite_element_section(payload, remap):
             raise ValueError(f"unhandled element segment flags={flags}")
         out += uleb128(flags)
         start = p
-        while payload[p] != 0x0B:
-            p += 1
-        p += 1
-        out += payload[start:p]  # offset expr copied verbatim (no func refs in it)
+        p = const_expr_end(payload, p)
+        # The offset expr is an i32 const expr in practice, but a `ref.func`
+        # in it would carry a funcidx too, and walk_and_remap already knows
+        # every opcode a const expr may hold - so run it through the same
+        # walker rather than copying verbatim.
+        out += walk_and_remap(payload[start:p], remap)
         n, p = read_uleb128(payload, p)
         out += uleb128(n)
         for _ in range(n):
             idx, p = read_uleb128(payload, p)
             out += uleb128(remap(idx))
-    assert p == len(payload), "element section not fully consumed"
+    check(p == len(payload), "element section not fully consumed")
     return bytes(out)
 
 
 def main(in_path, out_path):
     data = open(in_path, "rb").read()
-    assert data[:4] == b"\0asm"
+    check(data[:4] == b"\0asm", f"{in_path}: not a wasm module (bad magic)")
     secs = split_sections(data)
 
     import_sec = next(s for s in secs if s["id"] == 2)
     new_import_payload, total_imported_funcs_old, removed = rewrite_import_section(
         import_sec["payload"], TARGET_MODULE, TARGET_FIELDS)
-    assert len(removed) == 2, f"expected 2 targets, found {len(removed)}"
+    check(len(removed) == 2, f"expected 2 targets, found {len(removed)}")
     type_idxs = {t for _, t, _ in removed}
-    assert len(type_idxs) == 1, "expected both targets to share one type index"
+    check(len(type_idxs) == 1, "expected both targets to share one type index")
     stub_type_idx = type_idxs.pop()
 
     removed_order = sorted(removed, key=lambda t: t[0])
@@ -463,4 +501,6 @@ def main(in_path, out_path):
 
 
 if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        sys.exit(f"usage: {sys.argv[0]} <in.wasm> <out.wasm>")
     main(sys.argv[1], sys.argv[2])

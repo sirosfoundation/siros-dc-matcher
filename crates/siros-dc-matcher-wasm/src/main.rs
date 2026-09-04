@@ -71,10 +71,18 @@ const MAX_COMBINATIONS: usize = 32;
 fn main() {
     let request = abi::request_bytes();
     let blob = abi::credentials_bytes();
-
     let (_package, origin) = abi::calling_app_info();
+    run(&request, &blob, &origin);
+}
 
-    let Ok(db) = CredentialDatabase::from_cbor(&blob) else {
+/// One matcher invocation, from the host's three inputs to emitted entries.
+///
+/// Separate from [`main`] so it can be driven on the host in tests: off the
+/// wasm target, `abi::emit` is a no-op and the three readers return nothing,
+/// so this is the only way to exercise the decision path against a real
+/// request and the committed golden blob.
+fn run(request: &[u8], blob: &[u8], origin: &str) {
+    let Ok(db) = CredentialDatabase::from_cbor(blob) else {
         // Nothing can be offered from a blob we cannot read, and nothing can
         // be said about it either: the debug flag lives inside the blob. This
         // is indistinguishable from "no matching credential" in the picker —
@@ -86,8 +94,8 @@ fn main() {
         enabled: db.profile.debug,
     };
 
-    let Some((protocol, query)) = first_supported_request(&request, &db.profile) else {
-        diag.emit("request", || diagnose(&request, &db.profile));
+    let Some((protocol, query)) = first_supported_request(request, &db.profile) else {
+        diag.emit("request", || diagnose(request, &db.profile));
         return;
     };
 
@@ -307,3 +315,85 @@ const FALLBACK_ICON_PNG: &[u8] = &[
     0x08, 0x08, 0x08, 0x5C, 0x16, 0x49, 0xAB, 0xD0, 0x97, 0x3A, 0x79, 0x4A, 0x21, 0x00, 0x00, 0x00,
     0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
 ];
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+
+    /// The committed golden blob - the same bytes `golden_blob.rs` in core
+    /// guards - so this exercises the real decoder against the real encoder's
+    /// output, not a hand-built stand-in.
+    fn golden_blob() -> Vec<u8> {
+        std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../siros-dc-matcher-core/tests/golden/credential_database_v1.cbor"
+        ))
+        .expect("golden vector")
+    }
+
+    fn mdl_request(claim: &str) -> String {
+        format!(
+            r#"{{"requests":[{{"protocol":"openid4vp-v1-unsigned","data":{{"dcql_query":{{"credentials":[{{"id":"mdl","format":"mso_mdoc","meta":{{"doctype_value":"org.iso.18013.5.1.mDL"}},"claims":[{{"path":["org.iso.18013.5.1","{claim}"]}}]}}]}}}}}}]}}"#
+        )
+    }
+
+    /// The whole decision path, host-side. `abi::emit` is a no-op here, so
+    /// what this proves is that every branch runs to completion without
+    /// trapping on real inputs - the property the denied `unwrap`/`panic`
+    /// lints exist for. A trap in the sandbox is a silent "no match".
+    #[test]
+    fn run_completes_on_every_path() {
+        let blob = golden_blob();
+        // Satisfiable: the golden credential has family_name.
+        run(
+            mdl_request("family_name").as_bytes(),
+            &blob,
+            "https://verifier.example",
+        );
+        // Unsatisfiable: it has no age_over_21. §6.4 says offer nothing.
+        run(mdl_request("age_over_21").as_bytes(), &blob, "");
+        // No supported request at all.
+        run(b"{\"requests\":[]}", &blob, "");
+        // A blob the decoder rejects.
+        run(mdl_request("family_name").as_bytes(), b"\x00\x01\x02", "");
+        run(b"", b"", "");
+    }
+
+    /// With the debug flag in the profile, the same paths run through the
+    /// diagnostic emitters too.
+    #[test]
+    fn run_completes_on_every_path_with_diagnostics_on() {
+        let mut db = CredentialDatabase::from_cbor(&golden_blob()).unwrap();
+        db.profile.debug = true;
+        let blob = db.to_cbor().unwrap();
+        run(mdl_request("age_over_21").as_bytes(), &blob, "");
+        run(
+            b"{\"requests\":[{\"protocol\":\"urn:example:x\",\"data\":{}}]}",
+            &blob,
+            "",
+        );
+        run(mdl_request("family_name").as_bytes(), &blob, "");
+    }
+
+    /// Off is the production state, and it must cost nothing: the message
+    /// closure — which for the no-request case re-parses the request — is
+    /// never run.
+    #[test]
+    fn disabled_diagnostics_never_compose_their_message() {
+        let composed = Cell::new(false);
+        Diagnostics { enabled: false }.emit("x", || {
+            composed.set(true);
+            String::new()
+        });
+        assert!(!composed.get());
+
+        let composed = Cell::new(false);
+        Diagnostics { enabled: true }.emit("x", || {
+            composed.set(true);
+            String::new()
+        });
+        assert!(composed.get());
+    }
+}

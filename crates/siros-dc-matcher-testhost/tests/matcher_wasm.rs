@@ -35,6 +35,19 @@ fn build_matcher_wasm() -> Vec<u8> {
 
     let out = Command::new(env!("CARGO"))
         .current_dir(&root)
+        // The parent's compiler flags must not reach this build. Under
+        // `cargo llvm-cov` they carry `-C instrument-coverage`, which
+        // wasm32-wasip1 has no profiler runtime for, so the nested build fails
+        // and every test here reports the target as missing.
+        //
+        // Clearing them is also the more correct thing independently of
+        // coverage: these tests exist to run the artifact that ships, and an
+        // instrumented build is a different binary — different size, different
+        // code paths around the profiling hooks.
+        .env_remove("RUSTFLAGS")
+        .env_remove("CARGO_ENCODED_RUSTFLAGS")
+        .env_remove("RUSTDOCFLAGS")
+        .env_remove("CARGO_ENCODED_RUSTDOCFLAGS")
         .args([
             "build",
             "-p",

@@ -36,10 +36,26 @@ unsafe impl GlobalAlloc for SimpleAllocator {
         let align = layout.align();
         let size = layout.size();
 
-        let alloc_ptr = (next_addr + align - 1) & !(align - 1);
-        let end_ptr = alloc_ptr + size;
+        // Checked, not wrapping: a wrapped `end_ptr` would land below
+        // `next_addr` and hand out memory already in use, which for a global
+        // allocator is undefined behaviour rather than a mere bad pointer.
+        // Overflow is an allocation failure like any other, so it is null.
+        // `align` is a power of two, so `& !(align - 1)` rounds up without
+        // any further arithmetic that could wrap.
+        let Some(alloc_ptr) = next_addr
+            .checked_add(align - 1)
+            .map(|addr| addr & !(align - 1))
+        else {
+            return core::ptr::null_mut();
+        };
+        let Some(end_ptr) = alloc_ptr.checked_add(size) else {
+            return core::ptr::null_mut();
+        };
 
-        let current_limit = unsafe { CURRENT_PAGES * PAGE_SIZE };
+        // Saturating: 65536 pages of 64 KiB is exactly 2^32, one past what a
+        // 32-bit `usize` holds. At that limit nothing can grow further anyway,
+        // and saturating keeps the comparison below meaningful.
+        let current_limit = unsafe { CURRENT_PAGES.saturating_mul(PAGE_SIZE) };
 
         if end_ptr > current_limit {
             let needed_bytes = end_ptr - current_limit;
