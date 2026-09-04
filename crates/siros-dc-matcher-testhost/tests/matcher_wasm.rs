@@ -77,9 +77,15 @@ fn longfellow(num_attributes: &str) -> Capability {
     fixtures::longfellow(Some(num_attributes))
 }
 
+/// An unsigned request: the request object is `data` itself.
+///
+/// Labelled `-unsigned` because that is the shape it sends. It used to say
+/// `-signed` while sending this, which was accepted only because the protocol
+/// id selected a parser and nothing else — the thing the shape check now
+/// prevents. The genuinely signed shapes are exercised further down.
 fn request(format: &str, meta: Value) -> Vec<u8> {
     json!({"requests": [{
-        "protocol": "openid4vp-v1-signed",
+        "protocol": "openid4vp-v1-unsigned",
         "data": {"dcql_query": {"credentials": [{
             "id": "q1",
             "format": format,
@@ -265,7 +271,7 @@ fn metadata_carries_the_matchers_decision() {
     let meta: Value = serde_json::from_str(&entry.metadata).expect("metadata is JSON");
     assert_eq!(meta["query_id"], "q1");
     assert_eq!(meta["credential_id"], "mdl-1");
-    assert_eq!(meta["protocol"], "openid4vp-v1-signed");
+    assert_eq!(meta["protocol"], "openid4vp-v1-unsigned");
     // The platform-attested caller, so the wallet can check it was shown the
     // same one the matcher was.
     assert_eq!(meta["verified_origin"], "https://verifier.example.org");
@@ -363,7 +369,7 @@ fn a_multi_credential_option_is_one_set_with_two_members() {
     db.credentials.push(second);
 
     let request = json!({"requests": [{
-        "protocol": "openid4vp-v1-signed",
+        "protocol": "openid4vp-v1-unsigned",
         "data": {"dcql_query": {
             "credentials": [
                 {"id": "q1", "format": "mso_mdoc", "meta": {"doctype_value": "org.iso.18013.5.1.mDL"},
@@ -415,9 +421,15 @@ fn an_icon_is_emitted_as_raw_bytes() {
     assert_eq!(entry.icon, vec![0x89, b'P', b'N', b'G', 0x00, 0x1A, 0x0A]);
 }
 
-/// A credential with no icon emits none, rather than an empty-but-present one.
+/// A credential with no icon still gets image bytes.
+///
+/// This asserted the opposite until the host's behaviour was understood: a
+/// null icon does not cost the picture, it costs the *entry*. The host drops
+/// it and logs `Null icon for icon` in its own process, so a credential
+/// registered without image bytes would simply not appear — while the wallet,
+/// the matcher and this suite all agreed it had matched.
 #[test]
-fn a_credential_without_an_icon_emits_none() {
+fn a_credential_without_an_icon_falls_back_rather_than_vanishing() {
     let db = wallet(None);
     let captured = invoke(
         &db,
@@ -426,15 +438,16 @@ fn a_credential_without_an_icon_emits_none() {
             json!({"doctype_value": "org.iso.18013.5.1.mDL"}),
         ),
     );
-    assert!(captured
-        .entry("siros-0", 0)
-        .expect("one entry")
-        .icon
-        .is_empty());
+    let icon = &captured.entry("siros-0", 0).expect("one entry").icon;
+    assert!(!icon.is_empty(), "a null icon is a dropped entry");
+    assert_eq!(&icon[..4], b"\x89PNG", "and it has to be a real image");
 }
 
-/// An icon reference outside the blob's buffer costs that credential its
-/// picture, not its entry.
+/// An icon reference outside the blob's buffer costs that credential neither
+/// its entry nor its picture: it falls back like any other missing icon.
+///
+/// A truncated or mis-offset reference is a wallet-side encoding bug, and the
+/// user should not pay for it by losing the credential from the picker.
 #[test]
 fn an_out_of_range_icon_reference_does_not_lose_the_entry() {
     let mut db = wallet(None);
@@ -455,7 +468,32 @@ fn an_out_of_range_icon_reference_does_not_lose_the_entry() {
         .entry("siros-0", 0)
         .expect("the entry must survive");
     assert_eq!(entry.credential_id, "mdl-1");
-    assert!(entry.icon.is_empty());
+    assert!(!entry.icon.is_empty(), "a null icon is a dropped entry");
+}
+
+/// A zero-length icon reference is a missing icon, not a present empty one.
+///
+/// `icon_bytes` returns `Some(&[])` for it, and the emitter maps an empty slice
+/// to the same null pointer it uses for `None` — so a fallback that only
+/// handles `None` misses the case and the host drops the entry anyway.
+#[test]
+fn a_zero_length_icon_reference_still_falls_back() {
+    let mut db = wallet(None);
+    db.icons = vec![1, 2, 3];
+    db.credentials[0].icon = Some(siros_dc_matcher_core::db::IconRef { start: 1, len: 0 });
+
+    let captured = invoke(
+        &db,
+        request(
+            "mso_mdoc",
+            json!({"doctype_value": "org.iso.18013.5.1.mDL"}),
+        ),
+    );
+    let icon = &captured
+        .entry("siros-0", 0)
+        .expect("the entry must survive")
+        .icon;
+    assert!(!icon.is_empty(), "an empty icon is a dropped entry");
 }
 
 /// When more combinations exist than the matcher will offer, the number
@@ -481,4 +519,140 @@ fn dropped_combinations_are_reported_in_metadata() {
     let entry = captured.entry("siros-0", 0).expect("one entry");
     let meta: Value = serde_json::from_str(&entry.metadata).expect("metadata is JSON");
     assert_eq!(meta["combinations_dropped"], 8);
+}
+
+// ============================================================================
+// Signed and multisigned requests, through the real binary
+// ============================================================================
+//
+// `request()` above sends the unsigned shape under the unsigned label. These
+// send what a verifier actually sends for the two signed protocols: a JWS the
+// matcher has to decode before it can see a query at all. Which shape is
+// accepted follows the protocol id, so these cannot be reached by relabelling
+// an inline request.
+
+/// Unpadded base64url, so a test does not hand-encode its own payload.
+fn b64(bytes: &[u8]) -> String {
+    const A: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut out = String::new();
+    for chunk in bytes.chunks(3) {
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
+        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
+        for i in 0..chunk.len() + 1 {
+            let idx = ((n >> (18 - 6 * i)) & 0x3F) as usize;
+            out.push(char::from(A[idx]));
+        }
+    }
+    out
+}
+
+/// The authorization request object the signed protocols carry as a payload.
+fn signed_request_object() -> String {
+    json!({
+        "client_id": "x509_san_dns:verifier.example",
+        "response_mode": "dc_api.jwt",
+        "nonce": "n-0S6_WzA2Mj",
+        "expected_origins": ["https://verifier.example.org"],
+        "dcql_query": {"credentials": [{
+            "id": "q1",
+            "format": "mso_mdoc",
+            "meta": {"doctype_value": "org.iso.18013.5.1.mDL"},
+            "claims": [{"path": ["org.iso.18013.5.1", "age_over_18"]}]
+        }]},
+        "client_metadata": {"jwks": {"keys": []}}
+    })
+    .to_string()
+}
+
+fn envelope(protocol: &str, data: Value) -> Vec<u8> {
+    json!({"requests": [{"protocol": protocol, "data": data}]})
+        .to_string()
+        .into_bytes()
+}
+
+/// A signed request produces a picker entry, which it never did before: the
+/// binary read only `data.dcql_query`, so a verifier offering just this
+/// protocol got nothing and no way to find out why.
+#[test]
+fn a_signed_request_produces_an_entry() {
+    let jws = format!(
+        "{}.{}.{}",
+        b64(br#"{"alg":"ES256","typ":"oauth-authz-req+jwt"}"#),
+        b64(signed_request_object().as_bytes()),
+        b64(b"signature")
+    );
+
+    let captured = invoke(
+        &wallet(None),
+        envelope("openid4vp-v1-signed", json!({"request": jws})),
+    );
+
+    assert_eq!(captured.sets, vec![("siros-0".to_string(), 1)]);
+    let entry = captured.entry("siros-0", 0).expect("one entry");
+    assert_eq!(entry.credential_id, "mdl-1");
+    assert!(
+        !entry.icon.is_empty(),
+        "the host silently drops an entry whose icon is null"
+    );
+}
+
+/// The multisigned shape reaches the same place by a different member.
+#[test]
+fn a_multisigned_request_produces_an_entry() {
+    let data = json!({"request": {
+        "payload": b64(signed_request_object().as_bytes()),
+        "signatures": [{
+            "protected": b64(br#"{"alg":"ES256"}"#),
+            "signature": b64(b"signature")
+        }]
+    }});
+
+    let captured = invoke(&wallet(None), envelope("openid4vp-v1-multisigned", data));
+    assert_eq!(captured.sets, vec![("siros-0".to_string(), 1)]);
+    assert_eq!(
+        captured
+            .entry("siros-0", 0)
+            .expect("one entry")
+            .credential_id,
+        "mdl-1"
+    );
+}
+
+/// A truncated JWS emits nothing and, more importantly, does not trap: a
+/// trapped matcher shows the user exactly what "no matching credential" shows.
+#[test]
+fn a_truncated_signed_request_emits_nothing_without_trapping() {
+    let captured = invoke(
+        &wallet(None),
+        envelope(
+            "openid4vp-v1-signed",
+            json!({"request": "aGVhZGVy.dHJ1bmM"}),
+        ),
+    );
+    assert!(captured.sets.is_empty());
+}
+
+/// Protocol negotiation, end to end through the binary: the verifier offers a
+/// signed request this build cannot read and an unsigned one it can, and the
+/// second is answered.
+#[test]
+fn the_binary_falls_through_to_a_protocol_it_can_read() {
+    let unsigned: Value = serde_json::from_str(&signed_request_object()).expect("json");
+    let request = json!({"requests": [
+        {"protocol": "openid4vp-v1-signed", "data": {"request": "@@@not-a-jws@@@"}},
+        {"protocol": "openid4vp-v1-unsigned", "data": unsigned}
+    ]})
+    .to_string()
+    .into_bytes();
+
+    let captured = invoke(&wallet(None), request);
+    assert_eq!(
+        captured.sets,
+        vec![("siros-0".to_string(), 1)],
+        "the unsigned entry should have been answered"
+    );
 }

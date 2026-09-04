@@ -28,7 +28,7 @@ use std::collections::HashMap;
 
 use siros_dc_matcher_core::db::CredentialDatabase;
 use siros_dc_matcher_core::evaluator::{credentials, resolve, ProfilePolicy};
-use siros_dc_matcher_core::profile::Parser;
+use siros_dc_matcher_core::request;
 use siros_dcql::{execute, DcqlQuery};
 
 use crate::FfiCapability;
@@ -169,26 +169,34 @@ pub fn match_dc_api_request(
             offered: Vec::new(),
         })?;
 
-    let query = requests
-        .iter()
-        .find_map(|entry| {
-            let protocol = entry.get("protocol")?.as_str()?;
-            match db.profile.parser_for(protocol)? {
-                Parser::Openid4vpV1 => {
-                    serde_json::from_value(entry.get("data")?.get("dcql_query")?.clone()).ok()
-                }
-                // ISO 18013-7 carries a CBOR DeviceRequest rather than DCQL,
-                // so it needs its own reader. Declining lets the caller fall
-                // through to another protocol the verifier offered.
-                Parser::IsoMdocApi => None,
-            }
-        })
-        .ok_or_else(|| MatchError::UnsupportedProtocol {
-            offered: requests
+    // The same dispatch the matcher binary runs, from the same module. It used
+    // to be a second implementation here that read only `data.dcql_query`,
+    // which meant the two entry points disagreed about what a request is: the
+    // picker would offer a credential for a signed request that this path
+    // declined. One reader, or they drift again.
+    let (_protocol, query) = match request::first_supported_in(&parsed, &db.profile) {
+        Some(found) => found,
+        None => {
+            let offered: Vec<String> = requests
                 .iter()
                 .filter_map(|e| Some(e.get("protocol")?.as_str()?.to_owned()))
-                .collect(),
-        })?;
+                .collect();
+            // "Unsupported protocol" only when that is what happened. Now that
+            // a supported protocol can still be unreadable — a payload that is
+            // not base64url, not JSON, or shaped for a different label — the
+            // two have to be told apart, or a caller debugging a malformed
+            // signed request is sent to look at its protocol list.
+            return Err(
+                if offered.iter().any(|p| db.profile.parser_for(p).is_some()) {
+                    MatchError::Request {
+                        reason: request::diagnose(request_json.as_bytes(), &db.profile),
+                    }
+                } else {
+                    MatchError::UnsupportedProtocol { offered }
+                },
+            );
+        }
+    };
 
     Ok(evaluate(&db, &query))
 }

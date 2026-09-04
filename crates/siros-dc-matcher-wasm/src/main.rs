@@ -46,9 +46,9 @@ extern "C" fn _start() {
 
 use siros_dc_matcher_core::db::CredentialDatabase;
 use siros_dc_matcher_core::evaluator::{credentials, resolve, ProfilePolicy};
-use siros_dc_matcher_core::profile::Parser;
+use siros_dc_matcher_core::request::{diagnose, first_supported_request};
 use siros_dc_matcher_core::sink::Entry;
-use siros_dcql::{execute, DcqlQuery};
+use siros_dcql::execute;
 
 /// Prefix for the per-entry set ids.
 ///
@@ -94,8 +94,8 @@ fn run(request: &[u8], blob: &[u8], origin: &str) {
         enabled: db.profile.debug,
     };
 
-    let Some((protocol, query)) = first_supported_request(request, &db) else {
-        diag.emit("request", || diagnose_no_request(request, &db));
+    let Some((protocol, query)) = first_supported_request(request, &db.profile) else {
+        diag.emit("request", || diagnose(request, &db.profile));
         return;
     };
 
@@ -195,7 +195,22 @@ fn run(request: &[u8], blob: &[u8], origin: &str) {
                     title: &credential.title,
                     subtitle: &credential.subtitle,
                     metadata: &metadata,
-                    icon: db.icon_bytes(credential),
+                    // Never `None`. A null icon is not a missing picture:
+                    // the host drops the whole entry and logs `Null icon for
+                    // icon` in its own process, so a credential registered
+                    // without image bytes would silently not exist in the
+                    // picker. #19 gave the diagnostic entries this fallback;
+                    // a real entry needs it at least as much, because a user
+                    // is looking for that credential.
+                    // `filter`, not just `unwrap_or`: a zero-length `IconRef`
+                    // yields `Some(&[])`, and the emitter maps an empty slice
+                    // to the same null pointer as `None` — so without this the
+                    // fallback misses exactly the case it was added for.
+                    icon: Some(
+                        db.icon_bytes(credential)
+                            .filter(|bytes| !bytes.is_empty())
+                            .unwrap_or(FALLBACK_ICON_PNG),
+                    ),
                 },
             );
 
@@ -219,40 +234,6 @@ fn run(request: &[u8], blob: &[u8], origin: &str) {
                 }
             }
         }
-    }
-}
-
-/// The first request this wallet's profile says it can answer, with its DCQL
-/// query.
-///
-/// The request is a list because one DC API call can offer the same request
-/// under several protocols and let the wallet pick. Taking the first
-/// *supported* one rather than the first one is what makes that negotiation
-/// work — and which protocols are supported comes from the registered profile,
-/// so adding one costs a re-registration rather than a new binary.
-fn first_supported_request(request: &[u8], db: &CredentialDatabase) -> Option<(String, DcqlQuery)> {
-    let parsed: serde_json::Value = serde_json::from_slice(request).ok()?;
-    parsed
-        .get("requests")?
-        .as_array()?
-        .iter()
-        .find_map(|entry| {
-            let protocol = entry.get("protocol")?.as_str()?;
-            let parser = db.profile.parser_for(protocol)?;
-            let query = extract_query(parser, entry.get("data")?)?;
-            Some((protocol.to_string(), query))
-        })
-}
-
-/// The DCQL query carried by one protocol's request data.
-fn extract_query(parser: Parser, data: &serde_json::Value) -> Option<DcqlQuery> {
-    match parser {
-        Parser::Openid4vpV1 => serde_json::from_value(data.get("dcql_query")?.clone()).ok(),
-        // ISO 18013-7 carries a CBOR DeviceRequest rather than DCQL, so it
-        // needs its own reader rather than a different JSON pointer. Returning
-        // None declines the protocol, which lets the caller fall through to
-        // another one the verifier offered instead of failing the request.
-        Parser::IsoMdocApi => None,
     }
 }
 
@@ -335,136 +316,11 @@ const FALLBACK_ICON_PNG: &[u8] = &[
     0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
 ];
 
-/// Why [`first_supported_request`] found nothing to answer, in as much detail
-/// as can be gotten without threading a proper error type through it. Only
-/// ever shown when [`Diagnostics`] is enabled.
-fn diagnose_no_request(request: &[u8], db: &CredentialDatabase) -> String {
-    let parsed: Result<serde_json::Value, _> = serde_json::from_slice(request);
-    let parsed = match parsed {
-        Ok(v) => v,
-        Err(e) => return format!("request ({} bytes) is not valid JSON: {e}", request.len()),
-    };
-    let Some(requests) = parsed.get("requests").and_then(|r| r.as_array()) else {
-        return "request JSON has no `requests` array".to_string();
-    };
-    if requests.is_empty() {
-        return "`requests` array is empty".to_string();
-    }
-    let mut parts = Vec::new();
-    for entry in requests {
-        let protocol = entry
-            .get("protocol")
-            .and_then(|p| p.as_str())
-            .unwrap_or("<missing protocol>");
-        let Some(parser) = db.profile.parser_for(protocol) else {
-            parts.push(format!("{protocol}: not in registered profile"));
-            continue;
-        };
-        let Some(data) = entry.get("data") else {
-            parts.push(format!("{protocol}: request entry has no `data`"));
-            continue;
-        };
-        match parser {
-            Parser::Openid4vpV1 => match data.get("dcql_query") {
-                None => parts.push(format!("{protocol}: data has no `dcql_query`")),
-                Some(dcql) => match serde_json::from_value::<DcqlQuery>(dcql.clone()) {
-                    Ok(q) => parts.push(format!(
-                        "{protocol}: dcql_query parsed ({} credential queries) - should not have reached here",
-                        q.credentials.len()
-                    )),
-                    Err(e) => parts.push(format!("{protocol}: dcql_query failed to parse: {e}")),
-                },
-            },
-            Parser::IsoMdocApi => parts.push(format!("{protocol}: ISO mdoc API has no parser yet")),
-        }
-    }
-    parts.join(" | ")
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 mod tests {
     use super::*;
-    use siros_dc_matcher_core::db::VERSION;
-    use siros_dc_matcher_core::profile::MatchProfile;
     use std::cell::Cell;
-
-    fn db() -> CredentialDatabase {
-        CredentialDatabase {
-            version: VERSION,
-            profile: MatchProfile::siros_default(),
-            credentials: Vec::new(),
-            icons: Vec::new(),
-        }
-    }
-
-    const UNSIGNED_MDL: &str = r#"{"requests":[{"protocol":"openid4vp-v1-unsigned","data":{"dcql_query":{"credentials":[{"id":"mdl","format":"mso_mdoc","meta":{"doctype_value":"org.iso.18013.5.1.mDL"},"claims":[{"path":["org.iso.18013.5.1","family_name"]}]}]}}}]}"#;
-
-    #[test]
-    fn unsigned_request_yields_its_query_and_protocol() {
-        let (protocol, query) = first_supported_request(UNSIGNED_MDL.as_bytes(), &db()).unwrap();
-        assert_eq!(protocol, "openid4vp-v1-unsigned");
-        assert_eq!(query.credentials.len(), 1);
-        assert_eq!(query.credentials[0].id, "mdl");
-    }
-
-    /// The verifier may offer the same request under several protocols. The
-    /// first one the profile supports wins, not merely the first one listed.
-    #[test]
-    fn falls_through_to_the_first_supported_protocol() {
-        let request = r#"{"requests":[
-            {"protocol":"urn:example:nobody-speaks-this","data":{"dcql_query":{"credentials":[]}}},
-            {"protocol":"openid4vp-v1-unsigned","data":{"dcql_query":{"credentials":[{"id":"a","format":"mso_mdoc"}]}}}]}"#;
-        let (protocol, _) = first_supported_request(request.as_bytes(), &db()).unwrap();
-        assert_eq!(protocol, "openid4vp-v1-unsigned");
-    }
-
-    /// Signed requests carry a JWS in `data.request` rather than an inline
-    /// query. Today that declines the protocol; when signed support lands this
-    /// test is the one to flip.
-    #[test]
-    fn signed_request_is_declined_for_now() {
-        let request = r#"{"requests":[{"protocol":"openid4vp-v1-signed","data":{"request":"eyJhbGciOiJFUzI1NiJ9.e30.sig"}}]}"#;
-        assert!(first_supported_request(request.as_bytes(), &db()).is_none());
-    }
-
-    #[test]
-    fn garbage_declines_without_panicking() {
-        let d = db();
-        assert!(first_supported_request(b"", &d).is_none());
-        assert!(first_supported_request(b"not json", &d).is_none());
-        assert!(first_supported_request(br#"{"requests":"nope"}"#, &d).is_none());
-        assert!(first_supported_request(
-            br#"{"requests":[{"protocol":"openid4vp-v1-unsigned"}]}"#,
-            &d
-        )
-        .is_none());
-    }
-
-    #[test]
-    fn iso_mdoc_api_parser_declines_everything() {
-        let data = serde_json::json!({"deviceRequest": "base64..."});
-        assert!(extract_query(Parser::IsoMdocApi, &data).is_none());
-    }
-
-    /// Each reason `first_supported_request` can come back empty has its own
-    /// wording, because the diagnostic is all a tester on a device gets.
-    #[test]
-    fn diagnosis_names_the_reason() {
-        let d = db();
-        assert!(diagnose_no_request(b"not json", &d).contains("not valid JSON"));
-        assert!(diagnose_no_request(br#"{"x":1}"#, &d).contains("no `requests` array"));
-        assert!(diagnose_no_request(br#"{"requests":[]}"#, &d).contains("is empty"));
-        let unknown = br#"{"requests":[{"protocol":"urn:example:x","data":{}}]}"#;
-        assert!(diagnose_no_request(unknown, &d).contains("not in registered profile"));
-        let no_data = br#"{"requests":[{"protocol":"openid4vp-v1-unsigned"}]}"#;
-        assert!(diagnose_no_request(no_data, &d).contains("no `data`"));
-        let no_query =
-            br#"{"requests":[{"protocol":"openid4vp-v1-unsigned","data":{"request":"jws"}}]}"#;
-        assert!(diagnose_no_request(no_query, &d).contains("no `dcql_query`"));
-        let bad_query = br#"{"requests":[{"protocol":"openid4vp-v1-unsigned","data":{"dcql_query":{"credentials":"x"}}}]}"#;
-        assert!(diagnose_no_request(bad_query, &d).contains("failed to parse"));
-    }
 
     /// The committed golden blob - the same bytes `golden_blob.rs` in core
     /// guards - so this exercises the real decoder against the real encoder's
