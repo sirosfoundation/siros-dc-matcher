@@ -38,6 +38,9 @@ pub enum NoQuery {
     /// `data.request` is present but is neither a string nor an object, so
     /// there is nothing to decode — a different problem from its absence.
     RequestNotAJwsOrObject,
+    /// A JWS JSON Serialization object is present but carries no string
+    /// `payload` — again, present but undecodable rather than absent.
+    JwsObjectHasNoPayload,
     /// `data.request` is a string but not a compact JWS.
     NotACompactJws,
     /// The payload segment is not unpadded base64url.
@@ -63,6 +66,9 @@ impl NoQuery {
             }
             Self::RequestNotAJwsOrObject => {
                 "data.request is neither a JWS string nor a JWS JSON object".into()
+            }
+            Self::JwsObjectHasNoPayload => {
+                "the JWS JSON object has no string `payload` member".into()
             }
             Self::NotACompactJws => "data.request is not a compact JWS".into(),
             Self::PayloadNotBase64url => "JWS payload is not unpadded base64url".into(),
@@ -152,12 +158,14 @@ fn signed_payload(data: &Value) -> Result<Vec<u8>, NoQuery> {
         // Compact serialization: header.payload.signature.
         Some(Value::String(jws)) => compact_payload(jws),
         // JWS JSON Serialization, general or flattened.
-        Some(Value::Object(_)) => json_serialization_payload(&data["request"]),
+        Some(Value::Object(_)) => {
+            json_serialization_payload(&data["request"], NoQuery::JwsObjectHasNoPayload)
+        }
         // Present but useless — a number, a bool, null. Distinguished from
         // absence because "there is no request" sends whoever is reading the
         // diagnostic looking for a missing key that is in fact right there.
         Some(_) => Err(NoQuery::RequestNotAJwsOrObject),
-        None => json_serialization_payload(data),
+        None => json_serialization_payload(data, NoQuery::NoQueryAndNoRequest),
     }
 }
 
@@ -195,9 +203,15 @@ fn compact_payload(jws: &str) -> Result<Vec<u8>, NoQuery> {
 }
 
 /// The `payload` member of a JWS JSON Serialization object.
-fn json_serialization_payload(value: &Value) -> Result<Vec<u8>, NoQuery> {
+///
+/// `missing` is the caller's, because the two callers mean different things by
+/// a missing `payload`: under `data.request` it is a malformed signed request,
+/// while at the top level of `data` it means this was not a signed request at
+/// all. Reporting either as the other sends whoever reads the diagnostic
+/// looking in the wrong place.
+fn json_serialization_payload(value: &Value, missing: NoQuery) -> Result<Vec<u8>, NoQuery> {
     let Some(Value::String(payload)) = value.get("payload") else {
-        return Err(NoQuery::NoQueryAndNoRequest);
+        return Err(missing);
     };
     base64url::decode(payload).ok_or(NoQuery::PayloadNotBase64url)
 }

@@ -94,6 +94,12 @@ const credentials = await readFile(BLOB);
 let memory;
 const str = (ptr) => {
   if (ptr === 0) return null;
+  // Checked before constructing the view. Out of bounds, `Uint8Array` throws a
+  // bare RangeError that names neither the pointer nor the limit — and a bad
+  // pointer is one of the things this tool exists to identify.
+  if (ptr < 0 || ptr >= memory.buffer.byteLength) {
+    throw new Error(`pointer ${ptr} is outside linear memory (${memory.buffer.byteLength} bytes)`);
+  }
   const bytes = new Uint8Array(memory.buffer, ptr);
   // Bounded by the array, not only by finding a NUL. Past the end an index
   // yields `undefined`, and `undefined !== 0` is true — so a pointer into

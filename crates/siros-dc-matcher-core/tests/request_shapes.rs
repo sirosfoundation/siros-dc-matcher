@@ -220,6 +220,12 @@ fn each_failure_is_named_separately() {
             serde_json::json!({"request": null}),
             NoQuery::RequestNotAJwsOrObject,
         ),
+        // A JWS JSON object with no payload is a malformed signed request, not
+        // an absent one.
+        (
+            serde_json::json!({"request": {"signatures": []}}),
+            NoQuery::JwsObjectHasNoPayload,
+        ),
     ];
     for (data, expected) in cases {
         assert_eq!(
