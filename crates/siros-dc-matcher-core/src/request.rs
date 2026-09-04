@@ -224,9 +224,14 @@ fn json_payload(data: &Value) -> Result<Vec<u8>, NoQuery> {
         Some(Value::Object(_)) => {
             json_serialization_payload(&data["request"], NoQuery::JwsObjectHasNoPayload)
         }
-        // Present but useless — a string, a number, null. Distinguished from
-        // absence because "there is no request" sends whoever is reading the
-        // diagnostic looking for a missing key that is in fact right there.
+        // A string here is a compact JWS, which is the `-signed` shape: the
+        // label and the shape disagree, which is a mismatch rather than a
+        // value of the wrong type.
+        Some(Value::String(_)) => Err(NoQuery::ShapeDoesNotMatchProtocol),
+        // A number, a bool, null — nothing that could carry a payload.
+        // Distinguished from absence because "there is no request" sends
+        // whoever is reading the diagnostic looking for a missing key that is
+        // in fact right there.
         Some(_) => Err(NoQuery::RequestNotAJwsOrObject),
         None => json_serialization_payload(data, NoQuery::NoQueryAndNoRequest),
     }

@@ -238,6 +238,13 @@ fn each_failure_is_named_separately() {
             serde_json::json!({"request": 42}),
             NoQuery::RequestNotAJwsOrObject,
         ),
+        // A string is the `-signed` shape, so under `-multisigned` it is a
+        // mismatch rather than a value of the wrong type.
+        (
+            "openid4vp-v1-multisigned",
+            serde_json::json!({"request": "aGVhZGVy.aGk.c2ln"}),
+            NoQuery::ShapeDoesNotMatchProtocol,
+        ),
         (
             "openid4vp-v1-multisigned",
             serde_json::json!({"request": null}),
@@ -378,7 +385,8 @@ fn the_two_signed_protocols_do_not_accept_each_other_s_shape() {
 
     assert_eq!(
         extract_query(Parser::Openid4vpV1, "openid4vp-v1-multisigned", &compact),
-        Err(NoQuery::RequestNotAJwsOrObject)
+        Err(NoQuery::ShapeDoesNotMatchProtocol),
+        "a compact JWS is the -signed shape, not a wrong-typed value"
     );
     assert_eq!(
         extract_query(Parser::Openid4vpV1, "openid4vp-v1-signed", &json),
