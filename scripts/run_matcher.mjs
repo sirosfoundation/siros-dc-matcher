@@ -87,8 +87,14 @@ let memory;
 const str = (ptr) => {
   if (ptr === 0) return null;
   const bytes = new Uint8Array(memory.buffer, ptr);
-  let end = 0;
-  while (bytes[end] !== 0) end++;
+  // Bounded by the array, not only by finding a NUL. Past the end an index
+  // yields `undefined`, and `undefined !== 0` is true — so a pointer into
+  // unterminated memory would spin here forever rather than reporting the bad
+  // pointer that caused it. Which is the failure this tool exists to diagnose.
+  const end = bytes.indexOf(0);
+  if (end === -1) {
+    throw new Error(`unterminated string at ${ptr}: no NUL before the end of linear memory`);
+  }
   return Buffer.from(bytes.subarray(0, end)).toString('utf8');
 };
 const u32 = (ptr, value) => new DataView(memory.buffer).setUint32(ptr, value, true);

@@ -222,6 +222,39 @@ fn each_failure_is_named_separately() {
     }
 }
 
+/// A JWE has five segments and its second is an encrypted key, not a payload.
+///
+/// Accepting it would decode that key as though it were the request object:
+/// either a misleading failure, or — if it happened to decode — an answer built
+/// from something that is not the request at all.
+#[test]
+fn a_jwe_is_not_mistaken_for_a_jws() {
+    let jwe = format!(
+        "{}.{}.{}.{}.{}",
+        b64(br#"{"alg":"ECDH-ES","enc":"A256GCM"}"#),
+        b64(b"encrypted-key"),
+        b64(b"iv"),
+        b64(b"ciphertext"),
+        b64(b"tag")
+    );
+    assert_eq!(
+        extract_query(Parser::Openid4vpV1, &serde_json::json!({"request": jwe})),
+        Err(NoQuery::NotACompactJws)
+    );
+}
+
+/// An unsecured token is two segments, and its payload is still the request
+/// object. The matcher does not judge signatures, so it does not require one.
+#[test]
+fn an_unsecured_two_segment_token_is_still_read() {
+    let token = format!(
+        "{}.{}",
+        b64(br#"{"alg":"none"}"#),
+        b64(request_object().as_bytes())
+    );
+    assert!(extract_query(Parser::Openid4vpV1, &serde_json::json!({"request": token})).is_ok());
+}
+
 /// A `dcql_query` that is present but not DCQL is its own failure, not a
 /// missing one.
 #[test]

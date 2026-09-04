@@ -153,18 +153,24 @@ fn signed_payload(data: &Value) -> Result<Vec<u8>, NoQuery> {
 
 /// The middle segment of a compact JWS.
 ///
-/// Only the count of segments is checked, not the header or the signature.
-/// Rejecting a two-segment JWS would refuse an unsecured token whose payload is
-/// still the request object we need, and the matcher is not the party deciding
-/// whether the signature is acceptable.
+/// The header and the signature are not inspected — the matcher is not the
+/// party deciding whether a signature is acceptable — but the segment *count*
+/// is, in both directions.
+///
+/// Two or three. Three is a JWS; two is an unsecured token whose payload is
+/// still the request object we need. Five is a JWE, and there the second
+/// segment is an encrypted key rather than a payload: decoding it would either
+/// fail with a misleading reason or, worse, succeed on something that is not
+/// the request. A verifier sending a JWE is doing something this matcher has no
+/// answer for, and saying so is better than guessing.
 fn compact_payload(jws: &str) -> Result<Vec<u8>, NoQuery> {
-    let mut segments = jws.split('.');
-    let (Some(_header), Some(payload)) = (segments.next(), segments.next()) else {
-        return Err(NoQuery::NotACompactJws);
-    };
-    if payload.is_empty() {
+    let segments: Vec<&str> = jws.split('.').collect();
+    if !(2..=3).contains(&segments.len()) {
         return Err(NoQuery::NotACompactJws);
     }
+    let Some(payload) = segments.get(1).filter(|p| !p.is_empty()) else {
+        return Err(NoQuery::NotACompactJws);
+    };
     base64url::decode(payload).ok_or(NoQuery::PayloadNotBase64url)
 }
 
