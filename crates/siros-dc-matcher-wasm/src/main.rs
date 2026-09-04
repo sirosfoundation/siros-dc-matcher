@@ -22,6 +22,28 @@
 #![deny(clippy::indexing_slicing)]
 
 mod abi;
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+mod simple_allocator;
+
+// Entry point for the `wasm32-unknown-unknown` target.
+//
+// The Credential Manager host calls `_start`. On `wasm32-wasip1` wasi-libc's
+// CRT exports it; this target has no CRT, so nothing would. Same fix as
+// `digitalcredentialsdev/CMWallet`'s own matcher-rs. That target also needs
+// the allocator in `simple_allocator`, since there is no libc to supply one.
+//
+// The shipped build is `wasm32-wasip1` (see the Makefile). This target is
+// kept buildable as the WASI-free alternative should the host's WASI subset
+// ever turn out narrower than the two imports the shipped build still has:
+//
+//     cargo +nightly build -p siros-dc-matcher-wasm -Z build-std \
+//         --target wasm32-unknown-unknown --profile wasm-release
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+#[unsafe(no_mangle)]
+extern "C" fn _start() {
+    main();
+}
+
 use siros_dc_matcher_core::db::CredentialDatabase;
 use siros_dc_matcher_core::evaluator::{credentials, resolve, ProfilePolicy};
 use siros_dc_matcher_core::profile::Parser;
