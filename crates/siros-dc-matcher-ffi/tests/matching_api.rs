@@ -142,6 +142,29 @@ fn the_envelope_selects_a_supported_protocol() {
     assert!(out.satisfiable);
 }
 
+/// A supported protocol carrying an unreadable request is a request problem,
+/// not a negotiation one.
+///
+/// Before signed requests existed the two could not be told apart, because a
+/// protocol the profile listed was always readable. Reporting this as
+/// "unsupported protocol" sends a caller debugging a malformed signed request
+/// to look at its protocol list.
+#[test]
+fn a_malformed_request_under_a_supported_protocol_is_a_request_error() {
+    let blob = wallet(None);
+    let request = json!({"requests": [
+        {"protocol": "openid4vp-v1-signed", "data": {"request": "aGVhZGVy.@@@@.c2ln"}}
+    ]})
+    .to_string();
+
+    match match_dc_api_request(blob, request) {
+        Err(MatchError::Request { reason }) => {
+            assert!(reason.contains("base64url"), "got: {reason}");
+        }
+        other => panic!("expected a request error, got {other:?}"),
+    }
+}
+
 /// An envelope offering nothing the wallet speaks is distinct from an empty
 /// match: the wallet may hold exactly what was asked for and still not speak
 /// the protocol it was asked in.

@@ -174,15 +174,29 @@ pub fn match_dc_api_request(
     // which meant the two entry points disagreed about what a request is: the
     // picker would offer a credential for a signed request that this path
     // declined. One reader, or they drift again.
-    let (_protocol, query) =
-        request::first_supported_in(&parsed, &db.profile).ok_or_else(|| {
-            MatchError::UnsupportedProtocol {
-                offered: requests
-                    .iter()
-                    .filter_map(|e| Some(e.get("protocol")?.as_str()?.to_owned()))
-                    .collect(),
-            }
-        })?;
+    let (_protocol, query) = match request::first_supported_in(&parsed, &db.profile) {
+        Some(found) => found,
+        None => {
+            let offered: Vec<String> = requests
+                .iter()
+                .filter_map(|e| Some(e.get("protocol")?.as_str()?.to_owned()))
+                .collect();
+            // "Unsupported protocol" only when that is what happened. Now that
+            // a supported protocol can still be unreadable — a payload that is
+            // not base64url, not JSON, or shaped for a different label — the
+            // two have to be told apart, or a caller debugging a malformed
+            // signed request is sent to look at its protocol list.
+            return Err(
+                if offered.iter().any(|p| db.profile.parser_for(p).is_some()) {
+                    MatchError::Request {
+                        reason: request::diagnose(request_json.as_bytes(), &db.profile),
+                    }
+                } else {
+                    MatchError::UnsupportedProtocol { offered }
+                },
+            );
+        }
+    };
 
     Ok(evaluate(&db, &query))
 }
