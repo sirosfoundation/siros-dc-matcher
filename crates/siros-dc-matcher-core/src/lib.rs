@@ -10,10 +10,12 @@
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
 
+pub mod base64url;
 pub mod db;
 
 pub mod evaluator;
 #[cfg(any(test, feature = "test-fixtures"))]
 pub mod fixtures;
 pub mod profile;
+pub mod request;
 pub mod sink;

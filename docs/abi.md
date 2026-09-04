@@ -49,6 +49,43 @@ Watch for both with `adb logcat | grep WasmRuntime` while the picker is open —
 that tag is silent on success, so its absence proves nothing, but its
 `Null icon` form is definitive.
 
+## The request, and its three shapes
+
+`GetRequestBuffer` hands over the DC API request as JSON. The envelope is the
+same whichever protocol the verifier used — a `requests` array, because one
+call can offer the same request under several and let the wallet pick. Only
+`data` differs (OpenID4VP 1.0 Appendix A):
+
+```json
+{"requests": [
+  {"protocol": "openid4vp-v1-unsigned",    "data": { … request object, dcql_query inline … }},
+  {"protocol": "openid4vp-v1-signed",      "data": {"request": "<header>.<payload>.<signature>"}},
+  {"protocol": "openid4vp-v1-multisigned", "data": {"request": {"payload": "<base64url>", "signatures": [ … ]}}}
+]}
+```
+
+For `-signed`, the payload is the compact JWS's middle segment. For
+`-multisigned`, it is the `payload` member of a JWS JSON Serialization object —
+which the reference matcher also accepts at the top level of `data`, so we
+accept both. Base64url-decoded, either is the same JSON the unsigned form
+carries directly:
+
+```json
+{"client_id": "x509_san_dns:verifier.example", "response_mode": "dc_api.jwt",
+ "nonce": "…", "expected_origins": ["https://verifier.example"],
+ "dcql_query": { … }, "client_metadata": {"jwks": { … }}}
+```
+
+**The matcher does not verify signatures, and must not be relied on as though
+it did.** It has no crypto, no randomness and a hard size budget, and it is not
+the trust boundary: the wallet verifies the JWS at selection time, before
+anything is disclosed. The matcher decodes an unverified payload for one
+reason — to find `dcql_query` and decide what to draw in the picker.
+
+A request shape this build cannot read declines *that protocol* rather than
+failing the call, so the verifier's negotiation still works: offer signed and
+unsigned together and the readable one is answered.
+
 ## Constraints that follow
 
 - **A trap is a silent failure.** If the module panics, the picker shows no
