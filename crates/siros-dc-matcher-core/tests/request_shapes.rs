@@ -206,6 +206,20 @@ fn each_failure_is_named_separately() {
             serde_json::json!({"request": "aGVhZGVy."}),
             NoQuery::NotACompactJws,
         ),
+        // An empty header segment is malformed; offering an entry for it means
+        // the user consents to something the wallet rejects afterwards.
+        (
+            "openid4vp-v1-signed",
+            serde_json::json!({"request": ".aGk.c2ln"}),
+            NoQuery::NotACompactJws,
+        ),
+        // The mirror of the compact-JWS branch: an inline query under the
+        // multisigned label is a mismatch, not an absence.
+        (
+            "openid4vp-v1-multisigned",
+            serde_json::json!({"dcql_query": {"credentials": []}}),
+            NoQuery::ShapeDoesNotMatchProtocol,
+        ),
         (
             "openid4vp-v1-signed",
             serde_json::json!({"request": "aGVhZGVy.@@@@.c2ln"}),

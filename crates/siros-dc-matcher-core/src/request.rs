@@ -233,6 +233,10 @@ fn json_payload(data: &Value) -> Result<Vec<u8>, NoQuery> {
         // whoever is reading the diagnostic looking for a missing key that is
         // in fact right there.
         Some(_) => Err(NoQuery::RequestNotAJwsOrObject),
+        // An inline query under a signed label, same as the compact-JWS branch
+        // reports. Without this the symmetry breaks and one of the two
+        // mismatches gets the vaguer reason.
+        None if data.get("dcql_query").is_some() => Err(NoQuery::ShapeDoesNotMatchProtocol),
         None => json_serialization_payload(data, NoQuery::NoQueryAndNoRequest),
     }
 }
@@ -256,8 +260,14 @@ fn compact_payload(jws: &str) -> Result<Vec<u8>, NoQuery> {
     // splitting on every one would allocate proportionally to the request.
     // A fourth piece existing at all is enough to know there were too many.
     let mut segments = jws.splitn(4, '.');
-    let _header = segments.next();
+    // The header is not inspected, but it has to be there. A token starting
+    // with `.` is malformed, and offering a picker entry for it means the user
+    // consents to something the wallet will reject afterwards.
+    let header = segments.next();
     let payload = segments.next();
+    if header.is_none_or(str::is_empty) {
+        return Err(NoQuery::NotACompactJws);
+    }
     let _signature = segments.next();
     // A fourth piece at all means there were more than three segments, whatever
     // is in it — enough to know this is not a JWS without splitting further.
