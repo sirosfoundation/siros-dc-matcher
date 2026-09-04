@@ -23,6 +23,36 @@ jobs:
         with:
           fetch-depth: 0
 
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          # `llvm-tools` carries the `llvm-profdata`/`llvm-cov` that read the
+          # counters instrumented builds write.
+          components: llvm-tools
+          targets: wasm32-wasip1
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b # v2
+        with:
+          tool: cargo-llvm-cov
+
+      # Without a report the quality gate reads new code as 0% covered and
+      # fails every pull request that adds a line — which is what it did to
+      # #19, the first one to meet the newly-added `new_coverage` condition.
+      #
+      # `siros-dc-matcher-testhost` is excluded because its tests spawn a
+      # nested `cargo build --target wasm32-wasip1`, and instrumentation is not
+      # available for that target: the child build fails with a missing
+      # `profiler_builtins` and every test reports the target as uninstalled.
+      # Excluding it costs no real coverage — it is the harness, not the
+      # subject — but it does mean the wasm binary's own source is measured
+      # only by whatever host tests it has. The `Test` job still runs the whole
+      # suite, uninstrumented, so nothing goes unexercised.
+      - name: Coverage
+        run: |
+          cargo llvm-cov --locked --workspace --all-features \
+            --exclude siros-dc-matcher-testhost \
+            --lcov --output-path lcov.info
+          echo "lcov.info: $(wc -l < lcov.info) lines"
+
       - name: SonarCloud Scan
         uses: SonarSource/sonarqube-scan-action@22918119ff8e1ca75a623e15c8296b6ea4fbe28f # v8.2.1
         env:
