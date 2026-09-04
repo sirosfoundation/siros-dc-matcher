@@ -151,8 +151,14 @@ const credman_v2 = {
     fields.push({ setId: str(setId), index, credentialId: str(credId), name: str(name), value: str(value) }),
 };
 
-// The host's WASI is a subset. These are the only two the shipped binary
-// imports, and both come from rustc's CRT rather than from our code.
+// The host's WASI is a subset, and the shipped binary imports two of it:
+// `fd_write` and `proc_exit`, both from rustc's CRT rather than from our code.
+// (`environ_get`/`environ_sizes_get` are also added by the CRT and are removed
+// again by scripts/strip_wasi_environ.py — see the Makefile.)
+//
+// More are stubbed than are needed, so that a build which picks up another CRT
+// dependency still runs here and is reported below rather than failing to
+// instantiate with a bare LinkError.
 const wasi_snapshot_preview1 = {
   environ_sizes_get: (countPtr, sizePtr) => {
     u32(countPtr, 0);
@@ -166,14 +172,44 @@ const wasi_snapshot_preview1 = {
   fd_seek: () => 0,
 };
 
-const { instance } = await WebAssembly.instantiate(await readFile(WASM), {
-  credman, credman_v2, wasi_snapshot_preview1,
-});
+const moduleBytes = await readFile(WASM);
+const wasmModule = new WebAssembly.Module(moduleBytes);
+
+// Report what the binary actually asks the host for, rather than trusting a
+// comment to stay true. "The host's WASI is a subset" has cost real time; a new
+// import appearing here is the earliest place to notice one.
+const imports = {};
+for (const i of WebAssembly.Module.imports(wasmModule)) {
+  (imports[i.module] ??= []).push(i.name);
+}
+const stubbed = { credman, credman_v2, wasi_snapshot_preview1 };
+const unstubbed = Object.entries(imports).flatMap(([mod, names]) =>
+  names.filter((n) => stubbed[mod]?.[n] === undefined).map((n) => `${mod}.${n}`),
+);
+
+// With a `Module` (rather than bytes) this resolves to the Instance itself,
+// not a `{ module, instance }` pair.
+const instance = await WebAssembly.instantiate(wasmModule, stubbed);
 memory = instance.exports.memory;
 instance.exports._start();
 
 const source = requestPath ? `from ${requestPath}` : '(built-in signed example)';
 console.log(`request: ${request.length} bytes ${source}`);
+for (const mod of Object.keys(imports).sort()) {
+  console.log(`imports ${mod}: ${imports[mod].sort().join(', ')}`);
+}
+if (unstubbed.length > 0) {
+  console.log(`\nNote: not stubbed here — ${unstubbed.join(', ')}`);
+}
+// `make matcher` runs scripts/strip_wasi_environ.py; a plain `cargo build`
+// (which `cargo test` does, to build the module for the Rust integration
+// tests) does not. Seeing these means target/ holds the unstripped build, not
+// the artifact that ships — worth knowing before concluding anything about the
+// host's WASI subset from what is printed above.
+if (imports.wasi_snapshot_preview1?.some((n) => n.startsWith('environ_'))) {
+  console.log('\nNote: environ_* present — this is a plain `cargo build` output.');
+  console.log('      Run `make matcher` for the stripped artifact that ships.');
+}
 console.log(`blob:    ${credentials.length} bytes\n`);
 
 if (sets.length === 0) {

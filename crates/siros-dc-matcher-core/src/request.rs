@@ -35,6 +35,9 @@ pub enum NoQuery {
     NoData,
     /// `data` had neither `dcql_query` nor anything shaped like a JWS.
     NoQueryAndNoRequest,
+    /// `data.request` is present but is neither a string nor an object, so
+    /// there is nothing to decode — a different problem from its absence.
+    RequestNotAJwsOrObject,
     /// `data.request` is a string but not a compact JWS.
     NotACompactJws,
     /// The payload segment is not unpadded base64url.
@@ -57,6 +60,9 @@ impl NoQuery {
             Self::NoData => "request entry has no `data`".into(),
             Self::NoQueryAndNoRequest => {
                 "data has neither `dcql_query` nor a `request` to decode".into()
+            }
+            Self::RequestNotAJwsOrObject => {
+                "data.request is neither a JWS string nor a JWS JSON object".into()
             }
             Self::NotACompactJws => "data.request is not a compact JWS".into(),
             Self::PayloadNotBase64url => "JWS payload is not unpadded base64url".into(),
@@ -147,7 +153,11 @@ fn signed_payload(data: &Value) -> Result<Vec<u8>, NoQuery> {
         Some(Value::String(jws)) => compact_payload(jws),
         // JWS JSON Serialization, general or flattened.
         Some(Value::Object(_)) => json_serialization_payload(&data["request"]),
-        _ => json_serialization_payload(data),
+        // Present but useless — a number, a bool, null. Distinguished from
+        // absence because "there is no request" sends whoever is reading the
+        // diagnostic looking for a missing key that is in fact right there.
+        Some(_) => Err(NoQuery::RequestNotAJwsOrObject),
+        None => json_serialization_payload(data),
     }
 }
 

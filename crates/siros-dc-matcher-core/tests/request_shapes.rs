@@ -211,6 +211,15 @@ fn each_failure_is_named_separately() {
             serde_json::json!({"unrelated": true}),
             NoQuery::NoQueryAndNoRequest,
         ),
+        // Present but not decodable is not the same as absent.
+        (
+            serde_json::json!({"request": 42}),
+            NoQuery::RequestNotAJwsOrObject,
+        ),
+        (
+            serde_json::json!({"request": null}),
+            NoQuery::RequestNotAJwsOrObject,
+        ),
     ];
     for (data, expected) in cases {
         assert_eq!(
