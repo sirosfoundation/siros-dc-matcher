@@ -71,10 +71,18 @@ const MAX_COMBINATIONS: usize = 32;
 fn main() {
     let request = abi::request_bytes();
     let blob = abi::credentials_bytes();
-
     let (_package, origin) = abi::calling_app_info();
+    run(&request, &blob, &origin);
+}
 
-    let Ok(db) = CredentialDatabase::from_cbor(&blob) else {
+/// One matcher invocation, from the host's three inputs to emitted entries.
+///
+/// Separate from [`main`] so it can be driven on the host in tests: off the
+/// wasm target, `abi::emit` is a no-op and the three readers return nothing,
+/// so this is the only way to exercise the decision path against a real
+/// request and the committed golden blob.
+fn run(request: &[u8], blob: &[u8], origin: &str) {
+    let Ok(db) = CredentialDatabase::from_cbor(blob) else {
         // Nothing can be offered from a blob we cannot read, and nothing can
         // be said about it either: the debug flag lives inside the blob. This
         // is indistinguishable from "no matching credential" in the picker —
@@ -86,8 +94,8 @@ fn main() {
         enabled: db.profile.debug,
     };
 
-    let Some((protocol, query)) = first_supported_request(&request, &db) else {
-        diag.emit("request", || diagnose_no_request(&request, &db));
+    let Some((protocol, query)) = first_supported_request(request, &db) else {
+        diag.emit("request", || diagnose_no_request(request, &db));
         return;
     };
 
@@ -371,4 +379,165 @@ fn diagnose_no_request(request: &[u8], db: &CredentialDatabase) -> String {
         }
     }
     parts.join(" | ")
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
+mod tests {
+    use super::*;
+    use siros_dc_matcher_core::db::VERSION;
+    use siros_dc_matcher_core::profile::MatchProfile;
+    use std::cell::Cell;
+
+    fn db() -> CredentialDatabase {
+        CredentialDatabase {
+            version: VERSION,
+            profile: MatchProfile::siros_default(),
+            credentials: Vec::new(),
+            icons: Vec::new(),
+        }
+    }
+
+    const UNSIGNED_MDL: &str = r#"{"requests":[{"protocol":"openid4vp-v1-unsigned","data":{"dcql_query":{"credentials":[{"id":"mdl","format":"mso_mdoc","meta":{"doctype_value":"org.iso.18013.5.1.mDL"},"claims":[{"path":["org.iso.18013.5.1","family_name"]}]}]}}}]}"#;
+
+    #[test]
+    fn unsigned_request_yields_its_query_and_protocol() {
+        let (protocol, query) = first_supported_request(UNSIGNED_MDL.as_bytes(), &db()).unwrap();
+        assert_eq!(protocol, "openid4vp-v1-unsigned");
+        assert_eq!(query.credentials.len(), 1);
+        assert_eq!(query.credentials[0].id, "mdl");
+    }
+
+    /// The verifier may offer the same request under several protocols. The
+    /// first one the profile supports wins, not merely the first one listed.
+    #[test]
+    fn falls_through_to_the_first_supported_protocol() {
+        let request = r#"{"requests":[
+            {"protocol":"urn:example:nobody-speaks-this","data":{"dcql_query":{"credentials":[]}}},
+            {"protocol":"openid4vp-v1-unsigned","data":{"dcql_query":{"credentials":[{"id":"a","format":"mso_mdoc"}]}}}]}"#;
+        let (protocol, _) = first_supported_request(request.as_bytes(), &db()).unwrap();
+        assert_eq!(protocol, "openid4vp-v1-unsigned");
+    }
+
+    /// Signed requests carry a JWS in `data.request` rather than an inline
+    /// query. Today that declines the protocol; when signed support lands this
+    /// test is the one to flip.
+    #[test]
+    fn signed_request_is_declined_for_now() {
+        let request = r#"{"requests":[{"protocol":"openid4vp-v1-signed","data":{"request":"eyJhbGciOiJFUzI1NiJ9.e30.sig"}}]}"#;
+        assert!(first_supported_request(request.as_bytes(), &db()).is_none());
+    }
+
+    #[test]
+    fn garbage_declines_without_panicking() {
+        let d = db();
+        assert!(first_supported_request(b"", &d).is_none());
+        assert!(first_supported_request(b"not json", &d).is_none());
+        assert!(first_supported_request(br#"{"requests":"nope"}"#, &d).is_none());
+        assert!(first_supported_request(
+            br#"{"requests":[{"protocol":"openid4vp-v1-unsigned"}]}"#,
+            &d
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn iso_mdoc_api_parser_declines_everything() {
+        let data = serde_json::json!({"deviceRequest": "base64..."});
+        assert!(extract_query(Parser::IsoMdocApi, &data).is_none());
+    }
+
+    /// Each reason `first_supported_request` can come back empty has its own
+    /// wording, because the diagnostic is all a tester on a device gets.
+    #[test]
+    fn diagnosis_names_the_reason() {
+        let d = db();
+        assert!(diagnose_no_request(b"not json", &d).contains("not valid JSON"));
+        assert!(diagnose_no_request(br#"{"x":1}"#, &d).contains("no `requests` array"));
+        assert!(diagnose_no_request(br#"{"requests":[]}"#, &d).contains("is empty"));
+        let unknown = br#"{"requests":[{"protocol":"urn:example:x","data":{}}]}"#;
+        assert!(diagnose_no_request(unknown, &d).contains("not in registered profile"));
+        let no_data = br#"{"requests":[{"protocol":"openid4vp-v1-unsigned"}]}"#;
+        assert!(diagnose_no_request(no_data, &d).contains("no `data`"));
+        let no_query =
+            br#"{"requests":[{"protocol":"openid4vp-v1-unsigned","data":{"request":"jws"}}]}"#;
+        assert!(diagnose_no_request(no_query, &d).contains("no `dcql_query`"));
+        let bad_query = br#"{"requests":[{"protocol":"openid4vp-v1-unsigned","data":{"dcql_query":{"credentials":"x"}}}]}"#;
+        assert!(diagnose_no_request(bad_query, &d).contains("failed to parse"));
+    }
+
+    /// The committed golden blob - the same bytes `golden_blob.rs` in core
+    /// guards - so this exercises the real decoder against the real encoder's
+    /// output, not a hand-built stand-in.
+    fn golden_blob() -> Vec<u8> {
+        std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../siros-dc-matcher-core/tests/golden/credential_database_v1.cbor"
+        ))
+        .expect("golden vector")
+    }
+
+    fn mdl_request(claim: &str) -> String {
+        format!(
+            r#"{{"requests":[{{"protocol":"openid4vp-v1-unsigned","data":{{"dcql_query":{{"credentials":[{{"id":"mdl","format":"mso_mdoc","meta":{{"doctype_value":"org.iso.18013.5.1.mDL"}},"claims":[{{"path":["org.iso.18013.5.1","{claim}"]}}]}}]}}}}}}]}}"#
+        )
+    }
+
+    /// The whole decision path, host-side. `abi::emit` is a no-op here, so
+    /// what this proves is that every branch runs to completion without
+    /// trapping on real inputs - the property the denied `unwrap`/`panic`
+    /// lints exist for. A trap in the sandbox is a silent "no match".
+    #[test]
+    fn run_completes_on_every_path() {
+        let blob = golden_blob();
+        // Satisfiable: the golden credential has family_name.
+        run(
+            mdl_request("family_name").as_bytes(),
+            &blob,
+            "https://verifier.example",
+        );
+        // Unsatisfiable: it has no age_over_21. §6.4 says offer nothing.
+        run(mdl_request("age_over_21").as_bytes(), &blob, "");
+        // No supported request at all.
+        run(b"{\"requests\":[]}", &blob, "");
+        // A blob the decoder rejects.
+        run(mdl_request("family_name").as_bytes(), b"\x00\x01\x02", "");
+        run(b"", b"", "");
+    }
+
+    /// With the debug flag in the profile, the same paths run through the
+    /// diagnostic emitters too.
+    #[test]
+    fn run_completes_on_every_path_with_diagnostics_on() {
+        let mut db = CredentialDatabase::from_cbor(&golden_blob()).unwrap();
+        db.profile.debug = true;
+        let blob = db.to_cbor().unwrap();
+        run(mdl_request("age_over_21").as_bytes(), &blob, "");
+        run(
+            b"{\"requests\":[{\"protocol\":\"urn:example:x\",\"data\":{}}]}",
+            &blob,
+            "",
+        );
+        run(mdl_request("family_name").as_bytes(), &blob, "");
+    }
+
+    /// Off is the production state, and it must cost nothing: the message
+    /// closure — which for the no-request case re-parses the request — is
+    /// never run.
+    #[test]
+    fn disabled_diagnostics_never_compose_their_message() {
+        let composed = Cell::new(false);
+        Diagnostics { enabled: false }.emit("x", || {
+            composed.set(true);
+            String::new()
+        });
+        assert!(!composed.get());
+
+        let composed = Cell::new(false);
+        Diagnostics { enabled: true }.emit("x", || {
+            composed.set(true);
+            String::new()
+        });
+        assert!(composed.get());
+    }
 }
