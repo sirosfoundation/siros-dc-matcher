@@ -213,6 +213,14 @@ fn each_failure_is_named_separately() {
             serde_json::json!({"request": ".aGk.c2ln"}),
             NoQuery::NotACompactJws,
         ),
+        // Three segments claim a signature, so an empty third is malformed.
+        // The two-segment unsecured form claims none and is accepted - see
+        // `an_unsecured_two_segment_token_is_still_read`.
+        (
+            "openid4vp-v1-signed",
+            serde_json::json!({"request": format!("aGVhZGVy.{}.", b64(request_object().as_bytes()))}),
+            NoQuery::NotACompactJws,
+        ),
         // The mirror of the compact-JWS branch: an inline query under the
         // multisigned label is a mismatch, not an absence.
         (

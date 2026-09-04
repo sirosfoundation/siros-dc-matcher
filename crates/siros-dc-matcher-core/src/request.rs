@@ -268,7 +268,13 @@ fn compact_payload(jws: &str) -> Result<Vec<u8>, NoQuery> {
     if header.is_none_or(str::is_empty) {
         return Err(NoQuery::NotACompactJws);
     }
-    let _signature = segments.next();
+    // Three segments means a signature is claimed, so an empty one is
+    // malformed — `header.payload.` would otherwise produce a picker entry for
+    // a request the wallet rejects a moment later. The two-segment unsecured
+    // form claims no signature and stays acceptable.
+    if segments.next().is_some_and(str::is_empty) {
+        return Err(NoQuery::NotACompactJws);
+    }
     // A fourth piece at all means there were more than three segments, whatever
     // is in it — enough to know this is not a JWS without splitting further.
     if segments.next().is_some() {
