@@ -25,3 +25,4 @@ Thumbs.db
 
 # Agent worktrees and session scratch — never part of a commit.
 .claude/
+scripts/__pycache__/

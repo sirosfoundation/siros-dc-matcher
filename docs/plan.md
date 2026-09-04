@@ -221,7 +221,9 @@ Icons are emitted by pointer and length, borrowed straight from the decoded
 blob — a PNG contains NULs, so anything treating them as text truncates at the
 first one, and copying a bitmap per entry inside a sandbox with a time budget
 is worth avoiding. An icon reference outside the blob's buffer costs that
-credential its picture, not its entry.
+credential its entry: the host drops any entry with no icon (see
+`docs/abi.md`, *Host behaviours*), so the wallet must never register a
+credential without a resolvable one.
 
 The v1 emission fallback remains out of scope for the reason in `docs/abi.md`:
 it cannot be a runtime branch, only a second binary.

@@ -13,16 +13,15 @@
 //! than merely discouraged, and why the release profile aborts instead of
 //! unwinding.
 //!
-//! # Status
+//! # Two host behaviours every emitter must respect
 //!
-//! Phase 4: real matching. Entry display and icons are Phase 5 — see
-//! `docs/plan.md`.
+//! An entry with no icon is dropped, and declaring one set id twice discards
+//! everything — both silently. See [`Diagnostics`] for the full account.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 #![deny(clippy::indexing_slicing)]
 
 mod abi;
-
 use siros_dc_matcher_core::db::CredentialDatabase;
 use siros_dc_matcher_core::evaluator::{credentials, resolve, ProfilePolicy};
 use siros_dc_matcher_core::profile::Parser;
@@ -54,14 +53,19 @@ fn main() {
     let (_package, origin) = abi::calling_app_info();
 
     let Ok(db) = CredentialDatabase::from_cbor(&blob) else {
-        // Nothing can be offered from a blob we cannot read. It is worth
-        // saying plainly that this is indistinguishable from "no matching
-        // credential" in the picker — the wallet-side registration is where
-        // such a failure has to be caught.
+        // Nothing can be offered from a blob we cannot read, and nothing can
+        // be said about it either: the debug flag lives inside the blob. This
+        // is indistinguishable from "no matching credential" in the picker —
+        // the wallet-side registration is where such a failure has to be
+        // caught, which is what the golden-vector test in core is for.
         return;
+    };
+    let diag = Diagnostics {
+        enabled: db.profile.debug,
     };
 
     let Some((protocol, query)) = first_supported_request(&request, &db) else {
+        diag.emit("request", &diagnose_no_request(&request, &db));
         return;
     };
 
@@ -75,6 +79,13 @@ fn main() {
     // would be worse than offering nothing: the user consents to a
     // presentation that cannot satisfy the verifier.
     if !result.satisfiable {
+        diag.emit(
+            "unsatisfiable",
+            &format!(
+                "{protocol}: parsed {} cred queries, not satisfiable",
+                query.credentials.len()
+            ),
+        );
         return;
     }
 
@@ -83,6 +94,13 @@ fn main() {
     // are separate combinations, and therefore separate sets.
     let enumerated = result.combinations(MAX_COMBINATIONS);
     if enumerated.combinations.is_empty() {
+        diag.emit(
+            "zero",
+            &format!(
+                "{protocol}: satisfiable but zero combinations ({} held)",
+                held.len()
+            ),
+        );
         return;
     }
 
@@ -208,4 +226,124 @@ fn extract_query(parser: Parser, data: &serde_json::Value) -> Option<DcqlQuery> 
         // another one the verifier offered instead of failing the request.
         Parser::IsoMdocApi => None,
     }
+}
+
+// ============================================================================
+// Diagnostics
+// ============================================================================
+
+/// Why a request produced no entry, surfaced where it can actually be seen.
+///
+/// This binary has no logging channel: its only imports are `credman` and
+/// `credman_v2`, neither of which exposes anything like a log call, and it
+/// runs inside a sandboxed host process that no logcat filter on the wallet
+/// side can look into. The picker UI is the one surface it has, so when the
+/// wallet registered with `profile.debug` set, a request that matches nothing
+/// gets exactly one entry naming the reason instead of silence.
+///
+/// Off by default, and the wallet must never enable it in production: an
+/// end user cannot act on "not satisfiable", and selecting the entry hands
+/// the wallet a credential id that does not exist. The wallet-side gate is
+/// the app's own debuggable flag.
+///
+/// Two host behaviours shape this, both learned the hard way and neither
+/// documented anywhere:
+///
+/// * An entry with no icon is silently dropped. The host logs
+///   `WasmRuntime: Null icon for icon` in its own process and shows nothing.
+///   Every diagnostic therefore carries [`FALLBACK_ICON_PNG`], and at the
+///   same 64x64 as real entries — a 4x4 one was dropped just the same.
+/// * Declaring the same set id twice in one invocation makes the host
+///   discard the *whole* output, silently. Every path that emits a
+///   diagnostic returns immediately afterwards, and each uses its own set
+///   id, so no invocation can ever declare one twice.
+struct Diagnostics {
+    enabled: bool,
+}
+
+impl Diagnostics {
+    /// Emit one entry in its own set, `siros-debug-<kind>`, if enabled.
+    fn emit(&self, kind: &str, message: &str) {
+        if !self.enabled {
+            return;
+        }
+        let set_id = format!("siros-debug-{kind}");
+        abi::emit::entry_set(&set_id, 1);
+        abi::emit::entry(
+            &set_id,
+            0,
+            &Entry {
+                credential_id: "siros-debug-entry",
+                title: "[SIROS DEBUG] no match",
+                // Picker subtitles are typically single-line and short; keep
+                // the message itself terse rather than truncating here, so
+                // nothing important silently falls off the end.
+                subtitle: message,
+                metadata: "{}",
+                icon: Some(FALLBACK_ICON_PNG),
+            },
+        );
+    }
+}
+
+/// A 64x64 solid-colour PNG for diagnostic entries — the same dimensions the
+/// wallet ships for real ones. See [`Diagnostics`] for why it exists and why
+/// it is this size.
+#[rustfmt::skip]
+const FALLBACK_ICON_PNG: &[u8] = &[
+    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x40, 0x08, 0x02, 0x00, 0x00, 0x00, 0x25, 0x0B, 0xE6,
+    0x89, 0x00, 0x00, 0x00, 0x50, 0x49, 0x44, 0x41, 0x54, 0x78, 0xDA, 0xED, 0xCF, 0x41, 0x09, 0x00,
+    0x00, 0x08, 0x04, 0xB0, 0xCB, 0x61, 0x10, 0xDB, 0xD8, 0xBF, 0x86, 0x11, 0x7C, 0x0B, 0x83, 0x15,
+    0x58, 0xAA, 0xE7, 0xB5, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08,
+    0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08,
+    0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08,
+    0x08, 0x08, 0x08, 0x5C, 0x16, 0x49, 0xAB, 0xD0, 0x97, 0x3A, 0x79, 0x4A, 0x21, 0x00, 0x00, 0x00,
+    0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+];
+
+/// Why [`first_supported_request`] found nothing to answer, in as much detail
+/// as can be gotten without threading a proper error type through it. Only
+/// ever shown when [`Diagnostics`] is enabled.
+fn diagnose_no_request(request: &[u8], db: &CredentialDatabase) -> String {
+    let parsed: Result<serde_json::Value, _> = serde_json::from_slice(request);
+    let parsed = match parsed {
+        Ok(v) => v,
+        Err(e) => return format!("request ({} bytes) is not valid JSON: {e}", request.len()),
+    };
+    let Some(requests) = parsed.get("requests").and_then(|r| r.as_array()) else {
+        return "request JSON has no `requests` array".to_string();
+    };
+    if requests.is_empty() {
+        return "`requests` array is empty".to_string();
+    }
+    let mut parts = Vec::new();
+    for entry in requests {
+        let protocol = entry
+            .get("protocol")
+            .and_then(|p| p.as_str())
+            .unwrap_or("<missing protocol>");
+        let Some(parser) = db.profile.parser_for(protocol) else {
+            parts.push(format!("{protocol}: not in registered profile"));
+            continue;
+        };
+        let Some(data) = entry.get("data") else {
+            parts.push(format!("{protocol}: request entry has no `data`"));
+            continue;
+        };
+        match parser {
+            Parser::Openid4vpV1 => match data.get("dcql_query") {
+                None => parts.push(format!("{protocol}: data has no `dcql_query`")),
+                Some(dcql) => match serde_json::from_value::<DcqlQuery>(dcql.clone()) {
+                    Ok(q) => parts.push(format!(
+                        "{protocol}: dcql_query parsed ({} credential queries) - should not have reached here",
+                        q.credentials.len()
+                    )),
+                    Err(e) => parts.push(format!("{protocol}: dcql_query failed to parse: {e}")),
+                },
+            },
+            Parser::IsoMdocApi => parts.push(format!("{protocol}: ISO mdoc API has no parser yet")),
+        }
+    }
+    parts.join(" | ")
 }

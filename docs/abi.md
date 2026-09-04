@@ -15,7 +15,7 @@ interoperability facts, not borrowed code — see
 | `GetWasmVersion` | `credman` | Host ABI version — the feature-detection hook for `credman_v2` |
 | `AddStringIdEntry` / `AddFieldForStringIdEntry` | `credman` | v1 emission: one flat entry plus its display fields |
 | `AddEntrySet` / `AddEntryToSet` / `AddFieldToEntrySet` | `credman_v2` | v2 emission: grouped entries. Required for DCQL `credential_sets`, and carries a free-form `metadata` string |
-| `fd_write`, `fd_seek`, `fd_close`, `fd_fdstat_get`, `proc_exit` | `wasi_snapshot_preview1` | The host provides a WASI preview-1 subset |
+| `fd_write`, `fd_seek`, `fd_close`, `fd_fdstat_get`, `proc_exit` | `wasi_snapshot_preview1` | The host provides a WASI preview-1 *subset*. It is known to lack `random_get` (Rust `HashMap`'s default hasher needs it; see UbiqueInnovation/oid4vp-wasm-matcher). A missing import fails instantiation with no error surface — hence the Makefile stubs out the two `environ_*` imports rustc's CRT adds unconditionally |
 
 ## Exports
 
@@ -27,6 +27,27 @@ Because the host already speaks WASI preview 1, Rust's stock `wasm32-wasip1`
 target drops straight in: no custom shim, no `no_std`, and `std` collections
 and formatting stay available. Verified — a `wasm32-wasip1` build of this
 workspace produces the same import and export shape as the C++ reference.
+
+## Host behaviours the emitter must respect
+
+Neither is documented by the platform. Both were established on a real
+device, from the host process's own logcat output.
+
+- **An entry with no icon is dropped.** `AddEntryToSet` with a null icon
+  pointer makes the host log `WasmRuntime: Null icon for icon` in its own
+  process and show nothing for that entry. The wallet side sees only "your
+  info wasn't found". An icon reference that resolves to nothing therefore
+  costs the credential its *entry*, not just its picture — every entry must
+  carry real image bytes, and 64×64 PNG is known to work (a 4×4 one was
+  dropped just the same).
+- **Declaring a set id twice discards the whole output.** Two `AddEntrySet`
+  calls with the same id in one invocation make the host silently reject
+  everything the matcher emitted — no log line at all. Every set id must be
+  unique within an invocation.
+
+Watch for both with `adb logcat | grep WasmRuntime` while the picker is open —
+that tag is silent on success, so its absence proves nothing, but its
+`Null icon` form is definitive.
 
 ## Constraints that follow
 
