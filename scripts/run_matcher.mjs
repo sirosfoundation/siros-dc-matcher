@@ -50,11 +50,13 @@ function defaultRequest() {
 /**
  * Resolve a request path given on the command line.
  *
- * The argument is the tool's whole interface, so it cannot be an allowlist —
- * but it can be checked: an absolute, resolved path to an existing regular
- * `.json` file, and nothing else. That rejects the directory traversal a
- * relative path invites and, more usefully in practice, says which of those
- * four things was wrong instead of failing inside `readFile`.
+ * The argument is the tool's whole interface, so this is deliberately *not*
+ * containment: any path the developer can read is a valid one, `..` included.
+ * A request captured off a device gets triaged where it landed.
+ *
+ * What the check buys is a named error — resolved, existing, a regular file,
+ * `.json` — instead of failing somewhere inside `readFile` with whichever of
+ * those four things was wrong left for the reader to work out.
  */
 async function resolveRequestPath(argument) {
   const path = resolve(argument);

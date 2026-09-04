@@ -164,11 +164,21 @@ fn signed_payload(data: &Value) -> Result<Vec<u8>, NoQuery> {
 /// the request. A verifier sending a JWE is doing something this matcher has no
 /// answer for, and saying so is better than guessing.
 fn compact_payload(jws: &str) -> Result<Vec<u8>, NoQuery> {
-    let segments: Vec<&str> = jws.split('.').collect();
-    if !(2..=3).contains(&segments.len()) {
+    // `splitn(4)`, and no collecting. The input is verifier-controlled and this
+    // runs in a sandbox with a time budget, so the work has to be bounded by
+    // the parts that mean something rather than by how many dots someone sent:
+    // splitting on every one would allocate proportionally to the request.
+    // A fourth piece existing at all is enough to know there were too many.
+    let mut segments = jws.splitn(4, '.');
+    let _header = segments.next();
+    let payload = segments.next();
+    let _signature = segments.next();
+    // A fourth piece at all means there were more than three segments, whatever
+    // is in it — enough to know this is not a JWS without splitting further.
+    if segments.next().is_some() {
         return Err(NoQuery::NotACompactJws);
     }
-    let Some(payload) = segments.get(1).filter(|p| !p.is_empty()) else {
+    let Some(payload) = payload.filter(|p| !p.is_empty()) else {
         return Err(NoQuery::NotACompactJws);
     };
     base64url::decode(payload).ok_or(NoQuery::PayloadNotBase64url)
