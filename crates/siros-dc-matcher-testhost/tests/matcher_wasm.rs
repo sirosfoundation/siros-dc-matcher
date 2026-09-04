@@ -64,9 +64,15 @@ fn longfellow(num_attributes: &str) -> Capability {
     fixtures::longfellow(Some(num_attributes))
 }
 
+/// An unsigned request: the request object is `data` itself.
+///
+/// Labelled `-unsigned` because that is the shape it sends. It used to say
+/// `-signed` while sending this, which was accepted only because the protocol
+/// id selected a parser and nothing else — the thing the shape check now
+/// prevents. The genuinely signed shapes are exercised further down.
 fn request(format: &str, meta: Value) -> Vec<u8> {
     json!({"requests": [{
-        "protocol": "openid4vp-v1-signed",
+        "protocol": "openid4vp-v1-unsigned",
         "data": {"dcql_query": {"credentials": [{
             "id": "q1",
             "format": format,
@@ -252,7 +258,7 @@ fn metadata_carries_the_matchers_decision() {
     let meta: Value = serde_json::from_str(&entry.metadata).expect("metadata is JSON");
     assert_eq!(meta["query_id"], "q1");
     assert_eq!(meta["credential_id"], "mdl-1");
-    assert_eq!(meta["protocol"], "openid4vp-v1-signed");
+    assert_eq!(meta["protocol"], "openid4vp-v1-unsigned");
     // The platform-attested caller, so the wallet can check it was shown the
     // same one the matcher was.
     assert_eq!(meta["verified_origin"], "https://verifier.example.org");
@@ -350,7 +356,7 @@ fn a_multi_credential_option_is_one_set_with_two_members() {
     db.credentials.push(second);
 
     let request = json!({"requests": [{
-        "protocol": "openid4vp-v1-signed",
+        "protocol": "openid4vp-v1-unsigned",
         "data": {"dcql_query": {
             "credentials": [
                 {"id": "q1", "format": "mso_mdoc", "meta": {"doctype_value": "org.iso.18013.5.1.mDL"},

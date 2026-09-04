@@ -17,6 +17,7 @@ fn wallet(zk: Option<Capability>) -> Vec<u8> {
         .expect("encoding")
 }
 
+/// An inline request object, as `openid4vp-v1-unsigned` carries it.
 fn dcql(format: &str, claims: serde_json::Value, meta: serde_json::Value) -> String {
     json!({"credentials": [{
         "id": "q1", "format": format, "meta": meta, "claims": claims
@@ -130,7 +131,7 @@ fn the_envelope_selects_a_supported_protocol() {
     let blob = wallet(None);
     let request = json!({"requests": [
         {"protocol": "some-future-thing", "data": {}},
-        {"protocol": "openid4vp-v1-signed", "data": {"dcql_query":
+        {"protocol": "openid4vp-v1-unsigned", "data": {"dcql_query":
             serde_json::from_str::<serde_json::Value>(
                 &dcql("mso_mdoc", age_claim(), json!({"doctype_value": "org.iso.18013.5.1.mDL"}))
             ).expect("query")}}

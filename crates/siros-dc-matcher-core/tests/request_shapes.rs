@@ -184,54 +184,78 @@ fn malformed_signed_requests_decline_without_panicking() {
 
 /// Each failure is named, because "data has no `dcql_query`" is true of every
 /// signed request and tells whoever is reading the picker nothing.
+///
+/// Keyed by protocol as well as by data, because the reason depends on both:
+/// the same `{"request": 42}` is "not a compact JWS" under `-signed` and
+/// "neither a JWS string nor a JWS JSON object" under `-multisigned`.
 #[test]
 fn each_failure_is_named_separately() {
     let cases = [
         (
+            "openid4vp-v1-unsigned",
+            serde_json::json!({"unrelated": true}),
+            NoQuery::NoQueryAndNoRequest,
+        ),
+        (
+            "openid4vp-v1-signed",
             serde_json::json!({"request": "no-dots"}),
             NoQuery::NotACompactJws,
         ),
         (
+            "openid4vp-v1-signed",
             serde_json::json!({"request": "aGVhZGVy."}),
             NoQuery::NotACompactJws,
         ),
         (
+            "openid4vp-v1-signed",
             serde_json::json!({"request": "aGVhZGVy.@@@@.c2ln"}),
             NoQuery::PayloadNotBase64url,
         ),
         (
+            "openid4vp-v1-signed",
             serde_json::json!({"request": format!("aGVhZGVy.{}.c2ln", b64(b"plain text"))}),
             NoQuery::PayloadNotJson,
         ),
         (
+            "openid4vp-v1-signed",
             serde_json::json!({"request": format!("aGVhZGVy.{}.c2ln", b64(br#"{"nonce":"x"}"#))}),
             NoQuery::PayloadHasNoDcqlQuery,
         ),
+        // A signed request whose `request` is not even a string.
         (
-            serde_json::json!({"unrelated": true}),
-            NoQuery::NoQueryAndNoRequest,
+            "openid4vp-v1-signed",
+            serde_json::json!({"request": {"payload": "aGk"}}),
+            NoQuery::NotACompactJws,
+        ),
+        (
+            "openid4vp-v1-multisigned",
+            serde_json::json!({"request": {"payload": "!!!"}}),
+            NoQuery::PayloadNotBase64url,
         ),
         // Present but not decodable is not the same as absent.
         (
+            "openid4vp-v1-multisigned",
             serde_json::json!({"request": 42}),
             NoQuery::RequestNotAJwsOrObject,
         ),
         (
+            "openid4vp-v1-multisigned",
             serde_json::json!({"request": null}),
             NoQuery::RequestNotAJwsOrObject,
         ),
         // A JWS JSON object with no payload is a malformed signed request, not
         // an absent one.
         (
+            "openid4vp-v1-multisigned",
             serde_json::json!({"request": {"signatures": []}}),
             NoQuery::JwsObjectHasNoPayload,
         ),
     ];
-    for (data, expected) in cases {
+    for (protocol, data, expected) in cases {
         assert_eq!(
-            extract_query(Parser::Openid4vpV1, &data),
+            extract_query(Parser::Openid4vpV1, protocol, &data),
             Err(expected.clone()),
-            "for {data}"
+            "for {protocol} {data}"
         );
         assert!(!expected.reason().is_empty());
     }
@@ -253,7 +277,11 @@ fn a_jwe_is_not_mistaken_for_a_jws() {
         b64(b"tag")
     );
     assert_eq!(
-        extract_query(Parser::Openid4vpV1, &serde_json::json!({"request": jwe})),
+        extract_query(
+            Parser::Openid4vpV1,
+            "openid4vp-v1-signed",
+            &serde_json::json!({"request": jwe})
+        ),
         Err(NoQuery::NotACompactJws)
     );
 }
@@ -267,7 +295,12 @@ fn an_unsecured_two_segment_token_is_still_read() {
         b64(br#"{"alg":"none"}"#),
         b64(request_object().as_bytes())
     );
-    assert!(extract_query(Parser::Openid4vpV1, &serde_json::json!({"request": token})).is_ok());
+    assert!(extract_query(
+        Parser::Openid4vpV1,
+        "openid4vp-v1-signed",
+        &serde_json::json!({"request": token})
+    )
+    .is_ok());
 }
 
 /// A `dcql_query` that is present but not DCQL is its own failure, not a
@@ -275,7 +308,7 @@ fn an_unsecured_two_segment_token_is_still_read() {
 #[test]
 fn a_malformed_dcql_query_reports_the_parse_error() {
     let data = serde_json::json!({"dcql_query": {"credentials": "not an array"}});
-    match extract_query(Parser::Openid4vpV1, &data) {
+    match extract_query(Parser::Openid4vpV1, "openid4vp-v1-unsigned", &data) {
         Err(NoQuery::Malformed(e)) => assert!(!e.is_empty()),
         other => panic!("expected a parse error, got {other:?}"),
     }
@@ -286,8 +319,86 @@ fn a_malformed_dcql_query_reports_the_parse_error() {
 #[test]
 fn the_iso_mdoc_protocol_declines_rather_than_failing() {
     assert_eq!(
-        extract_query(Parser::IsoMdocApi, &serde_json::json!({})),
+        extract_query(Parser::IsoMdocApi, "org.iso.mdoc", &serde_json::json!({})),
         Err(NoQuery::NoParser)
+    );
+}
+
+// --- the shape must match the label ----------------------------------------
+
+/// A request labelled `-unsigned` that carries a JWS is not answered.
+///
+/// All three OpenID4VP protocols share a parser, so accepting any shape for any
+/// of them let a verifier label a request unsigned and still send a signed one.
+/// The matcher would read the query out of the signed payload, offer a
+/// credential for it, and report the protocol as unsigned — and the protocol id
+/// is what a wallet uses to decide whether to verify a signature. The gap
+/// between what the user consented to and what gets checked is the whole
+/// problem.
+#[test]
+fn an_unsigned_label_does_not_accept_a_signed_payload() {
+    let data = serde_json::json!({"request": compact_jws(&request_object())});
+    assert_eq!(
+        extract_query(Parser::Openid4vpV1, "openid4vp-v1-unsigned", &data),
+        Err(NoQuery::NoQueryAndNoRequest)
+    );
+    assert!(first_supported_request(
+        &envelope("openid4vp-v1-unsigned", data),
+        &MatchProfile::siros_default()
+    )
+    .is_none());
+}
+
+/// And the converse: a `-signed` label does not accept an inline query.
+///
+/// A verifier that sends an unsigned request under a signed label is either
+/// confused or trying something; either way the matcher should not quietly
+/// paper over it, because the wallet will look for a signature that is not
+/// there.
+#[test]
+fn a_signed_label_does_not_accept_an_inline_query() {
+    let data: serde_json::Value = serde_json::from_str(&request_object()).expect("json");
+    assert_eq!(
+        extract_query(Parser::Openid4vpV1, "openid4vp-v1-signed", &data),
+        Err(NoQuery::NotACompactJws)
+    );
+}
+
+/// Each signed protocol takes its own serialization, not the other's.
+#[test]
+fn the_two_signed_protocols_do_not_accept_each_other_s_shape() {
+    let compact = serde_json::json!({"request": compact_jws(&request_object())});
+    let json = serde_json::json!({
+        "request": {"payload": b64(request_object().as_bytes()), "signatures": []}
+    });
+
+    assert!(extract_query(Parser::Openid4vpV1, "openid4vp-v1-signed", &compact).is_ok());
+    assert!(extract_query(Parser::Openid4vpV1, "openid4vp-v1-multisigned", &json).is_ok());
+
+    assert_eq!(
+        extract_query(Parser::Openid4vpV1, "openid4vp-v1-multisigned", &compact),
+        Err(NoQuery::RequestNotAJwsOrObject)
+    );
+    assert_eq!(
+        extract_query(Parser::Openid4vpV1, "openid4vp-v1-signed", &json),
+        Err(NoQuery::NotACompactJws)
+    );
+}
+
+/// A profile naming its own OpenID4VP protocol gets the inline shape, not the
+/// signed ones: declaring a protocol is not opting into decoding unverified
+/// payloads under it.
+#[test]
+fn an_unknown_openid4vp_protocol_id_gets_the_inline_shape() {
+    let inline: serde_json::Value = serde_json::from_str(&request_object()).expect("json");
+    assert!(extract_query(Parser::Openid4vpV1, "org.example.vp-v1", &inline).is_ok());
+    assert_eq!(
+        extract_query(
+            Parser::Openid4vpV1,
+            "org.example.vp-v1",
+            &serde_json::json!({"request": compact_jws(&request_object())})
+        ),
+        Err(NoQuery::NoQueryAndNoRequest)
     );
 }
 

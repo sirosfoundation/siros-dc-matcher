@@ -104,7 +104,7 @@ pub fn first_supported_request(
         .find_map(|entry| {
             let protocol = entry.get("protocol")?.as_str()?;
             let parser = profile.parser_for(protocol)?;
-            let query = extract_query(parser, entry.get("data")?).ok()?;
+            let query = extract_query(parser, protocol, entry.get("data")?).ok()?;
             Some((protocol.to_string(), query))
         })
 }
@@ -123,45 +123,88 @@ pub fn first_supported_request(
 /// Base64url-decoded, the signed payloads are the same JSON the unsigned form
 /// carries directly.
 ///
+/// # The shape must match the label
+///
+/// Which shapes are accepted follows the *protocol id*, not merely the parser.
+/// All three OpenID4VP protocols share a parser, so without this a verifier
+/// could label a request `openid4vp-v1-unsigned` and still send a JWS in
+/// `data.request` — and the matcher would answer it, having read the query out
+/// of a signed payload, while reporting the protocol as unsigned.
+///
+/// That matters because the protocol id is what a wallet uses to decide
+/// whether to verify a signature. A request whose payload chose the
+/// credentials, presented to the user, and then handled as though it had never
+/// been signed, is a gap between what was consented to and what is checked.
+///
 /// # Errors
 ///
 /// See [`NoQuery`]. Every variant means "decline this protocol", which lets the
 /// caller fall through to another the verifier offered.
-pub fn extract_query(parser: Parser, data: &Value) -> Result<DcqlQuery, NoQuery> {
+pub fn extract_query(parser: Parser, protocol: &str, data: &Value) -> Result<DcqlQuery, NoQuery> {
     match parser {
-        Parser::Openid4vpV1 => {
-            if let Some(dcql) = data.get("dcql_query") {
-                return parse_dcql(dcql);
+        Parser::Openid4vpV1 => match Shape::of(protocol) {
+            Shape::Inline => {
+                let dcql = data.get("dcql_query").ok_or(NoQuery::NoQueryAndNoRequest)?;
+                parse_dcql(dcql)
             }
-            let payload = signed_payload(data)?;
-            let object: Value =
-                serde_json::from_slice(&payload).map_err(|_| NoQuery::PayloadNotJson)?;
-            let dcql = object
-                .get("dcql_query")
-                .ok_or(NoQuery::PayloadHasNoDcqlQuery)?;
-            parse_dcql(dcql)
-        }
+            Shape::CompactJws => {
+                let Some(Value::String(jws)) = data.get("request") else {
+                    return Err(NoQuery::NotACompactJws);
+                };
+                from_payload(compact_payload(jws)?)
+            }
+            Shape::JwsJson => from_payload(json_payload(data)?),
+        },
         // ISO 18013-7 carries a CBOR DeviceRequest rather than DCQL, so it
         // needs its own reader rather than a different JSON pointer.
         Parser::IsoMdocApi => Err(NoQuery::NoParser),
     }
 }
 
-/// The unverified payload bytes of a signed or multisigned request.
+/// The one request shape a protocol id is allowed to arrive in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Shape {
+    /// The request object is `data` itself, `dcql_query` inline.
+    Inline,
+    /// `data.request` is a compact JWS.
+    CompactJws,
+    /// A JWS JSON Serialization object, under `data.request` or `data`.
+    JwsJson,
+}
+
+impl Shape {
+    /// Unrecognised ids get [`Shape::Inline`], the shape that requires no
+    /// decoding of anything unverified. A profile naming its own OpenID4VP
+    /// protocol is not thereby opting into signed payloads.
+    fn of(protocol: &str) -> Self {
+        match protocol {
+            "openid4vp-v1-signed" => Self::CompactJws,
+            "openid4vp-v1-multisigned" => Self::JwsJson,
+            _ => Self::Inline,
+        }
+    }
+}
+
+/// The DCQL query inside a decoded, unverified JWS payload.
+fn from_payload(payload: Vec<u8>) -> Result<DcqlQuery, NoQuery> {
+    let object: Value = serde_json::from_slice(&payload).map_err(|_| NoQuery::PayloadNotJson)?;
+    let dcql = object
+        .get("dcql_query")
+        .ok_or(NoQuery::PayloadHasNoDcqlQuery)?;
+    parse_dcql(dcql)
+}
+
+/// The unverified payload of a JWS JSON Serialization object.
 ///
-/// Both `data.request` and `data` itself are accepted as the carrier of a JWS
-/// JSON Serialization object: the reference matcher accepts the payload at the
-/// top level of `data` too, and a verifier that sends it that way is not wrong
-/// enough to refuse.
-fn signed_payload(data: &Value) -> Result<Vec<u8>, NoQuery> {
+/// Both `data.request` and `data` itself are accepted as its carrier: the
+/// reference matcher accepts the payload at the top level of `data` too, and a
+/// verifier that sends it that way is not wrong enough to refuse.
+fn json_payload(data: &Value) -> Result<Vec<u8>, NoQuery> {
     match data.get("request") {
-        // Compact serialization: header.payload.signature.
-        Some(Value::String(jws)) => compact_payload(jws),
-        // JWS JSON Serialization, general or flattened.
         Some(Value::Object(_)) => {
             json_serialization_payload(&data["request"], NoQuery::JwsObjectHasNoPayload)
         }
-        // Present but useless — a number, a bool, null. Distinguished from
+        // Present but useless — a string, a number, null. Distinguished from
         // absence because "there is no request" sends whoever is reading the
         // diagnostic looking for a missing key that is in fact right there.
         Some(_) => Err(NoQuery::RequestNotAJwsOrObject),
@@ -251,7 +294,7 @@ pub fn diagnose(request: &[u8], profile: &MatchProfile) -> String {
             parts.push(format!("{protocol}: {}", NoQuery::NoData.reason()));
             continue;
         };
-        match extract_query(parser, data) {
+        match extract_query(parser, protocol, data) {
             Ok(q) => parts.push(format!(
                 "{protocol}: dcql_query parsed ({} credential queries) - should not have reached here",
                 q.credentials.len()
