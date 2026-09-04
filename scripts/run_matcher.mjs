@@ -173,7 +173,26 @@ const wasi_snapshot_preview1 = {
   },
   environ_get: () => 0,
   proc_exit: () => {},
-  fd_write: () => 0,
+  // The one WASI call the binary makes on purpose - rustc's panic handler
+  // writes its message through it. Honour the ABI rather than stubbing it:
+  // the bytes go to the matching Node stream so a panic is visible here, and
+  // `nwritten` is set, since std's write loop retries a short write and a
+  // stub that reports zero bytes written would leave it spinning.
+  fd_write: (fd, iovs, iovsLen, nwrittenPtr) => {
+    const view = new DataView(memory.buffer);
+    const chunks = [];
+    let total = 0;
+    for (let n = 0; n < iovsLen; n++) {
+      const ptr = view.getUint32(iovs + n * 8, true);
+      const len = view.getUint32(iovs + n * 8 + 4, true);
+      chunks.push(Buffer.from(new Uint8Array(memory.buffer, ptr, len)));
+      total += len;
+    }
+    const stream = fd === 2 ? process.stderr : process.stdout;
+    stream.write(Buffer.concat(chunks));
+    u32(nwrittenPtr, total);
+    return 0;
+  },
   fd_close: () => 0,
   fd_seek: () => 0,
 };
@@ -186,7 +205,8 @@ const wasmModule = new WebAssembly.Module(moduleBytes);
 // import appearing here is the earliest place to notice one.
 const imports = {};
 for (const i of WebAssembly.Module.imports(wasmModule)) {
-  (imports[i.module] ??= []).push(i.name);
+  imports[i.module] ??= [];
+  imports[i.module].push(i.name);
 }
 const stubbed = { credman, credman_v2, wasi_snapshot_preview1 };
 const unstubbed = Object.entries(imports).flatMap(([mod, names]) =>
@@ -201,8 +221,9 @@ instance.exports._start();
 
 const source = requestPath ? `from ${requestPath}` : '(built-in signed example)';
 console.log(`request: ${request.length} bytes ${source}`);
-for (const mod of Object.keys(imports).sort()) {
-  console.log(`imports ${mod}: ${imports[mod].sort().join(', ')}`);
+const alphabetical = (a, b) => a.localeCompare(b);
+for (const mod of Object.keys(imports).sort(alphabetical)) {
+  console.log(`imports ${mod}: ${imports[mod].sort(alphabetical).join(', ')}`);
 }
 if (unstubbed.length > 0) {
   console.log(`\nNote: not stubbed here — ${unstubbed.join(', ')}`);
