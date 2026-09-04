@@ -87,7 +87,7 @@ fn main() {
     };
 
     let Some((protocol, query)) = first_supported_request(&request, &db) else {
-        diag.emit("request", &diagnose_no_request(&request, &db));
+        diag.emit("request", || diagnose_no_request(&request, &db));
         return;
     };
 
@@ -101,13 +101,12 @@ fn main() {
     // would be worse than offering nothing: the user consents to a
     // presentation that cannot satisfy the verifier.
     if !result.satisfiable {
-        diag.emit(
-            "unsatisfiable",
-            &format!(
+        diag.emit("unsatisfiable", || {
+            format!(
                 "{protocol}: parsed {} cred queries, not satisfiable",
                 query.credentials.len()
-            ),
-        );
+            )
+        });
         return;
     }
 
@@ -116,13 +115,12 @@ fn main() {
     // are separate combinations, and therefore separate sets.
     let enumerated = result.combinations(MAX_COMBINATIONS);
     if enumerated.combinations.is_empty() {
-        diag.emit(
-            "zero",
-            &format!(
+        diag.emit("zero", || {
+            format!(
                 "{protocol}: satisfiable but zero combinations ({} held)",
                 held.len()
-            ),
-        );
+            )
+        });
         return;
     }
 
@@ -285,10 +283,15 @@ struct Diagnostics {
 
 impl Diagnostics {
     /// Emit one entry in its own set, `siros-debug-<kind>`, if enabled.
-    fn emit(&self, kind: &str, message: &str) {
+    ///
+    /// The message is a closure rather than a string so that composing it —
+    /// which for the no-request case means re-parsing the request JSON — costs
+    /// nothing on the production path, where diagnostics are off.
+    fn emit(&self, kind: &str, message: impl FnOnce() -> String) {
         if !self.enabled {
             return;
         }
+        let message = message();
         let set_id = format!("siros-debug-{kind}");
         abi::emit::entry_set(&set_id, 1);
         abi::emit::entry(
@@ -300,7 +303,7 @@ impl Diagnostics {
                 // Picker subtitles are typically single-line and short; keep
                 // the message itself terse rather than truncating here, so
                 // nothing important silently falls off the end.
-                subtitle: message,
+                subtitle: &message,
                 metadata: "{}",
                 icon: Some(FALLBACK_ICON_PNG),
             },

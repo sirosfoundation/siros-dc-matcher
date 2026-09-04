@@ -13,9 +13,10 @@ This rewrites:
   - the function + code sections (prepends two stub function bodies,
     occupying exactly the function-index slots vacated by the removed
     imports)
-  - every function-index reference elsewhere (export section, element
-    section, and every `call`/`ref.func` instruction in every function
-    body) via a byte-exact instruction walk - not a blind byte search.
+  - every function-index reference elsewhere (export section, start
+    section, element section, and every `call`/`ref.func` instruction in
+    every function body) via a byte-exact instruction walk - not a blind
+    byte search.
 
 Both stubs share the same (i32,i32)->i32 signature: (errno) environ_get
 writes nothing and returns 0; environ_sizes_get writes 0 to both output
@@ -388,6 +389,16 @@ def rewrite_export_section(payload, remap):
     return bytes(out)
 
 
+def rewrite_start_section(payload, remap):
+    """The start section (id 8) is a single funcidx - the function the host
+    runs at instantiation. wasi-libc's command model exports `_start` rather
+    than using this section, so the shipped build has none; but an input that
+    does have one would otherwise run the wrong function after the shift."""
+    idx, p = read_uleb128(payload, 0)
+    assert p == len(payload), "start section not fully consumed"
+    return uleb128(remap(idx))
+
+
 def rewrite_element_section(payload, remap):
     count, p = read_uleb128(payload, 0)
     out = bytearray(uleb128(count))
@@ -438,6 +449,8 @@ def main(in_path, out_path):
             payload = rewrite_function_section(payload, stub_type_idx)
         elif sid == 7:
             payload = rewrite_export_section(payload, remap)
+        elif sid == 8:
+            payload = rewrite_start_section(payload, remap)
         elif sid == 9:
             payload = rewrite_element_section(payload, remap)
         elif sid == 10:
