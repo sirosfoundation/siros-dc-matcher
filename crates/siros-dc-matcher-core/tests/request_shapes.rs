@@ -340,7 +340,8 @@ fn an_unsigned_label_does_not_accept_a_signed_payload() {
     let data = serde_json::json!({"request": compact_jws(&request_object())});
     assert_eq!(
         extract_query(Parser::Openid4vpV1, "openid4vp-v1-unsigned", &data),
-        Err(NoQuery::NoQueryAndNoRequest)
+        Err(NoQuery::ShapeDoesNotMatchProtocol),
+        "the reason should name the mismatch, not a missing key"
     );
     assert!(first_supported_request(
         &envelope("openid4vp-v1-unsigned", data),
@@ -360,7 +361,7 @@ fn a_signed_label_does_not_accept_an_inline_query() {
     let data: serde_json::Value = serde_json::from_str(&request_object()).expect("json");
     assert_eq!(
         extract_query(Parser::Openid4vpV1, "openid4vp-v1-signed", &data),
-        Err(NoQuery::NotACompactJws)
+        Err(NoQuery::ShapeDoesNotMatchProtocol)
     );
 }
 
@@ -398,7 +399,7 @@ fn an_unknown_openid4vp_protocol_id_gets_the_inline_shape() {
             "org.example.vp-v1",
             &serde_json::json!({"request": compact_jws(&request_object())})
         ),
-        Err(NoQuery::NoQueryAndNoRequest)
+        Err(NoQuery::ShapeDoesNotMatchProtocol)
     );
 }
 

@@ -512,10 +512,11 @@ fn dropped_combinations_are_reported_in_metadata() {
 // Signed and multisigned requests, through the real binary
 // ============================================================================
 //
-// `request()` above labels its envelope `openid4vp-v1-signed` while sending the
-// *unsigned* `data` shape, because the protocol id only selects a parser. These
-// send what a verifier actually sends for those two protocols: a JWS the
-// matcher has to decode before it can see a query at all.
+// `request()` above sends the unsigned shape under the unsigned label. These
+// send what a verifier actually sends for the two signed protocols: a JWS the
+// matcher has to decode before it can see a query at all. Which shape is
+// accepted follows the protocol id, so these cannot be reached by relabelling
+// an inline request.
 
 /// Unpadded base64url, so a test does not hand-encode its own payload.
 fn b64(bytes: &[u8]) -> String {

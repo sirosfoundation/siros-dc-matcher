@@ -174,12 +174,14 @@ pub fn match_dc_api_request(
     // which meant the two entry points disagreed about what a request is: the
     // picker would offer a credential for a signed request that this path
     // declined. One reader, or they drift again.
-    let (_protocol, query) = request::first_supported_request(request_json.as_bytes(), &db.profile)
-        .ok_or_else(|| MatchError::UnsupportedProtocol {
-            offered: requests
-                .iter()
-                .filter_map(|e| Some(e.get("protocol")?.as_str()?.to_owned()))
-                .collect(),
+    let (_protocol, query) =
+        request::first_supported_in(&parsed, &db.profile).ok_or_else(|| {
+            MatchError::UnsupportedProtocol {
+                offered: requests
+                    .iter()
+                    .filter_map(|e| Some(e.get("protocol")?.as_str()?.to_owned()))
+                    .collect(),
+            }
         })?;
 
     Ok(evaluate(&db, &query))

@@ -41,6 +41,10 @@ pub enum NoQuery {
     /// A JWS JSON Serialization object is present but carries no string
     /// `payload` — again, present but undecodable rather than absent.
     JwsObjectHasNoPayload,
+    /// The data carries a `request` under a protocol whose shape is an inline
+    /// query, or an inline query under a signed one. The label and the shape
+    /// disagree, which is a different problem from either being absent.
+    ShapeDoesNotMatchProtocol,
     /// `data.request` is a string but not a compact JWS.
     NotACompactJws,
     /// The payload segment is not unpadded base64url.
@@ -70,6 +74,9 @@ impl NoQuery {
             Self::JwsObjectHasNoPayload => {
                 "the JWS JSON object has no string `payload` member".into()
             }
+            Self::ShapeDoesNotMatchProtocol => {
+                "the request shape does not match the protocol it is labelled with".into()
+            }
             Self::NotACompactJws => "data.request is not a compact JWS".into(),
             Self::PayloadNotBase64url => "JWS payload is not unpadded base64url".into(),
             Self::PayloadNotJson => "JWS payload is not JSON".into(),
@@ -97,6 +104,13 @@ pub fn first_supported_request(
     profile: &MatchProfile,
 ) -> Option<(String, DcqlQuery)> {
     let parsed: Value = serde_json::from_slice(request).ok()?;
+    first_supported_in(&parsed, profile)
+}
+
+/// [`first_supported_request`] for a caller that has already parsed the
+/// envelope, so the JSON is not walked twice at an API boundary.
+#[must_use]
+pub fn first_supported_in(parsed: &Value, profile: &MatchProfile) -> Option<(String, DcqlQuery)> {
     parsed
         .get("requests")?
         .as_array()?
@@ -143,16 +157,22 @@ pub fn first_supported_request(
 pub fn extract_query(parser: Parser, protocol: &str, data: &Value) -> Result<DcqlQuery, NoQuery> {
     match parser {
         Parser::Openid4vpV1 => match Shape::of(protocol) {
-            Shape::Inline => {
-                let dcql = data.get("dcql_query").ok_or(NoQuery::NoQueryAndNoRequest)?;
-                parse_dcql(dcql)
-            }
-            Shape::CompactJws => {
-                let Some(Value::String(jws)) = data.get("request") else {
-                    return Err(NoQuery::NotACompactJws);
-                };
-                from_payload(compact_payload(jws)?)
-            }
+            Shape::Inline => match data.get("dcql_query") {
+                Some(dcql) => parse_dcql(dcql),
+                // A `request` here means the verifier sent a signed shape
+                // under a label whose shape is inline. Saying "no dcql_query"
+                // would send whoever reads it looking for a missing key when
+                // the request is right there under the wrong name.
+                None if data.get("request").is_some() => Err(NoQuery::ShapeDoesNotMatchProtocol),
+                None => Err(NoQuery::NoQueryAndNoRequest),
+            },
+            Shape::CompactJws => match data.get("request") {
+                Some(Value::String(jws)) => from_payload(compact_payload(jws)?),
+                // An inline query under a signed label is the mirror image of
+                // the case above, and just as worth naming.
+                None if data.get("dcql_query").is_some() => Err(NoQuery::ShapeDoesNotMatchProtocol),
+                _ => Err(NoQuery::NotACompactJws),
+            },
             Shape::JwsJson => from_payload(json_payload(data)?),
         },
         // ISO 18013-7 carries a CBOR DeviceRequest rather than DCQL, so it
