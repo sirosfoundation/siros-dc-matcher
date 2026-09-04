@@ -31,6 +31,20 @@
 pub fn decode(input: &str) -> Option<Vec<u8>> {
     let bytes = input.as_bytes();
 
+    // A cap, because the caller's input is verifier-controlled and this runs
+    // inside someone else's process. Without one, `with_capacity` below sizes
+    // an allocation from that input, and the failure mode is the worst one
+    // available here: a trap shows the user exactly what "no matching
+    // credential" shows. Declining is a decision; running out of memory is
+    // not.
+    //
+    // 256 KiB of base64 is ~192 KiB decoded. An authorization request object
+    // is a few kilobytes; this is generous by two orders of magnitude and
+    // still bounded.
+    if bytes.len() > MAX_INPUT {
+        return None;
+    }
+
     // A base64 quantum is 4 characters carrying 3 bytes. A tail of 2 or 3
     // characters carries 1 or 2 bytes; a tail of exactly 1 carries nothing and
     // cannot be the output of any encoder.
@@ -61,6 +75,9 @@ pub fn decode(input: &str) -> Option<Vec<u8>> {
 
     Some(out)
 }
+
+/// The largest input [`decode`] will attempt, in encoded bytes.
+const MAX_INPUT: usize = 256 * 1024;
 
 /// The 6-bit value of one base64url character, or `None` if it is not one.
 fn sextet(c: u8) -> Option<u8> {
@@ -129,6 +146,17 @@ mod tests {
         assert_eq!(decode("Zg").as_deref(), Some(&b"f"[..]));
         assert_eq!(decode("Zh"), None);
         assert_eq!(decode("Zm9vYh"), None);
+    }
+
+    /// The cap declines rather than allocating from verifier-controlled input.
+    ///
+    /// A trap in the matcher shows the user what "no matching credential"
+    /// shows, so running out of memory is the one outcome worse than a
+    /// rejection.
+    #[test]
+    fn refuses_an_input_beyond_the_cap() {
+        assert!(decode(&"A".repeat(super::MAX_INPUT)).is_some());
+        assert_eq!(decode(&"A".repeat(super::MAX_INPUT + 4)), None);
     }
 
     /// Decoding is bounded by the input, and a truncated JWS is a normal thing

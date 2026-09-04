@@ -243,16 +243,23 @@ fn json_payload(data: &Value) -> Result<Vec<u8>, NoQuery> {
 
 /// The middle segment of a compact JWS.
 ///
-/// The header and the signature are not inspected — the matcher is not the
-/// party deciding whether a signature is acceptable — but the segment *count*
-/// is, in both directions.
+/// Exactly three segments: the compact serialization is always
+/// `header.payload.signature` (RFC 7515 §7.1). The signature may be *empty* —
+/// that is RFC 7519 §6's unsecured token — because whether an unsecured request
+/// is acceptable is the wallet's decision and not this one. The header and the
+/// payload may not be empty, and a token that is malformed in that way would
+/// otherwise produce a picker entry for a request the wallet rejects a moment
+/// later.
 ///
-/// Two or three. Three is a JWS; two is an unsecured token whose payload is
-/// still the request object we need. Five is a JWE, and there the second
-/// segment is an encrypted key rather than a payload: decoding it would either
-/// fail with a misleading reason or, worse, succeed on something that is not
-/// the request. A verifier sending a JWE is doing something this matcher has no
-/// answer for, and saying so is better than guessing.
+/// Beyond the count, the header and signature are not inspected; the matcher is
+/// not the party deciding whether a signature is acceptable. But five segments
+/// is a JWE, whose second segment is an encrypted key rather than a payload:
+/// decoding that would either fail with a misleading reason or, worse, succeed
+/// on something that is not the request.
+///
+/// The work is bounded by `splitn`, not by the number of dots — this is
+/// verifier-controlled input reaching a sandbox with a time budget, and
+/// splitting on every one would allocate in proportion to the request.
 fn compact_payload(jws: &str) -> Result<Vec<u8>, NoQuery> {
     // `splitn(4)`, and no collecting. The input is verifier-controlled and this
     // runs in a sandbox with a time budget, so the work has to be bounded by
@@ -260,24 +267,18 @@ fn compact_payload(jws: &str) -> Result<Vec<u8>, NoQuery> {
     // splitting on every one would allocate proportionally to the request.
     // A fourth piece existing at all is enough to know there were too many.
     let mut segments = jws.splitn(4, '.');
-    // The header is not inspected, but it has to be there. A token starting
-    // with `.` is malformed, and offering a picker entry for it means the user
-    // consents to something the wallet will reject afterwards.
     let header = segments.next();
     let payload = segments.next();
-    if header.is_none_or(str::is_empty) {
-        return Err(NoQuery::NotACompactJws);
-    }
-    // Three segments means a signature is claimed, so an empty one is
-    // malformed — `header.payload.` would otherwise produce a picker entry for
-    // a request the wallet rejects a moment later. The two-segment unsecured
-    // form claims no signature and stays acceptable.
-    if segments.next().is_some_and(str::is_empty) {
-        return Err(NoQuery::NotACompactJws);
-    }
-    // A fourth piece at all means there were more than three segments, whatever
-    // is in it — enough to know this is not a JWS without splitting further.
+    let signature = segments.next();
+    // A fourth piece at all means more than three segments, whatever is in it —
+    // enough to know this is not a compact JWS without splitting further.
     if segments.next().is_some() {
+        return Err(NoQuery::NotACompactJws);
+    }
+    // Exactly three, and the header present. The *signature* may be empty:
+    // that is the unsecured token of RFC 7519 §6, and whether an unsecured
+    // request is acceptable is the wallet's decision rather than this one.
+    if signature.is_none() || header.is_none_or(str::is_empty) {
         return Err(NoQuery::NotACompactJws);
     }
     let Some(payload) = payload.filter(|p| !p.is_empty()) else {

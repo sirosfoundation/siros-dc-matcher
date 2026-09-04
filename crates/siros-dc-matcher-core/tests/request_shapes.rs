@@ -213,12 +213,12 @@ fn each_failure_is_named_separately() {
             serde_json::json!({"request": ".aGk.c2ln"}),
             NoQuery::NotACompactJws,
         ),
-        // Three segments claim a signature, so an empty third is malformed.
-        // The two-segment unsecured form claims none and is accepted - see
-        // `an_unsecured_two_segment_token_is_still_read`.
+        // Two segments is not the compact serialization, which is always three
+        // (RFC 7515 §7.1). The unsecured form is `header.payload.` - see
+        // `an_unsecured_token_has_an_empty_signature_not_a_missing_one`.
         (
             "openid4vp-v1-signed",
-            serde_json::json!({"request": format!("aGVhZGVy.{}.", b64(request_object().as_bytes()))}),
+            serde_json::json!({"request": format!("aGVhZGVy.{}", b64(request_object().as_bytes()))}),
             NoQuery::NotACompactJws,
         ),
         // The mirror of the compact-JWS branch: an inline query under the
@@ -315,12 +315,16 @@ fn a_jwe_is_not_mistaken_for_a_jws() {
     );
 }
 
-/// An unsecured token is two segments, and its payload is still the request
-/// object. The matcher does not judge signatures, so it does not require one.
+/// An unsecured token has an *empty* signature, not a missing one.
+///
+/// RFC 7519 §6: `alg: none` with the signature as the empty string, so the
+/// serialization is `header.payload.` — three segments, the third empty. Its
+/// payload is read, because whether an unsecured request is acceptable is the
+/// wallet's decision and not the matcher's.
 #[test]
-fn an_unsecured_two_segment_token_is_still_read() {
+fn an_unsecured_token_has_an_empty_signature_not_a_missing_one() {
     let token = format!(
-        "{}.{}",
+        "{}.{}.",
         b64(br#"{"alg":"none"}"#),
         b64(request_object().as_bytes())
     );
