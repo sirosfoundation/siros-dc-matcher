@@ -38,9 +38,22 @@ all: matcher bindings
 
 # ── The matcher binary ───────────────────────────────────────────────
 
+MATCHER_WASM := $(BUILD_DIR)/wasm32-wasip1/wasm-release/matcher.wasm
+
 matcher:
 	cargo build --locked -p siros-dc-matcher-wasm --target wasm32-wasip1 --profile wasm-release
-	@ls -l $(BUILD_DIR)/wasm32-wasip1/wasm-release/matcher.wasm
+	# rustc's wasm32-wasip1 CRT startup (crt1-command.o) unconditionally
+	# imports wasi_snapshot_preview1.environ_get/environ_sizes_get, whether
+	# or not the program touches env vars - and this one never does. The
+	# Credential Manager host implements only a small WASI subset (it is
+	# known to lack random_get, per UbiqueInnovation/oid4vp-wasm-matcher's
+	# README), and a missing import fails instantiation with no error
+	# surface at all. Whether it lacks these two is not established; stubbing
+	# them out as local no-ops is cheap insurance against ever finding out
+	# the hard way. See the script for what it rewrites and how.
+	python3 scripts/strip_wasi_environ.py $(MATCHER_WASM) $(MATCHER_WASM).tmp
+	mv $(MATCHER_WASM).tmp $(MATCHER_WASM)
+	@ls -l $(MATCHER_WASM)
 
 # ── Binding generation ───────────────────────────────────────────────
 #
