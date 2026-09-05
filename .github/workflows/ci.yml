@@ -68,7 +68,10 @@ jobs:
         with:
           targets: wasm32-wasip1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - run: cargo build --locked -p siros-dc-matcher-wasm --target wasm32-wasip1 --profile wasm-release
+      # `make matcher`, so the module checked below is the one that ships —
+      # a bare `cargo build` leaves the `environ_*` imports in, and then the
+      # ABI check and the size budget both measure a file no wallet runs.
+      - run: make matcher
 
       # A matcher that traps emits no entries, which the user cannot tell
       # apart from "no matching credential". Check the module actually links
@@ -88,6 +91,15 @@ jobs:
           missing = [r for r in required if r not in names]
           if missing:
               sys.exit("matcher.wasm is missing host ABI symbols: " + ", ".join(missing))
+          # The strip step's own result. Whatever the cause — the step was
+          # skipped, or it ran and did not rewrite the module — the effect is
+          # the same: this is not the binary the AAR ships.
+          leftover = [n for n in ("environ_get", "environ_sizes_get") if n in names]
+          if leftover:
+              sys.exit("matcher.wasm still imports " + ", ".join(leftover)
+                       + " — expected scripts/strip_wasi_environ.py to have removed"
+                       + " them. Either `make matcher` was not the build step, or"
+                       + " the script did not rewrite the module.")
           print("host ABI intact:", ", ".join(required))
           PY
 

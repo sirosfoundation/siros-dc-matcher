@@ -22,7 +22,19 @@ jobs:
         with:
           targets: wasm32-wasip1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - run: cargo build --locked -p siros-dc-matcher-wasm --target wasm32-wasip1 --profile wasm-release
+      # `make matcher`, not a bare `cargo build`: the Makefile also strips the
+      # two `environ_*` imports rustc's CRT adds unconditionally. Without that
+      # step the published binary is a different file from the one the AAR
+      # ships and wallets actually run — v0.6.0 published 259,867 bytes
+      # importing `environ_get`/`environ_sizes_get`, while its own AAR carried
+      # 250,110 bytes importing neither.
+      #
+      # That is worse than untidy. The digest below exists so someone can check
+      # what they are running, and it was attesting a file nobody runs — one
+      # carrying exactly the two imports the host's WASI subset may not
+      # provide, where a missing import fails instantiation with no error
+      # surface at all.
+      - run: make matcher
 
       # This binary runs inside other people's credential picker. "Built from
       # this commit" has to be something they can check, so the digest is
@@ -32,6 +44,30 @@ jobs:
           cp target/wasm32-wasip1/wasm-release/matcher.wasm .
           sha256sum matcher.wasm | tee matcher.wasm.sha256
           echo "toolchain: $(rustc --version)" | tee -a matcher.wasm.sha256
+
+      # The published artifact and the one inside the AAR are built by separate
+      # jobs from the same commit. They must be the same bytes; checking is
+      # cheaper than discovering they diverged from a device.
+      - name: The published binary is the one that ships
+        run: |
+          set -euo pipefail
+          node -e '
+            const fs = require("fs");
+            const m = new WebAssembly.Module(fs.readFileSync("matcher.wasm"));
+            const wasi = WebAssembly.Module.imports(m)
+              .filter(i => i.module === "wasi_snapshot_preview1")
+              .map(i => i.name).sort();
+            console.log("wasi imports:", wasi.join(", "));
+            const unexpected = wasi.filter(n => n.startsWith("environ_"));
+            if (unexpected.length) {
+              console.error("::error::matcher.wasm still imports " + unexpected.join(", ") +
+                            " — expected scripts/strip_wasi_environ.py to have removed them." +
+                            " Either `make matcher` was not the build step, or the script did" +
+                            " not rewrite the module. Either way this is not the binary the" +
+                            " AAR ships, so it must not be published.");
+              process.exit(1);
+            }
+          '
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
