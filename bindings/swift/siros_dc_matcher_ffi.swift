@@ -536,11 +536,12 @@ public protocol SirosBlobBuilderProtocol : AnyObject {
      *
      * # Errors
      *
-     * `BlobError::UnknownIcon` (`BlobException.UnknownIcon` in Kotlin) when a
-     * credential names an icon that was never added — a dangling reference
-     * would otherwise cost that credential its picture with nothing said.
-     * `BlobError::Encoding` (`BlobException.Encoding`) if serialisation
-     * fails.
+     * In Rust and Swift the error type is `BlobError`; Kotlin renames it to
+     * `BlobException`. Either way there are two variants.
+     *
+     * `UnknownIcon` when a credential names an icon that was never added — a
+     * dangling reference would otherwise cost that credential its picture
+     * with nothing said. `Encoding` if serialisation fails.
      */
     func build() throws  -> Data
     
@@ -666,11 +667,12 @@ open func addZkSystem(capability: FfiCapability) {try! rustCall() {
      *
      * # Errors
      *
-     * `BlobError::UnknownIcon` (`BlobException.UnknownIcon` in Kotlin) when a
-     * credential names an icon that was never added — a dangling reference
-     * would otherwise cost that credential its picture with nothing said.
-     * `BlobError::Encoding` (`BlobException.Encoding`) if serialisation
-     * fails.
+     * In Rust and Swift the error type is `BlobError`; Kotlin renames it to
+     * `BlobException`. Either way there are two variants.
+     *
+     * `UnknownIcon` when a credential names an icon that was never added — a
+     * dangling reference would otherwise cost that credential its picture
+     * with nothing said. `Encoding` if serialisation fails.
      */
 open func build()throws  -> Data {
     return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeBlobError.lift) {
@@ -2037,7 +2039,7 @@ private var initializationResult: InitializationResult = {
     if (uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_add_zk_system() != 50234) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_build() != 20328) {
+    if (uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_build() != 43215) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_set_debug() != 60199) {
