@@ -1744,7 +1744,7 @@ dependencies = [
 
 [[package]]
 name = "siros-dc-matcher-ffi"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "serde_json",
  "siros-dc-matcher-core",
