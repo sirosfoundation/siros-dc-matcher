@@ -931,7 +931,7 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_add_zk_system() != 50234.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_build() != 30642.toShort()) {
+    if (lib.uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_build() != 20328.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_set_debug() != 60199.toShort()) {
@@ -1309,9 +1309,11 @@ public interface SirosBlobBuilderInterface {
      *
      * # Errors
      *
-     * An unknown-icon error when a credential names an icon that was never
-     * added — a dangling reference would otherwise cost that credential its
-     * picture with nothing said. An encoding error if serialisation fails.
+     * `BlobError::UnknownIcon` (`BlobException.UnknownIcon` in Kotlin) when a
+     * credential names an icon that was never added — a dangling reference
+     * would otherwise cost that credential its picture with nothing said.
+     * `BlobError::Encoding` (`BlobException.Encoding`) if serialisation
+     * fails.
      */
     fun `build`(): kotlin.ByteArray
     
@@ -1481,9 +1483,11 @@ open class SirosBlobBuilder: Disposable, AutoCloseable, SirosBlobBuilderInterfac
      *
      * # Errors
      *
-     * An unknown-icon error when a credential names an icon that was never
-     * added — a dangling reference would otherwise cost that credential its
-     * picture with nothing said. An encoding error if serialisation fails.
+     * `BlobError::UnknownIcon` (`BlobException.UnknownIcon` in Kotlin) when a
+     * credential names an icon that was never added — a dangling reference
+     * would otherwise cost that credential its picture with nothing said.
+     * `BlobError::Encoding` (`BlobException.Encoding`) if serialisation
+     * fails.
      */
     @Throws(BlobException::class)override fun `build`(): kotlin.ByteArray {
             return FfiConverterByteArray.lift(
