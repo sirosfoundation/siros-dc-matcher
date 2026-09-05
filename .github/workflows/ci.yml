@@ -91,12 +91,15 @@ jobs:
           missing = [r for r in required if r not in names]
           if missing:
               sys.exit("matcher.wasm is missing host ABI symbols: " + ", ".join(missing))
-          # The strip step's own result. Present means `make matcher` did not
-          # run, and the module measured here is not the one the AAR ships.
+          # The strip step's own result. Whatever the cause — the step was
+          # skipped, or it ran and did not rewrite the module — the effect is
+          # the same: this is not the binary the AAR ships.
           leftover = [n for n in ("environ_get", "environ_sizes_get") if n in names]
           if leftover:
               sys.exit("matcher.wasm still imports " + ", ".join(leftover)
-                       + " — the WASI strip step did not run")
+                       + " — expected scripts/strip_wasi_environ.py to have removed"
+                       + " them. Either `make matcher` was not the build step, or"
+                       + " the script did not rewrite the module.")
           print("host ABI intact:", ", ".join(required))
           PY
 

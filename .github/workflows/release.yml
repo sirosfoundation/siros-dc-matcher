@@ -61,7 +61,10 @@ jobs:
             const unexpected = wasi.filter(n => n.startsWith("environ_"));
             if (unexpected.length) {
               console.error("::error::matcher.wasm still imports " + unexpected.join(", ") +
-                            " — the strip step did not run, so this is not the binary the AAR ships");
+                            " — expected scripts/strip_wasi_environ.py to have removed them." +
+                            " Either `make matcher` was not the build step, or the script did" +
+                            " not rewrite the module. Either way this is not the binary the" +
+                            " AAR ships, so it must not be published.");
               process.exit(1);
             }
           '
