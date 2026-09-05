@@ -193,9 +193,12 @@ impl SirosBlobBuilder {
     ///
     /// # Errors
     ///
-    /// An unknown-icon error when a credential names an icon that was never
-    /// added — a dangling reference would otherwise cost that credential its
-    /// picture with nothing said. An encoding error if serialisation fails.
+    /// In Rust and Swift the error type is `BlobError`; Kotlin renames it to
+    /// `BlobException`. Either way there are two variants.
+    ///
+    /// `UnknownIcon` when a credential names an icon that was never added — a
+    /// dangling reference would otherwise cost that credential its picture
+    /// with nothing said. `Encoding` if serialisation fails.
     pub fn build(&self) -> Result<Vec<u8>, BlobError> {
         let s = self.state();
 
