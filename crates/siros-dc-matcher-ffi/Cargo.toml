@@ -1,6 +1,6 @@
 [package]
 name = "siros-dc-matcher-ffi"
-version = "0.6.1"
+version = "0.6.2"
 description = "Kotlin/Swift bindings for the SIROS DC API matcher"
 publish = false
 edition.workspace = true
