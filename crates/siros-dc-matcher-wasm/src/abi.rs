@@ -218,7 +218,6 @@ pub mod emit {
             let (set_id, cred_id) = (super::c(set_id), super::c(e.credential_id));
             let (title, subtitle) = (super::c(e.title), super::c(e.subtitle));
             let metadata = super::c(e.metadata);
-            let empty = super::c("");
             // A null pointer with length 0 for "no icon". The bytes, when
             // there are some, are borrowed straight from the decoded blob —
             // they outlive the call, and copying a bitmap per entry inside a
@@ -238,8 +237,18 @@ pub mod emit {
                     icon_len,
                     title.as_ptr(),
                     subtitle.as_ptr(),
-                    empty.as_ptr(),
-                    empty.as_ptr(),
+                    // Null, not a pointer to "". The picker draws a red badge
+                    // with a warning triangle for any entry whose disclaimer or
+                    // warning is *present*, and an empty string is present —
+                    // so every entry we emitted carried a warning symbol with
+                    // no warning in it. Confirmed on a Pixel: the badge sits on
+                    // the credential card in the share sheet, saying nothing.
+                    //
+                    // The icon two arguments up already uses this convention:
+                    // absent is a null pointer, not an empty value. These two
+                    // now agree with it.
+                    core::ptr::null(),
+                    core::ptr::null(),
                     metadata.as_ptr(),
                     set_id.as_ptr(),
                     index as i32,
