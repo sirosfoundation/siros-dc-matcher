@@ -286,14 +286,19 @@ fn zk_system_type_on_a_plain_mdoc_query_is_a_zk_request() {
     assert_eq!(matches(&capable, &q), ["mdl-1"]);
 }
 
-/// And the gate bites: a wallet that cannot produce the named proof is not
-/// offered, even though the format alone would have matched.
+/// And the gate bites when the verifier says it must: a wallet that cannot
+/// produce the named proof is not offered, even though the format alone would
+/// have matched.
+///
+/// `zk_required: true` is what makes it bite. Naming systems alone is an
+/// offer — see `an_absent_flag_means_optional`.
 #[test]
-fn a_plain_mdoc_query_naming_a_system_we_lack_is_not_offered() {
+fn a_plain_mdoc_query_requiring_a_system_we_lack_is_not_offered() {
     let incapable = wallet(vec![]);
     let q = plain_mdoc_query_with(json!({
         "doctype_value": "org.iso.18013.5.1.mDL",
-        "zk_system_type": [{"id": "1", "system": "longfellow-libzk-v1"}]
+        "zk_system_type": [{"id": "1", "system": "longfellow-libzk-v1"}],
+        "zk_required": true
     }));
     assert!(
         matches(&incapable, &q).is_empty(),
@@ -396,18 +401,25 @@ fn zk_required_false_still_reports_the_chosen_system() {
 /// exactly what it gets now, and the safer reading is the default: not
 /// offering beats offering a presentation that cannot satisfy the verifier.
 #[test]
-fn an_absent_flag_means_required() {
+fn an_absent_flag_means_optional() {
     let incapable = wallet(vec![]);
     let q = plain_mdoc_query_with(json!({
         "doctype_value": "org.iso.18013.5.1.mDL",
         "zk_system_type": [{"id": "1", "system": "longfellow-libzk-v1"}]
     }));
-    assert!(matches(&incapable, &q).is_empty());
+    assert_eq!(
+        matches(&incapable, &q).len(),
+        1,
+        "naming systems without a flag is an offer, not a demand: a verifier \
+         migrating off the mso_mdoc_zk suffix sends this before it sends any \
+         flag, and a wallet that cannot prove must still be offered"
+    );
 }
 
-/// `zk_required: true` is the default said out loud.
+/// `zk_required: true` is what demands the capability - the flag is the only
+/// thing that does, short of the `mso_mdoc_zk` format.
 #[test]
-fn an_explicit_true_is_the_same_as_absent() {
+fn an_explicit_true_demands_the_capability() {
     let incapable = wallet(vec![]);
     let q = plain_mdoc_query_with(json!({
         "doctype_value": "org.iso.18013.5.1.mDL",
@@ -415,6 +427,24 @@ fn an_explicit_true_is_the_same_as_absent() {
         "zk_required": true
     }));
     assert!(matches(&incapable, &q).is_empty());
+}
+
+/// A flag that is not a JSON boolean reads as absent, and absent is optional.
+///
+/// `"true"` the string is not `true` the boolean. Treating it as one would let
+/// a typo silently narrow who gets offered, which is the failure this whole
+/// area keeps producing.
+#[test]
+fn a_non_boolean_flag_reads_as_absent() {
+    let incapable = wallet(vec![]);
+    for bad in [json!("true"), json!(1), json!(null), json!({})] {
+        let q = plain_mdoc_query_with(json!({
+            "doctype_value": "org.iso.18013.5.1.mDL",
+            "zk_system_type": [{"id": "1", "system": "longfellow-libzk-v1"}],
+            "zk_required": bad
+        }));
+        assert_eq!(matches(&incapable, &q).len(), 1, "for {bad}");
+    }
 }
 
 /// The flag does not rescue the `mso_mdoc_zk` format. Asking for that format
