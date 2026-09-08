@@ -397,9 +397,10 @@ fn zk_required_false_still_reports_the_chosen_system() {
     );
 }
 
-/// Absent means required. Every verifier sending `zk_system_type` today gets
-/// exactly what it gets now, and the safer reading is the default: not
-/// offering beats offering a presentation that cannot satisfy the verifier.
+/// Absent means optional. A verifier migrating off the `mso_mdoc_zk` suffix
+/// names the systems it accepts before it starts sending any flag, so reading
+/// silence as a demand would stop offering those requests to exactly the
+/// wallets the migration exists to keep serving.
 #[test]
 fn an_absent_flag_means_optional() {
     let incapable = wallet(vec![]);

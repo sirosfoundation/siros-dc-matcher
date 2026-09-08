@@ -88,10 +88,10 @@ impl siros_dcql::Credential for BlobCredential<'_> {
 
 /// Whether a trigger's capability is required, or merely preferred.
 ///
-/// Required unless the request explicitly says otherwise: a verifier naming
-/// proof systems and saying nothing more is asking for a proof, and offering a
-/// wallet that cannot produce one leads to a consented presentation that
-/// cannot satisfy them.
+/// Optional unless the request explicitly demands it: a verifier naming proof
+/// systems and saying nothing more is listing what it accepts, not what it
+/// insists on. Only an explicit `true` in the flag the profile names makes the
+/// capability a condition of being offered at all.
 fn trigger_is_required(trigger: &crate::profile::MetaTrigger, query: &CredentialQuery) -> bool {
     // No flag configured: the trigger's presence is the requirement, as it was
     // before there was a flag at all.
