@@ -30,6 +30,18 @@ pub trait Credential {
     /// format. [`PathError::Empty`] — the credential simply lacks the claim —
     /// is the ordinary case and not exceptional.
     fn claim(&self, path: &[PathComponent]) -> Result<Vec<Value>, PathError>;
+
+    /// Whether this credential is cryptographically bound to its holder.
+    ///
+    /// Answers §6.1's `require_cryptographic_holder_binding`, whose default is
+    /// `true`: a verifier says nothing and still means "bound". A credential
+    /// that answers `false` is not offered to such a query.
+    ///
+    /// Deliberately without a default implementation. A blanket `true` would
+    /// let an implementor who never considered the question assert a security
+    /// property on their credentials' behalf, and the failure mode is a
+    /// verifier being handed exactly what it said it would not accept.
+    fn has_cryptographic_holder_binding(&self) -> bool;
 }
 
 /// Format and metadata matching, which DCQL deliberately leaves
@@ -86,6 +98,11 @@ pub struct QueryMatch {
     pub query_id: String,
     /// Credentials that satisfy it, in the order the wallet holds them.
     pub candidates: Vec<Candidate>,
+    /// Whether the query accepts more than one credential (§6.1 `multiple`).
+    ///
+    /// Carried on the result so combinations can be enumerated without the
+    /// query alongside, the same reason [`QueryResult::credential_sets`] is.
+    pub multiple: bool,
 }
 
 impl QueryMatch {
@@ -162,8 +179,17 @@ pub fn execute<C: Credential>(
         .iter()
         .map(|cq| QueryMatch {
             query_id: cq.id.clone(),
+            multiple: cq.multiple,
             candidates: credentials
                 .iter()
+                // §6.1 `require_cryptographic_holder_binding`, default true.
+                // Before the policy and the claims, because an unbound
+                // credential is not a weaker match for a query that requires
+                // binding — it is disqualified, however well it fits
+                // otherwise.
+                .filter(|c| {
+                    !cq.require_cryptographic_holder_binding || c.has_cryptographic_holder_binding()
+                })
                 .filter(|c| policy.matches(cq, *c))
                 .filter_map(|c| {
                     select_claims(cq, c).map(|claims| Candidate {
@@ -327,12 +353,15 @@ impl QueryResult {
     }
 }
 
-/// Up to `budget` ways to pick one candidate for each query id in `option`,
-/// and how many further ways existed.
+/// Up to `budget` ways to answer each query id in `option`, and how many
+/// further ways existed.
 ///
-/// The count is a product of the per-query candidate counts, so it is computed
-/// rather than reached by building every combination and discarding most of
-/// them.
+/// One candidate per query, except where the query set §6.1 `multiple`, in
+/// which case that query is answered by *all* of its candidates at once and so
+/// contributes a single way rather than one per credential.
+///
+/// The count is a product of the per-query widths, so it is computed rather
+/// than reached by building every combination and discarding most of them.
 fn candidate_products(
     result: &QueryResult,
     option: &[String],
@@ -343,7 +372,7 @@ fn candidate_products(
         let Some(query_match) = result.query(id) else {
             return (Vec::new(), 0);
         };
-        total = total.saturating_mul(query_match.candidates.len());
+        total = total.saturating_mul(query_width(query_match));
     }
     if total == 0 {
         return (Vec::new(), 0);
@@ -362,6 +391,18 @@ fn candidate_products(
             let Some(query_match) = result.query(id) else {
                 return (Vec::new(), 0);
             };
+            // A `multiple` query has width 1 and contributes every candidate,
+            // so it consumes none of the mixed-radix index — `% 1` and `/ 1`
+            // would be the no-ops that fall out of the arithmetic anyway.
+            if query_match.multiple {
+                members.extend(
+                    query_match
+                        .candidates
+                        .iter()
+                        .map(|candidate| (id.clone(), candidate.clone())),
+                );
+                continue;
+            }
             let width = query_match.candidates.len();
             let Some(candidate) = query_match.candidates.get(remainder % width) else {
                 return (Vec::new(), 0);
@@ -373,6 +414,27 @@ fn candidate_products(
     }
 
     (products, total - take)
+}
+
+/// How many distinct ways one query can be answered within a combination.
+///
+/// One per candidate normally. A query that set §6.1 `multiple` is answered by
+/// all of its candidates together, which is one way, not none — so a query
+/// with no candidates at all still has width zero and makes the whole product
+/// zero.
+///
+/// Answering a `multiple` query with everything that matches, rather than
+/// enumerating each credential as its own alternative, is the reading under
+/// which the flag does something: "multiple Credentials can be returned for
+/// this Credential Query" (§6.1). It also collapses the combination count
+/// where the permissive reading would multiply it, and the holder still
+/// consents to the combination as a whole.
+fn query_width(query_match: &QueryMatch) -> usize {
+    if query_match.multiple && !query_match.candidates.is_empty() {
+        1
+    } else {
+        query_match.candidates.len()
+    }
 }
 
 /// Which claims to disclose for one credential, or `None` if this credential

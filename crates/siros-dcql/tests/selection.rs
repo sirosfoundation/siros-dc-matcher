@@ -13,6 +13,9 @@ struct JsonCredential {
     id: String,
     format: String,
     body: Value,
+    /// Cryptographic holder binding, so §6.1's requirement can be tested from
+    /// both sides.
+    bound: bool,
 }
 
 impl JsonCredential {
@@ -21,7 +24,14 @@ impl JsonCredential {
             id: id.into(),
             format: format.into(),
             body,
+            bound: true,
         }
+    }
+
+    /// The same credential, with no cryptographic holder binding.
+    fn unbound(mut self) -> Self {
+        self.bound = false;
+        self
     }
 }
 
@@ -34,6 +44,9 @@ impl siros_dcql::Credential for JsonCredential {
     }
     fn claim(&self, path: &[PathComponent]) -> Result<Vec<Value>, PathError> {
         siros_dcql::resolve_json(&self.body, path).map(|v| v.into_iter().cloned().collect())
+    }
+    fn has_cryptographic_holder_binding(&self) -> bool {
+        self.bound
     }
 }
 
@@ -631,4 +644,157 @@ fn no_credential_sets_means_no_purposes() {
 
     let combos = execute(&q, &creds, &ExactFormat).combinations(16);
     assert!(combos.combinations[0].purposes.is_empty());
+}
+
+/// §6.1 — `require_cryptographic_holder_binding` defaults to `true`, so a
+/// verifier that says nothing still means bound, and an unbound credential is
+/// not offered to it.
+#[test]
+fn an_unbound_credential_is_not_offered_when_binding_is_required() {
+    let q = query(
+        r#"{"credentials":[{"id":"c","format":"dc+sd-jwt","meta":{},
+             "claims":[{"path":["given_name"]}]}]}"#,
+    );
+    let creds = [pid(json!({"given_name": "Erika"})).unbound()];
+
+    let result = execute(&q, &creds, &ExactFormat);
+    assert!(
+        !result.satisfiable,
+        "the default is `true`; silence is not permission"
+    );
+    assert!(result.query("c").expect("query").candidates.is_empty());
+}
+
+/// The same credential is offered once the verifier says binding is not
+/// required — the check is the verifier's constraint, not a blanket rule.
+#[test]
+fn an_unbound_credential_is_offered_when_binding_is_not_required() {
+    let q = query(
+        r#"{"credentials":[{"id":"c","format":"dc+sd-jwt","meta":{},
+             "require_cryptographic_holder_binding":false,
+             "claims":[{"path":["given_name"]}]}]}"#,
+    );
+    let creds = [pid(json!({"given_name": "Erika"})).unbound()];
+
+    let result = execute(&q, &creds, &ExactFormat);
+    assert!(result.satisfiable);
+    assert_eq!(result.query("c").expect("query").candidates.len(), 1);
+}
+
+/// Binding is checked before format and claims: an unbound credential is
+/// disqualified rather than being a weaker match, so it does not appear even
+/// when it fits the query perfectly otherwise.
+#[test]
+fn binding_disqualifies_rather_than_deprioritises() {
+    let q = query(
+        r#"{"credentials":[{"id":"c","format":"dc+sd-jwt","meta":{},
+             "claims":[{"path":["given_name"]}]}]}"#,
+    );
+    let creds = [
+        JsonCredential::new("unbound-1", "dc+sd-jwt", json!({"given_name": "Erika"})).unbound(),
+        pid(json!({"given_name": "Erika"})),
+    ];
+
+    let result = execute(&q, &creds, &ExactFormat);
+    let candidates = &result.query("c").expect("query").candidates;
+    assert_eq!(candidates.len(), 1, "only the bound one");
+    assert_eq!(candidates[0].credential_id, "pid-1");
+}
+
+/// §6.1 `multiple` — "multiple Credentials can be returned for this Credential
+/// Query". A query that sets it is answered by every matching credential at
+/// once, which is the reading under which the flag does anything at all.
+#[test]
+fn a_multiple_query_is_answered_by_every_matching_credential() {
+    let q = query(
+        r#"{"credentials":[{"id":"c","format":"dc+sd-jwt","meta":{},"multiple":true,
+             "claims":[{"path":["given_name"]}]}]}"#,
+    );
+    let creds = [
+        JsonCredential::new("a", "dc+sd-jwt", json!({"given_name": "Erika"})),
+        JsonCredential::new("b", "dc+sd-jwt", json!({"given_name": "Max"})),
+        JsonCredential::new("c", "dc+sd-jwt", json!({"given_name": "Ada"})),
+    ];
+
+    let combos = execute(&q, &creds, &ExactFormat).combinations(16);
+    assert_eq!(
+        combos.combinations.len(),
+        1,
+        "one option holding all three, not three alternatives"
+    );
+    let ids: Vec<_> = combos.combinations[0]
+        .members
+        .iter()
+        .map(|(query_id, candidate)| (query_id.as_str(), candidate.credential_id.as_str()))
+        .collect();
+    assert_eq!(ids, [("c", "a"), ("c", "b"), ("c", "c")]);
+}
+
+/// Without `multiple` the same wallet yields one alternative per credential —
+/// the default is `false`, and §6.4 then permits at most one per query.
+#[test]
+fn without_multiple_each_credential_is_its_own_alternative() {
+    let q = query(
+        r#"{"credentials":[{"id":"c","format":"dc+sd-jwt","meta":{},
+             "claims":[{"path":["given_name"]}]}]}"#,
+    );
+    let creds = [
+        JsonCredential::new("a", "dc+sd-jwt", json!({"given_name": "Erika"})),
+        JsonCredential::new("b", "dc+sd-jwt", json!({"given_name": "Max"})),
+        JsonCredential::new("c", "dc+sd-jwt", json!({"given_name": "Ada"})),
+    ];
+
+    let combos = execute(&q, &creds, &ExactFormat).combinations(16);
+    assert_eq!(combos.combinations.len(), 3);
+    for combination in &combos.combinations {
+        assert_eq!(combination.members.len(), 1, "at most one per query (§6.4)");
+    }
+}
+
+/// `multiple` collapses the product rather than multiplying it: two queries
+/// with three candidates each is nine combinations normally, and one when both
+/// take everything.
+#[test]
+fn multiple_collapses_the_combination_count() {
+    let q = query(
+        r#"{"credentials":[{"id":"names","format":"dc+sd-jwt","meta":{},"multiple":true,
+                            "claims":[{"path":["given_name"]}]},
+                           {"id":"dates","format":"dc+sd-jwt","meta":{},"multiple":true,
+                            "claims":[{"path":["birth_date"]}]}]}"#,
+    );
+    let creds = [
+        JsonCredential::new(
+            "a",
+            "dc+sd-jwt",
+            json!({"given_name": "Erika", "birth_date": "1979-04-12"}),
+        ),
+        JsonCredential::new(
+            "b",
+            "dc+sd-jwt",
+            json!({"given_name": "Max", "birth_date": "1985-01-02"}),
+        ),
+        JsonCredential::new(
+            "c",
+            "dc+sd-jwt",
+            json!({"given_name": "Ada", "birth_date": "1990-11-30"}),
+        ),
+    ];
+
+    let combos = execute(&q, &creds, &ExactFormat).combinations(64);
+    assert_eq!(combos.combinations.len(), 1);
+    assert_eq!(combos.combinations[0].members.len(), 6, "3 per query");
+    assert_eq!(combos.dropped, 0);
+}
+
+/// A `multiple` query with nothing matching is still unsatisfied. Width one
+/// applies to a query answered by everything, and there is no "everything"
+/// when the wallet holds none of it.
+#[test]
+fn a_multiple_query_with_no_candidates_is_not_satisfied() {
+    let q = query(r#"{"credentials":[{"id":"c","format":"mso_mdoc","meta":{},"multiple":true}]}"#);
+    let creds = [pid(json!({"given_name": "Erika"}))];
+
+    let result = execute(&q, &creds, &ExactFormat);
+    assert!(!result.satisfiable);
+    assert!(result.combinations(16).combinations.is_empty());
 }

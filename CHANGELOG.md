@@ -13,6 +13,14 @@ existed.
 
 ### Fixed
 
+- A verifier requiring cryptographic holder binding is honoured (§6.1). The
+  field was parsed and never read, and since its default is `true`, that
+  applied to every verifier that said nothing about it as well as to those that
+  asked explicitly. Every credential the wallet registers is bound to a WSCD
+  key, so nothing the matcher offers today changes — but the requirement is now
+  enforced rather than assumed.
+- `multiple` (§6.1) is honoured: a verifier asking for several credentials of
+  one type now receives every match, instead of the flag being ignored.
 - Duplicate DCQL identifiers are rejected rather than resolving to whichever
   came first. A repeated credential query `id` (§6.1) or claims `id` (§6.3)
   made a reference from `credential_sets` or `claim_sets` ambiguous, and the
