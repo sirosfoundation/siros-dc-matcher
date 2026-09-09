@@ -103,6 +103,15 @@ impl QueryMatch {
 pub struct Combination {
     /// Which credential answers which query, with the claims to disclose.
     pub members: Vec<(String, Candidate)>,
+    /// Why the verifier asked for this, from the `purpose` of each credential
+    /// set this combination satisfies (§6.2), in set order.
+    ///
+    /// Carried per combination rather than left on the query because that is
+    /// where it is needed: a request with several credential sets offers
+    /// several combinations, and the reason shown beside one of them is the
+    /// reason belonging to *its* set. Empty when the verifier gave no reason,
+    /// which includes every request without `credential_sets`.
+    pub purposes: Vec<Value>,
 }
 
 /// The combinations that satisfy a request, and whether the list was cut short.
@@ -238,17 +247,17 @@ impl QueryResult {
         // Each required group is a set of query ids that must all be answered
         // by one combination. Without `credential_sets` that is every query
         // (§6.4); with them it is one satisfiable option per required set.
-        let groups: Vec<Vec<Vec<String>>> = match &self.credential_sets {
-            None => vec![vec![self
-                .matches
-                .iter()
-                .map(|m| m.query_id.clone())
-                .collect()]],
+        let groups: Vec<(Option<Value>, Vec<Vec<String>>)> = match &self.credential_sets {
+            None => vec![(
+                None,
+                vec![self.matches.iter().map(|m| m.query_id.clone()).collect()],
+            )],
             Some(sets) => sets
                 .iter()
                 .filter(|s| s.required)
                 .map(|set| {
-                    set.options
+                    let options = set
+                        .options
                         .iter()
                         .filter(|option| {
                             option
@@ -256,7 +265,8 @@ impl QueryResult {
                                 .all(|id| self.query(id).is_some_and(QueryMatch::is_satisfied))
                         })
                         .cloned()
-                        .collect()
+                        .collect();
+                    (set.purpose.clone(), options)
                 })
                 .collect(),
         };
@@ -276,10 +286,11 @@ impl QueryResult {
         // in the chosen options.
         let mut out: Vec<Combination> = vec![Combination {
             members: Vec::new(),
+            purposes: Vec::new(),
         }];
         let mut dropped = 0usize;
 
-        for options in &groups {
+        for (purpose, options) in &groups {
             let mut next: Vec<Combination> = Vec::new();
             for partial in &out {
                 for option in options {
@@ -294,7 +305,12 @@ impl QueryResult {
                     for members in products {
                         let mut combined = partial.members.clone();
                         combined.extend(members);
-                        next.push(Combination { members: combined });
+                        let mut purposes = partial.purposes.clone();
+                        purposes.extend(purpose.clone());
+                        next.push(Combination {
+                            members: combined,
+                            purposes,
+                        });
                     }
                 }
             }

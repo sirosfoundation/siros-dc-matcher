@@ -968,14 +968,42 @@ public struct FfiCombination {
      * The credentials making up this option.
      */
     public var members: [FfiMatchedCredential]
+    /**
+     * Why the verifier asked for this, from the `purpose` of each credential
+     * set it satisfies (§6.2), ready to display.
+     *
+     * §6.2 allows a string, an integer or an object. A string arrives
+     * unchanged; anything else is compact JSON, because a purpose exists to
+     * be shown to a user and dropping the ones that are not strings would
+     * leave the wallet unable to say why for exactly the verifiers that were
+     * most specific about it.
+     *
+     * Empty when the verifier gave no reason — including every request with
+     * no `credential_sets` at all.
+     */
+    public var purposes: [String]
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
     public init(
         /**
          * The credentials making up this option.
-         */members: [FfiMatchedCredential]) {
+         */members: [FfiMatchedCredential], 
+        /**
+         * Why the verifier asked for this, from the `purpose` of each credential
+         * set it satisfies (§6.2), ready to display.
+         *
+         * §6.2 allows a string, an integer or an object. A string arrives
+         * unchanged; anything else is compact JSON, because a purpose exists to
+         * be shown to a user and dropping the ones that are not strings would
+         * leave the wallet unable to say why for exactly the verifiers that were
+         * most specific about it.
+         *
+         * Empty when the verifier gave no reason — including every request with
+         * no `credential_sets` at all.
+         */purposes: [String]) {
         self.members = members
+        self.purposes = purposes
     }
 }
 
@@ -986,11 +1014,15 @@ extension FfiCombination: Equatable, Hashable {
         if lhs.members != rhs.members {
             return false
         }
+        if lhs.purposes != rhs.purposes {
+            return false
+        }
         return true
     }
 
     public func hash(into hasher: inout Hasher) {
         hasher.combine(members)
+        hasher.combine(purposes)
     }
 }
 
@@ -1002,12 +1034,14 @@ public struct FfiConverterTypeFfiCombination: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiCombination {
         return
             try FfiCombination(
-                members: FfiConverterSequenceTypeFfiMatchedCredential.read(from: &buf)
+                members: FfiConverterSequenceTypeFfiMatchedCredential.read(from: &buf), 
+                purposes: FfiConverterSequenceString.read(from: &buf)
         )
     }
 
     public static func write(_ value: FfiCombination, into buf: inout [UInt8]) {
         FfiConverterSequenceTypeFfiMatchedCredential.write(value.members, into: &buf)
+        FfiConverterSequenceString.write(value.purposes, into: &buf)
     }
 }
 

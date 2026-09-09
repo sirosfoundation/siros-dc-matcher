@@ -563,3 +563,72 @@ fn only_the_requested_number_of_combinations_is_built() {
         assert_eq!(combination.members.len(), 2);
     }
 }
+
+/// §6.2 `purpose` reaches the combination it explains, not just the query.
+///
+/// A request with two required sets offers combinations that satisfy both, so
+/// both reasons belong to each one. Shown beside the wrong option, a purpose
+/// misinforms the person consenting.
+#[test]
+fn a_combination_carries_the_purposes_of_the_sets_it_satisfies() {
+    let q = query(
+        r#"{"credentials":[{"id":"name","format":"dc+sd-jwt","meta":{},
+                            "claims":[{"path":["given_name"]}]},
+                           {"id":"age","format":"dc+sd-jwt","meta":{},
+                            "claims":[{"path":["birth_date"]}]}],
+            "credential_sets":[
+              {"options":[["name"]],"purpose":"Addressing you correctly"},
+              {"options":[["age"]],"purpose":{"id":7,"name":"Age check"}}]}"#,
+    );
+    let creds = [pid(
+        json!({"given_name": "Erika", "birth_date": "1979-04-12"}),
+    )];
+
+    let combos = execute(&q, &creds, &ExactFormat).combinations(16);
+    assert_eq!(combos.combinations.len(), 1);
+    let purposes = &combos.combinations[0].purposes;
+    assert_eq!(
+        purposes.len(),
+        2,
+        "one per required set the combination satisfies"
+    );
+    assert_eq!(
+        purposes[0],
+        Value::String("Addressing you correctly".into())
+    );
+    assert_eq!(
+        purposes[1].get("name"),
+        Some(&Value::String("Age check".into())),
+        "a non-string purpose is carried whole, not stringified here"
+    );
+}
+
+/// A set with no `purpose` contributes nothing rather than a placeholder, so a
+/// caller can tell "no reason given" from "a reason that renders as empty".
+#[test]
+fn a_set_without_a_purpose_contributes_none() {
+    let q = query(
+        r#"{"credentials":[{"id":"name","format":"dc+sd-jwt","meta":{},
+                            "claims":[{"path":["given_name"]}]}],
+            "credential_sets":[{"options":[["name"]]}]}"#,
+    );
+    let creds = [pid(json!({"given_name": "Erika"}))];
+
+    let combos = execute(&q, &creds, &ExactFormat).combinations(16);
+    assert!(combos.combinations[0].purposes.is_empty());
+}
+
+/// Without `credential_sets` there is no set to carry a reason, so there is no
+/// reason — the implicit group §6.4 defines is the engine's, not the
+/// verifier's.
+#[test]
+fn no_credential_sets_means_no_purposes() {
+    let q = query(
+        r#"{"credentials":[{"id":"name","format":"dc+sd-jwt","meta":{},
+             "claims":[{"path":["given_name"]}]}]}"#,
+    );
+    let creds = [pid(json!({"given_name": "Erika"}))];
+
+    let combos = execute(&q, &creds, &ExactFormat).combinations(16);
+    assert!(combos.combinations[0].purposes.is_empty());
+}

@@ -33,4 +33,4 @@ pub use eval::{
     QueryResult, SelectedClaim,
 };
 pub use path::{mdoc_components, resolve_json, PathComponent, PathError};
-pub use query::{ClaimsQuery, CredentialQuery, CredentialSetQuery, DcqlQuery};
+pub use query::{ClaimsQuery, CredentialQuery, CredentialSetQuery, DcqlQuery, QueryError};

@@ -1672,7 +1672,21 @@ data class FfiCombination (
     /**
      * The credentials making up this option.
      */
-    var `members`: List<FfiMatchedCredential>
+    var `members`: List<FfiMatchedCredential>, 
+    /**
+     * Why the verifier asked for this, from the `purpose` of each credential
+     * set it satisfies (§6.2), ready to display.
+     *
+     * §6.2 allows a string, an integer or an object. A string arrives
+     * unchanged; anything else is compact JSON, because a purpose exists to
+     * be shown to a user and dropping the ones that are not strings would
+     * leave the wallet unable to say why for exactly the verifiers that were
+     * most specific about it.
+     *
+     * Empty when the verifier gave no reason — including every request with
+     * no `credential_sets` at all.
+     */
+    var `purposes`: List<kotlin.String>
 ) {
     
     companion object
@@ -1685,15 +1699,18 @@ public object FfiConverterTypeFfiCombination: FfiConverterRustBuffer<FfiCombinat
     override fun read(buf: ByteBuffer): FfiCombination {
         return FfiCombination(
             FfiConverterSequenceTypeFfiMatchedCredential.read(buf),
+            FfiConverterSequenceString.read(buf),
         )
     }
 
     override fun allocationSize(value: FfiCombination) = (
-            FfiConverterSequenceTypeFfiMatchedCredential.allocationSize(value.`members`)
+            FfiConverterSequenceTypeFfiMatchedCredential.allocationSize(value.`members`) +
+            FfiConverterSequenceString.allocationSize(value.`purposes`)
     )
 
     override fun write(value: FfiCombination, buf: ByteBuffer) {
             FfiConverterSequenceTypeFfiMatchedCredential.write(value.`members`, buf)
+            FfiConverterSequenceString.write(value.`purposes`, buf)
     }
 }
 

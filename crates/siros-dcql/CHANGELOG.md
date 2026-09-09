@@ -13,7 +13,44 @@ this file.
 
 ## Unreleased
 
-Nothing yet.
+Releasing as **0.3.0**: the changes below are breaking, which pre-1.0 means a
+minor bump.
+
+### Added
+
+- `CredentialSetQuery::purpose` (§6.2) — why the verifier wants a combination,
+  as a `Value`, because the spec permits a string, an integer or an object.
+- `Combination::purposes`, carrying the reasons of the credential sets a
+  combination satisfies. Held per combination rather than only on the query,
+  because a request with several sets offers several combinations and the
+  reason shown beside one belongs to *its* set.
+- `DcqlQuery::validate`, and `QueryError` describing why a query is unusable.
+
+### Changed
+
+- **Breaking.** `DcqlQuery::from_json` now returns `Result<Self, QueryError>`
+  rather than `Result<Self, serde_json::Error>`, and validates identifiers on
+  the way through. Validation is on the parse path rather than beside it so a
+  caller cannot hold a query whose ids are ambiguous. `QueryError::Json` wraps
+  what the old signature returned, and `QueryError` implements `Display` and
+  `std::error::Error`, so a caller that only formatted the error needs no
+  change.
+- **Breaking.** `Combination` gained a field, so it can no longer be
+  constructed with a struct literal from outside the crate.
+
+### Fixed
+
+- Duplicate identifiers are rejected instead of resolving to whichever came
+  first. §6.1 requires a credential query `id` to be unique across the query
+  and §6.3 requires a claims `id` to be unique within its array; without the
+  check, a reference from `credential_sets` or `claim_sets` to a duplicated id
+  named two different things and answered one, silently dropping the other. An
+  empty credential query `id` is rejected for the same reason.
+
+  The character restrictions §6.1 and §6.3 also place on an `id` are
+  deliberately *not* enforced: they carry no meaning for matching, and failing
+  a request over a dot in an identifier would reject a request that is
+  perfectly well understood.
 
 ## 0.2.0 — 2026-08-30
 

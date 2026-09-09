@@ -333,3 +333,73 @@ fn matches_survives_an_unsatisfiable_request_but_combinations_do_not() {
          a caller must consult `satisfiable` before offering them"
     );
 }
+
+/// A §6.2 `purpose` crosses the FFI boundary ready to display, because a
+/// wallet asking for consent without saying what for is the gap this closes.
+///
+/// §6.2 permits a string, an integer or an object. UniFFI has no JSON value,
+/// so each is rendered: a string loses its quotes, and anything else keeps its
+/// JSON form rather than being dropped — the verifiers most specific about
+/// their reason are exactly the ones that send an object.
+#[test]
+fn a_purpose_reaches_the_caller_as_a_display_string() {
+    let blob = wallet(None);
+    let query = json!({
+        "credentials": [{
+            "id": "q1", "format": "mso_mdoc",
+            "meta": {"doctype_value": "org.iso.18013.5.1.mDL"},
+            "claims": age_claim()
+        }],
+        "credential_sets": [{"options": [["q1"]], "purpose": "Confirming you are over 18"}]
+    })
+    .to_string();
+
+    let out = match_dcql(blob, query).expect("matched");
+    assert!(out.satisfiable);
+    assert_eq!(
+        out.combinations[0].purposes,
+        vec!["Confirming you are over 18".to_string()],
+        "a string purpose arrives without its JSON quotes"
+    );
+}
+
+/// An object purpose survives as JSON rather than vanishing.
+#[test]
+fn a_non_string_purpose_is_rendered_not_dropped() {
+    let blob = wallet(None);
+    let query = json!({
+        "credentials": [{
+            "id": "q1", "format": "mso_mdoc",
+            "meta": {"doctype_value": "org.iso.18013.5.1.mDL"},
+            "claims": age_claim()
+        }],
+        "credential_sets": [{"options": [["q1"]], "purpose": {"id": 7}}]
+    })
+    .to_string();
+
+    let out = match_dcql(blob, query).expect("matched");
+    assert_eq!(
+        out.combinations[0].purposes,
+        vec![r#"{"id":7}"#.to_string()]
+    );
+}
+
+/// A duplicated credential query id is a request error, not a silent
+/// first-one-wins (§6.1). The reference from `credential_sets` would name two
+/// different requests, and answering one of them drops the other.
+#[test]
+fn a_duplicated_credential_query_id_is_a_request_error() {
+    let blob = wallet(None);
+    let query = json!({"credentials": [
+        {"id": "q1", "format": "mso_mdoc", "meta": {}, "claims": age_claim()},
+        {"id": "q1", "format": "dc+sd-jwt", "meta": {}, "claims": age_claim()}
+    ]})
+    .to_string();
+
+    let err = match_dcql(blob, query).expect_err("a duplicated id is not usable");
+    assert!(
+        matches!(&err, MatchError::Request { reason } if reason.contains("unique")
+            || reason.contains("share the id")),
+        "got {err:?}"
+    );
+}
