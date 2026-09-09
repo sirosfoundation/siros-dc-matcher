@@ -40,6 +40,10 @@ impl siros_dcql::Credential for Mdoc {
             .map(|v| vec![v.clone()])
             .ok_or(PathError::Empty)
     }
+    /// The spec's own vectors are all holder-bound credentials.
+    fn has_cryptographic_holder_binding(&self) -> bool {
+        true
+    }
 }
 
 /// A JSON credential, resolved with the §7.1 rules.
@@ -58,6 +62,10 @@ impl siros_dcql::Credential for Json {
     }
     fn claim(&self, path: &[PathComponent]) -> Result<Vec<Value>, PathError> {
         siros_dcql::resolve_json(&self.body, path).map(|v| v.into_iter().cloned().collect())
+    }
+    /// The spec's own vectors are all holder-bound credentials.
+    fn has_cryptographic_holder_binding(&self) -> bool {
+        true
     }
 }
 

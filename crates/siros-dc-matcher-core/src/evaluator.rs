@@ -47,6 +47,21 @@ impl siros_dcql::Credential for BlobCredential<'_> {
         &self.credential.format
     }
 
+    /// Always bound.
+    ///
+    /// Every credential a SIROS wallet registers into the blob is held against
+    /// a key in the WSCD — a device keystore or a roaming authenticator — so
+    /// there is no unbound credential for this to be false about, and the blob
+    /// records no field for it.
+    ///
+    /// This is a claim about the *storage*, not a default. If a credential
+    /// type without holder binding ever becomes registrable, the blob needs a
+    /// field and this needs to read it; answering `true` on its behalf would
+    /// hand a verifier exactly what it said it would not accept.
+    fn has_cryptographic_holder_binding(&self) -> bool {
+        true
+    }
+
     /// Resolve a claims path pointer against the claims the wallet registered.
     ///
     /// The blob stores each claim it holds under a concrete path, so this is a

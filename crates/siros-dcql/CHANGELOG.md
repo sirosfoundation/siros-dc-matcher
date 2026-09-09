@@ -25,6 +25,7 @@ minor bump.
   because a request with several sets offers several combinations and the
   reason shown beside one belongs to *its* set.
 - `DcqlQuery::validate`, and `QueryError` describing why a query is unusable.
+- `Credential::has_cryptographic_holder_binding`, and `QueryMatch::multiple`.
 
 ### Changed
 
@@ -35,11 +36,28 @@ minor bump.
   what the old signature returned, and `QueryError` implements `Display` and
   `std::error::Error`, so a caller that only formatted the error needs no
   change.
-- **Breaking.** `Combination` gained a field, so it can no longer be
-  constructed with a struct literal from outside the crate.
+- **Breaking.** `Combination` and `QueryMatch` each gained a field, so neither
+  can be constructed with a struct literal from outside the crate.
+- **Breaking.** `Credential` gained a required method,
+  `has_cryptographic_holder_binding`, deliberately without a default. A blanket
+  `true` would let an implementor who never considered the question assert a
+  security property on their credentials' behalf, and the failure mode is a
+  verifier being handed exactly what it said it would not accept.
 
 ### Fixed
 
+- `require_cryptographic_holder_binding` (§6.1) is enforced. It was parsed and
+  never read, so a verifier that required holder binding — which is the
+  *default*, so also every verifier that said nothing — was offered unbound
+  credentials regardless. Checked before format and claims, because an unbound
+  credential is disqualified rather than a weaker match.
+- `multiple` (§6.1) is evaluated. A query that sets it is now answered by every
+  matching credential at once, rather than the flag being parsed and ignored.
+  This is the reading under which it does anything: "multiple Credentials can
+  be returned for this Credential Query". It also collapses the combination
+  count where enumerating each credential as its own alternative would multiply
+  it. `multiple: false` — the default — is unchanged and still yields at most
+  one credential per query, as §6.4 requires.
 - Duplicate identifiers are rejected instead of resolving to whichever came
   first. §6.1 requires a credential query `id` to be unique across the query
   and §6.3 requires a claims `id` to be unique within its array; without the
