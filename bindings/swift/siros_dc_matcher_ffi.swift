@@ -1257,8 +1257,21 @@ public struct FfiMatchOutcome {
     public var combinations: [FfiCombination]
     /**
      * How many further combinations existed beyond the returned ones.
+     *
+     * A lower bound rather than a count when the exactness field beside it
+     * says so — which covers both an unknowable engine count and one too
+     * large to narrow to this width.
      */
     public var dropped: UInt32
+    /**
+     * Whether the dropped count is the true number rather than a floor.
+     *
+     * The combination count is a product of the per-query candidate counts,
+     * and a wallet holding enough credentials overflows it. Showing someone
+     * "4294967295 more options" is worse than showing them "more options":
+     * the first makes them doubt the rest of the screen.
+     */
+    public var droppedIsExact: Bool
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -1277,11 +1290,24 @@ public struct FfiMatchOutcome {
          */combinations: [FfiCombination], 
         /**
          * How many further combinations existed beyond the returned ones.
-         */dropped: UInt32) {
+         *
+         * A lower bound rather than a count when the exactness field beside it
+         * says so — which covers both an unknowable engine count and one too
+         * large to narrow to this width.
+         */dropped: UInt32, 
+        /**
+         * Whether the dropped count is the true number rather than a floor.
+         *
+         * The combination count is a product of the per-query candidate counts,
+         * and a wallet holding enough credentials overflows it. Showing someone
+         * "4294967295 more options" is worse than showing them "more options":
+         * the first makes them doubt the rest of the screen.
+         */droppedIsExact: Bool) {
         self.matches = matches
         self.satisfiable = satisfiable
         self.combinations = combinations
         self.dropped = dropped
+        self.droppedIsExact = droppedIsExact
     }
 }
 
@@ -1301,6 +1327,9 @@ extension FfiMatchOutcome: Equatable, Hashable {
         if lhs.dropped != rhs.dropped {
             return false
         }
+        if lhs.droppedIsExact != rhs.droppedIsExact {
+            return false
+        }
         return true
     }
 
@@ -1309,6 +1338,7 @@ extension FfiMatchOutcome: Equatable, Hashable {
         hasher.combine(satisfiable)
         hasher.combine(combinations)
         hasher.combine(dropped)
+        hasher.combine(droppedIsExact)
     }
 }
 
@@ -1323,7 +1353,8 @@ public struct FfiConverterTypeFfiMatchOutcome: FfiConverterRustBuffer {
                 matches: FfiConverterSequenceTypeFfiQueryMatch.read(from: &buf), 
                 satisfiable: FfiConverterBool.read(from: &buf), 
                 combinations: FfiConverterSequenceTypeFfiCombination.read(from: &buf), 
-                dropped: FfiConverterUInt32.read(from: &buf)
+                dropped: FfiConverterUInt32.read(from: &buf), 
+                droppedIsExact: FfiConverterBool.read(from: &buf)
         )
     }
 
@@ -1332,6 +1363,7 @@ public struct FfiConverterTypeFfiMatchOutcome: FfiConverterRustBuffer {
         FfiConverterBool.write(value.satisfiable, into: &buf)
         FfiConverterSequenceTypeFfiCombination.write(value.combinations, into: &buf)
         FfiConverterUInt32.write(value.dropped, into: &buf)
+        FfiConverterBool.write(value.droppedIsExact, into: &buf)
     }
 }
 

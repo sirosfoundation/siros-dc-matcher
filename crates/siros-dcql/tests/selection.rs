@@ -6,7 +6,7 @@
 //! `credential_sets` means every query must be satisfied rather than none.
 
 use serde_json::{json, Value};
-use siros_dcql::{execute, DcqlQuery, ExactFormat, PathComponent, PathError};
+use siros_dcql::{execute, DcqlQuery, Dropped, ExactFormat, PathComponent, PathError};
 
 /// A JSON credential, resolved with the §7.1 rules the crate provides.
 struct JsonCredential {
@@ -381,7 +381,7 @@ fn a_combination_spans_every_query_when_no_sets_are_given() {
     )];
 
     let combos = execute(&q, &creds, &ExactFormat).combinations(16);
-    assert_eq!(combos.dropped, 0);
+    assert_eq!(combos.dropped, Dropped::Exact(0));
     assert_eq!(combos.combinations.len(), 1);
 
     let members = &combos.combinations[0].members;
@@ -500,7 +500,8 @@ fn the_combination_count_is_bounded_and_the_remainder_is_counted() {
     let combos = execute(&q, &creds, &ExactFormat).combinations(4);
     assert_eq!(combos.combinations.len(), 4);
     assert_eq!(
-        combos.dropped, 6,
+        combos.dropped,
+        Dropped::Exact(6),
         "the remainder must be reported, not hidden"
     );
 }
@@ -568,7 +569,11 @@ fn only_the_requested_number_of_combinations_is_built() {
     // 40 candidates for each of two queries: 1600 possibilities.
     let combos = execute(&q, &creds, &ExactFormat).combinations(2);
     assert_eq!(combos.combinations.len(), 2);
-    assert_eq!(combos.dropped, 1598, "the rest are counted, not built");
+    assert_eq!(
+        combos.dropped,
+        Dropped::Exact(1598),
+        "the rest are counted, not built"
+    );
 
     // The two built are distinct, so the bound does not collapse them.
     assert_ne!(combos.combinations[0], combos.combinations[1]);
@@ -783,7 +788,7 @@ fn multiple_collapses_the_combination_count() {
     let combos = execute(&q, &creds, &ExactFormat).combinations(64);
     assert_eq!(combos.combinations.len(), 1);
     assert_eq!(combos.combinations[0].members.len(), 6, "3 per query");
-    assert_eq!(combos.dropped, 0);
+    assert_eq!(combos.dropped, Dropped::Exact(0));
 }
 
 /// A `multiple` query with nothing matching is still unsatisfied. Width one
@@ -797,4 +802,126 @@ fn a_multiple_query_with_no_candidates_is_not_satisfied() {
     let result = execute(&q, &creds, &ExactFormat);
     assert!(!result.satisfiable);
     assert!(result.combinations(16).combinations.is_empty());
+}
+
+/// The finding this type exists for: a product that overflows `usize` reports
+/// a bound, not a number.
+///
+/// Before, `dropped` was `total - take` where `total` had saturated, so a
+/// wallet asking about 500 credential queries was told 18446744073709551551
+/// combinations had been dropped — a figure precise enough to be believed and
+/// wrong enough to discredit everything beside it.
+#[test]
+fn an_overflowing_product_reports_a_bound_rather_than_a_number() {
+    // Two candidates per query across enough queries that 2^n leaves `usize`
+    // far behind. Nothing is mis-offered — the cap is what keeps enumeration
+    // bounded — but the count of what was skipped is unknowable.
+    let queries: Vec<String> = (0..200)
+        .map(|i| {
+            format!(
+                r#"{{"id":"q{i}","format":"dc+sd-jwt","meta":{{}},
+                     "claims":[{{"path":["given_name"]}}]}}"#
+            )
+        })
+        .collect();
+    let q = query(&format!(r#"{{"credentials":[{}]}}"#, queries.join(",")));
+    let creds = [
+        JsonCredential::new("a", "dc+sd-jwt", json!({"given_name": "Erika"})),
+        JsonCredential::new("b", "dc+sd-jwt", json!({"given_name": "Max"})),
+    ];
+
+    let combos = execute(&q, &creds, &ExactFormat).combinations(32);
+    assert_eq!(combos.combinations.len(), 32, "the limit is still honoured");
+    assert!(
+        !combos.dropped.is_exact(),
+        "2^200 combinations cannot be counted in a usize, and claiming \
+         otherwise is the bug: got {:?}",
+        combos.dropped
+    );
+    assert!(combos.dropped.any());
+    assert!(
+        matches!(combos.dropped, Dropped::AtLeast(n) if n == usize::MAX - 32),
+        "the bound is what is left of the clamp: got {:?}",
+        combos.dropped
+    );
+}
+
+/// A count that fits stays exact, so the distinction is not merely always-on.
+#[test]
+fn a_product_that_fits_stays_exact() {
+    let q = query(
+        r#"{"credentials":[{"id":"a","format":"dc+sd-jwt","meta":{},
+                            "claims":[{"path":["given_name"]}]},
+                           {"id":"b","format":"dc+sd-jwt","meta":{},
+                            "claims":[{"path":["given_name"]}]}]}"#,
+    );
+    let creds = [
+        JsonCredential::new("x", "dc+sd-jwt", json!({"given_name": "Erika"})),
+        JsonCredential::new("y", "dc+sd-jwt", json!({"given_name": "Max"})),
+        JsonCredential::new("z", "dc+sd-jwt", json!({"given_name": "Ada"})),
+    ];
+
+    // 3 x 3 = 9 combinations, of which 4 are built.
+    let combos = execute(&q, &creds, &ExactFormat).combinations(4);
+    assert_eq!(combos.combinations.len(), 4);
+    assert_eq!(combos.dropped, Dropped::Exact(5));
+    assert!(combos.dropped.is_exact());
+}
+
+/// Nothing dropped is exactly zero, not an unknown — a picker showing every
+/// option there is should say so with confidence.
+#[test]
+fn nothing_dropped_is_an_exact_zero() {
+    let q = query(
+        r#"{"credentials":[{"id":"c","format":"dc+sd-jwt","meta":{},
+             "claims":[{"path":["given_name"]}]}]}"#,
+    );
+    let creds = [pid(json!({"given_name": "Erika"}))];
+
+    let combos = execute(&q, &creds, &ExactFormat).combinations(16);
+    assert_eq!(combos.dropped, Dropped::Exact(0));
+    assert!(!combos.dropped.any());
+}
+
+/// Summing dropped counts must not manufacture exactness either.
+///
+/// Two required credential sets each drop a bounded number, and the total is
+/// still a bound. Reported as exact, that would be the same overstatement one
+/// layer up from the product — so it is checked across the group loop, not
+/// only inside it.
+#[test]
+fn a_bound_stays_a_bound_across_several_credential_sets() {
+    // Two required sets, each over enough queries that its own product
+    // overflows, so both contribute an `AtLeast` that then has to be summed.
+    let mut queries = Vec::new();
+    for group in 0..2 {
+        for i in 0..100 {
+            queries.push(format!(
+                r#"{{"id":"g{group}q{i}","format":"dc+sd-jwt","meta":{{}},
+                     "claims":[{{"path":["given_name"]}}]}}"#
+            ));
+        }
+    }
+    let options: Vec<String> = (0..2)
+        .map(|group| {
+            let ids: Vec<String> = (0..100).map(|i| format!(r#""g{group}q{i}""#)).collect();
+            format!(r#"{{"options":[[{}]]}}"#, ids.join(","))
+        })
+        .collect();
+    let q = query(&format!(
+        r#"{{"credentials":[{}],"credential_sets":[{}]}}"#,
+        queries.join(","),
+        options.join(",")
+    ));
+    let creds = [
+        JsonCredential::new("a", "dc+sd-jwt", json!({"given_name": "Erika"})),
+        JsonCredential::new("b", "dc+sd-jwt", json!({"given_name": "Max"})),
+    ];
+
+    let combos = execute(&q, &creds, &ExactFormat).combinations(32);
+    assert!(
+        !combos.dropped.is_exact(),
+        "a sum of bounds is a bound: got {:?}",
+        combos.dropped
+    );
 }

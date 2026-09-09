@@ -13,6 +13,14 @@ existed.
 
 ### Fixed
 
+- The dropped-combination count says whether it is exact. The number of
+  combinations is a product of the per-query candidate counts, and a wallet
+  holding enough credentials overflows it — at which point the count of what
+  was skipped is a lower bound rather than a figure. It reported
+  18446744073709551551, which is true as a bound and ruinous as a number.
+  Entry metadata gains `combinations_dropped_is_exact`, and the FFI outcome
+  gains the matching field; what the matcher offers is unaffected, since the
+  overflow is in the count and never in the entries.
 - A verifier requiring cryptographic holder binding is honoured (§6.1). The
   field was parsed and never read, and since its default is `true`, that
   applied to every verifier that said nothing about it as well as to those that

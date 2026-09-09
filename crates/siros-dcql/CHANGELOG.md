@@ -26,6 +26,7 @@ minor bump.
   reason shown beside one belongs to *its* set.
 - `DcqlQuery::validate`, and `QueryError` describing why a query is unusable.
 - `Credential::has_cryptographic_holder_binding`, and `QueryMatch::multiple`.
+- `Dropped`, with `count`, `is_exact` and `any`.
 
 ### Changed
 
@@ -38,6 +39,9 @@ minor bump.
   change.
 - **Breaking.** `Combination` and `QueryMatch` each gained a field, so neither
   can be constructed with a struct literal from outside the crate.
+- **Breaking.** `Combinations::dropped` is a `Dropped` rather than a `usize`.
+  A caller wanting the old value calls `count()` on it — and should check
+  `is_exact()` before showing it to anyone.
 - **Breaking.** `Credential` gained a required method,
   `has_cryptographic_holder_binding`, deliberately without a default. A blanket
   `true` would let an implementor who never considered the question assert a
@@ -58,6 +62,14 @@ minor bump.
   count where enumerating each credential as its own alternative would multiply
   it. `multiple: false` — the default — is unchanged and still yields at most
   one credential per query, as §6.4 requires.
+- `Combinations::dropped` no longer reports a precise-looking figure it cannot
+  know. The combination count is a product of the per-query widths, and once
+  that product overflows `usize` the number not built is unknowable; the old
+  code returned `total - take` over a saturated total, so a request with enough
+  candidates reported 18446744073709551551 combinations dropped. The value was
+  a true lower bound, but nothing said so, and a figure that precise gets
+  believed. `Dropped` now distinguishes `Exact` from `AtLeast`, so a caller
+  cannot read the number without meeting the question.
 - Duplicate identifiers are rejected instead of resolving to whichever came
   first. §6.1 requires a credential query `id` to be unique across the query
   and §6.3 requires a claims `id` to be unique within its array; without the

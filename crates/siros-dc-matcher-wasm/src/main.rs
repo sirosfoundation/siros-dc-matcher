@@ -183,7 +183,13 @@ fn run(request: &[u8], blob: &[u8], origin: &str) {
                 "host_abi": abi::wasm_version(),
                 // How many further options existed. A picker showing the first
                 // few of many is telling the user those are all they have.
-                "combinations_dropped": enumerated.dropped,
+                //
+                // Still a plain number, and still true — it is a lower bound
+                // when the product overflowed `usize`, not a wrapped value —
+                // but a wallet cannot tell a count from a bound by looking, so
+                // the second field says which this is.
+                "combinations_dropped": enumerated.dropped.count(),
+                "combinations_dropped_is_exact": enumerated.dropped.is_exact(),
             })
             .to_string();
 
