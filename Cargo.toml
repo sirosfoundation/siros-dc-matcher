@@ -13,6 +13,9 @@ edition = "2021"
 license = "BSD-2-Clause"
 repository = "https://github.com/sirosfoundation/siros-dc-matcher"
 authors = ["SIROS Foundation"]
+# Held by everything that ships inside the credential picker — siros-dcql,
+# -core and -wasm — and checked on 1.82 in CI. The -ffi and -testhost crates
+# override this upward: uniffi's bindgen chain and wasmtime both need more.
 rust-version = "1.82"
 
 [workspace.dependencies]

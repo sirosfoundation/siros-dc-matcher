@@ -213,6 +213,53 @@ jobs:
           name: bindings
           path: bindings/
 
+  msrv:
+    name: Minimum supported Rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # RUSTUP_TOOLCHAIN rather than the action's `toolchain:` input, because
+      # rust-toolchain.toml pins `channel = "stable"` and wins over the input.
+      # The env var beats the file, which is the whole point of setting it.
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: "1.82"
+          targets: wasm32-wasip1
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+
+      # siros-dcql is on crates.io, so its `rust-version` is a promise to
+      # people outside this repository. -core and -wasm inherit the same floor
+      # because they are what runs inside the credential picker, where the
+      # toolchain is whatever the wallet's build uses, not ours.
+      #
+      # -ffi and -testhost are deliberately excluded: they declare 1.88 in
+      # their own manifests. Checking them here would only re-discover that.
+      - name: The 1.82 crates build on 1.82
+        env:
+          RUSTUP_TOOLCHAIN: "1.82"
+        run: |
+          cargo check --locked --all-features \
+            -p siros-dcql -p siros-dc-matcher-core -p siros-dc-matcher-wasm
+
+  semver:
+    name: siros-dcql API matches its version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      # Compares the crate's public API against the newest version on
+      # crates.io. A breaking change is not an error here — it is an error to
+      # make one without a version bump that admits to it. Pre-1.0 that means
+      # the minor: 0.2.x -> 0.3.0.
+      #
+      # Without this, `cargo publish` happily ships a breaking change as a
+      # patch, and the first thing a consumer learns about it is their build
+      # failing.
+      - uses: obi1kenobi/cargo-semver-checks-action@6b69fcf40e9b5fb17adeb57e4b6ecd020649a239 # v2.9
+        with:
+          package: siros-dcql
+
   publishable:
     name: siros-dcql is publishable
     runs-on: ubuntu-latest
