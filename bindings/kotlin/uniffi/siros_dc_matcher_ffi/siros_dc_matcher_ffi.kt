@@ -1825,8 +1825,20 @@ data class FfiMatchOutcome (
     var `combinations`: List<FfiCombination>, 
     /**
      * How many further combinations existed beyond the returned ones.
+     *
+     * A lower bound rather than a count when the exactness field beside it
+     * says so. Clamped, and it only reaches the clamp in that case.
      */
-    var `dropped`: kotlin.UInt
+    var `dropped`: kotlin.UInt, 
+    /**
+     * Whether the dropped count is the true number rather than a floor.
+     *
+     * The combination count is a product of the per-query candidate counts,
+     * and a wallet holding enough credentials overflows it. Showing someone
+     * "4294967295 more options" is worse than showing them "more options":
+     * the first makes them doubt the rest of the screen.
+     */
+    var `droppedIsExact`: kotlin.Boolean
 ) {
     
     companion object
@@ -1842,6 +1854,7 @@ public object FfiConverterTypeFfiMatchOutcome: FfiConverterRustBuffer<FfiMatchOu
             FfiConverterBoolean.read(buf),
             FfiConverterSequenceTypeFfiCombination.read(buf),
             FfiConverterUInt.read(buf),
+            FfiConverterBoolean.read(buf),
         )
     }
 
@@ -1849,7 +1862,8 @@ public object FfiConverterTypeFfiMatchOutcome: FfiConverterRustBuffer<FfiMatchOu
             FfiConverterSequenceTypeFfiQueryMatch.allocationSize(value.`matches`) +
             FfiConverterBoolean.allocationSize(value.`satisfiable`) +
             FfiConverterSequenceTypeFfiCombination.allocationSize(value.`combinations`) +
-            FfiConverterUInt.allocationSize(value.`dropped`)
+            FfiConverterUInt.allocationSize(value.`dropped`) +
+            FfiConverterBoolean.allocationSize(value.`droppedIsExact`)
     )
 
     override fun write(value: FfiMatchOutcome, buf: ByteBuffer) {
@@ -1857,6 +1871,7 @@ public object FfiConverterTypeFfiMatchOutcome: FfiConverterRustBuffer<FfiMatchOu
             FfiConverterBoolean.write(value.`satisfiable`, buf)
             FfiConverterSequenceTypeFfiCombination.write(value.`combinations`, buf)
             FfiConverterUInt.write(value.`dropped`, buf)
+            FfiConverterBoolean.write(value.`droppedIsExact`, buf)
     }
 }
 

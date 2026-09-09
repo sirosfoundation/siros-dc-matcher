@@ -146,7 +146,17 @@ pub struct FfiMatchOutcome {
     /// Ways to satisfy it. Alternatives are separate entries.
     pub combinations: Vec<FfiCombination>,
     /// How many further combinations existed beyond the returned ones.
+    ///
+    /// A lower bound rather than a count when the exactness field beside it
+    /// says so. Clamped, and it only reaches the clamp in that case.
     pub dropped: u32,
+    /// Whether the dropped count is the true number rather than a floor.
+    ///
+    /// The combination count is a product of the per-query candidate counts,
+    /// and a wallet holding enough credentials overflows it. Showing someone
+    /// "4294967295 more options" is worse than showing them "more options":
+    /// the first makes them doubt the rest of the screen.
+    pub dropped_is_exact: bool,
 }
 
 /// Match a full Digital Credentials API request.
@@ -329,6 +339,7 @@ fn evaluate(db: &CredentialDatabase, query: &DcqlQuery) -> FfiMatchOutcome {
         matches,
         satisfiable: result.satisfiable,
         combinations,
-        dropped: u32::try_from(enumerated.dropped).unwrap_or(u32::MAX),
+        dropped: u32::try_from(enumerated.dropped.count()).unwrap_or(u32::MAX),
+        dropped_is_exact: enumerated.dropped.is_exact(),
     }
 }

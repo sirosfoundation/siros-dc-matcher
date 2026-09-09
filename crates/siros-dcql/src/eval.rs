@@ -131,6 +131,58 @@ pub struct Combination {
     pub purposes: Vec<Value>,
 }
 
+/// How many combinations were not built.
+///
+/// A count and a *lie* are not the same thing, which is why this is an enum
+/// and not a `usize`. The number of combinations is a product of the per-query
+/// widths, and a wallet holding enough credentials overflows it — at which
+/// point the difference between "we skipped 18446744073709551551" and "we
+/// skipped more than we can count" is the difference between a number a caller
+/// can show a user and one that will make them doubt everything else on the
+/// screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Dropped {
+    /// Exactly this many were not built.
+    Exact(usize),
+    /// At least this many were not built; the true product overflowed
+    /// `usize`, so it is unknown and unrepresentable.
+    AtLeast(usize),
+}
+
+impl Dropped {
+    /// The number, exact or not. Pair it with [`Self::is_exact`] before
+    /// showing it to anyone.
+    pub fn count(self) -> usize {
+        match self {
+            Self::Exact(n) | Self::AtLeast(n) => n,
+        }
+    }
+
+    /// Whether [`Self::count`] is the true number rather than a lower bound.
+    pub fn is_exact(self) -> bool {
+        matches!(self, Self::Exact(_))
+    }
+
+    /// Whether anything was dropped at all.
+    pub fn any(self) -> bool {
+        self.count() > 0
+    }
+
+    /// Both counts together, staying `AtLeast` if either side is.
+    ///
+    /// Saturating, because the sum of two bounded counts can overflow just as
+    /// the product did — and a sum that wrapped would be the same lie one
+    /// layer up.
+    fn add(self, other: Self) -> Self {
+        let total = self.count().saturating_add(other.count());
+        if self.is_exact() && other.is_exact() {
+            Self::Exact(total)
+        } else {
+            Self::AtLeast(total)
+        }
+    }
+}
+
 /// The combinations that satisfy a request, and whether the list was cut short.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Combinations {
@@ -140,7 +192,7 @@ pub struct Combinations {
     ///
     /// Named rather than left implicit: a picker that silently shows the first
     /// few of many is telling the user those are the only options they have.
-    pub dropped: usize,
+    pub dropped: Dropped,
 }
 
 /// The outcome of evaluating a query.
@@ -266,7 +318,7 @@ impl QueryResult {
         if !self.satisfiable {
             return Combinations {
                 combinations: Vec::new(),
-                dropped: 0,
+                dropped: Dropped::Exact(0),
             };
         }
 
@@ -304,7 +356,7 @@ impl QueryResult {
         if groups.is_empty() {
             return Combinations {
                 combinations: Vec::new(),
-                dropped: 0,
+                dropped: Dropped::Exact(0),
             };
         }
 
@@ -314,7 +366,7 @@ impl QueryResult {
             members: Vec::new(),
             purposes: Vec::new(),
         }];
-        let mut dropped = 0usize;
+        let mut dropped = Dropped::Exact(0);
 
         for (purpose, options) in &groups {
             let mut next: Vec<Combination> = Vec::new();
@@ -327,7 +379,7 @@ impl QueryResult {
                     // the arithmetic rather than by building it.
                     let budget = limit.saturating_sub(next.len());
                     let (products, skipped) = candidate_products(self, option, budget);
-                    dropped = dropped.saturating_add(skipped);
+                    dropped = dropped.add(skipped);
                     for members in products {
                         let mut combined = partial.members.clone();
                         combined.extend(members);
@@ -366,16 +418,26 @@ fn candidate_products(
     result: &QueryResult,
     option: &[String],
     budget: usize,
-) -> (Vec<Vec<(String, Candidate)>>, usize) {
+) -> (Vec<Vec<(String, Candidate)>>, Dropped) {
     let mut total: usize = 1;
+    // Whether the product ran out of `usize` on the way. Tracked rather than
+    // inferred from `total == usize::MAX`, which a genuine product could also
+    // reach, and clamping is what makes the count a bound instead of a number.
+    let mut overflowed = false;
     for id in option {
         let Some(query_match) = result.query(id) else {
-            return (Vec::new(), 0);
+            return (Vec::new(), Dropped::Exact(0));
         };
-        total = total.saturating_mul(query_width(query_match));
+        match total.checked_mul(query_width(query_match)) {
+            Some(product) => total = product,
+            None => {
+                overflowed = true;
+                total = usize::MAX;
+            }
+        }
     }
     if total == 0 {
-        return (Vec::new(), 0);
+        return (Vec::new(), Dropped::Exact(0));
     }
 
     let take = total.min(budget);
@@ -405,7 +467,7 @@ fn candidate_products(
         let mut members = Vec::with_capacity(members_per_combination);
         for id in option {
             let Some(query_match) = result.query(id) else {
-                return (Vec::new(), 0);
+                return (Vec::new(), Dropped::Exact(0));
             };
             // A `multiple` query has width 1 and contributes every candidate,
             // so it consumes none of the mixed-radix index — `% 1` and `/ 1`
@@ -421,7 +483,7 @@ fn candidate_products(
             }
             let width = query_match.candidates.len();
             let Some(candidate) = query_match.candidates.get(remainder % width) else {
-                return (Vec::new(), 0);
+                return (Vec::new(), Dropped::Exact(0));
             };
             members.push((id.clone(), candidate.clone()));
             remainder /= width;
@@ -429,7 +491,13 @@ fn candidate_products(
         products.push(members);
     }
 
-    (products, total - take)
+    let remaining = total - take;
+    let dropped = if overflowed {
+        Dropped::AtLeast(remaining)
+    } else {
+        Dropped::Exact(remaining)
+    };
+    (products, dropped)
 }
 
 /// How many distinct ways one query can be answered within a combination.
