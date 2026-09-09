@@ -88,19 +88,32 @@ impl siros_dcql::Credential for BlobCredential<'_> {
 
 /// Whether a trigger's capability is required, or merely preferred.
 ///
-/// Required unless the request explicitly says otherwise: a verifier naming
-/// proof systems and saying nothing more is asking for a proof, and offering a
-/// wallet that cannot produce one leads to a consented presentation that
-/// cannot satisfy them.
+/// Optional unless the request explicitly demands it: a verifier naming proof
+/// systems and saying nothing more is listing what it accepts, not what it
+/// insists on. Only an explicit `true` in the flag the profile names makes the
+/// capability a condition of being offered at all.
 fn trigger_is_required(trigger: &crate::profile::MetaTrigger, query: &CredentialQuery) -> bool {
+    // No flag configured: the trigger's presence is the requirement, as it was
+    // before there was a flag at all.
     let Some(flag) = trigger.required_flag.as_deref() else {
         return true;
     };
+    // Absent or false means optional; only an explicit `true` demands the
+    // capability. That is the opposite of the safer-looking default, and it is
+    // deliberate: `zk_system_type` is replacing the `mso_mdoc_zk` format
+    // suffix as the way to ask for a proof, so during that migration a
+    // verifier sends the systems it accepts without yet sending a flag. Read
+    // as "required", those requests would stop being offered to every wallet
+    // that cannot prove — which is the population the migration exists to keep
+    // serving. A verifier that means "mandatory" says so.
+    //
+    // Anything other than a JSON boolean is not a `false`, and not a claim
+    // that a proof is optional either, so it reads as absent.
     query
         .meta
         .get(flag)
         .and_then(Value::as_bool)
-        .unwrap_or(true)
+        .unwrap_or(false)
 }
 
 /// A stored claim's value as JSON, for DCQL `values` comparison.

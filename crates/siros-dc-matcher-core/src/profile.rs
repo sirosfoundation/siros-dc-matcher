@@ -105,9 +105,18 @@ pub struct MetaTrigger {
     /// than required: the wallet is offered either way, and the chosen system
     /// is still reported when it has one, so it can produce a proof if it can.
     ///
-    /// Absent from the request — or unset here — means required. That is the
-    /// safer default and preserves what every verifier sending
-    /// `zk_system_type` today already gets.
+    /// Absent from the request means **optional**: only an explicit `true`
+    /// demands the capability. That is the opposite of the safer-looking
+    /// default and it is deliberate. `zk_system_type` is replacing the
+    /// `mso_mdoc_zk` format suffix as the way to ask for a proof, so during
+    /// that migration a verifier names the systems it accepts before it sends
+    /// any flag. Reading those as "required" would stop offering them to every
+    /// wallet that cannot prove — the population the migration exists to keep
+    /// serving. A verifier that means mandatory says so.
+    ///
+    /// Unset *here*, in the profile, still means required: with no flag
+    /// configured the trigger's presence is the requirement, as it was before
+    /// there was a flag at all.
     ///
     /// Deliberately a sibling of `zk_system_type` in `meta`, not a key inside
     /// each entry: every key in an entry other than `id` and `system` is a

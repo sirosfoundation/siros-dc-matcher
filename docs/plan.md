@@ -159,12 +159,17 @@ presentation" — and they differ in who gets offered. A verifier says which wit
 
 | request | wallet without a proof system | wallet with one |
 |---|---|---|
-| `zk_system_type` only | not offered | offered, system reported |
+| `zk_system_type` only | **offered** | offered, system reported |
 | `zk_system_type` + `zk_required: false` | offered | offered, system reported |
+| `zk_system_type` + `zk_required: true` | not offered | offered, system reported |
 | format `mso_mdoc_zk` | not offered | offered, system reported |
 
-Absent means required: that is the safer reading, and it preserves what every
-verifier sending `zk_system_type` today already gets.
+**Absent means optional**, and only an explicit `true` demands a proof. That is
+the opposite of the safer-looking default, deliberately: `zk_system_type` is
+replacing the `mso_mdoc_zk` suffix as the way to ask for a proof, so a verifier
+migrating across names the systems it accepts before it sends any flag. Reading
+those requests as "required" would stop offering them to every wallet that
+cannot prove — exactly the population the migration exists to keep serving.
 
 `zk_required` sits beside `zk_system_type` in `meta`, deliberately not inside
 each entry. Every key in an entry other than `id` and `system` is a *circuit
