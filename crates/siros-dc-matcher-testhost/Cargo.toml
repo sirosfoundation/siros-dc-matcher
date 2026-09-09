@@ -7,7 +7,9 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-rust-version.workspace = true
+# wasmtime 30 and its icu dependencies want 1.88. This crate is a test
+# harness that never ships, so its floor is allowed above the workspace's.
+rust-version = "1.88"
 
 # wasmtime is added in Phase 1 alongside the first real emission path.
 [dependencies]
