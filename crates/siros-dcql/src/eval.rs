@@ -381,12 +381,28 @@ fn candidate_products(
     let take = total.min(budget);
     let mut products: Vec<Vec<(String, Candidate)>> = Vec::with_capacity(take);
 
+    // How many members each combination will hold: one per query, except a
+    // `multiple` query which contributes all of its candidates. Constant
+    // across the loop below, so it is computed once — a `multiple` query over
+    // many credentials otherwise grows a vector sized for one member each.
+    let members_per_combination: usize = option
+        .iter()
+        .filter_map(|id| result.query(id))
+        .map(|query_match| {
+            if query_match.multiple {
+                query_match.candidates.len()
+            } else {
+                1
+            }
+        })
+        .sum();
+
     // Index arithmetic rather than a growing cartesian product: the nth
     // combination is a mixed-radix reading of n across the per-query candidate
     // counts, so only the ones actually wanted are built.
     for n in 0..take {
         let mut remainder = n;
-        let mut members = Vec::with_capacity(option.len());
+        let mut members = Vec::with_capacity(members_per_combination);
         for id in option {
             let Some(query_match) = result.query(id) else {
                 return (Vec::new(), 0);
