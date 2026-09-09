@@ -218,9 +218,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      # RUSTUP_TOOLCHAIN rather than the action's `toolchain:` input, because
-      # rust-toolchain.toml pins `channel = "stable"` and wins over the input.
-      # The env var beats the file, which is the whole point of setting it.
+      # Both mechanisms are needed, and they do different jobs. `toolchain:`
+      # here is what *installs* 1.82. RUSTUP_TOOLCHAIN on the step below is
+      # what makes cargo use it: rust-toolchain.toml pins `channel = "stable"`
+      # and overrides the installed default, so without the env var this job
+      # would install 1.82 and then quietly build on stable — passing while
+      # checking nothing.
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           toolchain: "1.82"

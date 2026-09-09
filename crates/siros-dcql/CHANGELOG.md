@@ -11,6 +11,10 @@ of [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Entries for 0.1.0 and 0.2.0 are reconstructed from git history, which predates
 this file.
 
+## Unreleased
+
+Nothing yet.
+
 ## 0.2.0 — 2026-08-30
 
 ### Added
