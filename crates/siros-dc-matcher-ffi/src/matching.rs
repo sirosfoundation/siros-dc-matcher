@@ -103,6 +103,18 @@ pub struct FfiMatchedCredential {
 pub struct FfiCombination {
     /// The credentials making up this option.
     pub members: Vec<FfiMatchedCredential>,
+    /// Why the verifier asked for this, from the `purpose` of each credential
+    /// set it satisfies (§6.2), ready to display.
+    ///
+    /// §6.2 allows a string, an integer or an object. A string arrives
+    /// unchanged; anything else is compact JSON, because a purpose exists to
+    /// be shown to a user and dropping the ones that are not strings would
+    /// leave the wallet unable to say why for exactly the verifiers that were
+    /// most specific about it.
+    ///
+    /// Empty when the verifier gave no reason — including every request with
+    /// no `credential_sets` at all.
+    pub purposes: Vec<String>,
 }
 
 /// The credentials answering one credential query.
@@ -224,9 +236,23 @@ fn decode(blob: &[u8]) -> Result<CredentialDatabase, MatchError> {
     })
 }
 
-fn request_err(e: serde_json::Error) -> MatchError {
+/// Generic over the error type because two different ones reach it: the
+/// envelope is plain `serde_json`, while the DCQL query inside it also carries
+/// the §6.1/§6.3 identifier checks. Both only ever get stringified.
+fn request_err(e: impl core::fmt::Display) -> MatchError {
     MatchError::Request {
         reason: e.to_string(),
+    }
+}
+
+/// A §6.2 `purpose` as a string to show a user.
+///
+/// A JSON string loses its quotes; a number or object keeps its JSON form,
+/// which is at least displayable and identifies what the verifier meant.
+fn display_purpose(purpose: &serde_json::Value) -> String {
+    match purpose {
+        serde_json::Value::String(s) => s.clone(),
+        other => other.to_string(),
     }
 }
 
@@ -295,6 +321,7 @@ fn evaluate(db: &CredentialDatabase, query: &DcqlQuery) -> FfiMatchOutcome {
                 .iter()
                 .map(|(query_id, candidate)| member(query_id, candidate))
                 .collect(),
+            purposes: combination.purposes.iter().map(display_purpose).collect(),
         })
         .collect();
 

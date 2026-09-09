@@ -95,6 +95,14 @@ pub struct CredentialSetQuery {
     /// `true`" (§6.2).
     #[serde(default = "default_true")]
     pub required: bool,
+    /// Why the verifier wants this combination, for showing to the user (§6.2).
+    ///
+    /// "OPTIONAL. A string, integer or object" — all three, so a `Value` and
+    /// not a `String`. Nothing here interprets it: the whole purpose of the
+    /// field is to be displayed, and a wallet that drops it asks the user to
+    /// consent to a disclosure without telling them what it is for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub purpose: Option<Value>,
 }
 
 fn default_true() -> bool {
@@ -106,15 +114,116 @@ fn is_true(b: &bool) -> bool {
     *b
 }
 
+/// Why a document is not a usable DCQL query.
+///
+/// Deliberately short. §6 instructs implementations to "ignore any unknown
+/// properties", and this crate goes further in the same spirit: a query is
+/// rejected only when what the verifier wants cannot be determined, never for
+/// a deviation that can be read past. So a duplicated `id` is fatal — it makes
+/// a reference ambiguous — while a `credential_sets` option naming a query
+/// that does not exist is not, because an option the wallet cannot satisfy is
+/// simply an option it does not offer.
+///
+/// In particular the character restrictions §6.1 and §6.3 place on an `id` are
+/// *not* enforced. They carry no meaning for matching, and rejecting a
+/// verifier over a dot in an identifier would fail a request that is perfectly
+/// well understood.
+#[derive(Debug)]
+pub enum QueryError {
+    /// Not well-formed JSON, or not shaped like a DCQL query.
+    Json(serde_json::Error),
+    /// A credential query `id` is empty. "MUST be a non-empty string" (§6.1),
+    /// and an empty id cannot be referred to from `credential_sets`.
+    EmptyCredentialId,
+    /// Two credential queries share this `id`. §6.1 requires it to "be unique
+    /// across all Credential Query objects": a reference from
+    /// `credential_sets` to a duplicated id names two different requests, and
+    /// answering the first silently drops the second.
+    DuplicateCredentialId(String),
+    /// Two claims queries within one credential query share this `id`. §6.3
+    /// requires uniqueness "within the particular claims array", for the same
+    /// reason one level down: `claim_sets` refers to claims by id.
+    DuplicateClaimId {
+        /// The `id` of the credential query holding the duplicate.
+        credential: String,
+        /// The duplicated claims query `id`.
+        claim: String,
+    },
+}
+
+impl core::fmt::Display for QueryError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Json(e) => write!(f, "not a DCQL query: {e}"),
+            Self::EmptyCredentialId => {
+                write!(f, "a credential query has an empty id (§6.1)")
+            }
+            Self::DuplicateCredentialId(id) => {
+                write!(f, "two credential queries share the id {id:?} (§6.1)")
+            }
+            Self::DuplicateClaimId { credential, claim } => write!(
+                f,
+                "credential query {credential:?} has two claims with the id {claim:?} (§6.3)"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for QueryError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Json(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<serde_json::Error> for QueryError {
+    fn from(e: serde_json::Error) -> Self {
+        Self::Json(e)
+    }
+}
+
 impl DcqlQuery {
-    /// Parse a DCQL query from JSON.
+    /// Parse and validate a DCQL query from JSON.
+    ///
+    /// Validation is on this path rather than beside it, so that a caller
+    /// cannot hold a `DcqlQuery` whose ids are ambiguous. See [`QueryError`]
+    /// for what is checked, and for the larger set of things deliberately
+    /// tolerated.
     ///
     /// # Errors
     ///
-    /// Returns the underlying `serde_json` error when the document is not a
-    /// well-formed DCQL query. Unknown properties are not an error (§6).
-    pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
-        serde_json::from_str(json)
+    /// [`QueryError`]: the document is not a well-formed DCQL query, or its
+    /// identifiers are not usable. Unknown properties are not an error (§6).
+    pub fn from_json(json: &str) -> Result<Self, QueryError> {
+        let query: Self = serde_json::from_str(json)?;
+        query.validate()?;
+        Ok(query)
+    }
+
+    /// Check that this query's identifiers are usable.
+    ///
+    /// Called by [`Self::from_json`]. Public for callers that build a query in
+    /// memory rather than parsing one, who need the same guarantee.
+    ///
+    /// # Errors
+    ///
+    /// [`QueryError`], excluding [`QueryError::Json`] which only parsing can
+    /// produce.
+    pub fn validate(&self) -> Result<(), QueryError> {
+        let mut seen: Vec<&str> = Vec::with_capacity(self.credentials.len());
+        for credential in &self.credentials {
+            if credential.id.is_empty() {
+                return Err(QueryError::EmptyCredentialId);
+            }
+            if seen.contains(&credential.id.as_str()) {
+                return Err(QueryError::DuplicateCredentialId(credential.id.clone()));
+            }
+            seen.push(&credential.id);
+            credential.validate_claim_ids()?;
+        }
+        Ok(())
     }
 
     /// The credential query with the given id.
@@ -125,13 +234,33 @@ impl DcqlQuery {
 
 impl CredentialQuery {
     /// The claims query with the given id.
+    ///
+    /// Unambiguous because [`DcqlQuery::validate`] rejects duplicated claim
+    /// ids; without that, this would resolve to whichever came first.
     pub fn claim(&self, id: &str) -> Option<&ClaimsQuery> {
         self.claims.iter().find(|c| c.id.as_deref() == Some(id))
+    }
+
+    /// §6.3 claim id uniqueness, within this credential query's `claims`.
+    fn validate_claim_ids(&self) -> Result<(), QueryError> {
+        let mut seen: Vec<&str> = Vec::with_capacity(self.claims.len());
+        for id in self.claims.iter().filter_map(|c| c.id.as_deref()) {
+            if seen.contains(&id) {
+                return Err(QueryError::DuplicateClaimId {
+                    credential: self.id.clone(),
+                    claim: id.to_string(),
+                });
+            }
+            seen.push(id);
+        }
+        Ok(())
     }
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+// `expect` alongside `unwrap`: a test that states why it expects to succeed
+// says what broke when it stops succeeding.
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 
@@ -173,6 +302,142 @@ mod tests {
         let q =
             DcqlQuery::from_json(r#"{"credentials":[{"id":"pid","format":"mso_mdoc"}]}"#).unwrap();
         assert!(q.credentials[0].meta.is_empty());
+    }
+
+    /// §6.1: an `id` "MUST be unique across all Credential Query objects".
+    /// Without this check the duplicate is not merely tolerated — it changes
+    /// what gets offered, because `credential_sets` resolves a reference to
+    /// whichever entry came first and the second is answered by nobody.
+    #[test]
+    fn duplicate_credential_ids_are_rejected() {
+        let err = DcqlQuery::from_json(
+            r#"{"credentials":[{"id":"pid","format":"mso_mdoc"},
+                               {"id":"pid","format":"dc+sd-jwt"}]}"#,
+        )
+        .expect_err("a duplicated credential id is not usable");
+        assert!(
+            matches!(&err, QueryError::DuplicateCredentialId(id) if id == "pid"),
+            "got {err:?}"
+        );
+    }
+
+    /// §6.3: a claims `id` must be "unique within the particular claims
+    /// array". Same defect one level down — `claim_sets` refers to claims by
+    /// id, so a duplicate makes an option ambiguous.
+    #[test]
+    fn duplicate_claim_ids_are_rejected() {
+        let err = DcqlQuery::from_json(
+            r#"{"credentials":[{"id":"pid","format":"mso_mdoc","claims":[
+                 {"id":"a","path":["ns","given_name"]},
+                 {"id":"a","path":["ns","family_name"]}],
+                 "claim_sets":[["a"]]}]}"#,
+        )
+        .expect_err("a duplicated claim id is not usable");
+        assert!(
+            matches!(
+                &err,
+                QueryError::DuplicateClaimId { credential, claim }
+                    if credential == "pid" && claim == "a"
+            ),
+            "got {err:?}"
+        );
+    }
+
+    /// Claims without ids are the ordinary case when there are no
+    /// `claim_sets`, and any number of them is fine — the uniqueness rule is
+    /// about ids, and `None` is not an id.
+    #[test]
+    fn claims_without_ids_do_not_collide() {
+        let q = DcqlQuery::from_json(
+            r#"{"credentials":[{"id":"pid","format":"mso_mdoc","claims":[
+                 {"path":["ns","given_name"]},
+                 {"path":["ns","family_name"]}]}]}"#,
+        )
+        .expect("unidentified claims are not duplicates");
+        assert_eq!(q.credentials[0].claims.len(), 2);
+    }
+
+    /// "MUST be a non-empty string" (§6.1). An empty id cannot be referred to
+    /// from `credential_sets`, so it is rejected rather than read past.
+    #[test]
+    fn an_empty_credential_id_is_rejected() {
+        let err = DcqlQuery::from_json(r#"{"credentials":[{"id":"","format":"mso_mdoc"}]}"#)
+            .expect_err("an empty id is not usable");
+        assert!(matches!(err, QueryError::EmptyCredentialId), "got {err:?}");
+    }
+
+    /// The line this crate draws: reject what cannot be interpreted, tolerate
+    /// what can. §6.1 also restricts an id's characters, and a dot in one
+    /// changes nothing about what the verifier asked for — failing the request
+    /// over it would be a worse outcome than answering it.
+    #[test]
+    fn ids_outside_the_specified_character_set_are_tolerated() {
+        let q = DcqlQuery::from_json(
+            r#"{"credentials":[{"id":"eu.europa.ec.eudi.pid.1","format":"mso_mdoc"}]}"#,
+        )
+        .expect("a dotted id is unusual, not ambiguous");
+        assert!(q.credential("eu.europa.ec.eudi.pid.1").is_some());
+    }
+
+    /// A `credential_sets` option naming a query that does not exist is not
+    /// fatal either: an option the wallet cannot satisfy is one it does not
+    /// offer, which §6.4 already handles.
+    #[test]
+    fn a_dangling_credential_set_reference_is_tolerated() {
+        let q = DcqlQuery::from_json(
+            r#"{"credentials":[{"id":"pid","format":"mso_mdoc"}],
+                "credential_sets":[{"options":[["pid"],["nonexistent"]]}]}"#,
+        )
+        .expect("a dangling reference is an option, not a contradiction");
+        assert_eq!(q.credential_sets.as_ref().map(Vec::len), Some(1));
+    }
+
+    /// `purpose` is why the verifier wants a combination, and the wallet's
+    /// only chance to tell the user. §6.2 allows a string, an integer or an
+    /// object, so all three have to survive parsing.
+    #[test]
+    fn purpose_is_kept_in_all_three_shapes() {
+        let q = DcqlQuery::from_json(
+            r#"{"credentials":[{"id":"pid","format":"mso_mdoc"}],
+                "credential_sets":[
+                  {"options":[["pid"]],"purpose":"Proving your age"},
+                  {"options":[["pid"]],"purpose":1},
+                  {"options":[["pid"]],"purpose":{"id":1,"name":"Age check"}}]}"#,
+        )
+        .expect("valid DCQL");
+        let sets = q.credential_sets.expect("sets");
+        assert_eq!(
+            sets[0].purpose,
+            Some(Value::String("Proving your age".into()))
+        );
+        assert_eq!(sets[1].purpose, Some(Value::from(1)));
+        assert_eq!(
+            sets[2].purpose.as_ref().and_then(|p| p.get("name")),
+            Some(&Value::String("Age check".into()))
+        );
+        assert_eq!(
+            serde_json::to_string(&sets[0]).expect("serialize"),
+            r#"{"options":[["pid"]],"required":true,"purpose":"Proving your age"}"#,
+            "purpose round-trips; a wallet passing the query on must not drop it"
+        );
+    }
+
+    /// An absent `purpose` stays absent rather than serialising as null — a
+    /// verifier reading a re-encoded query should not see a field it never
+    /// sent.
+    #[test]
+    fn an_absent_purpose_is_not_serialised() {
+        let q = DcqlQuery::from_json(
+            r#"{"credentials":[{"id":"pid","format":"mso_mdoc"}],
+                "credential_sets":[{"options":[["pid"]]}]}"#,
+        )
+        .expect("valid DCQL");
+        let sets = q.credential_sets.expect("sets");
+        assert!(sets[0].purpose.is_none());
+        assert_eq!(
+            serde_json::to_string(&sets[0]).expect("serialize"),
+            r#"{"options":[["pid"]],"required":true}"#
+        );
     }
 
     /// A full query round-trips, including mdoc paths and value filters.

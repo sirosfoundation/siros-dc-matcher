@@ -13,6 +13,12 @@ existed.
 
 ### Fixed
 
+- Duplicate DCQL identifiers are rejected rather than resolving to whichever
+  came first. A repeated credential query `id` (§6.1) or claims `id` (§6.3)
+  made a reference from `credential_sets` or `claim_sets` ambiguous, and the
+  engine answered one of them — a request that asked for two credentials was
+  quietly answered with one, and the picker offered the same credential twice
+  as separate options.
 - `zk_required` absent now means the proof is *optional*. It was read as
   "required", the inverse of the specified behaviour, which silently withheld
   the wallet from every verifier that named `zk_system_type` without also
@@ -21,6 +27,11 @@ existed.
 
 ### Added
 
+- A §6.2 `purpose` now reaches the caller. `FfiCombination.purposes` carries
+  the verifier's stated reason for each combination, rendered for display, so a
+  wallet can tell the user what they are consenting to rather than only that
+  they are. A string arrives unchanged; an integer or object keeps its JSON
+  form instead of being dropped.
 - A minimum-supported-Rust-version job, so the declared `rust-version = 1.82`
   is a tested claim rather than an assertion.
 - `cargo-semver-checks` on `siros-dcql`, so a change to a published API cannot
