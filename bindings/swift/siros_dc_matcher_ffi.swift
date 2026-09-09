@@ -1259,7 +1259,8 @@ public struct FfiMatchOutcome {
      * How many further combinations existed beyond the returned ones.
      *
      * A lower bound rather than a count when the exactness field beside it
-     * says so. Clamped, and it only reaches the clamp in that case.
+     * says so — which covers both an unknowable engine count and one too
+     * large to narrow to this width.
      */
     public var dropped: UInt32
     /**
@@ -1291,7 +1292,8 @@ public struct FfiMatchOutcome {
          * How many further combinations existed beyond the returned ones.
          *
          * A lower bound rather than a count when the exactness field beside it
-         * says so. Clamped, and it only reaches the clamp in that case.
+         * says so — which covers both an unknowable engine count and one too
+         * large to narrow to this width.
          */dropped: UInt32, 
         /**
          * Whether the dropped count is the true number rather than a floor.

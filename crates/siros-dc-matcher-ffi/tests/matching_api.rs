@@ -403,3 +403,87 @@ fn a_duplicated_credential_query_id_is_a_request_error() {
         "got {err:?}"
     );
 }
+
+/// A wallet holding `n` interchangeable licences.
+///
+/// The canonical fixture holds exactly one, on purpose and shared by three
+/// suites, so this builds its own rather than changing what those assertions
+/// mean. Interchangeable is the point: every credential satisfies every query,
+/// which is what makes the combination count a full power.
+fn identical_licences(n: usize) -> Vec<u8> {
+    use siros_dc_matcher_core::db::{Claim, Credential, CredentialDatabase};
+    use siros_dc_matcher_core::profile::MatchProfile;
+
+    let mut db = CredentialDatabase::new(MatchProfile::siros_default());
+    for i in 0..n {
+        db.credentials.push(Credential {
+            id: format!("mdl-{i}"),
+            format: "mso_mdoc".into(),
+            doctype: Some("org.iso.18013.5.1.mDL".into()),
+            vct: None,
+            title: format!("Driving Licence {i}"),
+            subtitle: "Transportstyrelsen".into(),
+            icon: None,
+            claims: vec![Claim {
+                path: vec!["org.iso.18013.5.1".into(), "age_over_18".into()],
+                value: "true".into(),
+                display: "Over 18".into(),
+                display_value: Some("Yes".into()),
+            }],
+        });
+    }
+    db.to_cbor().expect("encoding")
+}
+
+/// The count crossing the FFI is narrowed to a fixed width, and a value that
+/// does not survive that narrowing is not exact — whatever the engine said.
+///
+/// This is the case worth pinning, because the engine is telling the truth:
+/// three candidates across forty queries is 3^40 combinations, which *fits* a
+/// `usize`, so the engine reports an exact count. It does not fit the FFI's
+/// narrower field. Clamped and still labelled exact, it would assert a precise
+/// figure that is merely the width of the field — the same overstated
+/// precision this pair of fields exists to prevent, reintroduced by the cast.
+#[test]
+fn a_dropped_count_too_large_to_narrow_is_not_exact() {
+    let blob = identical_licences(3);
+    let queries: Vec<serde_json::Value> = (0..40)
+        .map(|i| {
+            json!({
+                "id": format!("q{i}"), "format": "mso_mdoc",
+                "meta": {"doctype_value": "org.iso.18013.5.1.mDL"},
+                "claims": age_claim()
+            })
+        })
+        .collect();
+    let query = json!({"credentials": queries}).to_string();
+
+    let out = match_dcql(blob, query).expect("matched");
+    assert!(out.satisfiable);
+    assert_eq!(out.dropped, u32::MAX, "clamped to the field's width");
+    assert!(
+        !out.dropped_is_exact,
+        "3^40 is exact in a usize and far past this field; saying exact here \
+         would claim u32::MAX was the count"
+    );
+}
+
+/// A count that does fit is still reported as exact, so the check above is not
+/// simply switching the flag off for anything large.
+#[test]
+fn a_dropped_count_that_fits_stays_exact() {
+    let blob = identical_licences(3);
+    let queries: Vec<serde_json::Value> = (0..2)
+        .map(|i| {
+            json!({
+                "id": format!("q{i}"), "format": "mso_mdoc",
+                "meta": {"doctype_value": "org.iso.18013.5.1.mDL"},
+                "claims": age_claim()
+            })
+        })
+        .collect();
+    let query = json!({"credentials": queries}).to_string();
+
+    let out = match_dcql(blob, query).expect("matched");
+    assert!(out.dropped_is_exact, "9 combinations is a number we have");
+}

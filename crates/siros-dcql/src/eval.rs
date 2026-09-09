@@ -168,17 +168,17 @@ impl Dropped {
         self.count() > 0
     }
 
-    /// Both counts together, staying `AtLeast` if either side is.
+    /// Both counts together.
     ///
-    /// Saturating, because the sum of two bounded counts can overflow just as
-    /// the product did — and a sum that wrapped would be the same lie one
-    /// layer up.
+    /// Inexact if either side is — and also if the sum itself overflows, which
+    /// two exact counts can do. Saturating and still calling that `Exact`
+    /// would be the very lie this type exists to prevent, one layer up from
+    /// the product that motivated it.
     fn add(self, other: Self) -> Self {
-        let total = self.count().saturating_add(other.count());
-        if self.is_exact() && other.is_exact() {
-            Self::Exact(total)
-        } else {
-            Self::AtLeast(total)
+        match self.count().checked_add(other.count()) {
+            Some(total) if self.is_exact() && other.is_exact() => Self::Exact(total),
+            Some(total) => Self::AtLeast(total),
+            None => Self::AtLeast(usize::MAX),
         }
     }
 }

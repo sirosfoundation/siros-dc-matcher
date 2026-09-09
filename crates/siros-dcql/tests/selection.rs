@@ -882,3 +882,46 @@ fn nothing_dropped_is_an_exact_zero() {
     assert_eq!(combos.dropped, Dropped::Exact(0));
     assert!(!combos.dropped.any());
 }
+
+/// Summing dropped counts must not manufacture exactness either.
+///
+/// Two required credential sets each drop a bounded number, and the total is
+/// still a bound. Reported as exact, that would be the same overstatement one
+/// layer up from the product — so it is checked across the group loop, not
+/// only inside it.
+#[test]
+fn a_bound_stays_a_bound_across_several_credential_sets() {
+    // Two required sets, each over enough queries that its own product
+    // overflows, so both contribute an `AtLeast` that then has to be summed.
+    let mut queries = Vec::new();
+    for group in 0..2 {
+        for i in 0..100 {
+            queries.push(format!(
+                r#"{{"id":"g{group}q{i}","format":"dc+sd-jwt","meta":{{}},
+                     "claims":[{{"path":["given_name"]}}]}}"#
+            ));
+        }
+    }
+    let options: Vec<String> = (0..2)
+        .map(|group| {
+            let ids: Vec<String> = (0..100).map(|i| format!(r#""g{group}q{i}""#)).collect();
+            format!(r#"{{"options":[[{}]]}}"#, ids.join(","))
+        })
+        .collect();
+    let q = query(&format!(
+        r#"{{"credentials":[{}],"credential_sets":[{}]}}"#,
+        queries.join(","),
+        options.join(",")
+    ));
+    let creds = [
+        JsonCredential::new("a", "dc+sd-jwt", json!({"given_name": "Erika"})),
+        JsonCredential::new("b", "dc+sd-jwt", json!({"given_name": "Max"})),
+    ];
+
+    let combos = execute(&q, &creds, &ExactFormat).combinations(32);
+    assert!(
+        !combos.dropped.is_exact(),
+        "a sum of bounds is a bound: got {:?}",
+        combos.dropped
+    );
+}

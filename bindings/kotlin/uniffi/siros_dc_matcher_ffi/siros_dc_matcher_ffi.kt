@@ -1827,7 +1827,8 @@ data class FfiMatchOutcome (
      * How many further combinations existed beyond the returned ones.
      *
      * A lower bound rather than a count when the exactness field beside it
-     * says so. Clamped, and it only reaches the clamp in that case.
+     * says so — which covers both an unknowable engine count and one too
+     * large to narrow to this width.
      */
     var `dropped`: kotlin.UInt, 
     /**
