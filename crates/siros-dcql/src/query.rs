@@ -7,6 +7,8 @@
 //! recognise — a wallet that refuses tomorrow's extension is worse than one
 //! that ignores it.
 
+use std::collections::HashSet;
+
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -132,8 +134,13 @@ fn is_true(b: &bool) -> bool {
 pub enum QueryError {
     /// Not well-formed JSON, or not shaped like a DCQL query.
     Json(serde_json::Error),
-    /// A credential query `id` is empty. "MUST be a non-empty string" (§6.1),
-    /// and an empty id cannot be referred to from `credential_sets`.
+    /// A credential query `id` is empty. "MUST be a non-empty string" (§6.1).
+    ///
+    /// Rejected rather than read past because an identifier that identifies
+    /// nothing is not something this crate can interpret on the verifier's
+    /// behalf — not because a reference to it would fail to resolve, since
+    /// `""` is a perfectly good JSON string and `credential_sets` could name
+    /// it.
     EmptyCredentialId,
     /// Two credential queries share this `id`. §6.1 requires it to "be unique
     /// across all Credential Query objects": a reference from
@@ -212,15 +219,14 @@ impl DcqlQuery {
     /// [`QueryError`], excluding [`QueryError::Json`] which only parsing can
     /// produce.
     pub fn validate(&self) -> Result<(), QueryError> {
-        let mut seen: Vec<&str> = Vec::with_capacity(self.credentials.len());
+        let mut seen: HashSet<&str> = HashSet::with_capacity(self.credentials.len());
         for credential in &self.credentials {
             if credential.id.is_empty() {
                 return Err(QueryError::EmptyCredentialId);
             }
-            if seen.contains(&credential.id.as_str()) {
+            if !seen.insert(&credential.id) {
                 return Err(QueryError::DuplicateCredentialId(credential.id.clone()));
             }
-            seen.push(&credential.id);
             credential.validate_claim_ids()?;
         }
         Ok(())
@@ -243,15 +249,14 @@ impl CredentialQuery {
 
     /// §6.3 claim id uniqueness, within this credential query's `claims`.
     fn validate_claim_ids(&self) -> Result<(), QueryError> {
-        let mut seen: Vec<&str> = Vec::with_capacity(self.claims.len());
+        let mut seen: HashSet<&str> = HashSet::with_capacity(self.claims.len());
         for id in self.claims.iter().filter_map(|c| c.id.as_deref()) {
-            if seen.contains(&id) {
+            if !seen.insert(id) {
                 return Err(QueryError::DuplicateClaimId {
                     credential: self.id.clone(),
                     claim: id.to_string(),
                 });
             }
-            seen.push(id);
         }
         Ok(())
     }
