@@ -49,6 +49,13 @@ existed.
   that is absent, empty or blank produces a null pointer rather than an empty
   label — the host renders the presence of that field, which is what put a
   warning triangle on every entry before v0.6.2.
+
+  Only string reasons are shown. §6.2's integer and object forms are
+  machine-readable purpose identifiers, and putting one on a consent screen
+  renders `{"id":7,"name":"Age verification"}` under the list of attributes
+  about to be disclosed — verified on a Pixel, and worse than saying nothing.
+  Those still reach the application through the FFI, where a lookup is
+  possible.
 - A §6.2 `purpose` now reaches the caller. `FfiCombination.purposes` carries
   the verifier's stated reason for each combination, rendered for display, so a
   wallet can tell the user what they are consenting to rather than only that

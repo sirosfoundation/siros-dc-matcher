@@ -21,7 +21,17 @@ pub fn display(purpose: &Value) -> String {
     }
 }
 
-/// Every purpose behind one offered combination, as a single line.
+/// Every purpose behind one offered combination, as a single line to show on
+/// the consent screen.
+///
+/// **Strings only.** §6.2's integer and object forms are machine-readable
+/// purpose identifiers, to be looked up against whatever scheme the verifier
+/// and wallet share — not sentences. Rendering one puts
+/// `{"id":7,"name":"Age verification"}` in front of someone being asked to
+/// hand over an identity document, which is worse than saying nothing: the
+/// screen exists to be understood, and text nobody can read undermines the
+/// part they *can*. Non-string reasons still reach the application through the
+/// FFI, which is where a lookup can happen.
 ///
 /// `None` when the verifier gave no usable reason, and *usable* is the
 /// important word: a `purpose` of `""` is a present field with nothing in it,
@@ -34,8 +44,10 @@ pub fn display(purpose: &Value) -> String {
 pub fn line(purposes: &[Value]) -> Option<String> {
     let joined = purposes
         .iter()
-        .map(display)
-        .map(|p| p.trim().to_string())
+        .filter_map(|p| match p {
+            Value::String(s) => Some(s.trim()),
+            _ => None,
+        })
         .filter(|p| !p.is_empty())
         .collect::<Vec<_>>()
         // A combination can satisfy several required credential sets, each
@@ -96,5 +108,36 @@ mod tests {
             line(&[json!("  Age check  ")]).as_deref(),
             Some("Age check")
         );
+    }
+
+    /// A machine-readable reason is not consent-screen text.
+    ///
+    /// Verified on a Pixel before this rule existed: an object purpose put
+    /// `{"id":7,"name":"Age verification"}` on the share sheet, directly under
+    /// the list of attributes about to be disclosed. §6.2's integer and object
+    /// forms are identifiers to look up, and the application still receives
+    /// them over the FFI — the consent screen is the wrong place for them.
+    #[test]
+    fn a_machine_readable_reason_is_not_displayed() {
+        assert_eq!(line(&[json!({"id": 7, "name": "Age verification"})]), None);
+        assert_eq!(line(&[json!(7)]), None);
+        assert_eq!(line(&[json!(["a", "b"])]), None);
+    }
+
+    /// And it does not suppress a legible reason sitting beside it.
+    #[test]
+    fn a_machine_readable_reason_does_not_hide_a_readable_one() {
+        assert_eq!(
+            line(&[json!({"id": 7}), json!("Confirming your age")]).as_deref(),
+            Some("Confirming your age")
+        );
+    }
+
+    /// `display` keeps rendering everything: it serves the FFI, where an
+    /// application can interpret what a picker cannot show.
+    #[test]
+    fn display_still_renders_what_line_declines_to_show() {
+        assert_eq!(display(&json!({"id": 7})), r#"{"id":7}"#);
+        assert_eq!(line(&[json!({"id": 7})]), None);
     }
 }

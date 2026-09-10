@@ -732,12 +732,20 @@ fn an_empty_purpose_is_treated_as_no_purpose() {
     assert_eq!(entry.disclaimer, None);
 }
 
-/// §6.2 allows a non-string purpose, and it still has to be displayable.
+/// §6.2's object and integer forms are machine-readable identifiers, and they
+/// do not go on the consent screen.
+///
+/// Established by looking: before this rule, an object purpose put
+/// `{"id":7,"name":"Age verification"}` on a real Pixel's share sheet, under
+/// the list of attributes about to be disclosed. The application still gets it
+/// over the FFI, where a lookup is possible; the picker shows nothing rather
+/// than showing that.
 #[test]
-fn an_object_purpose_is_rendered_rather_than_dropped() {
+fn a_machine_readable_purpose_is_not_put_on_the_consent_screen() {
     let db = wallet(None);
     let captured = invoke(&db, request_with_purpose(json!({"id": 7})));
 
     let entry = captured.entry("siros-0", 0).expect("an entry");
-    assert_eq!(entry.disclaimer.as_deref(), Some(r#"{"id":7}"#));
+    assert_eq!(entry.disclaimer, None);
+    assert_eq!(entry.warning, None);
 }
