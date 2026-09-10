@@ -53,4 +53,11 @@ pub struct Entry<'a> {
     /// fall inside the blob's icon buffer — a credential should lose its
     /// picture over that, not its entry.
     pub icon: Option<&'a [u8]>,
+    /// Why the verifier is asking, shown with the entry (§6.2 `purpose`).
+    ///
+    /// `None` and `Some("")` are not the same thing to the host: it renders
+    /// the *presence* of this field, so an empty string produces a label with
+    /// nothing in it. Build it with [`crate::purpose::line`], which returns
+    /// `None` for a reason that is blank as well as for one that is absent.
+    pub disclaimer: Option<&'a str>,
 }

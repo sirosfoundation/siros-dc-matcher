@@ -43,6 +43,12 @@ existed.
 
 ### Added
 
+- The picker shows the verifier's stated reason. A §6.2 `purpose` is rendered
+  on each entry of the combination it belongs to, so a person is told what the
+  disclosure is *for* and not merely that one is being asked of them. A reason
+  that is absent, empty or blank produces a null pointer rather than an empty
+  label — the host renders the presence of that field, which is what put a
+  warning triangle on every entry before v0.6.2.
 - A §6.2 `purpose` now reaches the caller. `FfiCombination.purposes` carries
   the verifier's stated reason for each combination, rendered for display, so a
   wallet can tell the user what they are consenting to rather than only that

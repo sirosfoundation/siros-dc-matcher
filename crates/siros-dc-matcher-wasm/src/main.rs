@@ -155,6 +155,13 @@ fn run(request: &[u8], blob: &[u8], origin: &str) {
         let set_id = format!("{SET_PREFIX}-{index}");
         abi::emit::entry_set(&set_id, resolved.len());
 
+        // Why the verifier says it wants this combination (§6.2). Computed
+        // once per combination and shown on each of its entries: the purposes
+        // belong to the credential sets the combination satisfies, and the
+        // combination is what the user is consenting to as a unit, so every
+        // card in it is being offered for those reasons.
+        let purpose = siros_dc_matcher_core::purpose::line(&combination.purposes);
+
         for (position, (query_id, candidate, credential)) in resolved.iter().enumerate() {
             // Resolved by core, which the FFI also calls: the wallet needs to
             // know which proof to produce, and deriving that in two places is
@@ -217,6 +224,7 @@ fn run(request: &[u8], blob: &[u8], origin: &str) {
                             .filter(|bytes| !bytes.is_empty())
                             .unwrap_or(FALLBACK_ICON_PNG),
                     ),
+                    disclaimer: purpose.as_deref(),
                 },
             );
 
@@ -301,6 +309,9 @@ impl Diagnostics {
                 subtitle: &message,
                 metadata: "{}",
                 icon: Some(FALLBACK_ICON_PNG),
+                // A diagnostic entry has no verifier reason to show; the
+                // whole message is already in the subtitle.
+                disclaimer: None,
             },
         );
     }

@@ -256,17 +256,6 @@ fn request_err(e: impl core::fmt::Display) -> MatchError {
     }
 }
 
-/// A §6.2 `purpose` as a string to show a user.
-///
-/// A JSON string loses its quotes; a number or object keeps its JSON form,
-/// which is at least displayable and identifies what the verifier meant.
-fn display_purpose(purpose: &serde_json::Value) -> String {
-    match purpose {
-        serde_json::Value::String(s) => s.clone(),
-        other => other.to_string(),
-    }
-}
-
 fn evaluate(db: &CredentialDatabase, query: &DcqlQuery) -> FfiMatchOutcome {
     let held = credentials(db);
     let policy = ProfilePolicy::new(&db.profile);
@@ -333,7 +322,11 @@ fn evaluate(db: &CredentialDatabase, query: &DcqlQuery) -> FfiMatchOutcome {
                 .iter()
                 .map(|(query_id, candidate)| member(query_id, candidate))
                 .collect(),
-            purposes: combination.purposes.iter().map(display_purpose).collect(),
+            purposes: combination
+                .purposes
+                .iter()
+                .map(siros_dc_matcher_core::purpose::display)
+                .collect(),
         })
         .collect();
 

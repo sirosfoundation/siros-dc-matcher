@@ -228,6 +228,14 @@ pub mod emit {
                 }
                 _ => (core::ptr::null(), 0),
             };
+            // Same convention as the icon: absent is a null pointer, never a
+            // pointer to "". Held in a binding so the CString outlives the
+            // call rather than being dropped at the end of the expression
+            // that made it.
+            let disclaimer = e.disclaimer.map(super::c);
+            let disclaimer_ptr = disclaimer
+                .as_ref()
+                .map_or(core::ptr::null(), |d| d.as_ptr());
             // SAFETY: every pointer is to a value alive for the whole call,
             // and icon_len is the true length of the slice icon_ptr came from.
             unsafe {
@@ -237,17 +245,17 @@ pub mod emit {
                     icon_len,
                     title.as_ptr(),
                     subtitle.as_ptr(),
-                    // Null, not a pointer to "". The picker draws a red badge
-                    // with a warning triangle for any entry whose disclaimer or
-                    // warning is *present*, and an empty string is present —
-                    // so every entry we emitted carried a warning symbol with
-                    // no warning in it. Confirmed on a Pixel: the badge sits on
-                    // the credential card in the share sheet, saying nothing.
-                    //
-                    // The icon two arguments up already uses this convention:
-                    // absent is a null pointer, not an empty value. These two
-                    // now agree with it.
-                    core::ptr::null(),
+                    // The verifier's stated reason, or null when it gave
+                    // none. Never a pointer to "": the host renders the
+                    // *presence* of this field, and an empty string is
+                    // present, which is how every entry came to carry a
+                    // warning symbol with no warning in it before v0.6.2.
+                    // `purpose::line` is what guarantees the string is not
+                    // blank if it exists at all.
+                    disclaimer_ptr,
+                    // Nothing the matcher knows is a warning. A purpose is
+                    // not one — it is ordinary information about the request
+                    // — so it goes above, and this stays null.
                     core::ptr::null(),
                     metadata.as_ptr(),
                     set_id.as_ptr(),
