@@ -198,12 +198,19 @@ jobs:
       # and javadoc jars, signing, Central Portal upload) lives in
       # siros-sdk-kotlin; CENTRAL_*/SIGNING_* are the org-wide secrets the
       # SDK itself publishes with.
-      - name: Derive version from tag
-        run: echo "CENTRAL_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
       - name: Locate AAR and POM
         run: |
-          echo "CENTRAL_AAR=$(ls target/siros_dc_matcher_ffi-*.aar)" >> "$GITHUB_ENV"
-          echo "CENTRAL_POM=$(ls target/siros-dc-matcher-*.pom)" >> "$GITHUB_ENV"
+          shopt -s nullglob
+          aars=(target/siros_dc_matcher_ffi-*.aar)
+          poms=(target/siros-dc-matcher-*.pom)
+          if [ "${#aars[@]}" -ne 1 ] || [ "${#poms[@]}" -ne 1 ]; then
+            echo "expected exactly one AAR and one POM in target/, found ${#aars[@]} / ${#poms[@]}"; ls target; exit 1
+          fi
+          pom_version=$(python3 -c 'import sys,xml.etree.ElementTree as ET; ns="{http://maven.apache.org/POM/4.0.0}"; print(ET.parse(sys.argv[1]).getroot().findtext(ns+"version"))' "${poms[0]}")
+          if [ "$pom_version" != "${GITHUB_REF_NAME#v}" ]; then
+            echo "tag $GITHUB_REF_NAME does not match the POM version $pom_version"; exit 1
+          fi
+          printf 'CENTRAL_AAR=%s\nCENTRAL_POM=%s\nCENTRAL_VERSION=%s\n' "${aars[0]}" "${poms[0]}" "$pom_version" >> "$GITHUB_ENV"
       - name: Publish AAR to Maven Central
         uses: sirosfoundation/siros-sdk-kotlin/.github/actions/central-publish@8aeb039b19c86c0f83f0bc7970b7070817881e58 # main
         with:
