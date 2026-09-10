@@ -17,5 +17,6 @@ pub mod evaluator;
 #[cfg(any(test, feature = "test-fixtures"))]
 pub mod fixtures;
 pub mod profile;
+pub mod purpose;
 pub mod request;
 pub mod sink;

@@ -55,6 +55,16 @@ pub struct CapturedEntry {
     pub metadata: String,
     /// Icon bytes the matcher passed, if any.
     pub icon: Vec<u8>,
+    /// The disclaimer pointer, distinguishing absent from empty.
+    ///
+    /// `None` for a null pointer and `Some("")` for a pointer to an empty
+    /// string. The distinction is the whole point: the real host renders the
+    /// presence of this field, so an empty string draws a label with nothing
+    /// in it — the v0.6.1 warning-badge bug. A capture that collapsed the two
+    /// could not tell that bug from correct behaviour.
+    pub disclaimer: Option<String>,
+    /// The warning pointer, with the same absent-versus-empty distinction.
+    pub warning: Option<String>,
     /// Display fields attached to this entry, in emission order.
     pub fields: Vec<(String, String)>,
 }
@@ -251,8 +261,8 @@ fn add_credman(linker: &mut Linker<State>) -> Result<()> {
          icon_len: i32,
          title: i32,
          subtitle: i32,
-         _disclaimer: i32,
-         _warning: i32,
+         disclaimer: i32,
+         warning: i32,
          metadata: i32,
          set_id: i32,
          index: i32|
@@ -269,6 +279,8 @@ fn add_credman(linker: &mut Linker<State>) -> Result<()> {
                 subtitle: read_cstr(&mut c, subtitle)?,
                 metadata: read_cstr(&mut c, metadata)?,
                 icon,
+                disclaimer: read_cstr_opt(&mut c, disclaimer)?,
+                warning: read_cstr_opt(&mut c, warning)?,
                 fields: Vec::new(),
             };
             c.data_mut().out.entries.push(entry);
@@ -365,6 +377,17 @@ fn read_bytes(c: &mut Caller<'_, State>, ptr: i32, len: i32) -> Result<Vec<u8>> 
 }
 
 /// Read a NUL-terminated string the guest passed as `char*`.
+/// A C string the matcher may legitimately have omitted.
+///
+/// `None` for a null pointer, `Some` for anything else — including a pointer
+/// to `""`, which is a real value the host treats differently from absence.
+fn read_cstr_opt(c: &mut Caller<'_, State>, ptr: i32) -> Result<Option<String>> {
+    if ptr == 0 {
+        return Ok(None);
+    }
+    read_cstr(c, ptr).map(Some)
+}
+
 fn read_cstr(c: &mut Caller<'_, State>, ptr: i32) -> Result<String> {
     if ptr == 0 {
         return Ok(String::new());
