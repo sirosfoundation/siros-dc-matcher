@@ -11,6 +11,12 @@ existed.
 
 ## Unreleased
 
+### Changed
+
+- Release tags publish the Android AAR to Maven Central as well as GitHub
+  Packages (`org.siros:siros-dc-matcher`), so a consumer of the SIROS SDK
+  needs no GitHub Packages token for this crate. 0.6.2 was backfilled.
+
 ### Fixed
 
 - The dropped-combination count says whether it is exact. The number of
