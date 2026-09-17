@@ -8,6 +8,7 @@ permissions:
   contents: read
 
 env:
+  NDK_VERSION: "27.2.12479018"
   CARGO_TERM_COLOR: always
 
 jobs:
@@ -153,10 +154,19 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Install cargo-ndk
         run: cargo install cargo-ndk --locked
+      # setup-android takes no api-level/ndk-version inputs - they were
+      # silently ignored, and its default package list includes the retired
+      # `tools` package, which the current runner image's sdkmanager no
+      # longer knows (it failed siros-wscd-manager's v0.9.0 AAR job). Install
+      # the NDK explicitly and point cargo-ndk at that one.
       - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
         with:
-          api-level: 28
-          ndk-version: "27.2.12479018"
+          packages: "ndk;${{ env.NDK_VERSION }}"
+      - name: Pin cargo-ndk to the installed NDK
+        run: |
+          NDK_HOME="${ANDROID_SDK_ROOT:-$ANDROID_HOME}/ndk/${NDK_VERSION}"
+          test -d "$NDK_HOME" || { echo "::error::NDK not found at $NDK_HOME"; exit 1; }
+          echo "ANDROID_NDK_HOME=$NDK_HOME" >> "$GITHUB_ENV"
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           java-version: '17'
