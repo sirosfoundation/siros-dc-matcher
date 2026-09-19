@@ -13,8 +13,11 @@ this file.
 
 ## Unreleased
 
-Releasing as **0.3.0**: the changes below are breaking, which pre-1.0 means a
-minor bump.
+Nothing yet.
+
+## 0.3.0 — 2026-09-19
+
+Breaking, which pre-1.0 means a minor bump.
 
 ### Added
 
