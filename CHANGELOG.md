@@ -11,6 +11,15 @@ existed.
 
 ## Unreleased
 
+Nothing yet.
+
+## v0.7.0 — 2026-09-19
+
+Closes the production-readiness review: nine findings, all fixed. The FFI
+records gained fields, so a consumer must regenerate its bindings — UniFFI
+checksums them against the library at load, and a stale copy fails there
+rather than at build time.
+
 ### Changed
 
 - Release tags publish the Android AAR to Maven Central as well as GitHub

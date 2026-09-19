@@ -13,8 +13,13 @@ this file.
 
 ## Unreleased
 
-Releasing as **0.3.0**: the changes below are breaking, which pre-1.0 means a
-minor bump.
+Nothing yet.
+
+## 0.3.0 — 2026-09-19
+
+This release contains breaking changes, which pre-1.0 means a minor version
+bump. They are listed under *Changed* below; every caller of
+`DcqlQuery::from_json` is affected.
 
 ### Added
 
