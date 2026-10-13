@@ -11,7 +11,14 @@ existed.
 
 ## Unreleased
 
-Nothing yet.
+### Added
+
+- `circuit_zk` query planner in `siros-dc-matcher-core` (`circuit_zk::plan`):
+  parses and normalises a `circuit_zk` credential query in both rulebook
+  shapes (`req` and `claims._req`), and rejects structural defects only.
+  Not yet wired into matching. Conformance vectors in
+  `crates/siros-dc-matcher-core/tests/vectors/circuit_zk/` are reusable by the
+  SDKs. (#37)
 
 ## v0.7.0 — 2026-09-19
 
