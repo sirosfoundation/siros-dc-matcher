@@ -160,6 +160,60 @@ pub struct RequestContext {
     pub dcql_query: Option<DcqlQuery>,
 }
 
+impl RequestContext {
+    /// A context for a bare DCQL query that did not arrive in a DC API
+    /// envelope — the wallet's own presentation flow.
+    ///
+    /// There is no protocol and nothing signed: `protocol` is empty and
+    /// `signed` is `false`, and `client_id` and `expected_origins` are absent.
+    /// `client_metadata` is whatever the caller has, if anything, since the
+    /// verifier's circuit constraints live there.
+    ///
+    /// # Errors
+    ///
+    /// [`NoQuery::Malformed`] when the query is not DCQL, with the same
+    /// `circuit_zk` allowance as [`extract_context`].
+    pub fn from_dcql(
+        dcql_query_raw: Value,
+        client_metadata: Option<Value>,
+    ) -> Result<Self, NoQuery> {
+        let dcql_query = parse_dcql_or_circuit_zk(&dcql_query_raw)?;
+        Ok(Self {
+            protocol: String::new(),
+            signed: false,
+            client_id: None,
+            expected_origins: None,
+            client_metadata,
+            dcql_query_raw,
+            dcql_query,
+        })
+    }
+
+    /// The query to run the DCQL engine over: [`Self::dcql_query`], or, when
+    /// that is `None`, the raw query with the `claims` of its `circuit_zk`
+    /// credentials left out.
+    ///
+    /// DCQL's `claims` has no meaning for `circuit_zk`, whose requests live in
+    /// `req`. The engine needs a credential query to match and select, and a
+    /// `circuit_zk` one carrying no claims selects none — which is what the
+    /// format means. The planner, not this, reads what was actually asked.
+    #[must_use]
+    pub fn matching_query(&self) -> Option<DcqlQuery> {
+        if let Some(query) = &self.dcql_query {
+            return Some(query.clone());
+        }
+        let mut raw = self.dcql_query_raw.clone();
+        for credential in raw.get_mut("credentials")?.as_array_mut()? {
+            if credential.get("format").and_then(Value::as_str) == Some("circuit_zk") {
+                if let Some(object) = credential.as_object_mut() {
+                    object.remove("claims");
+                }
+            }
+        }
+        serde_json::from_value(raw).ok()
+    }
+}
+
 /// A caller's say over which entry of `requests` is used: it receives the
 /// protocol label, whether the entry is signed, and the extracted context.
 pub type EntryFilter<'a> = &'a dyn Fn(&str, bool, &RequestContext) -> bool;

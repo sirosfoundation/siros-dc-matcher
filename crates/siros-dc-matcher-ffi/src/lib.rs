@@ -22,7 +22,9 @@ use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 use siros_dc_matcher_core::db::{Claim, Credential, CredentialDatabase, IconRef};
-use siros_dc_matcher_core::profile::{Capability, MatchProfile, ZK_CAPABILITY};
+use siros_dc_matcher_core::profile::{
+    Capability, MatchProfile, CIRCUIT_ZK_CAPABILITY, ZK_CAPABILITY,
+};
 
 pub mod matching;
 
@@ -123,6 +125,7 @@ struct BuilderState {
     credentials: Vec<FfiCredential>,
     icons: Vec<(String, Vec<u8>)>,
     zk_systems: Vec<FfiCapability>,
+    circuit_zk_systems: Vec<FfiCapability>,
     debug: bool,
 }
 
@@ -179,6 +182,19 @@ impl SirosBlobBuilder {
     /// correct outcome for a wallet that cannot produce the proof.
     pub fn add_zk_system(&self, capability: FfiCapability) {
         self.state().zk_systems.push(capability);
+    }
+
+    /// Register a `circuit_zk` circuit this wallet can prove with.
+    ///
+    /// `system` is the proof system (for example `longfellow-libzk-v1`). The
+    /// params are opaque strings the matcher reads only as follows:
+    /// `circuit_id` is matched against a verifier's `circuit_id_values`, and
+    /// `functions`, if given as a comma-separated list of function ids, limits
+    /// which requested functions this circuit is offered for. A circuit that
+    /// declares no `functions` is not filtered by function. Call once per
+    /// circuit; with none registered, `circuit_zk` requests match nothing.
+    pub fn add_circuit_zk_system(&self, capability: FfiCapability) {
+        self.state().circuit_zk_systems.push(capability);
     }
 
     /// Put matcher diagnostics into entry metadata.
@@ -258,6 +274,23 @@ impl SirosBlobBuilder {
             profile.capabilities.insert(
                 ZK_CAPABILITY.to_string(),
                 s.zk_systems
+                    .iter()
+                    .map(|c| Capability {
+                        system: c.system.clone(),
+                        params: c
+                            .params
+                            .iter()
+                            .map(|(k, v)| (k.clone(), v.clone()))
+                            .collect(),
+                    })
+                    .collect(),
+            );
+        }
+
+        if !s.circuit_zk_systems.is_empty() {
+            profile.capabilities.insert(
+                CIRCUIT_ZK_CAPABILITY.to_string(),
+                s.circuit_zk_systems
                     .iter()
                     .map(|c| Capability {
                         system: c.system.clone(),

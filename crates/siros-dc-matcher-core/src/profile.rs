@@ -250,6 +250,27 @@ impl MatchProfile {
 /// Capability name a `mso_mdoc_zk` format rule refers to.
 pub const ZK_CAPABILITY: &str = "zk_system";
 
+/// Capability family for `circuit_zk` circuits a wallet can prove with.
+///
+/// Every entry is one circuit: [`Capability::system`] is its proof system, and
+/// its params are opaque strings the matcher reads only as follows —
+/// [`CIRCUIT_ID_PARAM`] is compared with the verifier's `circuit_id_values`,
+/// and [`FUNCTIONS_PARAM`], when present, bounds which functions it supports.
+pub const CIRCUIT_ZK_CAPABILITY: &str = "circuit_zk";
+
+/// Param naming a circuit, matched against the verifier's `circuit_id_values`.
+pub const CIRCUIT_ID_PARAM: &str = "circuit_id";
+
+/// Param listing the function ids a circuit supports, comma-separated.
+///
+/// Optional. A circuit that declares none is not filtered by function: the
+/// catalog carries no function-support metadata yet, and guessing at it would
+/// reject requests the wallet can serve.
+pub const FUNCTIONS_PARAM: &str = "functions";
+
+/// The format a `circuit_zk` query is asked in.
+pub const CIRCUIT_ZK_FORMAT: &str = "circuit_zk";
+
 /// `mso_mdoc_zk` maps onto ordinary `mso_mdoc` storage because producing a ZK
 /// proof is a presentation-time transform, not a storage format — there is no
 /// separate ZK credential on the device to find. It carries a capability
@@ -296,6 +317,15 @@ impl MatchProfile {
                         capability: ZK_CAPABILITY.into(),
                         from_meta: "zk_system_type".into(),
                     }],
+                },
+                // A `circuit_zk` presentation is a proof about an ordinary stored
+                // mdoc, like `mso_mdoc_zk`, but what it needs is not a `meta`
+                // list of systems — the circuit capabilities are checked by the
+                // evaluator against the planned request.
+                FormatRule {
+                    query_format: CIRCUIT_ZK_FORMAT.into(),
+                    stored_formats: vec!["mso_mdoc".into()],
+                    requires: vec![],
                 },
             ],
             meta_rules: vec![

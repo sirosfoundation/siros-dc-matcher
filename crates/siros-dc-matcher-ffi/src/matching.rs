@@ -28,7 +28,7 @@ use std::collections::HashMap;
 
 use siros_dc_matcher_core::db::CredentialDatabase;
 use siros_dc_matcher_core::evaluator::{credentials, resolve, ProfilePolicy};
-use siros_dc_matcher_core::request;
+use siros_dc_matcher_core::request::{self, RequestContext};
 use siros_dcql::{execute, DcqlQuery};
 
 use crate::FfiCapability;
@@ -96,6 +96,16 @@ pub struct FfiMatchedCredential {
     /// A pseudonym context changes what is produced, not which credential can
     /// produce it, so it is carried rather than matched on.
     pub meta: HashMap<String, String>,
+    /// For a `circuit_zk` query: a JSON object `{"circuit": {...}, "plan":
+    /// {...}}` holding the circuit this wallet chose (its registered
+    /// capability: `system` and string `params`) and the request as the
+    /// matcher normalised it. `None` for every other format.
+    ///
+    /// JSON strings, not records, so the planner's shape can follow the
+    /// rulebook without a binding regeneration each time. The plan's `raw`
+    /// member is the verifier's request as sent and is **not authenticated**
+    /// here. A `circuit_zk` match has an empty `claims`.
+    pub circuit_zk: Option<String>,
 }
 
 /// One way to satisfy the request: every member presented together.
@@ -197,7 +207,9 @@ pub fn match_dc_api_request(
     // which meant the two entry points disagreed about what a request is: the
     // picker would offer a credential for a signed request that this path
     // declined. One reader, or they drift again.
-    let (_protocol, query) = match request::first_supported_in(&parsed, &db.profile) {
+    let found = request::first_supported_context_in(&parsed, &db.profile, None)
+        .and_then(|context| Some((context.matching_query()?, context)));
+    let (query, context) = match found {
         Some(found) => found,
         None => {
             let offered: Vec<String> = requests
@@ -221,7 +233,7 @@ pub fn match_dc_api_request(
         }
     };
 
-    Ok(evaluate(&db, &query))
+    Ok(evaluate(&db, &query, &context))
 }
 
 /// Match a bare DCQL query.
@@ -236,9 +248,54 @@ pub fn match_dc_api_request(
 /// `MatchException` in Kotlin.
 #[uniffi::export]
 pub fn match_dcql(blob: Vec<u8>, dcql_json: String) -> Result<FfiMatchOutcome, MatchError> {
+    match_dcql_with_context(blob, dcql_json, None)
+}
+
+/// Match a bare DCQL query, with the request's `client_metadata`.
+///
+/// What [`match_dcql`] does, for a caller that also has the verifier's
+/// `client_metadata` (as JSON). A `circuit_zk` query is matched against the
+/// circuit lists in its `vp_formats_supported`; with `None` those are absent
+/// and impose no constraint. A `circuit_zk` query with `claims` as an object
+/// (the rulebook example shape) is accepted here although it is not DCQL.
+///
+/// # Errors
+///
+/// See the match error type — `MatchError` in Rust and Swift,
+/// `MatchException` in Kotlin.
+#[uniffi::export]
+pub fn match_dcql_with_context(
+    blob: Vec<u8>,
+    dcql_json: String,
+    client_metadata_json: Option<String>,
+) -> Result<FfiMatchOutcome, MatchError> {
     let db = decode(&blob)?;
-    let query = DcqlQuery::from_json(&dcql_json).map_err(request_err)?;
-    Ok(evaluate(&db, &query))
+    let raw: serde_json::Value = serde_json::from_str(&dcql_json).map_err(request_err)?;
+    let client_metadata = client_metadata_json
+        .map(|text| serde_json::from_str::<serde_json::Value>(&text).map_err(request_err))
+        .transpose()?;
+
+    let strict = DcqlQuery::from_json(&dcql_json);
+    let context = RequestContext::from_dcql(raw, client_metadata).map_err(|e| {
+        request_err(
+            strict
+                .as_ref()
+                .err()
+                .map_or_else(|| e.reason(), ToString::to_string),
+        )
+    })?;
+    let query = match strict {
+        Ok(query) => query,
+        // The identifier checks `from_json` makes still apply to anything that
+        // is DCQL; only a `circuit_zk` query DCQL cannot represent is let past.
+        Err(e) if context.dcql_query.is_some() => return Err(request_err(e)),
+        Err(e) => {
+            let query = context.matching_query().ok_or_else(|| request_err(&e))?;
+            query.validate().map_err(request_err)?;
+            query
+        }
+    };
+    Ok(evaluate(&db, &query, &context))
 }
 
 fn decode(blob: &[u8]) -> Result<CredentialDatabase, MatchError> {
@@ -256,9 +313,13 @@ fn request_err(e: impl core::fmt::Display) -> MatchError {
     }
 }
 
-fn evaluate(db: &CredentialDatabase, query: &DcqlQuery) -> FfiMatchOutcome {
+fn evaluate(
+    db: &CredentialDatabase,
+    query: &DcqlQuery,
+    context: &RequestContext,
+) -> FfiMatchOutcome {
     let held = credentials(db);
-    let policy = ProfilePolicy::new(&db.profile);
+    let policy = ProfilePolicy::new(&db.profile).with_context(context);
     let result = execute(query, &held, &policy);
     let enumerated = result.combinations(MAX_COMBINATIONS);
     let dropped_count = u32::try_from(enumerated.dropped.count()).unwrap_or(u32::MAX);
@@ -294,6 +355,10 @@ fn evaluate(db: &CredentialDatabase, query: &DcqlQuery) -> FfiMatchOutcome {
                         .collect()
                 })
                 .unwrap_or_default(),
+            circuit_zk: resolved
+                .as_ref()
+                .and_then(|r| r.circuit_zk.as_ref())
+                .map(|selection| selection.to_json().to_string()),
             meta: resolved
                 .map(|r| r.meta.into_iter().collect())
                 .unwrap_or_default(),

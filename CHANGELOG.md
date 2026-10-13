@@ -26,6 +26,30 @@ existed.
   is now a thin wrapper with an unchanged signature. A `circuit_zk` request with
   `claims` as an object yields a context (`dcql_query: None`) instead of
   `NoQuery::Malformed`. Signatures and origins are still not checked. (#38)
+- `circuit_zk` matching: `siros_default()` maps `circuit_zk` onto stored
+  `mso_mdoc` (doctype through the existing meta rule), and the evaluator answers
+  it from the planner's output. A structurally invalid request matches nothing
+  and never falls back to claim matching; the matcher applies no
+  satisfiability rules. Wallets register circuits with a new `circuit_zk`
+  capability family (`SirosBlobBuilder::add_circuit_zk_system`: proof system in
+  `system`, opaque string params; `circuit_id`, and optionally `functions` as a
+  comma-separated list). The verifier's `circuit_proof_system_values` and
+  `circuit_id_values` are matched against them when present; a circuit that
+  declares `functions` is only offered for requests using those. A match
+  carries no claims. `ProfilePolicy::with_context` supplies the request context.
+  The picker emits rows from the plan, each marked as an unverified request, and
+  `metadata.circuit_zk` carries the chosen circuit and plan. (#40)
+
+### Changed
+
+- FFI, **regenerate bindings**: `FfiMatchedCredential` gains
+  `circuit_zk: Option<String>`; new `match_dcql_with_context(blob, dcql_json,
+  client_metadata_json)`; new `SirosBlobBuilder.add_circuit_zk_system`.
+  `match_dc_api_request` and `match_dcql` are unchanged in signature, and
+  `match_dcql` now accepts a `circuit_zk` query whose `claims` is an object.
+- The registered profile gained a `circuit_zk` format rule, so the committed
+  golden blob changed (profile content only; `db::VERSION` is unchanged and a
+  blob without the rule still decodes and simply declines the format).
 
 ## v0.7.0 — 2026-09-19
 

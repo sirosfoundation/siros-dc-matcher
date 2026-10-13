@@ -70,3 +70,55 @@ pub fn longfellow(num_attributes: Option<&str>) -> Capability {
             .unwrap_or_default(),
     }
 }
+
+/// The doctype of the nym_auth attestation.
+pub const NYM_AUTH_DOCTYPE: &str = "eu.europa.ec.eudi.nym_auth.1";
+
+/// A circuit capability for `circuit_zk`: the proof system, its circuit id,
+/// and optionally the functions it declares support for (comma-separated).
+pub fn circuit(system: &str, circuit_id: &str, functions: Option<&str>) -> Capability {
+    let mut params = std::collections::BTreeMap::from([(
+        crate::profile::CIRCUIT_ID_PARAM.to_string(),
+        circuit_id.to_string(),
+    )]);
+    if let Some(functions) = functions {
+        params.insert(
+            crate::profile::FUNCTIONS_PARAM.to_string(),
+            functions.to_string(),
+        );
+    }
+    Capability {
+        system: system.into(),
+        params,
+    }
+}
+
+/// A wallet holding one nym_auth mdoc and the given `circuit_zk` circuits.
+///
+/// The credential does carry claims, deliberately: a `circuit_zk` match must
+/// disclose none of them, and a fixture without any would not notice if it did.
+pub fn nym_wallet(circuits: Vec<Capability>) -> CredentialDatabase {
+    let mut profile = MatchProfile::siros_default();
+    if !circuits.is_empty() {
+        profile
+            .capabilities
+            .insert(crate::profile::CIRCUIT_ZK_CAPABILITY.to_string(), circuits);
+    }
+    let mut db = CredentialDatabase::new(profile);
+    db.credentials.push(Credential {
+        id: "nym-1".into(),
+        format: "mso_mdoc".into(),
+        doctype: Some(NYM_AUTH_DOCTYPE.into()),
+        vct: None,
+        title: "Pseudonym credential".into(),
+        subtitle: "Issuer".into(),
+        icon: None,
+        claims: vec![Claim {
+            path: vec![NYM_AUTH_DOCTYPE.into(), "birth_date".into()],
+            value: "1990-01-01".into(),
+            display: "Birth date".into(),
+            display_value: None,
+        }],
+    });
+    db
+}
