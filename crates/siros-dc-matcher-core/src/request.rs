@@ -18,6 +18,8 @@
 //! matcher does too. The rule it implies is worth stating: nothing in here may
 //! be treated as authenticated by anything downstream.
 
+use std::borrow::Cow;
+
 use serde_json::Value;
 use siros_dcql::DcqlQuery;
 
@@ -111,6 +113,87 @@ pub fn first_supported_request(
 /// envelope, so the JSON is not walked twice at an API boundary.
 #[must_use]
 pub fn first_supported_in(parsed: &Value, profile: &MatchProfile) -> Option<(String, DcqlQuery)> {
+    // Entries whose query has no typed form (a `circuit_zk` request in the
+    // rulebook-example shape) are skipped, exactly as they were when they were
+    // a parse failure: this function can only return a `DcqlQuery`.
+    let only_typed = |_: &str, _: bool, context: &RequestContext| context.dcql_query.is_some();
+    let context = first_supported_context_in(parsed, profile, Some(&only_typed))?;
+    let query = context.dcql_query?;
+    Some((context.protocol, query))
+}
+
+/// What one request entry carries, as read from its (unverified) request
+/// object.
+///
+/// # Nothing here is authenticated
+///
+/// Every field comes from a payload that was decoded **without checking its
+/// signature** (see the module docs). `client_id`, `expected_origins` and
+/// `client_metadata` in particular are exactly the values a signature is there
+/// to protect, and the matcher is not the party that checks it. A caller that
+/// enforces anything on them must do so after the wallet has verified the
+/// request.
+///
+/// New fields may be added without a breaking change.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct RequestContext {
+    /// The protocol label of the entry, e.g. `openid4vp-v1-signed`.
+    pub protocol: String,
+    /// Whether the label names a signed shape. This says how the request
+    /// *arrived*, not that its signature is valid.
+    pub signed: bool,
+    /// The request object's `client_id`, if it is a string.
+    pub client_id: Option<String>,
+    /// The request object's `expected_origins`, if it is an array of strings.
+    pub expected_origins: Option<Vec<String>>,
+    /// The request object's `client_metadata`, whole, so that
+    /// `vp_formats_supported` and anything else in it is available.
+    pub client_metadata: Option<Value>,
+    /// The request object's `dcql_query` exactly as sent.
+    pub dcql_query_raw: Value,
+    /// `dcql_query_raw` parsed as DCQL.
+    ///
+    /// `None` only for a query DCQL cannot represent but a `circuit_zk`
+    /// credential query can: `claims` as an object, in the rulebook example
+    /// shape. Such a request is read from `dcql_query_raw` instead.
+    pub dcql_query: Option<DcqlQuery>,
+}
+
+/// A caller's say over which entry of `requests` is used: it receives the
+/// protocol label, whether the entry is signed, and the extracted context.
+pub type EntryFilter<'a> = &'a dyn Fn(&str, bool, &RequestContext) -> bool;
+
+/// The first supported, readable entry in the request that `accept` allows,
+/// with its full [`RequestContext`].
+///
+/// With `accept` as `None` this selects exactly what
+/// [`first_supported_request`] does. With a predicate, an entry it rejects is
+/// skipped and a later acceptable one can win, so a wallet that refuses some
+/// entries (unsigned ones, say) still reaches an entry it does accept. If it
+/// rejects every entry the result is `None`.
+///
+/// The matcher enforces nothing about signed protocols or `expected_origins`;
+/// it exposes the values and this hook, and the policy is the caller's. See
+/// [`RequestContext`] for why the values are not authenticated.
+#[must_use]
+pub fn first_supported_context(
+    request: &[u8],
+    profile: &MatchProfile,
+    accept: Option<EntryFilter<'_>>,
+) -> Option<RequestContext> {
+    let parsed: Value = serde_json::from_slice(request).ok()?;
+    first_supported_context_in(&parsed, profile, accept)
+}
+
+/// [`first_supported_context`] for a caller that has already parsed the
+/// envelope.
+#[must_use]
+pub fn first_supported_context_in(
+    parsed: &Value,
+    profile: &MatchProfile,
+    accept: Option<EntryFilter<'_>>,
+) -> Option<RequestContext> {
     parsed
         .get("requests")?
         .as_array()?
@@ -118,9 +201,51 @@ pub fn first_supported_in(parsed: &Value, profile: &MatchProfile) -> Option<(Str
         .find_map(|entry| {
             let protocol = entry.get("protocol")?.as_str()?;
             let parser = profile.parser_for(protocol)?;
-            let query = extract_query(parser, protocol, entry.get("data")?).ok()?;
-            Some((protocol.to_string(), query))
+            let context = extract_context(parser, protocol, entry.get("data")?).ok()?;
+            match accept {
+                Some(accept) if !accept(protocol, context.signed, &context) => None,
+                _ => Some(context),
+            }
         })
+}
+
+/// The [`RequestContext`] carried by one protocol's request data.
+///
+/// The same shape rules and the same errors as [`extract_query`], which is
+/// this with everything but the parsed query dropped.
+///
+/// # Errors
+///
+/// See [`NoQuery`].
+pub fn extract_context(
+    parser: Parser,
+    protocol: &str,
+    data: &Value,
+) -> Result<RequestContext, NoQuery> {
+    let (object, signed) = request_object(parser, protocol, data)?;
+    let raw = object
+        .get("dcql_query")
+        .ok_or(NoQuery::PayloadHasNoDcqlQuery)?;
+    let dcql_query = parse_dcql_or_circuit_zk(raw)?;
+    Ok(RequestContext {
+        protocol: protocol.to_string(),
+        signed,
+        client_id: object
+            .get("client_id")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        expected_origins: object
+            .get("expected_origins")
+            .and_then(Value::as_array)
+            .and_then(|a| {
+                a.iter()
+                    .map(|o| o.as_str().map(str::to_string))
+                    .collect::<Option<Vec<_>>>()
+            }),
+        client_metadata: object.get("client_metadata").cloned(),
+        dcql_query_raw: raw.clone(),
+        dcql_query,
+    })
 }
 
 /// The DCQL query carried by one protocol's request data.
@@ -155,10 +280,28 @@ pub fn first_supported_in(parsed: &Value, profile: &MatchProfile) -> Option<(Str
 /// See [`NoQuery`]. Every variant means "decline this protocol", which lets the
 /// caller fall through to another the verifier offered.
 pub fn extract_query(parser: Parser, protocol: &str, data: &Value) -> Result<DcqlQuery, NoQuery> {
+    let (object, _) = request_object(parser, protocol, data)?;
+    parse_dcql(
+        object
+            .get("dcql_query")
+            .ok_or(NoQuery::PayloadHasNoDcqlQuery)?,
+    )
+}
+
+/// The request object an entry carries, and whether its protocol is a signed
+/// shape. Enforces the shape-must-match-the-label rule; guarantees the object
+/// has a `dcql_query`.
+///
+/// The object is `data` itself for the inline shape, so that case borrows.
+fn request_object<'a>(
+    parser: Parser,
+    protocol: &str,
+    data: &'a Value,
+) -> Result<(Cow<'a, Value>, bool), NoQuery> {
     match parser {
         Parser::Openid4vpV1 => match Shape::of(protocol) {
             Shape::Inline => match data.get("dcql_query") {
-                Some(dcql) => parse_dcql(dcql),
+                Some(_) => Ok((Cow::Borrowed(data), false)),
                 // A `request` here means the verifier sent a signed shape
                 // under a label whose shape is inline. Saying "no dcql_query"
                 // would send whoever reads it looking for a missing key when
@@ -167,13 +310,13 @@ pub fn extract_query(parser: Parser, protocol: &str, data: &Value) -> Result<Dcq
                 None => Err(NoQuery::NoQueryAndNoRequest),
             },
             Shape::CompactJws => match data.get("request") {
-                Some(Value::String(jws)) => from_payload(compact_payload(jws)?),
+                Some(Value::String(jws)) => payload_object(compact_payload(jws)?),
                 // An inline query under a signed label is the mirror image of
                 // the case above, and just as worth naming.
                 None if data.get("dcql_query").is_some() => Err(NoQuery::ShapeDoesNotMatchProtocol),
                 _ => Err(NoQuery::NotACompactJws),
             },
-            Shape::JwsJson => from_payload(json_payload(data)?),
+            Shape::JwsJson => payload_object(json_payload(data)?),
         },
         // ISO 18013-7 carries a CBOR DeviceRequest rather than DCQL, so it
         // needs its own reader rather than a different JSON pointer.
@@ -205,13 +348,13 @@ impl Shape {
     }
 }
 
-/// The DCQL query inside a decoded, unverified JWS payload.
-fn from_payload(payload: Vec<u8>) -> Result<DcqlQuery, NoQuery> {
+/// The request object inside a decoded, unverified JWS payload. Always signed.
+fn payload_object<'a>(payload: Vec<u8>) -> Result<(Cow<'a, Value>, bool), NoQuery> {
     let object: Value = serde_json::from_slice(&payload).map_err(|_| NoQuery::PayloadNotJson)?;
-    let dcql = object
-        .get("dcql_query")
-        .ok_or(NoQuery::PayloadHasNoDcqlQuery)?;
-    parse_dcql(dcql)
+    if object.get("dcql_query").is_none() {
+        return Err(NoQuery::PayloadHasNoDcqlQuery);
+    }
+    Ok((Cow::Owned(object), true))
 }
 
 /// The unverified payload of a JWS JSON Serialization object.
@@ -303,6 +446,47 @@ fn json_serialization_payload(value: &Value, missing: NoQuery) -> Result<Vec<u8>
 
 fn parse_dcql(value: &Value) -> Result<DcqlQuery, NoQuery> {
     serde_json::from_value(value.clone()).map_err(|e| NoQuery::Malformed(e.to_string()))
+}
+
+/// Parse a raw `dcql_query` as DCQL, tolerating `circuit_zk` credential queries
+/// DCQL cannot represent.
+///
+/// The typed parser expects `claims` to be a sequence, and the `circuit_zk`
+/// rulebook example puts an object there. When the typed parse fails, the query
+/// is retried without its `circuit_zk` credentials: if the rest parses, the
+/// failure was theirs and the result is `Ok(None)`, leaving the raw value for
+/// the `circuit_zk` planner. A failure that is not theirs is still
+/// [`NoQuery::Malformed`], so every other format behaves as before.
+fn parse_dcql_or_circuit_zk(raw: &Value) -> Result<Option<DcqlQuery>, NoQuery> {
+    let first_error = match serde_json::from_value::<DcqlQuery>(raw.clone()) {
+        Ok(query) => return Ok(Some(query)),
+        Err(e) => e,
+    };
+    let is_circuit_zk = |c: &Value| c.get("format").and_then(Value::as_str) == Some("circuit_zk");
+    let (Some(credentials), Some(object)) = (
+        raw.get("credentials").and_then(Value::as_array),
+        raw.as_object(),
+    ) else {
+        return Err(NoQuery::Malformed(first_error.to_string()));
+    };
+    if !credentials.iter().any(is_circuit_zk) {
+        return Err(NoQuery::Malformed(first_error.to_string()));
+    }
+    let mut rest = object.clone();
+    rest.insert(
+        "credentials".to_string(),
+        Value::Array(
+            credentials
+                .iter()
+                .filter(|c| !is_circuit_zk(c))
+                .cloned()
+                .collect(),
+        ),
+    );
+    match serde_json::from_value::<DcqlQuery>(Value::Object(rest)) {
+        Ok(_) => Ok(None),
+        Err(_) => Err(NoQuery::Malformed(first_error.to_string())),
+    }
 }
 
 /// Why [`first_supported_request`] found nothing to answer.

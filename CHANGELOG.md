@@ -19,6 +19,13 @@ existed.
   Not yet wired into matching. Conformance vectors in
   `crates/siros-dc-matcher-core/tests/vectors/circuit_zk/` are reusable by the
   SDKs. (#37)
+- `request::first_supported_context` (and `_in`, `extract_context`): returns the
+  full `RequestContext` (protocol, signed flag, `client_id`, `expected_origins`,
+  `client_metadata`, raw and parsed `dcql_query`) and takes an optional caller
+  predicate, so the first entry the caller accepts wins. `first_supported_request`
+  is now a thin wrapper with an unchanged signature. A `circuit_zk` request with
+  `claims` as an object yields a context (`dcql_query: None`) instead of
+  `NoQuery::Malformed`. Signatures and origins are still not checked. (#38)
 
 ## v0.7.0 — 2026-09-19
 
