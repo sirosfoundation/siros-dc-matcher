@@ -25,11 +25,12 @@ use std::collections::BTreeMap;
 use serde_json::Value;
 use siros_dcql::{Credential as _, CredentialQuery, PathComponent, PathError};
 
+use crate::circuit_capabilities::{Capabilities, RequestedItem};
 use crate::circuit_zk::{self, Plan};
 use crate::db::{Claim, Credential, CredentialDatabase};
 use crate::profile::{
-    Capability, MatchProfile, Op, UnknownFormat, CIRCUIT_ID_PARAM, CIRCUIT_ZK_CAPABILITY,
-    CIRCUIT_ZK_FORMAT, FUNCTIONS_PARAM,
+    Capability, MatchProfile, Op, UnknownFormat, CAPABILITIES_PARAM, CIRCUIT_ID_PARAM,
+    CIRCUIT_ZK_CAPABILITY, CIRCUIT_ZK_FORMAT, CREDENTIAL_TYPE_PARAM, FUNCTIONS_PARAM,
 };
 use crate::request::RequestContext;
 
@@ -228,7 +229,7 @@ impl<'a> ProfilePolicy<'a> {
             .capabilities
             .get(CIRCUIT_ZK_CAPABILITY)?
             .iter()
-            .find(|capability| circuit_serves(capability, &plan))?;
+            .find(|capability| self.circuit_serves(capability, &plan))?;
         Some(CircuitZkSelection { capability, plan })
     }
 
@@ -363,32 +364,99 @@ fn satisfies(held: &Capability, requested: &Value) -> bool {
         })
 }
 
-/// Whether a circuit capability can serve a planned `circuit_zk` request.
-///
-/// The verifier's lists are constraints only when it sent them
-/// (`circuit_proof_system_values` and `circuit_id_values` are OPTIONAL). A
-/// circuit with no `circuit_id` cannot be named by a verifier that lists ids,
-/// so it does not satisfy one. A circuit with no `functions` is not filtered by
-/// function.
-fn circuit_serves(capability: &Capability, plan: &Plan) -> bool {
-    let filter = &plan.circuit_filter;
-    if let Some(systems) = &filter.proof_systems {
-        if !systems.contains(&capability.system) {
-            return false;
+/// The credential types a planned request can mean: its `meta.doctype_value`
+/// and each of its `meta.vct_values`. Empty when `meta` names neither.
+fn requested_types(plan: &Plan) -> Vec<&str> {
+    let meta = plan.raw.get("meta");
+    let doctype = meta
+        .and_then(|m| m.get("doctype_value"))
+        .and_then(Value::as_str);
+    let vcts = meta
+        .and_then(|m| m.get("vct_values"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str);
+    doctype.into_iter().chain(vcts).collect()
+}
+
+impl ProfilePolicy<'_> {
+    /// Whether a circuit capability can serve a planned `circuit_zk` request.
+    ///
+    /// The verifier's lists are constraints only when it sent them
+    /// (`circuit_proof_system_values` and `circuit_id_values` are OPTIONAL). A
+    /// circuit with no `circuit_id` cannot be named by a verifier that lists
+    /// ids, so it does not satisfy one.
+    ///
+    /// What the circuit says about itself is one of two things. With a
+    /// `capabilities` param, the structured rule of
+    /// [`crate::circuit_capabilities`] decides, and `functions` and
+    /// `credential_type` are not read; a value that does not parse rules the
+    /// circuit out. Without one, a circuit that declares `functions` is
+    /// offered only for requests using those, a circuit with a
+    /// `credential_type` only for a request whose `meta` names that type, and a
+    /// circuit with neither is not filtered, exactly as before.
+    fn circuit_serves(&self, capability: &Capability, plan: &Plan) -> bool {
+        let filter = &plan.circuit_filter;
+        if let Some(systems) = &filter.proof_systems {
+            if !systems.contains(&capability.system) {
+                return false;
+            }
+        }
+        if let Some(ids) = &filter.circuit_ids {
+            let ours = capability.params.get(CIRCUIT_ID_PARAM);
+            if !ids.iter().any(|id| Some(id) == ours) {
+                return false;
+            }
+        }
+        if let Some(text) = capability.params.get(CAPABILITIES_PARAM) {
+            return self.capabilities_serve(text, plan);
+        }
+        if let Some(ours) = capability.params.get(CREDENTIAL_TYPE_PARAM) {
+            if !requested_types(plan).contains(&ours.as_str()) {
+                return false;
+            }
+        }
+        match capability.params.get(FUNCTIONS_PARAM) {
+            Some(declared) => plan
+                .functions
+                .iter()
+                .all(|f| declared.split(',').any(|d| d.trim() == f.function_id)),
+            None => true,
         }
     }
-    if let Some(ids) = &filter.circuit_ids {
-        let ours = capability.params.get(CIRCUIT_ID_PARAM);
-        if !ids.iter().any(|id| Some(id) == ours) {
+
+    /// The `capabilities` rule, for one circuit, against one plan.
+    ///
+    /// The credential format a circuit proves over must be one the profile
+    /// maps `circuit_zk` onto: the request does not name a stored format, the
+    /// profile's format rule is what says which credentials answer it.
+    fn capabilities_serve(&self, text: &str, plan: &Plan) -> bool {
+        let Ok(capabilities) = Capabilities::parse(text) else {
             return false;
+        };
+        let Some(rule) = self.profile.format_rule(CIRCUIT_ZK_FORMAT) else {
+            return false;
+        };
+        let formats: Vec<&str> = rule.stored_formats.iter().map(String::as_str).collect();
+
+        let mut params = Vec::with_capacity(plan.functions.len());
+        for function in &plan.functions {
+            match serde_json::to_value(&function.params) {
+                Ok(Value::Object(map)) => params.push(map),
+                _ => return false,
+            }
         }
-    }
-    match capability.params.get(FUNCTIONS_PARAM) {
-        Some(declared) => plan
+        let items: Vec<RequestedItem<'_>> = plan
             .functions
             .iter()
-            .all(|f| declared.split(',').any(|d| d.trim() == f.function_id)),
-        None => true,
+            .zip(&params)
+            .map(|(function, params)| RequestedItem {
+                function_id: &function.function_id,
+                params,
+            })
+            .collect();
+        capabilities.serves(CIRCUIT_ZK_FORMAT, &formats, &requested_types(plan), &items)
     }
 }
 

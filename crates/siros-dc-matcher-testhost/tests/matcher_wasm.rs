@@ -835,6 +835,48 @@ fn the_verifiers_circuit_lists_decide_in_the_binary() {
     assert!(invoke(&db, nym_request(nym_query(), Some(cm(&["q"])))).is_empty());
 }
 
+/// The binary reads the new registration params the way the library does.
+#[test]
+fn credential_type_and_capabilities_decide_in_the_binary() {
+    let with = |params: &[(&str, String)]| {
+        let mut c = fixtures::circuit("p", "c", None);
+        for (k, v) in params {
+            c.params.insert((*k).to_string(), v.clone());
+        }
+        nym_db(vec![c])
+    };
+    let offered = |db: &CredentialDatabase| !invoke(db, nym_request(nym_query(), None)).is_empty();
+    let caps = |ty: &str| {
+        json!({"schema": 1, "presentation": "circuit_zk",
+               "credential": {"format": "mso_mdoc", "type": ty},
+               "functions": [
+                   {"id": "pseudonym-v1-sha256", "always": true,
+                    "params": {"config": {"enum": ["known-offender-matching-ssc"]}}},
+                   {"id": "age_check", "max": 1,
+                    "params": {"ge": {"type": "full-date"}, "le": {"type": "full-date"}}}]})
+        .to_string()
+    };
+
+    assert!(offered(&with(&[])));
+    assert!(offered(&with(&[(
+        "credential_type",
+        fixtures::NYM_AUTH_DOCTYPE.into()
+    )])));
+    assert!(!offered(&with(&[(
+        "credential_type",
+        "eu.example.other.1".into()
+    )])));
+    assert!(offered(&with(&[(
+        "capabilities",
+        caps(fixtures::NYM_AUTH_DOCTYPE)
+    )])));
+    assert!(!offered(&with(&[(
+        "capabilities",
+        caps("eu.example.other.1")
+    )])));
+    assert!(!offered(&with(&[("capabilities", "{not json".into())])));
+}
+
 #[test]
 fn a_circuit_zk_request_with_object_claims_reaches_the_planner() {
     let db = nym_db(vec![fixtures::circuit("p", "c", None)]);

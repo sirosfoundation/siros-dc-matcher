@@ -515,7 +515,7 @@ fn read_params(
 ///
 /// Syntax and calendar validity only. There is no ordering, span or "today"
 /// here; those are satisfiability.
-fn is_full_date(s: &str) -> bool {
+pub(crate) fn is_full_date(s: &str) -> bool {
     let mut parts = s.split('-');
     let (Some(y), Some(m), Some(d), None) =
         (parts.next(), parts.next(), parts.next(), parts.next())

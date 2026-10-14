@@ -26,6 +26,7 @@
 
 use std::collections::HashMap;
 
+use siros_dc_matcher_core::circuit_zk;
 use siros_dc_matcher_core::db::CredentialDatabase;
 use siros_dc_matcher_core::evaluator::{credentials, resolve, ProfilePolicy};
 use siros_dc_matcher_core::request::{self, RequestContext};
@@ -249,6 +250,83 @@ pub fn match_dc_api_request(
 #[uniffi::export]
 pub fn match_dcql(blob: Vec<u8>, dcql_json: String) -> Result<FfiMatchOutcome, MatchError> {
     match_dcql_with_context(blob, dcql_json, None)
+}
+
+/// Why a `circuit_zk` query could not be planned.
+#[derive(Debug, thiserror::Error, uniffi::Error)]
+pub enum CircuitZkPlanError {
+    /// The query is structurally broken: the planner's verdict, unchanged.
+    ///
+    /// This says the request is malformed, never that it cannot be served.
+    #[error("invalid circuit_zk request ({code}): {reason}")]
+    InvalidRequest {
+        /// A stable identifier for the defect, the planner's own code:
+        /// `query_not_parseable`, `req_missing_or_empty`, `req_ambiguous`,
+        /// `item_missing_function_id`, `item_missing_handle`,
+        /// `param_wrong_type`, `param_invalid_full_date`, `duplicate_handle`,
+        /// `claims_present`, `claim_sets_present`, `req_sets_present`,
+        /// `invalid_meta` or `invalid_client_metadata`. Match on this, not on
+        /// `reason`.
+        code: String,
+        /// The planner's message, for logs. Its wording may change.
+        reason: String,
+    },
+}
+
+/// Plan a `circuit_zk` credential query, without a blob.
+///
+/// `credential_query_json` is one Credential Query object (an element of
+/// `dcql_query.credentials`), not the whole `dcql_query`. In either rulebook
+/// shape: `req` beside `meta`, or `claims: {"_req": [...]}`.
+/// `client_metadata_json` is the request's `client_metadata`, if it has one.
+///
+/// This is the function the matcher itself calls (`circuit_zk::plan` in the
+/// core crate), so the plan a wallet reads here is the plan matching used. It
+/// judges structure only; whether the request can be served is the wallet's.
+///
+/// # The plan JSON
+///
+/// A JSON object with exactly these members; this shape is stable, and the
+/// same object is the `plan` member of [`FfiMatchedCredential::circuit_zk`]:
+///
+/// - `functions`: array, in request order, of `{function_id, handle, params}`.
+///   `function_id` is `id` in a `req` item and `fn_id` in a `_req` item;
+///   `handle` is `return` or `id` respectively. `params` is a flat object:
+///   the declared params that were present, plus every other param unchanged.
+///   Values of declared params are strings, and `full-date` ones are
+///   validated.
+/// - `circuit_filter`: `{proof_systems?, circuit_ids?}`, the verifier's
+///   `circuit_proof_system_values` and `circuit_id_values` (from either form of
+///   `vp_formats_supported.circuit_zk`). A member is absent when the verifier
+///   did not send it; a present empty list is passed through, not rejected.
+/// - `meta_doctype`: `meta.doctype_value`, or `null`.
+/// - `raw`: the credential query exactly as parsed, so members this version
+///   does not know survive. It is verifier-supplied and unauthenticated.
+///
+/// Normative cases for both the plan and every rejection are the vectors in
+/// `crates/siros-dc-matcher-core/tests/vectors/circuit_zk/`.
+///
+/// # Errors
+///
+/// [`CircuitZkPlanError::InvalidRequest`] with the planner's code and reason
+/// (`CircuitZkPlanException` in Kotlin). Input that is not JSON is the
+/// `query_not_parseable` or `invalid_client_metadata` code.
+#[uniffi::export]
+pub fn circuit_zk_plan(
+    credential_query_json: String,
+    client_metadata_json: Option<String>,
+) -> Result<String, CircuitZkPlanError> {
+    let plan =
+        circuit_zk::plan(&credential_query_json, client_metadata_json.as_deref()).map_err(|e| {
+            CircuitZkPlanError::InvalidRequest {
+                code: e.code().to_owned(),
+                reason: e.to_string(),
+            }
+        })?;
+    serde_json::to_string(&plan).map_err(|e| CircuitZkPlanError::InvalidRequest {
+        code: "plan_not_serializable".to_owned(),
+        reason: e.to_string(),
+    })
 }
 
 /// Match a bare DCQL query, with the request's `client_metadata`.
