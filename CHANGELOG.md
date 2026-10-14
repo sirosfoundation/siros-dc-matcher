@@ -11,6 +11,14 @@ existed.
 
 ## Unreleased
 
+## v0.9.0 — 2026-10-14
+
+Lets a wallet read the `circuit_zk` plan directly, and describe what a registered
+circuit can do. The FFI gained a function and an error type, so a consumer must
+regenerate its bindings. Registrations that use neither new param behave as in
+0.8.0. `siros-dcql` and `siros-dc-matcher-core` are versioned 0.9.0 to match the
+release; neither has an API change in this release.
+
 ### Added
 
 - FFI `circuit_zk_plan(credential_query_json, client_metadata_json)`: returns
@@ -27,15 +35,14 @@ existed.
   `meta.vct_values` contains it (a request naming neither is not offered a
   restricted circuit). `capabilities` carries the circuit catalog's
   `capabilities` object as a JSON string; when present it replaces `functions`
-  and `credential_type`, and the matcher applies steps 3 to 5 of the catalog's
-  matching rule (go-zk-circuits #35): presentation and credential type equal
+  and `credential_type`, and the matcher applies its capability rule: presentation and credential type equal
   the request's, every requested function is declared with params its
   constraints accept and within `max`, and every `always` function was
   requested. A `capabilities` value that does not parse (unknown keys,
   schema other than 1, malformed) never errors at registration; the circuit is
   not offered. A registration without these params behaves as in 0.8.0.
-  Verified against the catalog's shared match vectors (a snapshot, see
-  `tests/vectors/circuit_capabilities/README.md`).
+  The rule is held to a vector corpus that this repository owns and the SDKs
+  copy (`tests/vectors/circuit_capabilities/`).
 - The registered blob format is unchanged: the new params are ordinary
   capability params, the profile content is the same, so the golden blob and
   `db::VERSION` are unchanged.

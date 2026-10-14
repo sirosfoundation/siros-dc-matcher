@@ -1,12 +1,11 @@
 //! Structured circuit capabilities: the shared match vectors, and the same
 //! rule through the evaluator.
 //!
-//! `vectors/circuit_capabilities/match.json` is the catalog's own vector file
-//! (go-zk-circuits `testvectors/capabilities/match.json`, copied verbatim; see
-//! the README beside it). Each case is run through
-//! `Capabilities::serves`, which is steps 3 to 5 of the rule; steps 1 and 2 and
-//! the ranking are not the matcher's and are applied here the way a wallet
-//! does before it registers circuits.
+//! `vectors/circuit_capabilities/match.json` is the corpus for the capability
+//! rule; this repository owns it (see the README beside it). Each case is run
+//! through `Capabilities::serves`; the proof-system, circuit-id and status
+//! filters and the ranking are not the matcher's and are applied here the way
+//! a wallet does before it registers circuits.
 
 use std::collections::BTreeSet;
 use std::fs;
