@@ -11,6 +11,11 @@ existed.
 
 ## Unreleased
 
+## v0.8.0 — 2026-10-14
+
+Adds the `circuit_zk` (nym_auth) format: planner, request context and matching.
+The FFI records gained fields, so a consumer must regenerate its bindings.
+
 ### Added
 
 - `circuit_zk` query planner in `siros-dc-matcher-core` (`circuit_zk::plan`):
