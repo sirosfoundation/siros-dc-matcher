@@ -268,6 +268,22 @@ pub const CIRCUIT_ID_PARAM: &str = "circuit_id";
 /// reject requests the wallet can serve.
 pub const FUNCTIONS_PARAM: &str = "functions";
 
+/// Param restricting a circuit to one credential type (an mdoc doctype or an
+/// SD-JWT VC `vct`), compared with the request's `meta`.
+///
+/// Optional. Absent means unrestricted, as before. A request whose `meta`
+/// names neither `doctype_value` nor `vct_values` is not offered a restricted
+/// circuit. Ignored when [`CAPABILITIES_PARAM`] is present.
+pub const CREDENTIAL_TYPE_PARAM: &str = "credential_type";
+
+/// Param carrying the catalog's `capabilities` object for the circuit, as a
+/// JSON string (see [`crate::circuit_capabilities`]).
+///
+/// Optional. When present it replaces [`FUNCTIONS_PARAM`] and
+/// [`CREDENTIAL_TYPE_PARAM`], and a value that does not parse means the
+/// circuit is not offered.
+pub const CAPABILITIES_PARAM: &str = "capabilities";
+
 /// The format a `circuit_zk` query is asked in.
 pub const CIRCUIT_ZK_FORMAT: &str = "circuit_zk";
 

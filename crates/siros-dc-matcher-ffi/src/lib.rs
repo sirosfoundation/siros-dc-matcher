@@ -188,11 +188,34 @@ impl SirosBlobBuilder {
     ///
     /// `system` is the proof system (for example `longfellow-libzk-v1`). The
     /// params are opaque strings the matcher reads only as follows:
-    /// `circuit_id` is matched against a verifier's `circuit_id_values`, and
-    /// `functions`, if given as a comma-separated list of function ids, limits
-    /// which requested functions this circuit is offered for. A circuit that
-    /// declares no `functions` is not filtered by function. Call once per
-    /// circuit; with none registered, `circuit_zk` requests match nothing.
+    ///
+    /// - `circuit_id` is matched against a verifier's `circuit_id_values`.
+    /// - `functions`, if given as a comma-separated list of function ids,
+    ///   limits which requested functions this circuit is offered for. A
+    ///   circuit that declares no `functions` is not filtered by function.
+    /// - `credential_type`, if given, restricts the circuit to one credential
+    ///   type (an mdoc doctype or an SD-JWT VC `vct`): it is offered only for a
+    ///   request whose `meta.doctype_value` equals it or whose
+    ///   `meta.vct_values` contains it. A request whose `meta` names neither
+    ///   is not offered a restricted circuit. Absent means unrestricted. An
+    ///   empty string is a type like any other and matches nothing.
+    /// - `capabilities`, if given, is the circuit catalog's `capabilities`
+    ///   object as a JSON string. It replaces `functions` and
+    ///   `credential_type`, which are then not read. The circuit is offered for
+    ///   a request only if the catalog's matching rule (steps 3 to 5) holds:
+    ///   presentation `circuit_zk` and the credential's type equal the
+    ///   request's, every requested function is declared with params its
+    ///   constraints accept and within its `max`, and every `always` function
+    ///   was requested. A value that is not a valid capabilities object
+    ///   (unparseable, unknown keys, schema other than 1) is not an error
+    ///   here: the circuit is simply never offered. This method cannot fail,
+    ///   and offering a circuit on a description the matcher cannot read would
+    ///   be the wrong way to fail. Function ids, param names and values are
+    ///   opaque strings.
+    ///
+    /// A registration without `credential_type` and `capabilities` behaves as it did in
+    /// 0.8.0. Call once per circuit; with none registered, `circuit_zk`
+    /// requests match nothing.
     pub fn add_circuit_zk_system(&self, capability: FfiCapability) {
         self.state().circuit_zk_systems.push(capability);
     }

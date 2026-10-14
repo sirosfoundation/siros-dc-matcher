@@ -10,7 +10,8 @@ use serde_json::json;
 use siros_dc_matcher_core::fixtures;
 use siros_dc_matcher_core::profile::Capability;
 use siros_dc_matcher_ffi::matching::{
-    match_dc_api_request, match_dcql, match_dcql_with_context, MatchError,
+    circuit_zk_plan, match_dc_api_request, match_dcql, match_dcql_with_context, CircuitZkPlanError,
+    MatchError,
 };
 use siros_dc_matcher_ffi::{FfiCapability, FfiClaim, FfiCredential, SirosBlobBuilder};
 
@@ -677,4 +678,213 @@ fn a_circuit_declaring_functions_is_filtered_across_the_boundary() {
     let blob = nym_blob(&[("p", "c", Some("pseudonym-v1-sha256"))]);
     let out = match_dcql(blob, dcql_of(circuit_zk_query(age_req()))).expect("matched");
     assert!(!out.satisfiable);
+}
+
+// --- circuit_zk_plan ---------------------------------------------------------
+
+/// Every shared planner vector, through the FFI: the plan is the core planner's
+/// (`raw` included), and each rejected vector is an error with the planner's
+/// own code. The vectors are the core crate's; the FFI is thin over `plan`, and
+/// this is what keeps it so.
+#[test]
+fn circuit_zk_plan_agrees_with_the_core_planner_on_every_vector() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../siros-dc-matcher-core/tests/vectors/circuit_zk");
+    let mut checked = 0;
+    let mut failures = Vec::new();
+    for entry in std::fs::read_dir(&dir).expect("vector directory") {
+        let path = entry.expect("entry").path();
+        if path.extension().is_none_or(|e| e != "json") {
+            continue;
+        }
+        let name = path
+            .file_stem()
+            .expect("stem")
+            .to_string_lossy()
+            .into_owned();
+        let vector: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).expect("read")).expect("JSON");
+        let text =
+            |value_key: &str, text_key: &str| match (vector.get(value_key), vector.get(text_key)) {
+                (Some(v), _) => Some(v.to_string()),
+                (None, Some(t)) => t.as_str().map(str::to_owned),
+                (None, None) => None,
+            };
+        let query = text("query", "query_text").expect("query");
+        let metadata = text("client_metadata", "client_metadata_text");
+        let got = circuit_zk_plan(query.clone(), metadata);
+        checked += 1;
+
+        let expect = &vector["expect"];
+        match (expect.get("error"), expect.get("plan"), got) {
+            (Some(code), None, Err(CircuitZkPlanError::InvalidRequest { code: got, reason })) => {
+                if Some(got.as_str()) != code.as_str() {
+                    failures.push(format!("{name}: expected {code}, got {got}"));
+                }
+                if reason.is_empty() {
+                    failures.push(format!("{name}: the error carries no reason"));
+                }
+            }
+            (None, Some(want), Ok(json)) => {
+                let mut plan: serde_json::Value = serde_json::from_str(&json).expect("plan JSON");
+                let raw = plan.as_object_mut().expect("object").remove("raw");
+                let sent: serde_json::Value = serde_json::from_str(&query).expect("query JSON");
+                if raw.as_ref() != Some(&sent) {
+                    failures.push(format!("{name}: raw is not the query"));
+                }
+                if &plan != want {
+                    failures.push(format!("{name}: plan mismatch, got {plan}"));
+                }
+            }
+            (_, _, other) => failures.push(format!("{name}: unexpected {other:?}")),
+        }
+    }
+    assert!(checked >= 40, "vectors went missing: {checked}");
+    assert!(failures.is_empty(), "\n{}", failures.join("\n"));
+}
+
+/// The three inputs the issue names as coming out of the probe-blob route as
+/// "invalid" rather than as a plan, and what the planner says about each.
+#[test]
+fn circuit_zk_plan_answers_the_cases_a_probe_blob_could_not() {
+    // An empty circuit list is a plan, not a defect.
+    let plan = circuit_zk_plan(
+        circuit_zk_query(age_req()).to_string(),
+        Some(
+            json!({"vp_formats_supported": {"circuit_zk": {
+            "circuit_id_values": [], "circuit_proof_system_values": []}}})
+            .to_string(),
+        ),
+    )
+    .expect("planned");
+    let plan: serde_json::Value = serde_json::from_str(&plan).unwrap();
+    assert_eq!(plan["circuit_filter"]["circuit_ids"], json!([]));
+    assert_eq!(plan["circuit_filter"]["proof_systems"], json!([]));
+
+    // `vct_values: []` is well-formed.
+    let mut query = circuit_zk_query(age_req());
+    query["meta"] = json!({"vct_values": []});
+    assert!(circuit_zk_plan(query.to_string(), None).is_ok());
+
+    // A query without an `id` is still a plan: the id belongs to DCQL, not to
+    // the planner.
+    let mut query = circuit_zk_query(age_req());
+    query.as_object_mut().unwrap().remove("id");
+    assert!(circuit_zk_plan(query.to_string(), None).is_ok());
+}
+
+#[test]
+fn circuit_zk_plan_reports_the_planners_reason() {
+    let err = circuit_zk_plan("{not json".into(), None).unwrap_err();
+    let CircuitZkPlanError::InvalidRequest { code, reason } = &err;
+    assert_eq!(code, "query_not_parseable");
+    assert!(!reason.is_empty());
+    assert!(err.to_string().contains("query_not_parseable"));
+
+    let bad_metadata = circuit_zk_plan(circuit_zk_query(age_req()).to_string(), Some("[".into()));
+    assert!(matches!(
+        bad_metadata,
+        Err(CircuitZkPlanError::InvalidRequest { code, .. }) if code == "invalid_client_metadata"
+    ));
+}
+
+/// The plan `circuit_zk_plan` returns is the `plan` member of a match.
+#[test]
+fn circuit_zk_plan_is_the_plan_a_match_carries() {
+    let query = circuit_zk_query(age_req());
+    let planned: serde_json::Value =
+        serde_json::from_str(&circuit_zk_plan(query.to_string(), None).unwrap()).unwrap();
+    let blob = nym_blob(&[("longfellow-libzk-v1", "urn:circuit:1", None)]);
+    let out = match_dcql(blob, dcql_of(query)).expect("matched");
+    let zk: serde_json::Value = serde_json::from_str(
+        out.combinations[0].members[0]
+            .circuit_zk
+            .as_deref()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(zk["plan"], planned);
+}
+
+// --- the registration params -------------------------------------------------
+
+fn blob_with_circuit(params: &[(&str, &str)]) -> Vec<u8> {
+    let builder = SirosBlobBuilder::new();
+    builder.add_credential(FfiCredential {
+        id: "nym-1".into(),
+        format: "mso_mdoc".into(),
+        doctype: Some(NYM.into()),
+        vct: None,
+        title: "Pseudonym credential".into(),
+        subtitle: "Issuer".into(),
+        icon_id: None,
+        claims: vec![],
+    });
+    builder.add_circuit_zk_system(FfiCapability {
+        system: "longfellow-libzk-v1".into(),
+        params: params
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+            .collect(),
+    });
+    builder.build().expect("blob")
+}
+
+fn offered(blob: Vec<u8>, query: serde_json::Value) -> bool {
+    match_dcql(blob, dcql_of(query))
+        .expect("matched")
+        .satisfiable
+}
+
+#[test]
+fn the_registration_params_reach_the_matcher_through_the_builder() {
+    let age = circuit_zk_query(age_req());
+
+    // credential_type: restricts to one type.
+    assert!(!offered(
+        blob_with_circuit(&[("credential_type", "eu.example.other.1")]),
+        age.clone()
+    ));
+    assert!(offered(
+        blob_with_circuit(&[("credential_type", NYM)]),
+        age.clone()
+    ));
+
+    // Without it, unrestricted, as in 0.8.0.
+    assert!(offered(
+        blob_with_circuit(&[("circuit_id", "c")]),
+        age.clone()
+    ));
+
+    // capabilities: replaces functions and the type filter.
+    let capabilities = json!({"schema": 1, "presentation": "circuit_zk",
+        "credential": {"format": "mso_mdoc", "type": NYM},
+        "functions": [{"id": "age_check", "max": 1,
+                       "params": {"ge": {"type": "full-date"}}}]})
+    .to_string();
+    let with = |extra: &[(&str, &str)]| {
+        let mut params = vec![("capabilities", capabilities.as_str())];
+        params.extend_from_slice(extra);
+        blob_with_circuit(&params)
+    };
+    assert!(offered(with(&[]), age.clone()));
+    assert!(offered(
+        with(&[
+            ("credential_type", "eu.example.other.1"),
+            ("functions", "pseudonym")
+        ]),
+        age.clone()
+    ));
+    assert!(!offered(
+        with(&[]),
+        circuit_zk_query(
+            json!([{"id": "age_check", "return": "a", "params": {"le": "2013-10-09"}}])
+        )
+    ));
+
+    // Unreadable capabilities: registration succeeds, the circuit is never offered.
+    assert!(!offered(
+        blob_with_circuit(&[("capabilities", "{nope")]),
+        age
+    ));
 }

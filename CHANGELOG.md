@@ -11,6 +11,35 @@ existed.
 
 ## Unreleased
 
+### Added
+
+- FFI `circuit_zk_plan(credential_query_json, client_metadata_json)`: returns
+  the normalised plan as JSON, or `CircuitZkPlanError.InvalidRequest { code,
+  reason }` with the planner's own stable code. It is a thin wrapper over
+  `circuit_zk::plan`, the function matching already calls, so a wallet no longer
+  needs a probe blob to read a plan. The plan JSON (`functions`,
+  `circuit_filter`, `meta_doctype`, `raw`) is documented on the function and is
+  the same object as the `plan` member of a match. Tested against every planner
+  vector.
+- `add_circuit_zk_system` accepts two more opaque params, both optional.
+  `credential_type` restricts a circuit to one credential type: it is offered
+  only for a request whose `meta.doctype_value` equals it or whose
+  `meta.vct_values` contains it (a request naming neither is not offered a
+  restricted circuit). `capabilities` carries the circuit catalog's
+  `capabilities` object as a JSON string; when present it replaces `functions`
+  and `credential_type`, and the matcher applies steps 3 to 5 of the catalog's
+  matching rule (go-zk-circuits #35): presentation and credential type equal
+  the request's, every requested function is declared with params its
+  constraints accept and within `max`, and every `always` function was
+  requested. A `capabilities` value that does not parse (unknown keys,
+  schema other than 1, malformed) never errors at registration; the circuit is
+  not offered. A registration without these params behaves as in 0.8.0.
+  Verified against the catalog's shared match vectors (a snapshot, see
+  `tests/vectors/circuit_capabilities/README.md`).
+- The registered blob format is unchanged: the new params are ordinary
+  capability params, the profile content is the same, so the golden blob and
+  `db::VERSION` are unchanged.
+
 ## v0.8.0 — 2026-10-14
 
 Adds the `circuit_zk` (nym_auth) format: planner, request context and matching.
