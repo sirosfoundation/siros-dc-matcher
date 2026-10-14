@@ -11,6 +11,7 @@
 #![deny(unsafe_code)]
 
 pub mod base64url;
+pub mod circuit_zk;
 pub mod db;
 
 pub mod evaluator;

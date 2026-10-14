@@ -12,7 +12,9 @@
 //! device pass.
 
 use siros_dc_matcher_core::profile::{MatchProfile, Parser};
-use siros_dc_matcher_core::request::{diagnose, extract_query, first_supported_request, NoQuery};
+use siros_dc_matcher_core::request::{
+    diagnose, extract_query, first_supported_context, first_supported_request, NoQuery,
+};
 
 /// Unpadded base64url, so a test does not have to hand-encode its own payload.
 fn b64(bytes: &[u8]) -> String {
@@ -494,4 +496,217 @@ fn the_diagnostic_survives_every_malformed_envelope() {
     ] {
         assert!(!diagnose(raw, &profile).is_empty(), "empty for {raw:?}");
     }
+}
+
+// --- the full request context ----------------------------------------------
+
+fn two_entry_envelope(
+    first: (&str, serde_json::Value),
+    second: (&str, serde_json::Value),
+) -> Vec<u8> {
+    serde_json::json!({"requests": [
+        {"protocol": first.0, "data": first.1},
+        {"protocol": second.0, "data": second.1},
+    ]})
+    .to_string()
+    .into_bytes()
+}
+
+fn unsigned_data() -> serde_json::Value {
+    serde_json::from_str(&request_object()).expect("json")
+}
+
+fn signed_data() -> serde_json::Value {
+    serde_json::json!({"request": compact_jws(&request_object())})
+}
+
+#[test]
+fn an_unsigned_request_yields_its_full_context() {
+    let ctx = first_supported_context(
+        &envelope("openid4vp-v1-unsigned", unsigned_data()),
+        &MatchProfile::siros_default(),
+        None,
+    )
+    .expect("context");
+    assert_eq!(ctx.protocol, "openid4vp-v1-unsigned");
+    assert!(!ctx.signed);
+    assert_eq!(
+        ctx.client_id.as_deref(),
+        Some("x509_san_dns:verifier.example")
+    );
+    assert_eq!(
+        ctx.expected_origins,
+        Some(vec!["https://verifier.example".to_string()])
+    );
+    assert_eq!(
+        ctx.client_metadata,
+        Some(serde_json::json!({"jwks": {"keys": []}}))
+    );
+    assert_eq!(ctx.dcql_query_raw["credentials"][0]["id"], "pid");
+    assert_eq!(ctx.dcql_query.expect("typed").credentials[0].id, "pid");
+}
+
+#[test]
+fn a_signed_request_yields_its_full_context() {
+    let ctx = first_supported_context(
+        &envelope("openid4vp-v1-signed", signed_data()),
+        &MatchProfile::siros_default(),
+        None,
+    )
+    .expect("context");
+    assert_eq!(ctx.protocol, "openid4vp-v1-signed");
+    assert!(ctx.signed);
+    assert_eq!(
+        ctx.client_id.as_deref(),
+        Some("x509_san_dns:verifier.example")
+    );
+    assert_eq!(
+        ctx.expected_origins,
+        Some(vec!["https://verifier.example".to_string()])
+    );
+    assert!(ctx.client_metadata.is_some());
+    assert!(ctx.dcql_query.is_some());
+}
+
+#[test]
+fn origins_client_id_and_metadata_are_none_when_absent() {
+    let data = serde_json::json!({"dcql_query": {"credentials": [{
+        "id": "pid", "format": "mso_mdoc",
+        "meta": {"doctype_value": "org.iso.18013.5.1.mDL"},
+        "claims": [{"path": ["org.iso.18013.5.1", "age_over_18"]}]
+    }]}});
+    let ctx = first_supported_context(
+        &envelope("openid4vp-v1-unsigned", data),
+        &MatchProfile::siros_default(),
+        None,
+    )
+    .expect("context");
+    assert_eq!(ctx.client_id, None);
+    assert_eq!(ctx.expected_origins, None);
+    assert_eq!(ctx.client_metadata, None);
+}
+
+/// The rulebook example puts an object under `claims`, which the typed DCQL
+/// parser rejects. It must still reach the planner.
+fn circuit_zk_object_claims_data() -> serde_json::Value {
+    serde_json::json!({
+        "client_id": "x509_san_dns:rp.example.com",
+        "dcql_query": {"credentials": [{
+            "id": "nym", "format": "circuit_zk",
+            "meta": {"doctype_value": "eu.europa.ec.eudi.nym_auth.1"},
+            "claims": {"_req": [{"fn_id": "age_check", "id": "a", "params": {"ge": "2008-10-10"}}]}
+        }]}
+    })
+}
+
+#[test]
+fn a_circuit_zk_request_with_object_claims_yields_a_context() {
+    let ctx = first_supported_context(
+        &envelope("openid4vp-v1-unsigned", circuit_zk_object_claims_data()),
+        &MatchProfile::siros_default(),
+        None,
+    )
+    .expect("a context, not Malformed");
+    assert!(ctx.dcql_query.is_none());
+    assert!(ctx.dcql_query_raw["credentials"][0]["claims"]["_req"].is_array());
+}
+
+/// ... but only for circuit_zk. Other formats keep failing as before, and so
+/// does a malformed credential sitting next to a circuit_zk one.
+#[test]
+fn object_claims_on_any_other_format_is_still_malformed() {
+    let data = serde_json::json!({"dcql_query": {"credentials": [{
+        "id": "pid", "format": "mso_mdoc",
+        "meta": {"doctype_value": "d"}, "claims": {"_req": []}
+    }]}});
+    let profile = MatchProfile::siros_default();
+    assert!(first_supported_context(
+        &envelope("openid4vp-v1-unsigned", data.clone()),
+        &profile,
+        None
+    )
+    .is_none());
+    let parser = profile.parser_for("openid4vp-v1-unsigned").expect("parser");
+    assert!(matches!(
+        extract_query(parser, "openid4vp-v1-unsigned", &data),
+        Err(NoQuery::Malformed(_))
+    ));
+
+    let mut mixed = circuit_zk_object_claims_data();
+    mixed["dcql_query"]["credentials"]
+        .as_array_mut()
+        .expect("array")
+        .push(data["dcql_query"]["credentials"][0].clone());
+    assert!(
+        first_supported_context(&envelope("openid4vp-v1-unsigned", mixed), &profile, None)
+            .is_none()
+    );
+}
+
+/// The thin wrapper cannot return a query that does not exist, so it moves on
+/// to the next entry, as it did when this was a parse failure.
+#[test]
+fn the_wrapper_skips_a_circuit_zk_entry_that_has_no_typed_query() {
+    let found = first_supported_request(
+        &two_entry_envelope(
+            ("openid4vp-v1-unsigned", circuit_zk_object_claims_data()),
+            ("openid4vp-v1-signed", signed_data()),
+        ),
+        &MatchProfile::siros_default(),
+    );
+    assert_eq!(found.expect("second entry").0, "openid4vp-v1-signed");
+}
+
+#[test]
+fn a_predicate_can_skip_an_unsigned_first_entry_for_a_signed_second() {
+    let bytes = two_entry_envelope(
+        ("openid4vp-v1-unsigned", unsigned_data()),
+        ("openid4vp-v1-signed", signed_data()),
+    );
+    let profile = MatchProfile::siros_default();
+    let no_unsigned = |_: &str, signed: bool, _: &_| signed;
+    let ctx = first_supported_context(&bytes, &profile, Some(&no_unsigned)).expect("context");
+    assert_eq!(ctx.protocol, "openid4vp-v1-signed");
+    assert!(ctx.signed);
+
+    // No predicate: today's behaviour, first supported entry wins.
+    let first = first_supported_context(&bytes, &profile, None).expect("context");
+    assert_eq!(first.protocol, "openid4vp-v1-unsigned");
+}
+
+#[test]
+fn the_predicate_sees_the_protocol_label_and_the_context() {
+    let bytes = two_entry_envelope(
+        ("openid4vp-v1-unsigned", unsigned_data()),
+        ("openid4vp-v1-signed", signed_data()),
+    );
+    let wants = |protocol: &str, _: bool, ctx: &siros_dc_matcher_core::request::RequestContext| {
+        protocol == "openid4vp-v1-signed" && ctx.client_id.is_some()
+    };
+    let ctx = first_supported_context(&bytes, &MatchProfile::siros_default(), Some(&wants))
+        .expect("context");
+    assert_eq!(ctx.protocol, "openid4vp-v1-signed");
+}
+
+#[test]
+fn a_predicate_that_rejects_everything_yields_no_context() {
+    let bytes = two_entry_envelope(
+        ("openid4vp-v1-unsigned", unsigned_data()),
+        ("openid4vp-v1-signed", signed_data()),
+    );
+    let reject_all = |_: &str, _: bool, _: &_| false;
+    assert!(
+        first_supported_context(&bytes, &MatchProfile::siros_default(), Some(&reject_all))
+            .is_none()
+    );
+}
+
+#[test]
+fn an_unknown_protocol_still_yields_no_context() {
+    assert!(first_supported_context(
+        &envelope("some-other-protocol", unsigned_data()),
+        &MatchProfile::siros_default(),
+        None,
+    )
+    .is_none());
 }

@@ -9,7 +9,10 @@ use std::collections::HashMap;
 use serde_json::json;
 use siros_dc_matcher_core::fixtures;
 use siros_dc_matcher_core::profile::Capability;
-use siros_dc_matcher_ffi::matching::{match_dc_api_request, match_dcql, MatchError};
+use siros_dc_matcher_ffi::matching::{
+    match_dc_api_request, match_dcql, match_dcql_with_context, MatchError,
+};
+use siros_dc_matcher_ffi::{FfiCapability, FfiClaim, FfiCredential, SirosBlobBuilder};
 
 fn wallet(zk: Option<Capability>) -> Vec<u8> {
     fixtures::wallet(zk.into_iter().collect())
@@ -486,4 +489,192 @@ fn a_dropped_count_that_fits_stays_exact() {
 
     let out = match_dcql(blob, query).expect("matched");
     assert!(out.dropped_is_exact, "9 combinations is a number we have");
+}
+
+// --- circuit_zk ------------------------------------------------------------
+
+const NYM: &str = "eu.europa.ec.eudi.nym_auth.1";
+
+/// A blob built the way an SDK builds one: through `SirosBlobBuilder`, with a
+/// nym_auth mdoc that holds a claim, and the circuits registered.
+fn nym_blob(circuits: &[(&str, &str, Option<&str>)]) -> Vec<u8> {
+    let builder = SirosBlobBuilder::new();
+    builder.add_credential(FfiCredential {
+        id: "nym-1".into(),
+        format: "mso_mdoc".into(),
+        doctype: Some(NYM.into()),
+        vct: None,
+        title: "Pseudonym credential".into(),
+        subtitle: "Issuer".into(),
+        icon_id: None,
+        claims: vec![FfiClaim {
+            path: vec![NYM.into(), "birth_date".into()],
+            value: "1990-01-01".into(),
+            display: "Birth date".into(),
+            display_value: None,
+        }],
+    });
+    for (system, circuit_id, functions) in circuits {
+        let mut params = HashMap::from([("circuit_id".to_string(), (*circuit_id).to_string())]);
+        if let Some(functions) = functions {
+            params.insert("functions".to_string(), (*functions).to_string());
+        }
+        builder.add_circuit_zk_system(FfiCapability {
+            system: (*system).to_string(),
+            params,
+        });
+    }
+    builder.build().expect("blob")
+}
+
+fn circuit_zk_query(req: serde_json::Value) -> serde_json::Value {
+    json!({"id": "nym", "format": "circuit_zk", "meta": {"doctype_value": NYM}, "req": req})
+}
+
+fn age_req() -> serde_json::Value {
+    json!([{"id": "age_check", "return": "age", "params": {"ge": "2008-10-10"}}])
+}
+
+fn dcql_of(query: serde_json::Value) -> String {
+    json!({"credentials": [query]}).to_string()
+}
+
+#[test]
+fn a_circuit_zk_match_returns_the_circuit_and_the_plan() {
+    let blob = nym_blob(&[("longfellow-libzk-v1", "urn:circuit:1", None)]);
+    let out = match_dcql(blob, dcql_of(circuit_zk_query(age_req()))).expect("matched");
+    assert!(out.satisfiable);
+    let member = &out.combinations[0].members[0];
+    assert_eq!(member.credential_id, "nym-1");
+    assert!(member.claims.is_empty(), "nothing is disclosed");
+    let zk: serde_json::Value =
+        serde_json::from_str(member.circuit_zk.as_deref().expect("circuit_zk")).expect("JSON");
+    assert_eq!(zk["circuit"]["system"], "longfellow-libzk-v1");
+    assert_eq!(zk["circuit"]["params"]["circuit_id"], "urn:circuit:1");
+    assert_eq!(zk["plan"]["functions"][0]["function_id"], "age_check");
+    assert_eq!(zk["plan"]["meta_doctype"], NYM);
+}
+
+#[test]
+fn other_formats_have_no_circuit_zk_member() {
+    let blob = wallet(None);
+    let query = dcql(
+        "mso_mdoc",
+        age_claim(),
+        json!({"doctype_value": "org.iso.18013.5.1.mDL"}),
+    );
+    let out = match_dcql(blob, query).expect("matched");
+    assert!(out.combinations[0].members[0].circuit_zk.is_none());
+}
+
+/// The bare-query path has no envelope to read `client_metadata` from, so the
+/// caller passes it, and the verifier's circuit list is honoured.
+#[test]
+fn match_dcql_with_context_applies_the_verifiers_circuit_lists() {
+    let blob = nym_blob(&[("longfellow-libzk-v1", "urn:circuit:1", None)]);
+    let query = dcql_of(circuit_zk_query(age_req()));
+    let cm = |ids: &[&str]| {
+        Some(
+            json!({"vp_formats_supported": {"circuit_zk": {"circuit_id_values": ids}}}).to_string(),
+        )
+    };
+
+    let hit = match_dcql_with_context(blob.clone(), query.clone(), cm(&["urn:circuit:1"]))
+        .expect("matched");
+    assert!(hit.satisfiable);
+    let miss =
+        match_dcql_with_context(blob.clone(), query.clone(), cm(&["urn:other"])).expect("matched");
+    assert!(!miss.satisfiable);
+    // No client metadata at all: no constraint.
+    assert!(
+        match_dcql_with_context(blob.clone(), query.clone(), None)
+            .expect("matched")
+            .satisfiable
+    );
+    // And match_dcql is that with None.
+    assert!(match_dcql(blob, query).expect("matched").satisfiable);
+}
+
+#[test]
+fn unparseable_client_metadata_is_a_request_error() {
+    let blob = nym_blob(&[("p", "c", None)]);
+    let result = match_dcql_with_context(
+        blob,
+        dcql_of(circuit_zk_query(age_req())),
+        Some("{nope".into()),
+    );
+    assert!(matches!(result, Err(MatchError::Request { .. })));
+}
+
+/// The rulebook example's `claims` object is not DCQL. It must reach the
+/// planner through both entry points and not be an error.
+#[test]
+fn a_circuit_zk_query_with_object_claims_is_matched() {
+    let blob = nym_blob(&[("longfellow-libzk-v1", "urn:circuit:1", None)]);
+    let query = json!({"id": "nym", "format": "circuit_zk",
+        "meta": {"doctype_value": NYM},
+        "claims": {"_req": [{"fn_id": "age_check", "id": "age", "params": {"ge": "2008-10-10"}}]}});
+
+    let bare = match_dcql(blob.clone(), dcql_of(query.clone())).expect("matched");
+    assert_eq!(bare.combinations[0].members[0].credential_id, "nym-1");
+
+    let envelope = json!({"requests": [{"protocol": "openid4vp-v1-unsigned",
+        "data": {"dcql_query": {"credentials": [query]}}}]})
+    .to_string();
+    let out = match_dc_api_request(blob, envelope).expect("matched");
+    assert_eq!(out.combinations[0].members[0].credential_id, "nym-1");
+}
+
+/// `match_dc_api_request` already has the whole request, so `client_metadata`
+/// flows through without the caller passing it again.
+#[test]
+fn match_dc_api_request_reads_client_metadata_from_the_request() {
+    let blob = nym_blob(&[("longfellow-libzk-v1", "urn:circuit:1", None)]);
+    let request = |proof_systems: &[&str]| {
+        json!({"requests": [{"protocol": "openid4vp-v1-unsigned", "data": {
+            "dcql_query": {"credentials": [circuit_zk_query(age_req())]},
+            "client_metadata": {"vp_formats_supported": {"circuit_zk": {
+                "circuit_proof_system_values": proof_systems}}}
+        }}]})
+        .to_string()
+    };
+    assert!(
+        match_dc_api_request(blob.clone(), request(&["longfellow-libzk-v1"]))
+            .expect("matched")
+            .satisfiable
+    );
+    assert!(
+        !match_dc_api_request(blob, request(&["another-system"]))
+            .expect("matched")
+            .satisfiable
+    );
+}
+
+#[test]
+fn an_invalid_circuit_zk_request_is_not_satisfiable_and_does_not_fall_back_to_claims() {
+    let blob = nym_blob(&[("longfellow-libzk-v1", "urn:circuit:1", None)]);
+    let mut query = circuit_zk_query(age_req());
+    // Ordinary DCQL claims, naming a claim the wallet holds.
+    query["claims"] = json!([{"path": [NYM, "birth_date"]}]);
+    let out = match_dcql(blob.clone(), dcql_of(query)).expect("matched");
+    assert!(!out.satisfiable);
+    assert!(out.combinations.is_empty());
+
+    let dup = circuit_zk_query(json!([
+        {"id": "age_check", "return": "h"}, {"id": "age_check", "return": "h"}]));
+    assert!(!match_dcql(blob, dcql_of(dup)).expect("matched").satisfiable);
+}
+
+#[test]
+fn a_wallet_without_a_circuit_is_not_offered() {
+    let blob = nym_blob(&[]);
+    let out = match_dcql(blob, dcql_of(circuit_zk_query(age_req()))).expect("matched");
+    assert!(!out.satisfiable);
+}
+
+#[test]
+fn a_circuit_declaring_functions_is_filtered_across_the_boundary() {
+    let blob = nym_blob(&[("p", "c", Some("pseudonym-v1-sha256"))]);
+    let out = match_dcql(blob, dcql_of(circuit_zk_query(age_req()))).expect("matched");
+    assert!(!out.satisfiable);
 }

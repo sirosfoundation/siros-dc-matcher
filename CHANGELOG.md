@@ -11,7 +11,45 @@ existed.
 
 ## Unreleased
 
-Nothing yet.
+### Added
+
+- `circuit_zk` query planner in `siros-dc-matcher-core` (`circuit_zk::plan`):
+  parses and normalises a `circuit_zk` credential query in both rulebook
+  shapes (`req` and `claims._req`), and rejects structural defects only.
+  Not yet wired into matching. Conformance vectors in
+  `crates/siros-dc-matcher-core/tests/vectors/circuit_zk/` are reusable by the
+  SDKs. (#37)
+- `request::first_supported_context` (and `_in`, `extract_context`): returns the
+  full `RequestContext` (protocol, signed flag, `client_id`, `expected_origins`,
+  `client_metadata`, raw and parsed `dcql_query`) and takes an optional caller
+  predicate, so the first entry the caller accepts wins. `first_supported_request`
+  is now a thin wrapper with an unchanged signature. A `circuit_zk` request with
+  `claims` as an object yields a context (`dcql_query: None`) instead of
+  `NoQuery::Malformed`. Signatures and origins are still not checked. (#38)
+- `circuit_zk` matching: `siros_default()` maps `circuit_zk` onto stored
+  `mso_mdoc` (doctype through the existing meta rule), and the evaluator answers
+  it from the planner's output. A structurally invalid request matches nothing
+  and never falls back to claim matching; the matcher applies no
+  satisfiability rules. Wallets register circuits with a new `circuit_zk`
+  capability family (`SirosBlobBuilder::add_circuit_zk_system`: proof system in
+  `system`, opaque string params; `circuit_id`, and optionally `functions` as a
+  comma-separated list). The verifier's `circuit_proof_system_values` and
+  `circuit_id_values` are matched against them when present; a circuit that
+  declares `functions` is only offered for requests using those. A match
+  carries no claims. `ProfilePolicy::with_context` supplies the request context.
+  The picker emits rows from the plan, each marked as an unverified request, and
+  `metadata.circuit_zk` carries the chosen circuit and plan. (#40)
+
+### Changed
+
+- FFI, **regenerate bindings**: `FfiMatchedCredential` gains
+  `circuit_zk: Option<String>`; new `match_dcql_with_context(blob, dcql_json,
+  client_metadata_json)`; new `SirosBlobBuilder.add_circuit_zk_system`.
+  `match_dc_api_request` and `match_dcql` are unchanged in signature, and
+  `match_dcql` now accepts a `circuit_zk` query whose `claims` is an object.
+- The registered profile gained a `circuit_zk` format rule, so the committed
+  golden blob changed (profile content only; `db::VERSION` is unchanged and a
+  blob without the rule still decodes and simply declines the format).
 
 ## v0.7.0 — 2026-09-19
 

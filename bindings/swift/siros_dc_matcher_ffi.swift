@@ -510,6 +510,19 @@ fileprivate struct FfiConverterData: FfiConverterRustBuffer {
 public protocol SirosBlobBuilderProtocol : AnyObject {
     
     /**
+     * Register a `circuit_zk` circuit this wallet can prove with.
+     *
+     * `system` is the proof system (for example `longfellow-libzk-v1`). The
+     * params are opaque strings the matcher reads only as follows:
+     * `circuit_id` is matched against a verifier's `circuit_id_values`, and
+     * `functions`, if given as a comma-separated list of function ids, limits
+     * which requested functions this circuit is offered for. A circuit that
+     * declares no `functions` is not filtered by function. Call once per
+     * circuit; with none registered, `circuit_zk` requests match nothing.
+     */
+    func addCircuitZkSystem(capability: FfiCapability) 
+    
+    /**
      * Add a credential.
      */
     func addCredential(credential: FfiCredential) 
@@ -623,6 +636,24 @@ public convenience init() {
 
     
 
+    
+    /**
+     * Register a `circuit_zk` circuit this wallet can prove with.
+     *
+     * `system` is the proof system (for example `longfellow-libzk-v1`). The
+     * params are opaque strings the matcher reads only as follows:
+     * `circuit_id` is matched against a verifier's `circuit_id_values`, and
+     * `functions`, if given as a comma-separated list of function ids, limits
+     * which requested functions this circuit is offered for. A circuit that
+     * declares no `functions` is not filtered by function. Call once per
+     * circuit; with none registered, `circuit_zk` requests match nothing.
+     */
+open func addCircuitZkSystem(capability: FfiCapability) {try! rustCall() {
+    uniffi_siros_dc_matcher_ffi_fn_method_sirosblobbuilder_add_circuit_zk_system(self.uniffiClonePointer(),
+        FfiConverterTypeFfiCapability.lower(capability),$0
+    )
+}
+}
     
     /**
      * Add a credential.
@@ -1417,6 +1448,18 @@ public struct FfiMatchedCredential {
      * produce it, so it is carried rather than matched on.
      */
     public var meta: [String: String]
+    /**
+     * For a `circuit_zk` query: a JSON object `{"circuit": {...}, "plan":
+     * {...}}` holding the circuit this wallet chose (its registered
+     * capability: `system` and string `params`) and the request as the
+     * matcher normalised it. `None` for every other format.
+     *
+     * JSON strings, not records, so the planner's shape can follow the
+     * rulebook without a binding regeneration each time. The plan's `raw`
+     * member is the verifier's request as sent and is **not authenticated**
+     * here. A `circuit_zk` match has an empty `claims`.
+     */
+    public var circuitZk: String?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -1445,12 +1488,24 @@ public struct FfiMatchedCredential {
          *
          * A pseudonym context changes what is produced, not which credential can
          * produce it, so it is carried rather than matched on.
-         */meta: [String: String]) {
+         */meta: [String: String], 
+        /**
+         * For a `circuit_zk` query: a JSON object `{"circuit": {...}, "plan":
+         * {...}}` holding the circuit this wallet chose (its registered
+         * capability: `system` and string `params`) and the request as the
+         * matcher normalised it. `None` for every other format.
+         *
+         * JSON strings, not records, so the planner's shape can follow the
+         * rulebook without a binding regeneration each time. The plan's `raw`
+         * member is the verifier's request as sent and is **not authenticated**
+         * here. A `circuit_zk` match has an empty `claims`.
+         */circuitZk: String?) {
         self.queryId = queryId
         self.credentialId = credentialId
         self.claims = claims
         self.capabilities = capabilities
         self.meta = meta
+        self.circuitZk = circuitZk
     }
 }
 
@@ -1473,6 +1528,9 @@ extension FfiMatchedCredential: Equatable, Hashable {
         if lhs.meta != rhs.meta {
             return false
         }
+        if lhs.circuitZk != rhs.circuitZk {
+            return false
+        }
         return true
     }
 
@@ -1482,6 +1540,7 @@ extension FfiMatchedCredential: Equatable, Hashable {
         hasher.combine(claims)
         hasher.combine(capabilities)
         hasher.combine(meta)
+        hasher.combine(circuitZk)
     }
 }
 
@@ -1497,7 +1556,8 @@ public struct FfiConverterTypeFfiMatchedCredential: FfiConverterRustBuffer {
                 credentialId: FfiConverterString.read(from: &buf), 
                 claims: FfiConverterSequenceSequenceString.read(from: &buf), 
                 capabilities: FfiConverterSequenceTypeFfiCapability.read(from: &buf), 
-                meta: FfiConverterDictionaryStringString.read(from: &buf)
+                meta: FfiConverterDictionaryStringString.read(from: &buf), 
+                circuitZk: FfiConverterOptionString.read(from: &buf)
         )
     }
 
@@ -1507,6 +1567,7 @@ public struct FfiConverterTypeFfiMatchedCredential: FfiConverterRustBuffer {
         FfiConverterSequenceSequenceString.write(value.claims, into: &buf)
         FfiConverterSequenceTypeFfiCapability.write(value.capabilities, into: &buf)
         FfiConverterDictionaryStringString.write(value.meta, into: &buf)
+        FfiConverterOptionString.write(value.circuitZk, into: &buf)
     }
 }
 
@@ -2074,6 +2135,29 @@ public func matchDcql(blob: Data, dcqlJson: String)throws  -> FfiMatchOutcome {
     )
 })
 }
+/**
+ * Match a bare DCQL query, with the request's `client_metadata`.
+ *
+ * What [`match_dcql`] does, for a caller that also has the verifier's
+ * `client_metadata` (as JSON). A `circuit_zk` query is matched against the
+ * circuit lists in its `vp_formats_supported`; with `None` those are absent
+ * and impose no constraint. A `circuit_zk` query with `claims` as an object
+ * (the rulebook example shape) is accepted here although it is not DCQL.
+ *
+ * # Errors
+ *
+ * See the match error type — `MatchError` in Rust and Swift,
+ * `MatchException` in Kotlin.
+ */
+public func matchDcqlWithContext(blob: Data, dcqlJson: String, clientMetadataJson: String?)throws  -> FfiMatchOutcome {
+    return try  FfiConverterTypeFfiMatchOutcome.lift(try rustCallWithError(FfiConverterTypeMatchError.lift) {
+    uniffi_siros_dc_matcher_ffi_fn_func_match_dcql_with_context(
+        FfiConverterData.lower(blob),
+        FfiConverterString.lower(dcqlJson),
+        FfiConverterOptionString.lower(clientMetadataJson),$0
+    )
+})
+}
 
 private enum InitializationResult {
     case ok
@@ -2094,6 +2178,12 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_siros_dc_matcher_ffi_checksum_func_match_dcql() != 1962) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_siros_dc_matcher_ffi_checksum_func_match_dcql_with_context() != 35792) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_add_circuit_zk_system() != 2672) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_add_credential() != 64015) {
