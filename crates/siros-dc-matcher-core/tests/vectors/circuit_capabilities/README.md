@@ -1,22 +1,23 @@
 # circuit capabilities match vectors
 
-`match.json` is a verbatim copy of go-zk-circuits
-`testvectors/capabilities/match.json` (branch `feat/circuit-capabilities`,
-commit `f0a7784`, sha256
-`9bee1868fd957fd4ad56a91dbca93b922ede04bfa57bb0f8b3a3c9bd5f383866`). It is the
-catalog's reference vector file for its `Match` helper. The matcher is held to
-it by `tests/circuit_capabilities.rs`.
+`match.json` is the corpus for the capability rule the matcher applies
+(`Capabilities::serves`). **This repository owns it.** It started as a draft in
+the circuit-catalog work (go-zk-circuits issue 35, sha256
+`9bee1868fd957fd4ad56a91dbca93b922ede04bfa57bb0f8b3a3c9bd5f383866` at the point
+it was copied); the catalog stores capability metadata only and has no matching
+code or vectors. The SDKs copy this file from a release tag of this repository,
+the way they copy the planner vectors, and record the tag and hash beside their
+copy. The matcher is held to it by `tests/circuit_capabilities.rs`.
 
-**This copy is a snapshot of an unmerged branch.** When go-zk-circuits merges,
-re-copy the file from its final path, update the commit and hash above, and
-re-run `cargo test -p siros-dc-matcher-core --test circuit_capabilities`. Do
-not edit this copy: a vector changed here stops being shared.
+Change a vector here only together with the rule, in the same PR, and say so in
+the changelog: a changed vector changes what every wallet must do.
 
 ## What the matcher is held to, and what it is not
 
-The matcher implements steps 3 to 5 of the rule (`Capabilities::serves`). For
-each case the test applies the wallet's side (steps 1 and 2: the `proofSystems`
-and `circuitIds` filters, aliases, `revoked`) and then compares the set of
+The matcher implements the capability rule (`Capabilities::serves`: presentation
+and credential, per-function params and `max`, `always`). For each case the
+test applies the wallet's side (the `proofSystems` and `circuitIds` filters,
+aliases, `revoked`) and then compares the set of
 served circuit ids with `expect`.
 
 - **Ranking is not checked.** `expect` is ordered (active before deprecated,

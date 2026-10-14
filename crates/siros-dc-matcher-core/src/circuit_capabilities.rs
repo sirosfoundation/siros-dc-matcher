@@ -1,20 +1,21 @@
 //! Structured circuit capabilities, and the rule that matches a request to them.
 //!
 //! A wallet registers a `circuit_zk` circuit with an optional `capabilities`
-//! param: the `capabilities` object of the circuit catalog (go-zk-circuits
-//! issue 35) as a JSON string. [`Capabilities::parse`] reads it and
-//! [`Capabilities::serves`] applies steps 3 to 5 of the catalog's matching
-//! rule to a planned request:
+//! param: the `capabilities` object of the circuit catalog as a JSON string.
+//! [`Capabilities::parse`] reads it and [`Capabilities::serves`] applies the
+//! capability rule to a planned request (the catalog only stores the metadata;
+//! filtering by proof system, circuit id and status is the wallet's, before it
+//! registers circuits):
 //!
-//! 3. the circuit's presentation and credential (format and type) equal the
+//! 1. the circuit's presentation and credential (format and type) equal the
 //!    request's;
-//! 4. every requested function item names a function the circuit declares,
+//! 2. every requested function item names a function the circuit declares,
 //!    every param the item carries is listed for that function with a value
 //!    its constraint accepts, and the number of items naming a function is
 //!    within its `max`;
-//! 5. every function declared `always` appears among the items.
+//! 3. every function declared `always` appears among the items.
 //!
-//! Steps 1 and 2 (proof system and circuit id, status) are not here. The
+//! The proof-system, circuit-id and status filters are not here. The
 //! verifier's lists are matched by the evaluator, and a revoked or unwanted
 //! circuit is simply not registered by the wallet.
 //!
@@ -303,7 +304,7 @@ impl Capabilities {
         })
     }
 
-    /// Whether the circuit satisfies a request, by steps 3 to 5 of the rule.
+    /// Whether the circuit satisfies a request, by the three checks above.
     ///
     /// `credential_formats` and `credential_types` are what the request can
     /// mean by its credential: the circuit's format and type must each be one
