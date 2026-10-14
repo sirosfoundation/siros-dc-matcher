@@ -11,6 +11,14 @@ existed.
 
 ## Unreleased
 
+## v0.9.0 — 2026-10-14
+
+Lets a wallet read the `circuit_zk` plan directly, and describe what a registered
+circuit can do. The FFI gained a function and an error type, so a consumer must
+regenerate its bindings. Registrations that use neither new param behave as in
+0.8.0. `siros-dcql` and `siros-dc-matcher-core` are versioned 0.9.0 to match the
+release; neither has an API change in this release.
+
 ### Added
 
 - FFI `circuit_zk_plan(credential_query_json, client_metadata_json)`: returns

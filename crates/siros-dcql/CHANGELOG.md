@@ -13,7 +13,10 @@ this file.
 
 ## Unreleased
 
-Nothing yet.
+## 0.9.0 — 2026-10-14
+
+No API change. The version is aligned with the matcher release (v0.9.0), which
+it ships with; there is nothing to migrate.
 
 ## 0.3.0 — 2026-09-19
 
