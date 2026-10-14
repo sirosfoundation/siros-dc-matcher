@@ -514,11 +514,34 @@ public protocol SirosBlobBuilderProtocol : AnyObject {
      *
      * `system` is the proof system (for example `longfellow-libzk-v1`). The
      * params are opaque strings the matcher reads only as follows:
-     * `circuit_id` is matched against a verifier's `circuit_id_values`, and
-     * `functions`, if given as a comma-separated list of function ids, limits
-     * which requested functions this circuit is offered for. A circuit that
-     * declares no `functions` is not filtered by function. Call once per
-     * circuit; with none registered, `circuit_zk` requests match nothing.
+     *
+     * - `circuit_id` is matched against a verifier's `circuit_id_values`.
+     * - `functions`, if given as a comma-separated list of function ids,
+     * limits which requested functions this circuit is offered for. A
+     * circuit that declares no `functions` is not filtered by function.
+     * - `credential_type`, if given, restricts the circuit to one credential
+     * type (an mdoc doctype or an SD-JWT VC `vct`): it is offered only for a
+     * request whose `meta.doctype_value` equals it or whose
+     * `meta.vct_values` contains it. A request whose `meta` names neither
+     * is not offered a restricted circuit. Absent means unrestricted. An
+     * empty string is a type like any other and matches nothing.
+     * - `capabilities`, if given, is the circuit catalog's `capabilities`
+     * object as a JSON string. It replaces `functions` and
+     * `credential_type`, which are then not read. The circuit is offered for
+     * a request only if the catalog's matching rule (steps 3 to 5) holds:
+     * presentation `circuit_zk` and the credential's type equal the
+     * request's, every requested function is declared with params its
+     * constraints accept and within its `max`, and every `always` function
+     * was requested. A value that is not a valid capabilities object
+     * (unparseable, unknown keys, schema other than 1) is not an error
+     * here: the circuit is simply never offered. This method cannot fail,
+     * and offering a circuit on a description the matcher cannot read would
+     * be the wrong way to fail. Function ids, param names and values are
+     * opaque strings.
+     *
+     * A registration without `credential_type` and `capabilities` behaves as it did in
+     * 0.8.0. Call once per circuit; with none registered, `circuit_zk`
+     * requests match nothing.
      */
     func addCircuitZkSystem(capability: FfiCapability) 
     
@@ -642,11 +665,34 @@ public convenience init() {
      *
      * `system` is the proof system (for example `longfellow-libzk-v1`). The
      * params are opaque strings the matcher reads only as follows:
-     * `circuit_id` is matched against a verifier's `circuit_id_values`, and
-     * `functions`, if given as a comma-separated list of function ids, limits
-     * which requested functions this circuit is offered for. A circuit that
-     * declares no `functions` is not filtered by function. Call once per
-     * circuit; with none registered, `circuit_zk` requests match nothing.
+     *
+     * - `circuit_id` is matched against a verifier's `circuit_id_values`.
+     * - `functions`, if given as a comma-separated list of function ids,
+     * limits which requested functions this circuit is offered for. A
+     * circuit that declares no `functions` is not filtered by function.
+     * - `credential_type`, if given, restricts the circuit to one credential
+     * type (an mdoc doctype or an SD-JWT VC `vct`): it is offered only for a
+     * request whose `meta.doctype_value` equals it or whose
+     * `meta.vct_values` contains it. A request whose `meta` names neither
+     * is not offered a restricted circuit. Absent means unrestricted. An
+     * empty string is a type like any other and matches nothing.
+     * - `capabilities`, if given, is the circuit catalog's `capabilities`
+     * object as a JSON string. It replaces `functions` and
+     * `credential_type`, which are then not read. The circuit is offered for
+     * a request only if the catalog's matching rule (steps 3 to 5) holds:
+     * presentation `circuit_zk` and the credential's type equal the
+     * request's, every requested function is declared with params its
+     * constraints accept and within its `max`, and every `always` function
+     * was requested. A value that is not a valid capabilities object
+     * (unparseable, unknown keys, schema other than 1) is not an error
+     * here: the circuit is simply never offered. This method cannot fail,
+     * and offering a circuit on a description the matcher cannot read would
+     * be the wrong way to fail. Function ids, param names and values are
+     * opaque strings.
+     *
+     * A registration without `credential_type` and `capabilities` behaves as it did in
+     * 0.8.0. Call once per circuit; with none registered, `circuit_zk`
+     * requests match nothing.
      */
 open func addCircuitZkSystem(capability: FfiCapability) {try! rustCall() {
     uniffi_siros_dc_matcher_ffi_fn_method_sirosblobbuilder_add_circuit_zk_system(self.uniffiClonePointer(),
@@ -1761,6 +1807,83 @@ extension BlobError: Foundation.LocalizedError {
 
 
 /**
+ * Why a `circuit_zk` query could not be planned.
+ */
+public enum CircuitZkPlanError {
+
+    
+    
+    /**
+     * The query is structurally broken: the planner's verdict, unchanged.
+     *
+     * This says the request is malformed, never that it cannot be served.
+     */
+    case InvalidRequest(
+        /**
+         * A stable identifier for the defect, the planner's own code:
+         * `query_not_parseable`, `req_missing_or_empty`, `req_ambiguous`,
+         * `item_missing_function_id`, `item_missing_handle`,
+         * `param_wrong_type`, `param_invalid_full_date`, `duplicate_handle`,
+         * `claims_present`, `claim_sets_present`, `req_sets_present`,
+         * `invalid_meta` or `invalid_client_metadata`. Match on this, not on
+         * `reason`.
+         */code: String, 
+        /**
+         * The planner's message, for logs. Its wording may change.
+         */reason: String
+    )
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeCircuitZkPlanError: FfiConverterRustBuffer {
+    typealias SwiftType = CircuitZkPlanError
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CircuitZkPlanError {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        
+
+        
+        case 1: return .InvalidRequest(
+            code: try FfiConverterString.read(from: &buf), 
+            reason: try FfiConverterString.read(from: &buf)
+            )
+
+         default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: CircuitZkPlanError, into buf: inout [UInt8]) {
+        switch value {
+
+        
+
+        
+        
+        case let .InvalidRequest(code,reason):
+            writeInt(&buf, Int32(1))
+            FfiConverterString.write(code, into: &buf)
+            FfiConverterString.write(reason, into: &buf)
+            
+        }
+    }
+}
+
+
+extension CircuitZkPlanError: Equatable, Hashable {}
+
+extension CircuitZkPlanError: Foundation.LocalizedError {
+    public var errorDescription: String? {
+        String(reflecting: self)
+    }
+}
+
+
+/**
  * Why a request could not be matched.
  */
 public enum MatchError {
@@ -2089,6 +2212,54 @@ fileprivate struct FfiConverterDictionaryStringString: FfiConverterRustBuffer {
     }
 }
 /**
+ * Plan a `circuit_zk` credential query, without a blob.
+ *
+ * `credential_query_json` is one Credential Query object (an element of
+ * `dcql_query.credentials`), not the whole `dcql_query`. In either rulebook
+ * shape: `req` beside `meta`, or `claims: {"_req": [...]}`.
+ * `client_metadata_json` is the request's `client_metadata`, if it has one.
+ *
+ * This is the function the matcher itself calls (`circuit_zk::plan` in the
+ * core crate), so the plan a wallet reads here is the plan matching used. It
+ * judges structure only; whether the request can be served is the wallet's.
+ *
+ * # The plan JSON
+ *
+ * A JSON object with exactly these members; this shape is stable, and the
+ * same object is the `plan` member of [`FfiMatchedCredential::circuit_zk`]:
+ *
+ * - `functions`: array, in request order, of `{function_id, handle, params}`.
+ * `function_id` is `id` in a `req` item and `fn_id` in a `_req` item;
+ * `handle` is `return` or `id` respectively. `params` is a flat object:
+ * the declared params that were present, plus every other param unchanged.
+ * Values of declared params are strings, and `full-date` ones are
+ * validated.
+ * - `circuit_filter`: `{proof_systems?, circuit_ids?}`, the verifier's
+ * `circuit_proof_system_values` and `circuit_id_values` (from either form of
+ * `vp_formats_supported.circuit_zk`). A member is absent when the verifier
+ * did not send it; a present empty list is passed through, not rejected.
+ * - `meta_doctype`: `meta.doctype_value`, or `null`.
+ * - `raw`: the credential query exactly as parsed, so members this version
+ * does not know survive. It is verifier-supplied and unauthenticated.
+ *
+ * Normative cases for both the plan and every rejection are the vectors in
+ * `crates/siros-dc-matcher-core/tests/vectors/circuit_zk/`.
+ *
+ * # Errors
+ *
+ * [`CircuitZkPlanError::InvalidRequest`] with the planner's code and reason
+ * (`CircuitZkPlanException` in Kotlin). Input that is not JSON is the
+ * `query_not_parseable` or `invalid_client_metadata` code.
+ */
+public func circuitZkPlan(credentialQueryJson: String, clientMetadataJson: String?)throws  -> String {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeCircuitZkPlanError.lift) {
+    uniffi_siros_dc_matcher_ffi_fn_func_circuit_zk_plan(
+        FfiConverterString.lower(credentialQueryJson),
+        FfiConverterOptionString.lower(clientMetadataJson),$0
+    )
+})
+}
+/**
  * Match a full Digital Credentials API request.
  *
  * The request is the `{"requests":[{"protocol":…,"data":…}]}` envelope, which
@@ -2174,6 +2345,9 @@ private var initializationResult: InitializationResult = {
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
+    if (uniffi_siros_dc_matcher_ffi_checksum_func_circuit_zk_plan() != 42975) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_siros_dc_matcher_ffi_checksum_func_match_dc_api_request() != 49337) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -2183,7 +2357,7 @@ private var initializationResult: InitializationResult = {
     if (uniffi_siros_dc_matcher_ffi_checksum_func_match_dcql_with_context() != 35792) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_add_circuit_zk_system() != 2672) {
+    if (uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_add_circuit_zk_system() != 4465) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_add_credential() != 64015) {
