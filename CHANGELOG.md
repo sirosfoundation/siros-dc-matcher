@@ -11,6 +11,35 @@ existed.
 
 ## Unreleased
 
+Tests, vectors and docs only: no behaviour change, no FFI or plan-JSON change,
+no version bump.
+
+### Changed
+
+- `circuit_zk` planner vectors and tests follow the `nym_auth` rulebook change
+  that removes `verifier_id_type` from the request (how a verifier is identified
+  is now agreed in the shared trust framework: `semantic` or an OpenID4VP
+  client_id_type name). The planner still accepts the param and passes it
+  through as an opaque optional string, and the plan's `verifier_id_type` stays
+  an `Option`, `None` when absent; no function requires it. Vectors
+  `ok_normative_plain`, `ok_example_envelope`, `ok_opaque_strings`,
+  `err_duplicate_handle` and `err_example_duplicate_handle` no longer carry it;
+  new `ok_legacy_verifier_id_type_accepted` is the one vector that does. New
+  sha256:
+  - `err_duplicate_handle.json`: `0a94dbb8a02535d4ce657b6cdc747bf58de160d91a2a50a80e645c16da8801ed`
+  - `err_example_duplicate_handle.json`: `0811cad0d2d7ff7b22697537cb55aafecb4de3415199a512227b1e2142629cd9`
+  - `ok_example_envelope.json`: `6df46456fc8db63dc1da1c1707916122be8ed153d78f539cf3d14e9f6613e83f`
+  - `ok_normative_plain.json`: `1cd414d36529eb92d530ff6754779ed8ca600ce459ffdb33a4ee3acd8ac848e5`
+  - `ok_opaque_strings.json`: `c039c8fd0c129d0f6283b1e08d5775e1c490726b2e39e2162ca5b402ad8c9e3e`
+  - `ok_legacy_verifier_id_type_accepted.json`: `0cd2976e365f69ca9830434e2b89a1fb064f1b1a2a7a82e1410c59103e7b643c`
+  - `circuit_capabilities/match.json` is unchanged
+    (`9bee1868fd957fd4ad56a91dbca93b922ede04bfa57bb0f8b3a3c9bd5f383866`); it never
+    carried `verifier_id_type`.
+- Capability tests no longer send or declare `verifier_id_type`; the enum and
+  unlisted-param constraints are exercised with `config`. New test
+  `a_legacy_verifier_id_type_param_is_not_served` shows a request carrying the
+  param is not served by a circuit that does not list it.
+
 ## v0.9.0 — 2026-10-14
 
 Lets a wallet read the `circuit_zk` plan directly, and describe what a registered
