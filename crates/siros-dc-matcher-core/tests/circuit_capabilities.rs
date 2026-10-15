@@ -209,7 +209,7 @@ const CIRCUIT: &str = "urn:circuits:longfellow:nym_auth:v1";
 
 fn pseudonym(config: &str) -> Value {
     json!({"id": "pseudonym-v1-sha256", "return": "nym",
-           "params": {"config": config, "verifier_id_type": "x509_san_dns"}})
+           "params": {"config": config}})
 }
 
 fn age() -> Value {
@@ -256,8 +256,7 @@ fn with_param(key: &str, value: &str) -> CredentialDatabase {
 fn nym_auth_capabilities() -> String {
     caps(json!([
         {"id": "pseudonym-v1-sha256", "always": true, "params": {
-            "config": {"enum": ["known-offender-matching-ssc"]},
-            "verifier_id_type": {"enum": ["semantic", "x509_san_dns"]}}},
+            "config": {"enum": ["known-offender-matching-ssc"]}}},
         {"id": "age_check", "max": 1,
          "params": {"ge": {"type": "full-date"}, "le": {"type": "full-date"}}}
     ]))
@@ -364,6 +363,18 @@ fn an_unlisted_param_is_refused() {
     let db = with_param(CAPABILITIES_PARAM, &nym_auth_capabilities());
     let mut item = pseudonym("known-offender-matching-ssc");
     item["params"]["verifier_context"] = json!("ctx");
+    assert!(offered(&db, nym_query(json!([item]))).is_empty());
+}
+
+/// A request that still carries the retired `verifier_id_type` is planned
+/// (the planner is structural), but a circuit that does not list the param does
+/// not serve it: the ordinary unlisted-param rule, nothing special-cased.
+#[test]
+fn a_legacy_verifier_id_type_param_is_not_served() {
+    let db = with_param(CAPABILITIES_PARAM, &nym_auth_capabilities());
+    let mut item = pseudonym("known-offender-matching-ssc");
+    assert_eq!(offered(&db, nym_query(json!([item.clone()]))), ["nym-1"]);
+    item["params"]["verifier_id_type"] = json!("x509_san_dns");
     assert!(offered(&db, nym_query(json!([item]))).is_empty());
 }
 

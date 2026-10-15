@@ -24,11 +24,17 @@
 //!
 //! It judges **structure**, never **satisfiability**. Whether a request can be
 //! served (date spans and ordering, how many items of one function, which
-//! `config` or `verifier_id_type` values exist, `verifier_context` length,
+//! `config` values exist, `verifier_context` length,
 //! reserved `vct_values`, holder binding, a predicate against the holder's
 //! `birth_date`) is decided by wallets, against the [`Plan`]. `config` and
-//! `verifier_id_type` are therefore opaque strings here, and a function this
+//! `verifier_context` are therefore opaque strings here, and a function this
 //! table does not know passes through as [`Params::Unknown`].
+//!
+//! `verifier_id_type` is no longer part of the `nym_auth` rulebook request: how
+//! a verifier is identified is agreed between wallets and verifiers in the
+//! shared trust framework. The planner still accepts it and passes it through
+//! as an opaque optional string, so legacy and negative-test requests plan; no
+//! function requires it and nothing here interprets it.
 //!
 //! Nothing here is wired into matching, the FFI or the WASM picker.
 //!
@@ -99,6 +105,7 @@ pub const FUNCTIONS: &[FnSpec] = &[
                 name: "verifier_context",
                 ty: ParamType::String,
             },
+            // Legacy: not in the current rulebook request; opaque pass-through.
             ParamSpec {
                 name: "verifier_id_type",
                 ty: ParamType::String,
@@ -137,7 +144,8 @@ pub enum Params {
         /// `verifier_context`.
         #[serde(skip_serializing_if = "Option::is_none")]
         verifier_context: Option<String>,
-        /// `verifier_id_type`.
+        /// `verifier_id_type`: not carried by the current rulebook request;
+        /// accepted and passed through opaquely for legacy requests.
         #[serde(skip_serializing_if = "Option::is_none")]
         verifier_id_type: Option<String>,
         /// Parameters the table does not declare, such as the example shape's

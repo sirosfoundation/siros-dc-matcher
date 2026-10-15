@@ -33,7 +33,7 @@ fn age() -> Value {
 
 fn pseudonym() -> Value {
     json!({"id": "pseudonym-v1-sha256", "return": "nym",
-           "params": {"config": "known-offender-matching-ssc", "verifier_id_type": "x509_san_dns"}})
+           "params": {"config": "known-offender-matching-ssc"}})
 }
 
 fn client_metadata(systems: Option<&[&str]>, ids: Option<&[&str]>) -> Value {
