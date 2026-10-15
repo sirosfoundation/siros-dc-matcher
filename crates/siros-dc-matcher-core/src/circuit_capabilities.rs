@@ -28,8 +28,9 @@
 //! [`Capabilities::parse`] is strict, like the catalog's own validator: an
 //! unknown key at any level (so a constraint kind this build does not know), a
 //! `schema` other than 1, a missing required field, an empty id or enum, a
-//! duplicate function id, a `max` below 1, or a constraint that is not exactly
-//! one of `enum` / `type` is an error. The evaluator treats an error as "this
+//! duplicate function id, an empty `credential.issuance_profile` (or the old
+//! `credential.profile` key, now unknown), a `max` below 1, or a constraint
+//! that is not exactly one of `enum` / `type` is an error. The evaluator treats an error as "this
 //! circuit is not offered", never as "no constraint": a description we cannot
 //! read must not widen what a circuit is shown for.
 //!
@@ -269,14 +270,22 @@ impl Capabilities {
         let credential = map
             .get("credential")
             .ok_or_else(|| invalid("credential is required"))?;
-        let credential = object(credential, "credential", &["format", "type", "profile"])?;
-        // `profile` only ranks circuits, which is the wallet's job. It is
-        // accepted and ignored.
-        if credential
-            .get("profile")
-            .is_some_and(|p| !p.is_string() && !p.is_null())
-        {
-            return Err(invalid("credential.profile is not a string"));
+        let credential = object(
+            credential,
+            "credential",
+            &["format", "type", "issuance_profile"],
+        )?;
+        // `issuance_profile` is a constraint on the input credential, not an
+        // interop profile, and it only ranks circuits, which is the wallet's
+        // job. It must be a non-empty string when present, and is otherwise
+        // accepted and ignored: never used to filter. The key used to be
+        // called `profile`, which is now an unknown member like any other.
+        if let Some(profile) = credential.get("issuance_profile") {
+            if !profile.as_str().is_some_and(|p| !p.is_empty()) {
+                return Err(invalid(
+                    "credential.issuance_profile is not a non-empty string",
+                ));
+            }
         }
         let credential_format = required_text(credential, "format", "credential.")?;
         let credential_type = required_text(credential, "type", "credential.")?;

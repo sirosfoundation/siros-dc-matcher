@@ -11,6 +11,36 @@ existed.
 
 ## Unreleased
 
+## v0.10.0 — 2026-10-15
+
+Behaviour change (a minor bump, pre-1.0): the capabilities parser now follows
+the circuit catalog's rename of `credential.profile` to
+`credential.issuance_profile` (go-zk-circuits #36). No FFI or plan-JSON change,
+nothing to regenerate. `siros-dcql` and `siros-dc-matcher-core` are versioned
+0.10.0 to match the release; `siros-dcql` has no change.
+
+### Changed
+
+- `credential.issuance_profile` is accepted: an optional, non-empty opaque
+  string that constrains the input credential (it is not an interop profile).
+  It is validated (empty, null or non-string fails closed) and otherwise
+  ignored: it never filters, ranking being the wallet's job.
+- The old key `credential.profile` is now an unknown member like any other, so
+  the capabilities fail closed and the circuit is not offered. Nobody should
+  have been using it: no published catalog carried `profile`.
+- Capability vectors (`tests/vectors/circuit_capabilities/match.json`, sha256
+  `ab2e4f07ca6399e56cef486831ce1447fb772e13f3420af3a8d36d732153e8e9`): the
+  `profile-preferred`, `profile-conformant` and `profile-before-status` cases
+  use `issuance_profile` (expectations unchanged; membership only); new cases
+  `issuance-profile-served`, `legacy-profile-key-fails-closed` and
+  `issuance-profile-empty-fails-closed`. The two fail-closed cases carry
+  `expectRejected`: the capabilities themselves must not parse.
+
+Consumers that keep a copy of the vectors (siros-sdk-kotlin
+`spec/circuit-capabilities-vectors`, siros-sdk-swift) must re-copy them from the
+v0.10.0 tag and update their recorded provenance. The Kotlin pinned AAR should
+move to 0.10.0 once it is on Maven Central.
+
 ## v0.9.1 — 2026-10-15
 
 Tests, vectors and docs only: no behaviour change, no FFI or plan-JSON change,

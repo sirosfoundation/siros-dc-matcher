@@ -99,8 +99,14 @@ fn served(case: &Value) -> Result<BTreeSet<String>, ()> {
         let Some(capabilities) = c.get("capabilities") else {
             continue;
         };
-        let parsed = Capabilities::parse(&capabilities.to_string())
-            .unwrap_or_else(|e| panic!("{id}: the vector's own capabilities are rejected: {e}"));
+        let parsed = match Capabilities::parse(&capabilities.to_string()) {
+            Ok(parsed) => parsed,
+            // Fail closed: capabilities that do not parse are never offered.
+            // Only a case that says so (`expectRejected`) may rely on it;
+            // for every other case a rejection is a broken vector.
+            Err(_) if case["expectRejected"].as_bool() == Some(true) => continue,
+            Err(e) => panic!("{id}: the vector's own capabilities are rejected: {e}"),
+        };
         if !malformed && parsed.serves(presentation, &[format], &[ty], &items) {
             out.insert(id.to_owned());
         }
@@ -109,6 +115,29 @@ fn served(case: &Value) -> Result<BTreeSet<String>, ()> {
         Ok(BTreeSet::new())
     } else {
         Ok(out)
+    }
+}
+
+/// The catalog renamed `credential.profile` to `credential.issuance_profile`
+/// (a non-empty string). The old key is an unknown member, like any other.
+#[test]
+fn issuance_profile_is_a_non_empty_string_and_the_old_profile_key_is_unknown() {
+    let with = |credential: &str| {
+        Capabilities::parse(&format!(
+            r#"{{"schema":1,"presentation":"p","credential":{credential},
+                "functions":[{{"id":"f","max":1}}]}}"#
+        ))
+    };
+    assert!(with(r#"{"format":"f","type":"t"}"#).is_ok());
+    assert!(with(r#"{"format":"f","type":"t","issuance_profile":"x"}"#).is_ok());
+    for bad in [
+        r#""profile":"x""#,
+        r#""issuance_profile":"""#,
+        r#""issuance_profile":null"#,
+        r#""issuance_profile":1"#,
+    ] {
+        let e = with(&format!(r#"{{"format":"f","type":"t",{bad}}}"#));
+        assert!(e.is_err(), "{bad} must be rejected");
     }
 }
 
