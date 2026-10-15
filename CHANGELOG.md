@@ -11,8 +11,15 @@ existed.
 
 ## Unreleased
 
+## v0.9.1 — 2026-10-15
+
 Tests, vectors and docs only: no behaviour change, no FFI or plan-JSON change,
-no version bump.
+nothing to regenerate. The `circuit_zk` planner vectors changed (see below), so
+a consumer that keeps a copy of them (siros-sdk-kotlin
+`spec/circuit-zk-planner-vectors`, siros-sdk-swift) should re-copy them from the
+v0.9.1 tag rather than from commit 9237638, and update its recorded provenance.
+`siros-dcql` and `siros-dc-matcher-core` are versioned 0.9.1 to match the
+release; neither has a change.
 
 ### Changed
 
