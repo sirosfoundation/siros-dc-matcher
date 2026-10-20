@@ -13,6 +13,7 @@
 pub mod base64url;
 pub mod circuit_capabilities;
 pub mod circuit_zk;
+pub mod circuit_zk_response;
 pub mod db;
 
 pub mod evaluator;

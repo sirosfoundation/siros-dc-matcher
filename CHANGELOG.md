@@ -11,6 +11,13 @@ existed.
 
 ## Unreleased
 
+### Added
+
+- `circuit_zk` response shape: normative spec `docs/circuit_zk_response.md`,
+  conformance vectors in `crates/siros-dc-matcher-core/tests/vectors/circuit_zk_response/`
+  and a pure `circuit_zk_response::validate_response` that checks them. Not
+  wired into matching, the FFI or the WASM picker.
+
 ## v0.10.0 — 2026-10-15
 
 Behaviour change (a minor bump, pre-1.0): the capabilities parser now follows
