@@ -28,9 +28,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       # The test host's integration tests build and run the real matcher.wasm,
       # so the target has to be present for `cargo test` to mean anything.
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
-        with:
-          targets: wasm32-wasip1
+      - uses: ./.github/actions/rust-toolchain
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - run: cargo test --locked --workspace --all-features
 
@@ -39,9 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
-        with:
-          components: rustfmt
+      - uses: ./.github/actions/rust-toolchain
       - run: cargo fmt --all -- --check
 
   clippy:
@@ -49,10 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
-        with:
-          components: clippy
-          targets: wasm32-wasip1
+      - uses: ./.github/actions/rust-toolchain
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
       # The binary that actually ships is the wasm one; host-target lints alone
@@ -64,9 +57,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
-        with:
-          targets: wasm32-wasip1
+      - uses: ./.github/actions/rust-toolchain
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       # `make matcher`, so the module checked below is the one that ships —
       # a bare `cargo build` leaves the `environ_*` imports in, and then the
@@ -123,7 +114,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: ./.github/actions/rust-toolchain
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - run: cargo build --locked -p siros-dc-matcher-ffi --release
 
@@ -218,16 +209,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      # Both mechanisms are needed, and they do different jobs. `toolchain:`
-      # here is what *installs* 1.82. RUSTUP_TOOLCHAIN on the step below is
-      # what makes cargo use it: rust-toolchain.toml pins `channel = "stable"`
-      # and overrides the installed default, so without the env var this job
-      # would install 1.82 and then quietly build on stable — passing while
-      # checking nothing.
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
-        with:
-          toolchain: "1.82"
-          targets: wasm32-wasip1
+      # Both mechanisms are needed, and they do different jobs. `rustup
+      # toolchain install` here *installs* 1.82. RUSTUP_TOOLCHAIN (exported below) is
+      # what makes cargo use it: rust-toolchain.toml pins the exact
+      # CI toolchain and overrides the installed default, so without the env
+      # var this job would install 1.82 and then quietly build on the pinned
+      # one — passing while checking nothing.
+      - name: Install the MSRV toolchain
+        run: |
+          rustup toolchain install 1.82 --profile minimal --target wasm32-wasip1
+          # Exported for the rest of the job, not just the cargo step, so that
+          # rust-cache also keys on 1.82 rather than on the pinned compiler.
+          echo "RUSTUP_TOOLCHAIN=1.82" >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
       # siros-dcql is on crates.io, so its `rust-version` is a promise to
@@ -238,8 +231,6 @@ jobs:
       # -ffi and -testhost are deliberately excluded: they declare 1.88 in
       # their own manifests. Checking them here would only re-discover that.
       - name: The 1.82 crates build on 1.82
-        env:
-          RUSTUP_TOOLCHAIN: "1.82"
         run: |
           cargo check --locked --all-features \
             -p siros-dcql -p siros-dc-matcher-core -p siros-dc-matcher-wasm
@@ -249,7 +240,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: ./.github/actions/rust-toolchain
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       # Compares the crate's public API against the newest version on
       # crates.io. A breaking change is not an error here — it is an error to
@@ -268,7 +259,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: ./.github/actions/rust-toolchain
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       # siros-dcql goes to crates.io, so it must not acquire a dependency on
       # an unpublished workspace sibling. That is easy to add by accident and

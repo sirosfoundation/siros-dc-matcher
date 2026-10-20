@@ -22,7 +22,7 @@ Released artifacts are on the
 
 ## Build and test
 
-Rust stable, plus the wasm target:
+Rust, pinned exactly in `rust-toolchain.toml` (rustup installs it on first use), plus the wasm target:
 
 ```sh
 rustup target add wasm32-wasip1
