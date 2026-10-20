@@ -40,8 +40,17 @@ all: matcher bindings
 
 MATCHER_WASM := $(BUILD_DIR)/wasm32-wasip1/wasm-release/matcher.wasm
 
+# Panic locations embed the path of every dependency's source file, which
+# includes the builder's $CARGO_HOME. Without remapping, the same commit built
+# with the same rustc differs byte-for-byte between a laptop
+# (/home/alice/.cargo) and a CI runner (/home/runner/.cargo). Remap it, and the
+# checkout directory, to fixed names so the digest depends only on the source,
+# the lockfile and the pinned toolchain.
+CARGO_HOME_DIR := $(or $(CARGO_HOME),$(HOME)/.cargo)
+MATCHER_RUSTFLAGS := $(RUSTFLAGS) --remap-path-prefix=$(CARGO_HOME_DIR)=/cargo --remap-path-prefix=$(CURDIR)=/src
+
 matcher:
-	cargo build --locked -p siros-dc-matcher-wasm --target wasm32-wasip1 --profile wasm-release
+	RUSTFLAGS="$(MATCHER_RUSTFLAGS)" cargo build --locked -p siros-dc-matcher-wasm --target wasm32-wasip1 --profile wasm-release
 	# rustc's wasm32-wasip1 CRT startup (crt1-command.o) unconditionally
 	# imports wasi_snapshot_preview1.environ_get/environ_sizes_get, whether
 	# or not the program touches env vars - and this one never does. The
