@@ -25,7 +25,7 @@ fn response_conformance_vectors() {
         .filter(|p| p.extension().is_some_and(|e| e == "json"))
         .collect();
     names.sort();
-    assert!(names.len() >= 40, "vectors went missing: {}", names.len());
+    assert!(names.len() >= 60, "vectors went missing: {}", names.len());
 
     let mut failures = Vec::new();
     let (mut oks, mut errs) = (0, 0);
