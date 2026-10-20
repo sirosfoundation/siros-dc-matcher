@@ -25,7 +25,7 @@ fn response_conformance_vectors() {
         .filter(|p| p.extension().is_some_and(|e| e == "json"))
         .collect();
     names.sort();
-    assert!(names.len() >= 40, "vectors went missing: {}", names.len());
+    assert!(names.len() >= 60, "vectors went missing: {}", names.len());
 
     let mut failures = Vec::new();
     let (mut oks, mut errs) = (0, 0);
@@ -92,6 +92,13 @@ fn every_required_refusal_code_has_a_vector() {
         "result_member_wrong_type",
         "presentation_error_member",
         "result_not_object",
+        "x5chain_not_array",
+        "x5chain_empty",
+        "x5chain_too_many",
+        "x5chain_element_not_string",
+        "x5chain_element_not_base64",
+        "x5chain_element_empty",
+        "x5chain_element_too_large",
         "presentations_multiple_not_allowed",
         "presentations_not_array",
         "presentations_empty",

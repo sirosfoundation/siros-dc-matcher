@@ -11,6 +11,23 @@ existed.
 
 ## Unreleased
 
+### Changed
+
+- **BREAKING (response vectors and `validate_response`, relative to 99fdcae,
+  unreleased):** a `circuit_zk` presentation now has a required `x5chain`
+  member, the holder-supplied issuer certificate chain (array of standard
+  padded base64 DER, leaf first; at most 8 certificates, 4096 decoded bytes
+  each). Members are exactly `circuit_id`, `proof_system`, `proof`, `x5chain`,
+  `results`. New refusal codes: `x5chain_not_array`, `x5chain_empty`,
+  `x5chain_too_many`, `x5chain_element_not_string`,
+  `x5chain_element_not_base64`, `x5chain_element_empty`,
+  `x5chain_element_too_large`; an absent `x5chain` is
+  `presentation_member_missing`. Every valid vector carries an `x5chain`.
+  Certificates are not parsed here. No release has shipped the previous shape,
+  so no version bump is needed.
+- `circuit_zk` response: JSON `null` is pinned as a type error everywhere (never
+  absent, never empty); twelve `err_null_*` vectors, no new codes.
+
 ### Added
 
 - `circuit_zk` response shape: normative spec `docs/circuit_zk_response.md`,
