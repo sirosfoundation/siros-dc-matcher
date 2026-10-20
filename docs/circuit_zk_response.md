@@ -100,6 +100,18 @@ there is no partial acceptance). Reason codes are stable identifiers.
      any member other than its own (`result_unknown_member`), or without it
      (`result_member_missing`), is refused.
 
+## JSON `null`
+
+A JSON `null` is a value of the wrong type, wherever it appears. It is never
+"absent" (so it is not `presentation_member_missing`) and never an empty
+value (not an empty string, array or object). Concretely: `vp_token` ->
+`response_not_parseable`; the query-id entry -> `presentations_not_array`; a
+presentation -> `presentation_not_object`; `circuit_id` / `proof_system` /
+`proof` / `results` -> `presentation_member_wrong_type`; `x5chain` ->
+`x5chain_not_array`; an `x5chain` element -> `x5chain_element_not_string`; a
+result value -> `result_not_object`; a `pseudonym` or `satisfied` member ->
+`result_member_wrong_type`. Vectors: `err_null_*`.
+
 ## Order of checks
 
 The first failure in this order is the one reported: envelope (rule 1), then

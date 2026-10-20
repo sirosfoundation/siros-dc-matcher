@@ -25,6 +25,8 @@ existed.
   `presentation_member_missing`. Every valid vector carries an `x5chain`.
   Certificates are not parsed here. No release has shipped the previous shape,
   so no version bump is needed.
+- `circuit_zk` response: JSON `null` is pinned as a type error everywhere (never
+  absent, never empty); twelve `err_null_*` vectors, no new codes.
 
 ### Added
 
