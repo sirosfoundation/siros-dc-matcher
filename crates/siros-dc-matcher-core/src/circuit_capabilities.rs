@@ -1,6 +1,6 @@
 //! Structured circuit capabilities, and the rule that matches a request to them.
 //!
-//! A wallet registers a `circuit_zk` circuit with an optional `capabilities`
+//! A wallet registers a `zkp_req` circuit with an optional `capabilities`
 //! param: the `capabilities` object of the circuit catalog as a JSON string.
 //! [`Capabilities::parse`] reads it and [`Capabilities::serves`] applies the
 //! capability rule to a planned request (the catalog only stores the metadata;
@@ -177,7 +177,7 @@ impl Constraint {
                 .is_some_and(|s| values.iter().any(|v| v == s)),
             Self::Type(ParamKind::String) => value.is_string(),
             Self::Type(ParamKind::FullDate) => {
-                value.as_str().is_some_and(crate::circuit_zk::is_full_date)
+                value.as_str().is_some_and(crate::zkp_req::is_full_date)
             }
             // A JSON number with no fractional part. 2^53 is where f64 stops
             // being exact; the catalog's reference implementation draws the

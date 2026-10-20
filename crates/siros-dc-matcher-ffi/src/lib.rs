@@ -22,9 +22,7 @@ use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 use siros_dc_matcher_core::db::{Claim, Credential, CredentialDatabase, IconRef};
-use siros_dc_matcher_core::profile::{
-    Capability, MatchProfile, CIRCUIT_ZK_CAPABILITY, ZK_CAPABILITY,
-};
+use siros_dc_matcher_core::profile::{Capability, MatchProfile, ZKP_REQ_CAPABILITY, ZK_CAPABILITY};
 
 pub mod matching;
 
@@ -125,7 +123,7 @@ struct BuilderState {
     credentials: Vec<FfiCredential>,
     icons: Vec<(String, Vec<u8>)>,
     zk_systems: Vec<FfiCapability>,
-    circuit_zk_systems: Vec<FfiCapability>,
+    zkp_req_systems: Vec<FfiCapability>,
     debug: bool,
 }
 
@@ -184,12 +182,12 @@ impl SirosBlobBuilder {
         self.state().zk_systems.push(capability);
     }
 
-    /// Register a `circuit_zk` circuit this wallet can prove with.
+    /// Register a `zkp_req` circuit this wallet can prove with.
     ///
     /// `system` is the proof system (for example `longfellow-libzk-v1`). The
     /// params are opaque strings the matcher reads only as follows:
     ///
-    /// - `circuit_id` is matched against a verifier's `circuit_id_values`.
+    /// - `system_id` is matched against a verifier's `system_id_values`.
     /// - `functions`, if given as a comma-separated list of function ids,
     ///   limits which requested functions this circuit is offered for. A
     ///   circuit that declares no `functions` is not filtered by function.
@@ -203,7 +201,7 @@ impl SirosBlobBuilder {
     ///   object as a JSON string. It replaces `functions` and
     ///   `credential_type`, which are then not read. The circuit is offered for
     ///   a request only if the catalog's matching rule (steps 3 to 5) holds:
-    ///   presentation `circuit_zk` and the credential's type equal the
+    ///   presentation `zkp_req` and the credential's type equal the
     ///   request's, every requested function is declared with params its
     ///   constraints accept and within its `max`, and every `always` function
     ///   was requested. A value that is not a valid capabilities object
@@ -214,10 +212,10 @@ impl SirosBlobBuilder {
     ///   opaque strings.
     ///
     /// A registration without `credential_type` and `capabilities` behaves as it did in
-    /// 0.8.0. Call once per circuit; with none registered, `circuit_zk`
+    /// 0.8.0. Call once per circuit; with none registered, `zkp_req`
     /// requests match nothing.
-    pub fn add_circuit_zk_system(&self, capability: FfiCapability) {
-        self.state().circuit_zk_systems.push(capability);
+    pub fn add_zkp_req_system(&self, capability: FfiCapability) {
+        self.state().zkp_req_systems.push(capability);
     }
 
     /// Put matcher diagnostics into entry metadata.
@@ -310,10 +308,10 @@ impl SirosBlobBuilder {
             );
         }
 
-        if !s.circuit_zk_systems.is_empty() {
+        if !s.zkp_req_systems.is_empty() {
             profile.capabilities.insert(
-                CIRCUIT_ZK_CAPABILITY.to_string(),
-                s.circuit_zk_systems
+                ZKP_REQ_CAPABILITY.to_string(),
+                s.zkp_req_systems
                     .iter()
                     .map(|c| Capability {
                         system: c.system.clone(),

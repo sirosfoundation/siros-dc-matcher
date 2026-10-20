@@ -16,7 +16,7 @@ use siros_dc_matcher_core::circuit_capabilities::{Capabilities, RequestedItem};
 use siros_dc_matcher_core::db::CredentialDatabase;
 use siros_dc_matcher_core::evaluator::{credentials, ProfilePolicy};
 use siros_dc_matcher_core::fixtures::{circuit, nym_wallet, NYM_AUTH_DOCTYPE};
-use siros_dc_matcher_core::profile::{CAPABILITIES_PARAM, CIRCUIT_ID_PARAM, CREDENTIAL_TYPE_PARAM};
+use siros_dc_matcher_core::profile::{CAPABILITIES_PARAM, CREDENTIAL_TYPE_PARAM, SYSTEM_ID_PARAM};
 use siros_dc_matcher_core::request::first_supported_context;
 use siros_dcql::execute;
 
@@ -36,7 +36,7 @@ fn strings(v: Option<&Value>) -> Vec<String> {
 ///
 /// `Err` is the vector's `expectError`: a request without a presentation,
 /// credential format or credential type. The matcher has no such request (its
-/// presentation is `circuit_zk` and its format and type come from the profile
+/// presentation is `zkp_req` and its format and type come from the profile
 /// and `meta`), so for it an error case is the case where `serves` has nothing
 /// to compare against and must serve nothing.
 fn served(case: &Value) -> Result<BTreeSet<String>, ()> {
@@ -170,7 +170,7 @@ fn the_catalogs_match_vectors() {
 // --- parsing fails closed --------------------------------------------------
 
 fn caps(functions: Value) -> String {
-    json!({"schema": 1, "presentation": "circuit_zk",
+    json!({"schema": 1, "presentation": "zkp_req",
            "credential": {"format": "mso_mdoc", "type": NYM_AUTH_DOCTYPE},
            "functions": functions})
     .to_string()
@@ -237,16 +237,20 @@ const LONGFELLOW: &str = "longfellow-libzk-v1";
 const CIRCUIT: &str = "urn:circuits:longfellow:nym_auth:v1";
 
 fn pseudonym(config: &str) -> Value {
-    json!({"id": "pseudonym-v1-sha256", "return": "nym",
-           "params": {"config": config}})
+    json!({"fn_id": "pseudonym", "return": "nym",
+           "params": {"config": config, "ver": 1, "prf": "sha-256"}})
 }
 
 fn age() -> Value {
-    json!({"id": "age_check", "return": "age", "params": {"ge": "2008-10-10"}})
+    json!({"fn_id": "age_check", "return": "age", "params": {"ge": "2008-10-10"}})
 }
 
 fn query(meta: Value, req: Value) -> Value {
-    json!({"id": "nym", "format": "circuit_zk", "meta": meta, "req": req})
+    let mut meta = meta;
+    if let Some(object) = meta.as_object_mut() {
+        object.entry("source_format").or_insert(json!("mso_mdoc"));
+    }
+    json!({"id": "nym", "format": "zkp_req", "meta": meta, "_req": req})
 }
 
 fn nym_query(req: Value) -> Value {
@@ -284,8 +288,10 @@ fn with_param(key: &str, value: &str) -> CredentialDatabase {
 
 fn nym_auth_capabilities() -> String {
     caps(json!([
-        {"id": "pseudonym-v1-sha256", "always": true, "params": {
-            "config": {"enum": ["known-offender-matching-ssc"]}}},
+        {"id": "pseudonym", "always": true, "params": {
+            "config": {"enum": ["known-offender-matching-ssc"]},
+            "ver": {"type": "integer"},
+            "prf": {"enum": ["sha-256"]}}},
         {"id": "age_check", "max": 1,
          "params": {"ge": {"type": "full-date"}, "le": {"type": "full-date"}}}
     ]))
@@ -322,7 +328,7 @@ fn a_circuit_restricted_to_doctype_a_is_not_offered_for_a_request_naming_b() {
     unrestricted
         .profile
         .capabilities
-        .get_mut("circuit_zk")
+        .get_mut("zkp_req")
         .unwrap()[0]
         .params
         .remove(CREDENTIAL_TYPE_PARAM);
@@ -336,25 +342,18 @@ fn a_restricted_circuit_for_another_type_is_not_offered_for_the_held_one() {
     assert!(offered(&db, nym_query(json!([age()]))).is_empty());
 }
 
+/// `vct_values` belongs to the reserved `dc+sd-jwt` source format, which
+/// rulebook v0.4 does not define: such a request is unsatisfiable, whatever
+/// the circuit says.
 #[test]
-fn credential_type_is_compared_with_vct_values_too() {
-    let hold = |circuit_type: &str| {
-        let mut db = with_param(CREDENTIAL_TYPE_PARAM, circuit_type);
-        db.credentials[0].vct = Some("urn:vct:a".into());
-        db
-    };
-    let asks = |vcts: &[&str]| query(json!({"vct_values": vcts}), json!([age()]));
-    // The circuit's type is one of the request's alternatives.
-    assert_eq!(
-        offered(&hold("urn:vct:a"), asks(&["urn:vct:b", "urn:vct:a"])),
-        ["nym-1"]
+fn a_vct_values_request_is_not_offered() {
+    let mut db = with_param(CREDENTIAL_TYPE_PARAM, "urn:vct:a");
+    db.credentials[0].vct = Some("urn:vct:a".into());
+    let asks = query(
+        json!({"source_format": "dc+sd-jwt", "vct_values": ["urn:vct:a"]}),
+        json!([age()]),
     );
-    assert_eq!(
-        offered(&hold("urn:vct:c"), asks(&["urn:vct:a", "urn:vct:c"])),
-        ["nym-1"]
-    );
-    // Not one of them: the held credential matches the request, the circuit does not.
-    assert!(offered(&hold("urn:vct:c"), asks(&["urn:vct:a"])).is_empty());
+    assert!(offered(&db, asks).is_empty());
 }
 
 #[test]
@@ -366,9 +365,8 @@ fn a_restricted_circuit_needs_the_request_to_name_a_type() {
 #[test]
 fn without_credential_type_a_circuit_is_unrestricted_as_before() {
     let db = nym_wallet(vec![circuit(LONGFELLOW, CIRCUIT, None)]);
-    for meta in [json!({"doctype_value": NYM_AUTH_DOCTYPE}), json!({})] {
-        assert_eq!(offered(&db, query(meta, json!([age()]))), ["nym-1"]);
-    }
+    let meta = json!({"doctype_value": NYM_AUTH_DOCTYPE});
+    assert_eq!(offered(&db, query(meta, json!([age()]))), ["nym-1"]);
 }
 
 // capabilities
@@ -411,14 +409,15 @@ fn a_legacy_verifier_id_type_param_is_not_served() {
 fn an_undeclared_function_is_refused() {
     let db = with_param(CAPABILITIES_PARAM, &nym_auth_capabilities());
     let req = json!([pseudonym("known-offender-matching-ssc"),
-                     {"id": "future_fn", "return": "f"}]);
+                     {"fn_id": "future_fn", "return": "f"}]);
     assert!(offered(&db, nym_query(req)).is_empty());
 }
 
 #[test]
 fn max_instances_is_enforced() {
     let db = with_param(CAPABILITIES_PARAM, &nym_auth_capabilities());
-    let second_age = json!({"id": "age_check", "return": "age2", "params": {"le": "2013-10-09"}});
+    let second_age =
+        json!({"fn_id": "age_check", "return": "age2", "params": {"le": "2013-10-09"}});
     let one = json!([pseudonym("known-offender-matching-ssc"), age()]);
     let two = json!([pseudonym("known-offender-matching-ssc"), age(), second_age]);
     assert_eq!(offered(&db, nym_query(one)), ["nym-1"]);
@@ -441,16 +440,16 @@ fn the_credential_type_must_match_the_requests() {
 }
 
 #[test]
-fn the_presentation_must_be_circuit_zk() {
-    let text = nym_auth_capabilities().replace("\"circuit_zk\"", "\"other_presentation\"");
+fn the_presentation_must_be_zkp_req() {
+    let text = nym_auth_capabilities().replace("\"zkp_req\"", "\"other_presentation\"");
     let db = with_param(CAPABILITIES_PARAM, &text);
     let req = json!([pseudonym("known-offender-matching-ssc")]);
     assert!(offered(&db, nym_query(req)).is_empty());
 }
 
 #[test]
-fn the_circuit_format_must_be_one_the_profile_maps_circuit_zk_onto() {
-    // circuit_zk answers stored mso_mdoc credentials; a circuit that proves
+fn the_circuit_format_must_be_one_the_profile_maps_zkp_req_onto() {
+    // zkp_req answers stored mso_mdoc credentials; a circuit that proves
     // over an SD-JWT VC is not one the picker can use for them.
     let text = nym_auth_capabilities().replace("mso_mdoc", "dc+sd-jwt");
     let db = with_param(CAPABILITIES_PARAM, &text);
@@ -496,8 +495,8 @@ fn the_verifiers_circuit_lists_still_apply_with_capabilities() {
     let request = |ids: &[&str]| {
         json!({"requests": [{"protocol": "openid4vp-v1-unsigned", "data": {
             "dcql_query": {"credentials": [nym_query(req.clone())]},
-            "client_metadata": {"vp_formats_supported": {"circuit_zk": {
-                "circuit_id_values": ids}}}}}]})
+            "client_metadata": {"vp_formats_supported": {"zkp_req": {
+                "system_id_values": ids}}}}}]})
         .to_string()
     };
     let run = |ids: &[&str]| {
@@ -520,7 +519,7 @@ fn the_verifiers_circuit_lists_still_apply_with_capabilities() {
 #[test]
 fn a_registration_without_the_new_params_behaves_as_in_0_8_0() {
     let db = nym_wallet(vec![circuit(LONGFELLOW, CIRCUIT, None)]);
-    let caps = &db.profile.capabilities["circuit_zk"];
+    let caps = &db.profile.capabilities["zkp_req"];
     assert_eq!(caps.len(), 1);
     assert_eq!(
         caps[0]
@@ -528,17 +527,16 @@ fn a_registration_without_the_new_params_behaves_as_in_0_8_0() {
             .keys()
             .map(String::as_str)
             .collect::<Vec<_>>(),
-        [CIRCUIT_ID_PARAM],
+        [SYSTEM_ID_PARAM],
         "the fixture grew a param"
     );
 
-    // Unrestricted by type, even with no meta type at all, and by function,
-    // even for a function nobody has heard of.
+    // Unrestricted by type. (Since rulebook v0.4 a request with no type value,
+    // or a function the rulebook does not define, is unsatisfiable before any
+    // circuit is consulted.)
     for q in [
         nym_query(json!([age()])),
-        query(json!({}), json!([age()])),
         query(json!({"doctype_value": "anything"}), json!([age()])),
-        nym_query(json!([age(), {"id": "future_fn", "return": "f"}])),
     ] {
         let found = offered(&db, q.clone());
         // `anything` is ruled out by the held credential's doctype, as ever;

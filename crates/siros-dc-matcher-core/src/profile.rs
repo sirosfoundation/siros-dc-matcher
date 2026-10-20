@@ -250,16 +250,16 @@ impl MatchProfile {
 /// Capability name a `mso_mdoc_zk` format rule refers to.
 pub const ZK_CAPABILITY: &str = "zk_system";
 
-/// Capability family for `circuit_zk` circuits a wallet can prove with.
+/// Capability family for `zkp_req` circuits a wallet can prove with.
 ///
 /// Every entry is one circuit: [`Capability::system`] is its proof system, and
 /// its params are opaque strings the matcher reads only as follows —
-/// [`CIRCUIT_ID_PARAM`] is compared with the verifier's `circuit_id_values`,
+/// [`SYSTEM_ID_PARAM`] is compared with the verifier's `system_id_values`,
 /// and [`FUNCTIONS_PARAM`], when present, bounds which functions it supports.
-pub const CIRCUIT_ZK_CAPABILITY: &str = "circuit_zk";
+pub const ZKP_REQ_CAPABILITY: &str = "zkp_req";
 
-/// Param naming a circuit, matched against the verifier's `circuit_id_values`.
-pub const CIRCUIT_ID_PARAM: &str = "circuit_id";
+/// Param naming a circuit, matched against the verifier's `system_id_values`.
+pub const SYSTEM_ID_PARAM: &str = "system_id";
 
 /// Param listing the function ids a circuit supports, comma-separated.
 ///
@@ -284,8 +284,8 @@ pub const CREDENTIAL_TYPE_PARAM: &str = "credential_type";
 /// circuit is not offered.
 pub const CAPABILITIES_PARAM: &str = "capabilities";
 
-/// The format a `circuit_zk` query is asked in.
-pub const CIRCUIT_ZK_FORMAT: &str = "circuit_zk";
+/// The format a `zkp_req` query is asked in.
+pub const ZKP_REQ_FORMAT: &str = "zkp_req";
 
 /// `mso_mdoc_zk` maps onto ordinary `mso_mdoc` storage because producing a ZK
 /// proof is a presentation-time transform, not a storage format — there is no
@@ -334,12 +334,12 @@ impl MatchProfile {
                         from_meta: "zk_system_type".into(),
                     }],
                 },
-                // A `circuit_zk` presentation is a proof about an ordinary stored
+                // A `zkp_req` presentation is a proof about an ordinary stored
                 // mdoc, like `mso_mdoc_zk`, but what it needs is not a `meta`
                 // list of systems — the circuit capabilities are checked by the
                 // evaluator against the planned request.
                 FormatRule {
-                    query_format: CIRCUIT_ZK_FORMAT.into(),
+                    query_format: ZKP_REQ_FORMAT.into(),
                     stored_formats: vec!["mso_mdoc".into()],
                     requires: vec![],
                 },

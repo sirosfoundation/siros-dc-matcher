@@ -13,27 +13,57 @@ existed.
 
 ### Changed
 
-- **BREAKING (response vectors and `validate_response`, relative to 99fdcae,
-  unreleased):** a `circuit_zk` presentation now has a required `x5chain`
-  member, the holder-supplied issuer certificate chain (array of standard
-  padded base64 DER, leaf first; at most 8 certificates, 4096 decoded bytes
-  each). Members are exactly `circuit_id`, `proof_system`, `proof`, `x5chain`,
-  `results`. New refusal codes: `x5chain_not_array`, `x5chain_empty`,
-  `x5chain_too_many`, `x5chain_element_not_string`,
-  `x5chain_element_not_base64`, `x5chain_element_empty`,
-  `x5chain_element_too_large`; an absent `x5chain` is
-  `presentation_member_missing`. Every valid vector carries an `x5chain`.
-  Certificates are not parsed here. No release has shipped the previous shape,
-  so no version bump is needed.
-- `circuit_zk` response: JSON `null` is pinned as a type error everywhere (never
-  absent, never empty); twelve `err_null_*` vectors, no new codes.
+- **BREAKING (rulebook v0.4; nothing here has shipped):** the matcher follows
+  `nym_auth_rulebook` v0.4 (`fea9a0a`). Names: `circuit_zk` is `zkp_req`
+  (format, capability family, modules, FFI `add_zkp_req_system`,
+  `zkp_req_plan`, `ZkpReqPlanError`, `FfiMatchedCredential.zkp_req`), `req` is
+  `_req`, request item `id` is `fn_id`, `pseudonym-v1-sha256` is `pseudonym`,
+  `circuit_id` is `system_id` (registration param `system_id`),
+  `circuit_id_values` / `circuit_proof_system_values` are `system_id_values` /
+  `proof_system_values`, the plan's `circuit_filter` is `system_filter`
+  (`system_ids`). The request carries `meta.source_format` (`mso_mdoc`,
+  `bbs_cd`); `pseudonym` takes `config`, `ver` (integer) and `prf`;
+  `verifier_id_type` is gone (an undeclared parameter if sent). The rulebook
+  example shape (`claims._req`, `{fn_id, input}` envelope) is not a request
+  shape any more. Bindings are regenerated. Wallets must re-register: a blob
+  built before this change has no `zkp_req` format rule and declines the
+  format. Capability catalogs that name the presentation `circuit_zk` must say
+  `zkp_req`, and a `pseudonym` entry must list `config`, `ver` and `prf`.
+- **BREAKING (response):** a presentation is the base64url (unpadded) CBOR
+  `ZkpPresentation {system_id, proof, issuer_key_set, ? proof_time, results}`
+  (rulebook v0.4), replacing the JSON shape. `issuer_key_set` replaces
+  `x5chain` (DER certificates as byte strings; limits kept: 8 elements, 4096
+  bytes each); `proof_system` and `circuit_id` are not members; a pseudonym is
+  a byte string (32 for `prf` `sha-256`, 48 for `hashdh-bls12381g1`), a
+  predicate result is `true`. Strict CBOR: definite lengths only, no duplicate
+  keys, no trailing bytes. `proof_time` (tag-0 tdate) must be the exact 20-byte
+  form and is required for `mso_mdoc`. All response vectors are regenerated
+  (143, by `scripts/gen_zkp_req_response_vectors.py`); refusal codes are new
+  (see the vectors README).
+- The evaluator never offers a request the rulebook calls unsatisfiable
+  (`zkp_req::unsatisfiable`, 16 codes, vectors in `tests/vectors/zkp_req_unsat`),
+  and requires the stored attestation to be of the request's `source_format`.
+  Which configurations a circuit supports remains its capabilities' say.
+- Non-disclosure: a request through any format other than `zkp_req` for `ssc`,
+  `psc`, `secret_seed` or `birth_date` of a nym_auth attestation (including a
+  wildcard path, or no `claims`) does not match it. `birth_date` of other
+  credentials is unaffected.
 
 ### Added
 
-- `circuit_zk` response shape: normative spec `docs/circuit_zk_response.md`,
-  conformance vectors in `crates/siros-dc-matcher-core/tests/vectors/circuit_zk_response/`
-  and a pure `circuit_zk_response::validate_response` that checks them. Not
-  wired into matching, the FFI or the WASM picker.
+- `proof_time` module: `render` / `parse` of the exact 20-byte
+  `YYYY-MM-DDThh:mm:ssZ` form and `check_tolerance` (recommended 60 s skew,
+  600 s age, configurable); vectors in `tests/vectors/proof_time`.
+- Docs `docs/zkp_req_request.md`, `docs/zkp_req_response.md` (renamed from
+  `circuit_zk_response.md`), and `scripts/vectors_digest.sh`.
+- Vector set digest (sha256 of the sorted `sha256sum` manifest of
+  `zkp_req`, `zkp_req_response`, `zkp_req_unsat` and `proof_time`):
+  `9f482d7a3fb87cb1381d0dfb7a2fc396b6cd3c1eba07c5d76f44e47142b751ac`.
+  The capability vectors (`circuit_capabilities/match.json`) are unchanged:
+  `ab2e4f07ca6399e56cef486831ce1447fb772e13f3420af3a8d36d732153e8e9`.
+
+The unreleased JSON response shape of #48 and #49 (with `x5chain`) is
+superseded by the CBOR shape above and was never released.
 
 ## v0.10.0 — 2026-10-15
 

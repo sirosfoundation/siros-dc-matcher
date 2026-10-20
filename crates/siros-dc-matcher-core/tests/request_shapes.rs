@@ -588,11 +588,11 @@ fn origins_client_id_and_metadata_are_none_when_absent() {
 
 /// The rulebook example puts an object under `claims`, which the typed DCQL
 /// parser rejects. It must still reach the planner.
-fn circuit_zk_object_claims_data() -> serde_json::Value {
+fn zkp_req_object_claims_data() -> serde_json::Value {
     serde_json::json!({
         "client_id": "x509_san_dns:rp.example.com",
         "dcql_query": {"credentials": [{
-            "id": "nym", "format": "circuit_zk",
+            "id": "nym", "format": "zkp_req",
             "meta": {"doctype_value": "eu.europa.ec.eudi.nym_auth.1"},
             "claims": {"_req": [{"fn_id": "age_check", "id": "a", "params": {"ge": "2008-10-10"}}]}
         }]}
@@ -600,9 +600,9 @@ fn circuit_zk_object_claims_data() -> serde_json::Value {
 }
 
 #[test]
-fn a_circuit_zk_request_with_object_claims_yields_a_context() {
+fn a_zkp_req_request_with_object_claims_yields_a_context() {
     let ctx = first_supported_context(
-        &envelope("openid4vp-v1-unsigned", circuit_zk_object_claims_data()),
+        &envelope("openid4vp-v1-unsigned", zkp_req_object_claims_data()),
         &MatchProfile::siros_default(),
         None,
     )
@@ -611,8 +611,8 @@ fn a_circuit_zk_request_with_object_claims_yields_a_context() {
     assert!(ctx.dcql_query_raw["credentials"][0]["claims"]["_req"].is_array());
 }
 
-/// ... but only for circuit_zk. Other formats keep failing as before, and so
-/// does a malformed credential sitting next to a circuit_zk one.
+/// ... but only for zkp_req. Other formats keep failing as before, and so
+/// does a malformed credential sitting next to a zkp_req one.
 #[test]
 fn object_claims_on_any_other_format_is_still_malformed() {
     let data = serde_json::json!({"dcql_query": {"credentials": [{
@@ -632,7 +632,7 @@ fn object_claims_on_any_other_format_is_still_malformed() {
         Err(NoQuery::Malformed(_))
     ));
 
-    let mut mixed = circuit_zk_object_claims_data();
+    let mut mixed = zkp_req_object_claims_data();
     mixed["dcql_query"]["credentials"]
         .as_array_mut()
         .expect("array")
@@ -646,10 +646,10 @@ fn object_claims_on_any_other_format_is_still_malformed() {
 /// The thin wrapper cannot return a query that does not exist, so it moves on
 /// to the next entry, as it did when this was a parse failure.
 #[test]
-fn the_wrapper_skips_a_circuit_zk_entry_that_has_no_typed_query() {
+fn the_wrapper_skips_a_zkp_req_entry_that_has_no_typed_query() {
     let found = first_supported_request(
         &two_entry_envelope(
-            ("openid4vp-v1-unsigned", circuit_zk_object_claims_data()),
+            ("openid4vp-v1-unsigned", zkp_req_object_claims_data()),
             ("openid4vp-v1-signed", signed_data()),
         ),
         &MatchProfile::siros_default(),
