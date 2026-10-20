@@ -113,7 +113,7 @@ pub fn first_supported_request(
 /// envelope, so the JSON is not walked twice at an API boundary.
 #[must_use]
 pub fn first_supported_in(parsed: &Value, profile: &MatchProfile) -> Option<(String, DcqlQuery)> {
-    // Entries whose query has no typed form (a `circuit_zk` request in the
+    // Entries whose query has no typed form (a `zkp_req` request in the
     // rulebook-example shape) are skipped, exactly as they were when they were
     // a parse failure: this function can only return a `DcqlQuery`.
     let only_typed = |_: &str, _: bool, context: &RequestContext| context.dcql_query.is_some();
@@ -154,7 +154,7 @@ pub struct RequestContext {
     pub dcql_query_raw: Value,
     /// `dcql_query_raw` parsed as DCQL.
     ///
-    /// `None` only for a query DCQL cannot represent but a `circuit_zk`
+    /// `None` only for a query DCQL cannot represent but a `zkp_req`
     /// credential query can: `claims` as an object, in the rulebook example
     /// shape. Such a request is read from `dcql_query_raw` instead.
     pub dcql_query: Option<DcqlQuery>,
@@ -172,12 +172,12 @@ impl RequestContext {
     /// # Errors
     ///
     /// [`NoQuery::Malformed`] when the query is not DCQL, with the same
-    /// `circuit_zk` allowance as [`extract_context`].
+    /// `zkp_req` allowance as [`extract_context`].
     pub fn from_dcql(
         dcql_query_raw: Value,
         client_metadata: Option<Value>,
     ) -> Result<Self, NoQuery> {
-        let dcql_query = parse_dcql_or_circuit_zk(&dcql_query_raw)?;
+        let dcql_query = parse_dcql_or_zkp_req(&dcql_query_raw)?;
         Ok(Self {
             protocol: String::new(),
             signed: false,
@@ -190,12 +190,12 @@ impl RequestContext {
     }
 
     /// The query to run the DCQL engine over: [`Self::dcql_query`], or, when
-    /// that is `None`, the raw query with the `claims` of its `circuit_zk`
+    /// that is `None`, the raw query with the `claims` of its `zkp_req`
     /// credentials left out.
     ///
-    /// DCQL's `claims` has no meaning for `circuit_zk`, whose requests live in
+    /// DCQL's `claims` has no meaning for `zkp_req`, whose requests live in
     /// `req`. The engine needs a credential query to match and select, and a
-    /// `circuit_zk` one carrying no claims selects none — which is what the
+    /// `zkp_req` one carrying no claims selects none — which is what the
     /// format means. The planner, not this, reads what was actually asked.
     #[must_use]
     pub fn matching_query(&self) -> Option<DcqlQuery> {
@@ -204,7 +204,7 @@ impl RequestContext {
         }
         let mut raw = self.dcql_query_raw.clone();
         for credential in raw.get_mut("credentials")?.as_array_mut()? {
-            if credential.get("format").and_then(Value::as_str) == Some("circuit_zk") {
+            if credential.get("format").and_then(Value::as_str) == Some("zkp_req") {
                 if let Some(object) = credential.as_object_mut() {
                     object.remove("claims");
                 }
@@ -280,7 +280,7 @@ pub fn extract_context(
     let raw = object
         .get("dcql_query")
         .ok_or(NoQuery::PayloadHasNoDcqlQuery)?;
-    let dcql_query = parse_dcql_or_circuit_zk(raw)?;
+    let dcql_query = parse_dcql_or_zkp_req(raw)?;
     Ok(RequestContext {
         protocol: protocol.to_string(),
         signed,
@@ -502,28 +502,28 @@ fn parse_dcql(value: &Value) -> Result<DcqlQuery, NoQuery> {
     serde_json::from_value(value.clone()).map_err(|e| NoQuery::Malformed(e.to_string()))
 }
 
-/// Parse a raw `dcql_query` as DCQL, tolerating `circuit_zk` credential queries
+/// Parse a raw `dcql_query` as DCQL, tolerating `zkp_req` credential queries
 /// DCQL cannot represent.
 ///
-/// The typed parser expects `claims` to be a sequence, and the `circuit_zk`
+/// The typed parser expects `claims` to be a sequence, and the `zkp_req`
 /// rulebook example puts an object there. When the typed parse fails, the query
-/// is retried without its `circuit_zk` credentials: if the rest parses, the
+/// is retried without its `zkp_req` credentials: if the rest parses, the
 /// failure was theirs and the result is `Ok(None)`, leaving the raw value for
-/// the `circuit_zk` planner. A failure that is not theirs is still
+/// the `zkp_req` planner. A failure that is not theirs is still
 /// [`NoQuery::Malformed`], so every other format behaves as before.
-fn parse_dcql_or_circuit_zk(raw: &Value) -> Result<Option<DcqlQuery>, NoQuery> {
+fn parse_dcql_or_zkp_req(raw: &Value) -> Result<Option<DcqlQuery>, NoQuery> {
     let first_error = match serde_json::from_value::<DcqlQuery>(raw.clone()) {
         Ok(query) => return Ok(Some(query)),
         Err(e) => e,
     };
-    let is_circuit_zk = |c: &Value| c.get("format").and_then(Value::as_str) == Some("circuit_zk");
+    let is_zkp_req = |c: &Value| c.get("format").and_then(Value::as_str) == Some("zkp_req");
     let (Some(credentials), Some(object)) = (
         raw.get("credentials").and_then(Value::as_array),
         raw.as_object(),
     ) else {
         return Err(NoQuery::Malformed(first_error.to_string()));
     };
-    if !credentials.iter().any(is_circuit_zk) {
+    if !credentials.iter().any(is_zkp_req) {
         return Err(NoQuery::Malformed(first_error.to_string()));
     }
     let mut rest = object.clone();
@@ -532,7 +532,7 @@ fn parse_dcql_or_circuit_zk(raw: &Value) -> Result<Option<DcqlQuery>, NoQuery> {
         Value::Array(
             credentials
                 .iter()
-                .filter(|c| !is_circuit_zk(c))
+                .filter(|c| !is_zkp_req(c))
                 .cloned()
                 .collect(),
         ),

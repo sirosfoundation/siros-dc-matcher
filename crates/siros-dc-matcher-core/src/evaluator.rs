@@ -26,13 +26,13 @@ use serde_json::Value;
 use siros_dcql::{Credential as _, CredentialQuery, PathComponent, PathError};
 
 use crate::circuit_capabilities::{Capabilities, RequestedItem};
-use crate::circuit_zk::{self, Plan};
 use crate::db::{Claim, Credential, CredentialDatabase};
 use crate::profile::{
-    Capability, MatchProfile, Op, UnknownFormat, CAPABILITIES_PARAM, CIRCUIT_ID_PARAM,
-    CIRCUIT_ZK_CAPABILITY, CIRCUIT_ZK_FORMAT, CREDENTIAL_TYPE_PARAM, FUNCTIONS_PARAM,
+    Capability, MatchProfile, Op, UnknownFormat, CAPABILITIES_PARAM, CREDENTIAL_TYPE_PARAM,
+    FUNCTIONS_PARAM, SYSTEM_ID_PARAM, ZKP_REQ_CAPABILITY, ZKP_REQ_FORMAT,
 };
 use crate::request::RequestContext;
+use crate::zkp_req::{self, Plan};
 
 /// A credential from the registered blob, wrapped so DCQL can evaluate it.
 ///
@@ -154,16 +154,16 @@ pub struct ProfilePolicy<'a> {
     context: Option<&'a RequestContext>,
 }
 
-/// The circuit a `circuit_zk` query will be answered with, and what it asked.
+/// The circuit a `zkp_req` query will be answered with, and what it asked.
 #[derive(Debug, Clone, PartialEq)]
-pub struct CircuitZkSelection<'a> {
+pub struct ZkpReqSelection<'a> {
     /// The wallet's circuit capability chosen for this request.
     pub capability: &'a Capability,
     /// The normalised request, as the planner read it.
     pub plan: Plan,
 }
 
-impl CircuitZkSelection<'_> {
+impl ZkpReqSelection<'_> {
     /// `{"circuit": <capability>, "plan": <plan>}`, the one JSON form both the
     /// picker metadata and the FFI carry.
     ///
@@ -182,7 +182,7 @@ impl CircuitZkSelection<'_> {
 impl<'a> ProfilePolicy<'a> {
     /// Evaluate against this profile.
     ///
-    /// Without a request context a `circuit_zk` query matches nothing: what it
+    /// Without a request context a `zkp_req` query matches nothing: what it
     /// asks for is not in the typed DCQL query, so there is nothing to plan.
     /// See [`Self::with_context`].
     pub fn new(profile: &'a MatchProfile) -> Self {
@@ -194,7 +194,7 @@ impl<'a> ProfilePolicy<'a> {
 
     /// Evaluate with the request the query came from.
     ///
-    /// `circuit_zk` is matched against its planned request and the verifier's
+    /// `zkp_req` is matched against its planned request and the verifier's
     /// `client_metadata`, neither of which the typed query carries.
     #[must_use]
     pub fn with_context(mut self, context: &'a RequestContext) -> Self {
@@ -202,18 +202,18 @@ impl<'a> ProfilePolicy<'a> {
         self
     }
 
-    /// The circuit and plan for a `circuit_zk` query, or `None` if it cannot
+    /// The circuit and plan for a `zkp_req` query, or `None` if it cannot
     /// be answered.
     ///
     /// `None` covers a structurally invalid request (the planner said so), a
     /// wallet with no circuit, and a circuit the request rules out. It never
-    /// falls back to claim matching: an invalid `circuit_zk` request is a
+    /// falls back to claim matching: an invalid `zkp_req` request is a
     /// request for nothing the matcher understands, and answering it with
     /// whatever the claims would have selected discloses data nobody asked
     /// for. The matcher applies no satisfiability rules here; only the
     /// verifier's own circuit lists and, where a circuit declares them, the
     /// functions it supports.
-    pub fn circuit_zk_selection(&self, query: &CredentialQuery) -> Option<CircuitZkSelection<'a>> {
+    pub fn zkp_req_selection(&self, query: &CredentialQuery) -> Option<ZkpReqSelection<'a>> {
         let context = self.context?;
         let raw = context
             .dcql_query_raw
@@ -222,15 +222,17 @@ impl<'a> ProfilePolicy<'a> {
             .iter()
             .find(|c| c.get("id").and_then(Value::as_str) == Some(query.id.as_str()))?;
         let client_metadata = context.client_metadata.as_ref().map(Value::to_string);
-        let plan = circuit_zk::plan(&raw.to_string(), client_metadata.as_deref()).ok()?;
+        let plan = zkp_req::plan(&raw.to_string(), client_metadata.as_deref()).ok()?;
+        // A request the rulebook calls unsatisfiable is never offered.
+        zkp_req::unsatisfiable(&plan).ok()?;
 
         let capability = self
             .profile
             .capabilities
-            .get(CIRCUIT_ZK_CAPABILITY)?
+            .get(ZKP_REQ_CAPABILITY)?
             .iter()
             .find(|capability| self.circuit_serves(capability, &plan))?;
-        Some(CircuitZkSelection { capability, plan })
+        Some(ZkpReqSelection { capability, plan })
     }
 
     /// Every capability requirement that applies to this query.
@@ -377,15 +379,18 @@ fn requested_types(plan: &Plan) -> Vec<&str> {
         .into_iter()
         .flatten()
         .filter_map(Value::as_str);
-    doctype.into_iter().chain(vcts).collect()
+    let schema = meta
+        .and_then(|m| m.get("schema_id_value"))
+        .and_then(Value::as_str);
+    doctype.into_iter().chain(schema).chain(vcts).collect()
 }
 
 impl ProfilePolicy<'_> {
-    /// Whether a circuit capability can serve a planned `circuit_zk` request.
+    /// Whether a circuit capability can serve a planned `zkp_req` request.
     ///
     /// The verifier's lists are constraints only when it sent them
-    /// (`circuit_proof_system_values` and `circuit_id_values` are OPTIONAL). A
-    /// circuit with no `circuit_id` cannot be named by a verifier that lists
+    /// (`proof_system_values` and `system_id_values` are OPTIONAL). A
+    /// circuit with no `system_id` cannot be named by a verifier that lists
     /// ids, so it does not satisfy one.
     ///
     /// What the circuit says about itself is one of two things. With a
@@ -397,14 +402,14 @@ impl ProfilePolicy<'_> {
     /// `credential_type` only for a request whose `meta` names that type, and a
     /// circuit with neither is not filtered, exactly as before.
     fn circuit_serves(&self, capability: &Capability, plan: &Plan) -> bool {
-        let filter = &plan.circuit_filter;
+        let filter = &plan.system_filter;
         if let Some(systems) = &filter.proof_systems {
             if !systems.contains(&capability.system) {
                 return false;
             }
         }
-        if let Some(ids) = &filter.circuit_ids {
-            let ours = capability.params.get(CIRCUIT_ID_PARAM);
+        if let Some(ids) = &filter.system_ids {
+            let ours = capability.params.get(SYSTEM_ID_PARAM);
             if !ids.iter().any(|id| Some(id) == ours) {
                 return false;
             }
@@ -429,16 +434,23 @@ impl ProfilePolicy<'_> {
     /// The `capabilities` rule, for one circuit, against one plan.
     ///
     /// The credential format a circuit proves over must be one the profile
-    /// maps `circuit_zk` onto: the request does not name a stored format, the
+    /// maps `zkp_req` onto: the request does not name a stored format, the
     /// profile's format rule is what says which credentials answer it.
     fn capabilities_serve(&self, text: &str, plan: &Plan) -> bool {
         let Ok(capabilities) = Capabilities::parse(text) else {
             return false;
         };
-        let Some(rule) = self.profile.format_rule(CIRCUIT_ZK_FORMAT) else {
+        let Some(rule) = self.profile.format_rule(ZKP_REQ_FORMAT) else {
             return false;
         };
-        let formats: Vec<&str> = rule.stored_formats.iter().map(String::as_str).collect();
+        // The attestation the proof is made over must be the request's
+        // `source_format`, and one the profile stores.
+        let formats: Vec<&str> = rule
+            .stored_formats
+            .iter()
+            .map(String::as_str)
+            .filter(|f| *f == plan.source_format)
+            .collect();
 
         let mut params = Vec::with_capacity(plan.functions.len());
         for function in &plan.functions {
@@ -456,7 +468,7 @@ impl ProfilePolicy<'_> {
                 params,
             })
             .collect();
-        capabilities.serves(CIRCUIT_ZK_FORMAT, &formats, &requested_types(plan), &items)
+        capabilities.serves(ZKP_REQ_FORMAT, &formats, &requested_types(plan), &items)
     }
 }
 
@@ -472,6 +484,35 @@ fn as_text(value: &Value) -> Option<String> {
         Value::Bool(b) => Some(b.to_string()),
         _ => None,
     }
+}
+
+/// Doctype of the ISO/IEC 18013-5 nym_auth attestation.
+pub const NYM_AUTH_DOCTYPE: &str = "eu.europa.ec.eudi.nym_auth.1";
+/// Schema identifier of the `bbs_cd` nym_auth attestation.
+pub const NYM_AUTH_BBS_SCHEMA: &str = "eu.europa.ec.eudi.nym_auth.bbs.1";
+/// Attributes of a nym_auth attestation that no presentation may disclose.
+pub const NYM_AUTH_UNDISCLOSABLE: [&str; 4] = ["ssc", "psc", "secret_seed", "birth_date"];
+
+fn is_nym_auth(credential: &crate::db::Credential) -> bool {
+    [credential.doctype.as_deref(), credential.vct.as_deref()]
+        .into_iter()
+        .flatten()
+        .any(|t| t == NYM_AUTH_DOCTYPE || t == NYM_AUTH_BBS_SCHEMA)
+}
+
+/// Whether a non-`zkp_req` query asks a nym_auth attestation to disclose
+/// anything: a named undisclosable attribute, a wildcard path that includes
+/// one, or no `claims` at all (which asks for the whole attestation).
+fn discloses_nym_auth_secrets(query: &CredentialQuery) -> bool {
+    use siros_dcql::PathComponent;
+    query.claims.is_empty()
+        || query.claims.iter().any(|claim| {
+            claim.path.iter().any(|component| match component {
+                PathComponent::Key(k) => NYM_AUTH_UNDISCLOSABLE.contains(&k.as_str()),
+                PathComponent::Null => true,
+                PathComponent::Index(_) => false,
+            })
+        })
 }
 
 impl siros_dcql::Policy<BlobCredential<'_>> for ProfilePolicy<'_> {
@@ -493,9 +534,18 @@ impl siros_dcql::Policy<BlobCredential<'_>> for ProfilePolicy<'_> {
             },
         }
 
-        // `circuit_zk` is answered from its plan, not from claims, and an
+        // `zkp_req` is answered from its plan, not from claims, and an
         // invalid or unservable request is no match rather than a fallback.
-        if query.format == CIRCUIT_ZK_FORMAT && self.circuit_zk_selection(query).is_none() {
+        if query.format == ZKP_REQ_FORMAT {
+            match self.zkp_req_selection(query) {
+                // The proof is made over the stored attestation itself.
+                Some(selection) if selection.plan.source_format == stored => {}
+                _ => return false,
+            }
+        } else if is_nym_auth(credential.credential) && discloses_nym_auth_secrets(query) {
+            // Rulebook, "Non-disclosure of seed commitments": `ssc`, `psc`,
+            // `secret_seed` and `birth_date` of a nym_auth attestation are
+            // never disclosed. Only `zkp_req` may use them, inside `_req`.
             return false;
         }
 
@@ -589,9 +639,9 @@ pub struct Resolved<'a> {
     /// `ppid_context` above all, which changes what is produced rather than
     /// which credential can produce it.
     pub meta: BTreeMap<String, String>,
-    /// For a `circuit_zk` query: the circuit chosen and the planned request.
+    /// For a `zkp_req` query: the circuit chosen and the planned request.
     /// Such a match carries no claims.
-    pub circuit_zk: Option<CircuitZkSelection<'a>>,
+    pub zkp_req: Option<ZkpReqSelection<'a>>,
 }
 
 /// Resolve the details of one match.
@@ -612,22 +662,22 @@ pub fn resolve<'a>(
             .unwrap_or_default()
     };
 
-    // A `circuit_zk` match discloses nothing: whatever the typed query says
+    // A `zkp_req` match discloses nothing: whatever the typed query says
     // about claims, none are selected.
-    let circuit_zk = if query.format == CIRCUIT_ZK_FORMAT {
-        policy.circuit_zk_selection(query)
+    let zkp_req = if query.format == ZKP_REQ_FORMAT {
+        policy.zkp_req_selection(query)
     } else {
         None
     };
 
-    let claims = if circuit_zk.is_some() {
+    let claims = if zkp_req.is_some() {
         &[][..]
     } else {
         &candidate.claims[..]
     };
 
     Resolved {
-        circuit_zk,
+        zkp_req,
         claims: claims
             .iter()
             .map(|claim| {

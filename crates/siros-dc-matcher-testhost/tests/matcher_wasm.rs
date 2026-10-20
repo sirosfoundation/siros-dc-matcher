@@ -750,7 +750,7 @@ fn a_machine_readable_purpose_is_not_put_on_the_consent_screen() {
     assert_eq!(entry.warning, None);
 }
 
-// --- circuit_zk ------------------------------------------------------------
+// --- zkp_req ------------------------------------------------------------
 
 fn nym_request(query: Value, client_metadata: Option<Value>) -> Vec<u8> {
     let mut data = json!({"dcql_query": {"credentials": [query]}});
@@ -763,11 +763,12 @@ fn nym_request(query: Value, client_metadata: Option<Value>) -> Vec<u8> {
 }
 
 fn nym_query() -> Value {
-    json!({"id": "nym", "format": "circuit_zk",
-    "meta": {"doctype_value": fixtures::NYM_AUTH_DOCTYPE},
-    "req": [
-        {"id": "pseudonym-v1-sha256", "return": "n", "params": {"config": "known-offender-matching-ssc"}},
-        {"id": "age_check", "return": "a", "params": {"ge": "2008-10-10", "le": "2013-10-09"}}
+    json!({"id": "nym", "format": "zkp_req",
+    "meta": {"source_format": "mso_mdoc", "doctype_value": fixtures::NYM_AUTH_DOCTYPE},
+    "_req": [
+        {"fn_id": "pseudonym", "return": "n",
+         "params": {"config": "known-offender-matching-ssc", "ver": 1, "prf": "sha-256"}},
+        {"fn_id": "age_check", "return": "a", "params": {"ge": "2008-10-10", "le": "2013-10-09"}}
     ]})
 }
 
@@ -775,11 +776,11 @@ fn nym_db(circuits: Vec<Capability>) -> CredentialDatabase {
     fixtures::nym_wallet(circuits)
 }
 
-/// The real binary, end to end: a `circuit_zk` match is one entry whose rows
+/// The real binary, end to end: a `zkp_req` match is one entry whose rows
 /// come from the plan, not from the credential's claims, and every row says
 /// the request behind it is unverified.
 #[test]
-fn a_circuit_zk_request_is_offered_with_rows_from_the_plan() {
+fn a_zkp_req_request_is_offered_with_rows_from_the_plan() {
     let db = nym_db(vec![fixtures::circuit(
         "longfellow-libzk-v1",
         "urn:circuit:1",
@@ -787,21 +788,18 @@ fn a_circuit_zk_request_is_offered_with_rows_from_the_plan() {
     )]);
     let captured = invoke(&db, nym_request(nym_query(), None));
 
-    let entry = captured.entry("siros-0", 0).expect("circuit_zk entry");
+    let entry = captured.entry("siros-0", 0).expect("zkp_req entry");
     assert_eq!(entry.credential_id, "nym-1");
 
     let meta: Value = serde_json::from_str(&entry.metadata).expect("metadata is JSON");
     assert_eq!(
         meta["claims"],
         json!([]),
-        "a circuit_zk match carries no claims"
+        "a zkp_req match carries no claims"
     );
+    assert_eq!(meta["zkp_req"]["circuit"]["system"], "longfellow-libzk-v1");
     assert_eq!(
-        meta["circuit_zk"]["circuit"]["system"],
-        "longfellow-libzk-v1"
-    );
-    assert_eq!(
-        meta["circuit_zk"]["plan"]["functions"][1]["function_id"],
+        meta["zkp_req"]["plan"]["functions"][1]["function_id"],
         "age_check"
     );
 
@@ -814,7 +812,7 @@ fn a_circuit_zk_request_is_offered_with_rows_from_the_plan() {
 }
 
 #[test]
-fn a_non_circuit_zk_match_has_no_circuit_zk_metadata() {
+fn a_non_zkp_req_match_has_no_zkp_req_metadata() {
     let captured = invoke(
         &wallet(None),
         request(
@@ -824,13 +822,13 @@ fn a_non_circuit_zk_match_has_no_circuit_zk_metadata() {
     );
     let entry = captured.entry("siros-0", 0).expect("entry");
     let meta: Value = serde_json::from_str(&entry.metadata).expect("JSON");
-    assert!(meta["circuit_zk"].is_null());
+    assert!(meta["zkp_req"].is_null());
 }
 
 #[test]
 fn the_verifiers_circuit_lists_decide_in_the_binary() {
     let db = nym_db(vec![fixtures::circuit("p", "c", None)]);
-    let cm = |systems: &[&str]| json!({"vp_formats_supported": {"circuit_zk": {"circuit_proof_system_values": systems}}});
+    let cm = |systems: &[&str]| json!({"vp_formats_supported": {"zkp_req": {"proof_system_values": systems}}});
     assert!(!invoke(&db, nym_request(nym_query(), Some(cm(&["p"])))).is_empty());
     assert!(invoke(&db, nym_request(nym_query(), Some(cm(&["q"])))).is_empty());
 }
@@ -847,11 +845,12 @@ fn credential_type_and_capabilities_decide_in_the_binary() {
     };
     let offered = |db: &CredentialDatabase| !invoke(db, nym_request(nym_query(), None)).is_empty();
     let caps = |ty: &str| {
-        json!({"schema": 1, "presentation": "circuit_zk",
+        json!({"schema": 1, "presentation": "zkp_req",
                "credential": {"format": "mso_mdoc", "type": ty},
                "functions": [
-                   {"id": "pseudonym-v1-sha256", "always": true,
-                    "params": {"config": {"enum": ["known-offender-matching-ssc"]}}},
+                   {"id": "pseudonym", "always": true,
+                    "params": {"config": {"enum": ["known-offender-matching-ssc"]},
+                               "ver": {"type": "integer"}, "prf": {"enum": ["sha-256"]}}},
                    {"id": "age_check", "max": 1,
                     "params": {"ge": {"type": "full-date"}, "le": {"type": "full-date"}}}]})
         .to_string()
@@ -877,30 +876,31 @@ fn credential_type_and_capabilities_decide_in_the_binary() {
     assert!(!offered(&with(&[("capabilities", "{not json".into())])));
 }
 
+/// `claims` in any form is not `zkp_req`: an object, which DCQL cannot
+/// represent, reaches the planner and is refused as a request for nothing.
 #[test]
-fn a_circuit_zk_request_with_object_claims_reaches_the_planner() {
+fn a_zkp_req_request_with_object_claims_offers_nothing() {
     let db = nym_db(vec![fixtures::circuit("p", "c", None)]);
-    let query = json!({"id": "nym", "format": "circuit_zk",
-        "meta": {"doctype_value": fixtures::NYM_AUTH_DOCTYPE},
-        "claims": {"_req": [{"fn_id": "age_check", "id": "a", "params": {"ge": "2008-10-10"}}]}});
-    let captured = invoke(&db, nym_request(query, None));
-    let entry = captured.entry("siros-0", 0).expect("entry");
-    assert_eq!(entry.fields[0].0, "Age check");
+    let query = json!({"id": "nym", "format": "zkp_req",
+        "meta": {"source_format": "mso_mdoc", "doctype_value": fixtures::NYM_AUTH_DOCTYPE},
+        "claims": {"_req": [{"fn_id": "age_check", "return": "a", "params": {"ge": "2008-10-10"}}]}});
+    assert!(invoke(&db, nym_request(query, None)).is_empty());
 }
 
 #[test]
-fn circuit_zk_offers_nothing_without_a_circuit_or_with_an_invalid_plan() {
+fn zkp_req_offers_nothing_without_a_circuit_or_with_an_invalid_plan() {
     // No circuit registered.
     assert!(invoke(&nym_db(vec![]), nym_request(nym_query(), None)).is_empty());
 
     let db = nym_db(vec![fixtures::circuit("p", "c", None)]);
-    // Ordinary claims on circuit_zk: no fallback to claim matching, although
+    // Ordinary claims on zkp_req: no fallback to claim matching, although
     // the wallet holds the claim.
     let mut with_claims = nym_query();
     with_claims["claims"] = json!([{"path": [fixtures::NYM_AUTH_DOCTYPE, "birth_date"]}]);
     assert!(invoke(&db, nym_request(with_claims, None)).is_empty());
 
     let mut invalid = nym_query();
-    invalid["req"] = json!([{"id": "age_check", "return": "x", "params": {"ge": "2026-02-30"}}]);
+    invalid["_req"] =
+        json!([{"fn_id": "age_check", "return": "x", "params": {"ge": "2026-02-30"}}]);
     assert!(invoke(&db, nym_request(invalid, None)).is_empty());
 }

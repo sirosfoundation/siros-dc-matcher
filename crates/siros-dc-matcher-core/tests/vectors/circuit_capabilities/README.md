@@ -34,10 +34,10 @@ served circuit ids with `expect`.
   member and fails closed (`legacy-profile-key-fails-closed`).
 - **`expectError` cases** (a request without presentation, credential format or
   credential type) cannot arise in the matcher, whose presentation is fixed
-  at `circuit_zk` and whose format and type come from the profile and `meta`.
+  at `zkp_req` and whose format and type come from the profile and `meta`.
   The test requires that nothing is served for them.
 - **`credential.format`** is compared against the formats the profile maps
-  `circuit_zk` onto (stored `mso_mdoc`), not against a request member, because
-  a `circuit_zk` request does not carry one.
+  `zkp_req` onto (stored `mso_mdoc`), not against a request member, because
+  a `zkp_req` request does not carry one.
 - **`empty-req`** is served by `serves` as the vectors say. A real request
   never reaches it: the planner rejects an empty `req` as structurally invalid.

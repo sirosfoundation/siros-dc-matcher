@@ -44,11 +44,11 @@ extern "C" fn _start() {
     main();
 }
 
-use siros_dc_matcher_core::circuit_zk::{Params, Plan};
 use siros_dc_matcher_core::db::CredentialDatabase;
 use siros_dc_matcher_core::evaluator::{credentials, resolve, ProfilePolicy};
 use siros_dc_matcher_core::request::{diagnose, first_supported_context};
 use siros_dc_matcher_core::sink::Entry;
+use siros_dc_matcher_core::zkp_req::{Params, Plan};
 use siros_dcql::execute;
 
 /// Prefix for the per-entry set ids.
@@ -95,7 +95,7 @@ fn run(request: &[u8], blob: &[u8], origin: &str) {
         enabled: db.profile.debug,
     };
 
-    // The whole request context, not only the query: a `circuit_zk` request is
+    // The whole request context, not only the query: a `zkp_req` request is
     // matched against the verifier's `client_metadata` and has no typed DCQL
     // form when it uses the rulebook example's `claims` object. Nothing in the
     // context is authenticated; the wallet checks the request at selection.
@@ -181,7 +181,7 @@ fn run(request: &[u8], blob: &[u8], origin: &str) {
                 .as_ref()
                 .map(|r| r.capabilities.clone())
                 .unwrap_or_default();
-            let zk = resolved.as_ref().and_then(|r| r.circuit_zk.as_ref());
+            let zk = resolved.as_ref().and_then(|r| r.zkp_req.as_ref());
 
             let metadata = serde_json::json!({
                 "matcher": "siros-dc-matcher",
@@ -190,10 +190,10 @@ fn run(request: &[u8], blob: &[u8], origin: &str) {
                 "credential_id": credential.id,
                 "capabilities": capabilities,
                 "claims": resolved.as_ref().map(|r| r.claims.clone()).unwrap_or_default(),
-                // For `circuit_zk`: the chosen circuit and the planned
+                // For `zkp_req`: the chosen circuit and the planned
                 // request, the latter derived from an unverified request
                 // object. Absent for every other format.
-                "circuit_zk": zk.map(|z| z.to_json()),
+                "zkp_req": zk.map(|z| z.to_json()),
                 // The platform's own attestation of who is asking — the only
                 // trustworthy statement of that, since anything naming an
                 // origin inside the request body is the request describing
@@ -241,10 +241,10 @@ fn run(request: &[u8], blob: &[u8], origin: &str) {
                 },
             );
 
-            // A `circuit_zk` match discloses no claims, so its rows describe
+            // A `zkp_req` match discloses no claims, so its rows describe
             // the proof being asked for instead, from the plan.
             if let Some(zk) = zk {
-                for (name, value) in circuit_zk_rows(&zk.plan) {
+                for (name, value) in zkp_req_rows(&zk.plan) {
                     abi::emit::field(&set_id, position, &credential.id, &name, &value);
                 }
                 continue;
@@ -274,7 +274,7 @@ fn run(request: &[u8], blob: &[u8], origin: &str) {
 }
 
 // ============================================================================
-// circuit_zk rows
+// zkp_req rows
 // ============================================================================
 
 /// The longest row value emitted. The values are verifier-supplied strings, and
@@ -286,13 +286,13 @@ const ROW_MAX_CHARS: usize = 80;
 /// being asked, not facts.
 const UNVERIFIED: &str = "(unverified request)";
 
-/// Picker rows for a planned `circuit_zk` request: one per requested
+/// Picker rows for a planned `zkp_req` request: one per requested
 /// function, no claim fields.
 ///
 /// Text comes from the unverified request, so each row says so. Opaque values
 /// (`config`, dates, `verifier_context`) are shown as given and truncated, and
 /// nothing is judged: whether the request is acceptable is the wallet's call.
-fn circuit_zk_rows(plan: &Plan) -> Vec<(String, String)> {
+fn zkp_req_rows(plan: &Plan) -> Vec<(String, String)> {
     plan.functions
         .iter()
         .map(|function| {
@@ -511,52 +511,52 @@ mod tests {
         db.to_cbor().unwrap()
     }
 
-    fn circuit_zk_request(query: serde_json::Value) -> String {
+    fn zkp_req_request(query: serde_json::Value) -> String {
         serde_json::json!({"requests": [{"protocol": "openid4vp-v1-unsigned",
             "data": {"dcql_query": {"credentials": [query]}}}]})
         .to_string()
     }
 
-    /// The `circuit_zk` branch, every way through: a match, no circuit,
+    /// The `zkp_req` branch, every way through: a match, no circuit,
     /// an invalid plan, object `claims`, and ordinary claims on the format,
     /// with diagnostics on and off.
     #[test]
-    fn run_completes_on_every_circuit_zk_path() {
+    fn run_completes_on_every_zkp_req_path() {
         let nym = "eu.europa.ec.eudi.nym_auth.1";
         let queries = [
-            serde_json::json!({"id": "q", "format": "circuit_zk", "meta": {"doctype_value": nym},
-                "req": [{"id": "age_check", "return": "a", "params": {"ge": "2008-10-10"}},
-                        {"id": "pseudonym-v1-sha256", "return": "n", "params": {"config": "x".repeat(300)}},
-                        {"id": "future", "return": "f"}]}),
-            serde_json::json!({"id": "q", "format": "circuit_zk", "meta": {"doctype_value": nym},
-                "claims": {"_req": [{"fn_id": "age_check", "id": "a"}]}}),
-            serde_json::json!({"id": "q", "format": "circuit_zk", "meta": {"doctype_value": nym},
-                "req": [], "claims": [{"path": ["a", "b"]}]}),
-            serde_json::json!({"id": "q", "format": "circuit_zk", "meta": 7}),
+            serde_json::json!({"id": "q", "format": "zkp_req", "meta": {"source_format": "mso_mdoc", "doctype_value": nym},
+                "_req": [{"fn_id": "age_check", "return": "a", "params": {"ge": "2008-10-10"}},
+                        {"fn_id": "pseudonym", "return": "n", "params": {"config": "x".repeat(300)}},
+                        {"fn_id": "future", "return": "f"}]}),
+            serde_json::json!({"id": "q", "format": "zkp_req", "meta": {"source_format": "mso_mdoc", "doctype_value": nym},
+                "claims": {"_req": [{"fn_id": "age_check", "return": "a"}]}}),
+            serde_json::json!({"id": "q", "format": "zkp_req", "meta": {"source_format": "mso_mdoc", "doctype_value": nym},
+                "_req": [], "claims": [{"path": ["a", "b"]}]}),
+            serde_json::json!({"id": "q", "format": "zkp_req", "meta": 7}),
         ];
         for debug in [false, true] {
             for blob in [nym_blob(debug), golden_blob()] {
                 for query in &queries {
-                    run(circuit_zk_request(query.clone()).as_bytes(), &blob, "");
+                    run(zkp_req_request(query.clone()).as_bytes(), &blob, "");
                 }
             }
         }
     }
 
     #[test]
-    fn circuit_zk_rows_say_they_are_unverified_and_are_bounded() {
-        let plan = siros_dc_matcher_core::circuit_zk::plan(
-            &serde_json::json!({"id": "q", "format": "circuit_zk", "meta": {},
-                "req": [
-                    {"id": "age_check", "return": "a", "params": {"ge": "2008-10-10", "le": "2013-10-09"}},
-                    {"id": "pseudonym-v1-sha256", "return": "n", "params": {"config": "c".repeat(500)}},
-                    {"id": "mystery", "return": "m"},
-                    {"id": "age_check", "return": "b"}]})
+    fn zkp_req_rows_say_they_are_unverified_and_are_bounded() {
+        let plan = siros_dc_matcher_core::zkp_req::plan(
+            &serde_json::json!({"id": "q", "format": "zkp_req", "meta": {"source_format": "mso_mdoc"},
+                "_req": [
+                    {"fn_id": "age_check", "return": "a", "params": {"ge": "2008-10-10", "le": "2013-10-09"}},
+                    {"fn_id": "pseudonym", "return": "n", "params": {"config": "c".repeat(500)}},
+                    {"fn_id": "mystery", "return": "m"},
+                    {"fn_id": "age_check", "return": "b"}]})
             .to_string(),
             None,
         )
         .unwrap();
-        let rows = circuit_zk_rows(&plan);
+        let rows = zkp_req_rows(&plan);
         assert_eq!(rows.len(), 4, "one row per function");
         assert_eq!(rows[0].0, "Age check");
         assert!(rows[0].1.starts_with("born 2008-10-10 to 2013-10-09"));

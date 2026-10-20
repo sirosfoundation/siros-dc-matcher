@@ -72,14 +72,14 @@ pub fn longfellow(num_attributes: Option<&str>) -> Capability {
 }
 
 /// The doctype of the nym_auth attestation.
-pub const NYM_AUTH_DOCTYPE: &str = "eu.europa.ec.eudi.nym_auth.1";
+pub use crate::evaluator::NYM_AUTH_DOCTYPE;
 
-/// A circuit capability for `circuit_zk`: the proof system, its circuit id,
+/// A circuit capability for `zkp_req`: the proof system, its circuit id,
 /// and optionally the functions it declares support for (comma-separated).
-pub fn circuit(system: &str, circuit_id: &str, functions: Option<&str>) -> Capability {
+pub fn circuit(system: &str, system_id: &str, functions: Option<&str>) -> Capability {
     let mut params = std::collections::BTreeMap::from([(
-        crate::profile::CIRCUIT_ID_PARAM.to_string(),
-        circuit_id.to_string(),
+        crate::profile::SYSTEM_ID_PARAM.to_string(),
+        system_id.to_string(),
     )]);
     if let Some(functions) = functions {
         params.insert(
@@ -93,16 +93,16 @@ pub fn circuit(system: &str, circuit_id: &str, functions: Option<&str>) -> Capab
     }
 }
 
-/// A wallet holding one nym_auth mdoc and the given `circuit_zk` circuits.
+/// A wallet holding one nym_auth mdoc and the given `zkp_req` circuits.
 ///
-/// The credential does carry claims, deliberately: a `circuit_zk` match must
+/// The credential does carry claims, deliberately: a `zkp_req` match must
 /// disclose none of them, and a fixture without any would not notice if it did.
 pub fn nym_wallet(circuits: Vec<Capability>) -> CredentialDatabase {
     let mut profile = MatchProfile::siros_default();
     if !circuits.is_empty() {
         profile
             .capabilities
-            .insert(crate::profile::CIRCUIT_ZK_CAPABILITY.to_string(), circuits);
+            .insert(crate::profile::ZKP_REQ_CAPABILITY.to_string(), circuits);
     }
     let mut db = CredentialDatabase::new(profile);
     db.credentials.push(Credential {

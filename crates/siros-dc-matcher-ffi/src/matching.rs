@@ -26,10 +26,10 @@
 
 use std::collections::HashMap;
 
-use siros_dc_matcher_core::circuit_zk;
 use siros_dc_matcher_core::db::CredentialDatabase;
 use siros_dc_matcher_core::evaluator::{credentials, resolve, ProfilePolicy};
 use siros_dc_matcher_core::request::{self, RequestContext};
+use siros_dc_matcher_core::zkp_req;
 use siros_dcql::{execute, DcqlQuery};
 
 use crate::FfiCapability;
@@ -97,7 +97,7 @@ pub struct FfiMatchedCredential {
     /// A pseudonym context changes what is produced, not which credential can
     /// produce it, so it is carried rather than matched on.
     pub meta: HashMap<String, String>,
-    /// For a `circuit_zk` query: a JSON object `{"circuit": {...}, "plan":
+    /// For a `zkp_req` query: a JSON object `{"circuit": {...}, "plan":
     /// {...}}` holding the circuit this wallet chose (its registered
     /// capability: `system` and string `params`) and the request as the
     /// matcher normalised it. `None` for every other format.
@@ -105,8 +105,8 @@ pub struct FfiMatchedCredential {
     /// JSON strings, not records, so the planner's shape can follow the
     /// rulebook without a binding regeneration each time. The plan's `raw`
     /// member is the verifier's request as sent and is **not authenticated**
-    /// here. A `circuit_zk` match has an empty `claims`.
-    pub circuit_zk: Option<String>,
+    /// here. A `zkp_req` match has an empty `claims`.
+    pub zkp_req: Option<String>,
 }
 
 /// One way to satisfy the request: every member presented together.
@@ -252,13 +252,13 @@ pub fn match_dcql(blob: Vec<u8>, dcql_json: String) -> Result<FfiMatchOutcome, M
     match_dcql_with_context(blob, dcql_json, None)
 }
 
-/// Why a `circuit_zk` query could not be planned.
+/// Why a `zkp_req` query could not be planned.
 #[derive(Debug, thiserror::Error, uniffi::Error)]
-pub enum CircuitZkPlanError {
+pub enum ZkpReqPlanError {
     /// The query is structurally broken: the planner's verdict, unchanged.
     ///
     /// This says the request is malformed, never that it cannot be served.
-    #[error("invalid circuit_zk request ({code}): {reason}")]
+    #[error("invalid zkp_req request ({code}): {reason}")]
     InvalidRequest {
         /// A stable identifier for the defect, the planner's own code:
         /// `query_not_parseable`, `req_missing_or_empty`, `req_ambiguous`,
@@ -273,21 +273,21 @@ pub enum CircuitZkPlanError {
     },
 }
 
-/// Plan a `circuit_zk` credential query, without a blob.
+/// Plan a `zkp_req` credential query, without a blob.
 ///
 /// `credential_query_json` is one Credential Query object (an element of
 /// `dcql_query.credentials`), not the whole `dcql_query`. In either rulebook
 /// shape: `req` beside `meta`, or `claims: {"_req": [...]}`.
 /// `client_metadata_json` is the request's `client_metadata`, if it has one.
 ///
-/// This is the function the matcher itself calls (`circuit_zk::plan` in the
+/// This is the function the matcher itself calls (`zkp_req::plan` in the
 /// core crate), so the plan a wallet reads here is the plan matching used. It
 /// judges structure only; whether the request can be served is the wallet's.
 ///
 /// # The plan JSON
 ///
 /// A JSON object with exactly these members; this shape is stable, and the
-/// same object is the `plan` member of [`FfiMatchedCredential::circuit_zk`]:
+/// same object is the `plan` member of [`FfiMatchedCredential::zkp_req`]:
 ///
 /// - `functions`: array, in request order, of `{function_id, handle, params}`.
 ///   `function_id` is `id` in a `req` item and `fn_id` in a `_req` item;
@@ -295,35 +295,35 @@ pub enum CircuitZkPlanError {
 ///   the declared params that were present, plus every other param unchanged.
 ///   Values of declared params are strings, and `full-date` ones are
 ///   validated.
-/// - `circuit_filter`: `{proof_systems?, circuit_ids?}`, the verifier's
-///   `circuit_proof_system_values` and `circuit_id_values` (from either form of
-///   `vp_formats_supported.circuit_zk`). A member is absent when the verifier
+/// - `system_filter`: `{proof_systems?, system_ids?}`, the verifier's
+///   `proof_system_values` and `system_id_values` (from either form of
+///   `vp_formats_supported.zkp_req`). A member is absent when the verifier
 ///   did not send it; a present empty list is passed through, not rejected.
 /// - `meta_doctype`: `meta.doctype_value`, or `null`.
 /// - `raw`: the credential query exactly as parsed, so members this version
 ///   does not know survive. It is verifier-supplied and unauthenticated.
 ///
 /// Normative cases for both the plan and every rejection are the vectors in
-/// `crates/siros-dc-matcher-core/tests/vectors/circuit_zk/`.
+/// `crates/siros-dc-matcher-core/tests/vectors/zkp_req/`.
 ///
 /// # Errors
 ///
-/// [`CircuitZkPlanError::InvalidRequest`] with the planner's code and reason
-/// (`CircuitZkPlanException` in Kotlin). Input that is not JSON is the
+/// [`ZkpReqPlanError::InvalidRequest`] with the planner's code and reason
+/// (`ZkpReqPlanException` in Kotlin). Input that is not JSON is the
 /// `query_not_parseable` or `invalid_client_metadata` code.
 #[uniffi::export]
-pub fn circuit_zk_plan(
+pub fn zkp_req_plan(
     credential_query_json: String,
     client_metadata_json: Option<String>,
-) -> Result<String, CircuitZkPlanError> {
+) -> Result<String, ZkpReqPlanError> {
     let plan =
-        circuit_zk::plan(&credential_query_json, client_metadata_json.as_deref()).map_err(|e| {
-            CircuitZkPlanError::InvalidRequest {
+        zkp_req::plan(&credential_query_json, client_metadata_json.as_deref()).map_err(|e| {
+            ZkpReqPlanError::InvalidRequest {
                 code: e.code().to_owned(),
                 reason: e.to_string(),
             }
         })?;
-    serde_json::to_string(&plan).map_err(|e| CircuitZkPlanError::InvalidRequest {
+    serde_json::to_string(&plan).map_err(|e| ZkpReqPlanError::InvalidRequest {
         code: "plan_not_serializable".to_owned(),
         reason: e.to_string(),
     })
@@ -332,9 +332,9 @@ pub fn circuit_zk_plan(
 /// Match a bare DCQL query, with the request's `client_metadata`.
 ///
 /// What [`match_dcql`] does, for a caller that also has the verifier's
-/// `client_metadata` (as JSON). A `circuit_zk` query is matched against the
+/// `client_metadata` (as JSON). A `zkp_req` query is matched against the
 /// circuit lists in its `vp_formats_supported`; with `None` those are absent
-/// and impose no constraint. A `circuit_zk` query with `claims` as an object
+/// and impose no constraint. A `zkp_req` query with `claims` as an object
 /// (the rulebook example shape) is accepted here although it is not DCQL.
 ///
 /// # Errors
@@ -365,7 +365,7 @@ pub fn match_dcql_with_context(
     let query = match strict {
         Ok(query) => query,
         // The identifier checks `from_json` makes still apply to anything that
-        // is DCQL; only a `circuit_zk` query DCQL cannot represent is let past.
+        // is DCQL; only a `zkp_req` query DCQL cannot represent is let past.
         Err(e) if context.dcql_query.is_some() => return Err(request_err(e)),
         Err(e) => {
             let query = context.matching_query().ok_or_else(|| request_err(&e))?;
@@ -433,9 +433,9 @@ fn evaluate(
                         .collect()
                 })
                 .unwrap_or_default(),
-            circuit_zk: resolved
+            zkp_req: resolved
                 .as_ref()
-                .and_then(|r| r.circuit_zk.as_ref())
+                .and_then(|r| r.zkp_req.as_ref())
                 .map(|selection| selection.to_json().to_string()),
             meta: resolved
                 .map(|r| r.meta.into_iter().collect())
