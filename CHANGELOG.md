@@ -11,9 +11,21 @@ existed.
 
 ## Unreleased
 
+## v0.11.0 — 2026-10-20
+
+Adopts the `nym_auth` rulebook v0.4. **Breaking** (a minor bump, pre-1.0): the
+FFI was renamed, so a consumer must regenerate its bindings, and **wallets must
+re-register**: a credential blob built before this release has no `zkp_req`
+format rule and declines the format. `siros-dcql` and `siros-dc-matcher-core`
+are versioned 0.11.0 to match the release; `siros-dcql` has no change.
+Consumers that keep a copy of the vectors (siros-sdk-kotlin, siros-sdk-swift)
+must re-copy `zkp_req`, `zkp_req_response`, `zkp_req_unsat` and `proof_time`
+from the v0.11.0 tag; the vector set digest below identifies them.
+`matcher.wasm` is 303,480 bytes against the 307,200-byte budget.
+
 ### Changed
 
-- **BREAKING (rulebook v0.4; nothing here has shipped):** the matcher follows
+- **BREAKING (rulebook v0.4):** the matcher follows
   `nym_auth_rulebook` v0.4 (`fea9a0a`). Names: `circuit_zk` is `zkp_req`
   (format, capability family, modules, FFI `add_zkp_req_system`,
   `zkp_req_plan`, `ZkpReqPlanError`, `FfiMatchedCredential.zkp_req`), `req` is

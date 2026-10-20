@@ -13,6 +13,11 @@ this file.
 
 ## Unreleased
 
+## 0.11.0 — 2026-10-20
+
+No change to this crate: version bump only, to stay in step with the workspace
+(matcher release v0.11.0). There is nothing to migrate.
+
 ## 0.10.0 — 2026-10-15
 
 No change to this crate: version bump only, to stay in step with the workspace
