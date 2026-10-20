@@ -46,11 +46,27 @@ MATCHER_WASM := $(BUILD_DIR)/wasm32-wasip1/wasm-release/matcher.wasm
 # (/home/alice/.cargo) and a CI runner (/home/runner/.cargo). Remap it, and the
 # checkout directory, to fixed names so the digest depends only on the source,
 # the lockfile and the pinned toolchain.
+#
+# rustc applies the LAST matching --remap-path-prefix, so the more specific
+# (nested) directory goes last. The flags travel in CARGO_ENCODED_RUSTFLAGS
+# (unit-separator delimited), which keeps paths containing spaces in one piece;
+# any flags the caller already set in CARGO_ENCODED_RUSTFLAGS or RUSTFLAGS are
+# kept in front.
 CARGO_HOME_DIR := $(or $(CARGO_HOME),$(HOME)/.cargo)
-MATCHER_RUSTFLAGS := $(RUSTFLAGS) --remap-path-prefix=$(CARGO_HOME_DIR)=/cargo --remap-path-prefix=$(CURDIR)=/src
+ifneq ($(findstring $(CARGO_HOME_DIR)/,$(CURDIR)/),)
+  REMAP_FIRST := $(CARGO_HOME_DIR)=/cargo
+  REMAP_LAST  := $(CURDIR)=/src
+else
+  REMAP_FIRST := $(CURDIR)=/src
+  REMAP_LAST  := $(CARGO_HOME_DIR)=/cargo
+endif
 
 matcher:
-	RUSTFLAGS="$(MATCHER_RUSTFLAGS)" cargo build --locked -p siros-dc-matcher-wasm --target wasm32-wasip1 --profile wasm-release
+	set -eu; \
+	us=$$(printf '\037'); \
+	base="$${CARGO_ENCODED_RUSTFLAGS:-$$(printf '%s' "$${RUSTFLAGS:-}" | tr ' ' "$$us")}"; \
+	export CARGO_ENCODED_RUSTFLAGS="$${base:+$$base$$us}--remap-path-prefix=$(REMAP_FIRST)$${us}--remap-path-prefix=$(REMAP_LAST)"; \
+	cargo build --locked -p siros-dc-matcher-wasm --target wasm32-wasip1 --profile wasm-release
 	# rustc's wasm32-wasip1 CRT startup (crt1-command.o) unconditionally
 	# imports wasi_snapshot_preview1.environ_get/environ_sizes_get, whether
 	# or not the program touches env vars - and this one never does. The
