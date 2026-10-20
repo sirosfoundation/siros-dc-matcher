@@ -21,6 +21,7 @@ value is an **array** of presentations, one element per matched credential.
       "circuit_id": "urn:circuits:longfellow:nym_auth:v1",
       "proof_system": "longfellow-libzk-v1",
       "proof": "<base64url, unpadded>",
+      "x5chain": ["<base64 DER leaf (Document Signer)>", "<base64 DER CA>"],
       "results": {
         "nym-123": { "pseudonym": "<base64url, unpadded, 32 bytes>" },
         "age-range-123": { "satisfied": true }
@@ -50,8 +51,8 @@ there is no partial acceptance). Reason codes are stable identifiers.
    satisfy the request declines at the OpenID4VP level: a plain form post to
    `response_uri` with `error` / `error_description`. It never sends a
    presentation that describes a failure.
-3. **Members.** Exactly `circuit_id`, `proof_system`, `proof` (strings) and
-   `results` (object). Another member is refused
+3. **Members.** Exactly `circuit_id`, `proof_system`, `proof` (strings),
+   `x5chain` (array, rule 5a) and `results` (object). Another member is refused
    (`presentation_unknown_member`); a missing one (`presentation_member_missing`)
    or one of the wrong type (`presentation_member_wrong_type`) likewise. A
    repeated member name anywhere outside `results` is refused
@@ -67,6 +68,22 @@ there is no partial acceptance). Reason codes are stable identifiers.
    padding: alphabet `A-Z a-z 0-9 - _`, no `=`, no `+` `/`, no whitespace, a
    canonical final character (`proof_not_base64url`). The proof is not
    decoded or verified here.
+   5a. **Issuer certificate chain.** `x5chain` is the holder-supplied issuer
+   chain, RFC 7515 `x5c` style: a JSON array of strings, each the **standard**
+   base64 (RFC 4648 §4, alphabet `A-Z a-z 0-9 + /`, **with** `=` padding, no
+   whitespace, canonical final character) of one DER certificate, the leaf
+   (Document Signer) first. Normative limits: at most **8** certificates
+   and at most **4096** decoded bytes per certificate (both inclusive). Refused:
+   not an array (`x5chain_not_array`), empty (`x5chain_empty`), more than 8
+   (`x5chain_too_many`), an element that is not a string
+   (`x5chain_element_not_string`), not padded standard base64 (base64url
+   alphabet, unpadded, invalid, whitespace: `x5chain_element_not_base64`), the
+   empty string (`x5chain_element_empty`), over 4096 decoded bytes
+   (`x5chain_element_too_large`). Elements are checked in array order. The
+   matcher checks **encoding and limits only**: it does not parse X.509. The
+   verifier validates the chain through its trust evaluation (go-trust) and
+   takes the issuer's P-256 key Q from the validated leaf; it never looks up
+   issuer keys itself.
 6. **Handles.** The keys of `results` are exactly the `return` handles of the
    request's `req` items: an extra handle (`result_handle_unexpected`), a
    missing handle (`result_handle_missing`) and a repeated handle key
@@ -87,8 +104,9 @@ there is no partial acceptance). Reason codes are stable identifiers.
 
 The first failure in this order is the one reported: envelope (rule 1), then
 per presentation in array order: in-band error, unknown members, presence of
-all four members, member types (including `results` being an object), offer
-binding, proof encoding, then handles (extra, then missing, all before any
+all five members, member types (strings; `x5chain` an array; `results` an
+object), offer binding, proof encoding, `x5chain` contents (count, then each
+element: string, empty, encoding, size), then handles (extra, then missing, all before any
 value), then result values per `req` item in request order.
 
 ## Decisions worth knowing

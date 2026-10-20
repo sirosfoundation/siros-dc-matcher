@@ -87,6 +87,41 @@ pub enum InvalidResponse {
         /// Position in the array.
         index: usize,
     },
+    /// `x5chain` is not a JSON array.
+    X5chainNotArray {
+        /// Position in the array.
+        index: usize,
+    },
+    /// `x5chain` is an empty array.
+    X5chainEmpty {
+        /// Position in the array.
+        index: usize,
+    },
+    /// `x5chain` has more than [`X5CHAIN_MAX_CERTS`] certificates.
+    X5chainTooMany {
+        /// Position in the array.
+        index: usize,
+    },
+    /// An `x5chain` element is not a string.
+    X5chainElementNotString {
+        /// Position in the array.
+        index: usize,
+    },
+    /// An `x5chain` element is not padded standard-alphabet base64.
+    X5chainElementNotBase64 {
+        /// Position in the array.
+        index: usize,
+    },
+    /// An `x5chain` element is empty.
+    X5chainElementEmpty {
+        /// Position in the array.
+        index: usize,
+    },
+    /// An `x5chain` element decodes to more than [`X5CHAIN_MAX_CERT_BYTES`].
+    X5chainElementTooLarge {
+        /// Position in the array.
+        index: usize,
+    },
     /// `proof` is empty.
     ProofEmpty {
         /// Position in the array.
@@ -175,6 +210,13 @@ impl InvalidResponse {
             Self::PresentationMemberWrongType { .. } => "presentation_member_wrong_type",
             Self::CircuitIdNotOffered { .. } => "circuit_id_not_offered",
             Self::ProofSystemNotOffered { .. } => "proof_system_not_offered",
+            Self::X5chainNotArray { .. } => "x5chain_not_array",
+            Self::X5chainEmpty { .. } => "x5chain_empty",
+            Self::X5chainTooMany { .. } => "x5chain_too_many",
+            Self::X5chainElementNotString { .. } => "x5chain_element_not_string",
+            Self::X5chainElementNotBase64 { .. } => "x5chain_element_not_base64",
+            Self::X5chainElementEmpty { .. } => "x5chain_element_empty",
+            Self::X5chainElementTooLarge { .. } => "x5chain_element_too_large",
             Self::ProofEmpty { .. } => "proof_empty",
             Self::ProofNotBase64url { .. } => "proof_not_base64url",
             Self::DuplicateHandle { .. } => "duplicate_handle",
@@ -216,6 +258,13 @@ impl fmt::Display for InvalidResponse {
             | Self::CircuitIdNotOffered { index }
             | Self::ProofSystemNotOffered { index }
             | Self::ProofEmpty { index }
+            | Self::X5chainNotArray { index }
+            | Self::X5chainEmpty { index }
+            | Self::X5chainTooMany { index }
+            | Self::X5chainElementNotString { index }
+            | Self::X5chainElementNotBase64 { index }
+            | Self::X5chainElementEmpty { index }
+            | Self::X5chainElementTooLarge { index }
             | Self::ProofNotBase64url { index } => write!(f, " (presentation {index})"),
             _ => Ok(()),
         }
@@ -344,7 +393,12 @@ pub fn validate_response(plan: &Plan, vp_token_json: &str) -> Result<(), Invalid
     Ok(())
 }
 
-const MEMBERS: [&str; 4] = ["circuit_id", "proof_system", "proof", "results"];
+const MEMBERS: [&str; 5] = ["circuit_id", "proof_system", "proof", "x5chain", "results"];
+
+/// Most certificates an `x5chain` may carry.
+pub const X5CHAIN_MAX_CERTS: usize = 8;
+/// Largest certificate in an `x5chain`, in decoded (DER) bytes.
+pub const X5CHAIN_MAX_CERT_BYTES: usize = 4096;
 
 fn check_presentation(plan: &Plan, index: usize, p: &Json) -> Result<(), InvalidResponse> {
     let Json::Object(members) = p else {
@@ -380,6 +434,9 @@ fn check_presentation(plan: &Plan, index: usize, p: &Json) -> Result<(), Invalid
     let proof_system = string("proof_system")?;
     let proof = string("proof")?;
     let results = get("results")?;
+    let Json::Array(x5chain) = get("x5chain")? else {
+        return Err(InvalidResponse::X5chainNotArray { index });
+    };
     if !matches!(results, Json::Object(_)) {
         return Err(InvalidResponse::PresentationMemberWrongType {
             index,
@@ -403,7 +460,66 @@ fn check_presentation(plan: &Plan, index: usize, p: &Json) -> Result<(), Invalid
     if !is_unpadded_base64url(proof) {
         return Err(InvalidResponse::ProofNotBase64url { index });
     }
+    check_x5chain(index, x5chain)?;
     check_results(plan, index, results)
+}
+
+/// Encoding and limits only. The certificates are not parsed.
+fn check_x5chain(index: usize, chain: &[Json]) -> Result<(), InvalidResponse> {
+    if chain.is_empty() {
+        return Err(InvalidResponse::X5chainEmpty { index });
+    }
+    if chain.len() > X5CHAIN_MAX_CERTS {
+        return Err(InvalidResponse::X5chainTooMany { index });
+    }
+    for element in chain {
+        let Some(text) = element.as_str() else {
+            return Err(InvalidResponse::X5chainElementNotString { index });
+        };
+        if text.is_empty() {
+            return Err(InvalidResponse::X5chainElementEmpty { index });
+        }
+        let Some(len) = padded_base64_decoded_len(text) else {
+            return Err(InvalidResponse::X5chainElementNotBase64 { index });
+        };
+        if len > X5CHAIN_MAX_CERT_BYTES {
+            return Err(InvalidResponse::X5chainElementTooLarge { index });
+        }
+    }
+    Ok(())
+}
+
+/// Decoded length of strict padded standard base64 (RFC 4648 §4), or `None`
+/// when `s` is not exactly that: wrong alphabet, whitespace, missing or
+/// misplaced padding, or non-canonical trailing bits.
+fn padded_base64_decoded_len(s: &str) -> Option<usize> {
+    let b = s.as_bytes();
+    if b.is_empty() || b.len() % 4 != 0 {
+        return None;
+    }
+    let pad = b.iter().rev().take_while(|c| **c == b'=').count();
+    if pad > 2 {
+        return None;
+    }
+    let body = b.get(..b.len() - pad)?;
+    let value = |c: u8| match c {
+        b'A'..=b'Z' => Some(c - b'A'),
+        b'a'..=b'z' => Some(c - b'a' + 26),
+        b'0'..=b'9' => Some(c - b'0' + 52),
+        b'+' => Some(62),
+        b'/' => Some(63),
+        _ => None,
+    };
+    if !body.iter().all(|c| value(*c).is_some()) {
+        return None;
+    }
+    let last = value(*body.last()?)?;
+    let canonical = match pad {
+        1 => last & 0x03 == 0,
+        2 => last & 0x0F == 0,
+        _ => true,
+    };
+    canonical.then_some(b.len() / 4 * 3 - pad)
 }
 
 /// Strict unpadded base64url, without decoding. (`base64url::decode` caps its

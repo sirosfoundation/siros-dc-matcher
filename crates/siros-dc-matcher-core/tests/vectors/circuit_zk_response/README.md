@@ -32,7 +32,10 @@ order given in the spec's "Order of checks":
 `presentation_error_member`, `presentation_unknown_member`,
 `presentation_member_missing`, `presentation_member_wrong_type`,
 `circuit_id_not_offered`, `proof_system_not_offered`, `proof_empty`,
-`proof_not_base64url`, `duplicate_handle`, `result_handle_unexpected`,
+`proof_not_base64url`, `x5chain_not_array`, `x5chain_empty`,
+`x5chain_too_many`, `x5chain_element_not_string`,
+`x5chain_element_not_base64`, `x5chain_element_empty`,
+`x5chain_element_too_large`, `duplicate_handle`, `result_handle_unexpected`,
 `result_handle_missing`, `result_not_object`, `result_function_unknown`,
 `result_unknown_member`, `result_member_missing`, `result_member_wrong_type`,
 `result_not_satisfied`, `pseudonym_not_base64url`, `pseudonym_wrong_length`.
@@ -40,4 +43,6 @@ order given in the spec's "Order of checks":
 ## Scope
 
 Structure and the request/response binding only. The proof is not decoded or
-verified; `proof` is checked to be non-empty unpadded base64url.
+verified; `proof` is checked to be non-empty unpadded base64url. `x5chain` is
+checked for encoding (padded standard base64) and limits (8 certificates,
+4096 decoded bytes each); certificates are not parsed.
