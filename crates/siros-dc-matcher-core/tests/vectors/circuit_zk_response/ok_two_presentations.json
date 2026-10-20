@@ -1,8 +1,9 @@
 {
-  "description": "Two matched credentials: two array elements, each with its own proof and results.",
+  "description": "Two matched credentials (query sets multiple:true): two array elements, each with its own proof and results.",
   "query": {
     "id": "nym_attestation",
     "format": "circuit_zk",
+    "multiple": true,
     "meta": {
       "doctype_value": "eu.europa.ec.eudi.nym_auth.1"
     },

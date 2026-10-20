@@ -42,7 +42,9 @@ there is no partial acceptance). Reason codes are stable identifiers.
    (`response_not_parseable`, `query_id_missing`); that entry is a non-empty
    array (`presentations_not_array`, `presentations_empty`) of objects
    (`presentation_not_object`). Entries for other query ids are ignored. Every
-   array element is checked against the same request.
+   array element is checked against the same request. More than one element is
+   allowed only when the credential query sets `multiple: true` (DCQL: omitted
+   means false); otherwise `presentations_multiple_not_allowed`.
 2. **No in-band errors.** A presentation with an `error` or `error_description`
    member is refused (`presentation_error_member`). A wallet that cannot
    satisfy the request declines at the OpenID4VP level: a plain form post to
@@ -80,6 +82,14 @@ there is no partial acceptance). Reason codes are stable identifiers.
      (`result_function_unknown`); a result object for a known function with
      any member other than its own (`result_unknown_member`), or without it
      (`result_member_missing`), is refused.
+
+## Order of checks
+
+The first failure in this order is the one reported: envelope (rule 1), then
+per presentation in array order: in-band error, unknown members, presence of
+all four members, member types (including `results` being an object), offer
+binding, proof encoding, then handles (extra, then missing, all before any
+value), then result values per `req` item in request order.
 
 ## Decisions worth knowing
 

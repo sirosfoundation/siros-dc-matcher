@@ -24,10 +24,11 @@ request-side inputs of the planner; every vector's request must plan.
 ## `expect.error`
 
 A stable code, not message text. The first rule broken is reported, in the
-order of the spec's rule list:
+order given in the spec's "Order of checks":
 
 `response_not_parseable`, `duplicate_member`, `query_id_missing`,
-`presentations_not_array`, `presentations_empty`, `presentation_not_object`,
+`presentations_not_array`, `presentations_empty`,
+`presentations_multiple_not_allowed`, `presentation_not_object`,
 `presentation_error_member`, `presentation_unknown_member`,
 `presentation_member_missing`, `presentation_member_wrong_type`,
 `circuit_id_not_offered`, `proof_system_not_offered`, `proof_empty`,

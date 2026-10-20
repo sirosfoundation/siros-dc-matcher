@@ -92,6 +92,7 @@ fn every_required_refusal_code_has_a_vector() {
         "result_member_wrong_type",
         "presentation_error_member",
         "result_not_object",
+        "presentations_multiple_not_allowed",
         "presentations_not_array",
         "presentations_empty",
         "query_id_missing",

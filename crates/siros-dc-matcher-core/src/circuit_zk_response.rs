@@ -43,6 +43,8 @@ pub enum InvalidResponse {
     PresentationsNotArray,
     /// The entry is an empty array.
     PresentationsEmpty,
+    /// More than one presentation, but the query does not set `multiple: true`.
+    PresentationsMultipleNotAllowed,
     /// An array element is not an object.
     PresentationNotObject {
         /// Position in the array.
@@ -165,6 +167,7 @@ impl InvalidResponse {
             Self::QueryIdMissing => "query_id_missing",
             Self::PresentationsNotArray => "presentations_not_array",
             Self::PresentationsEmpty => "presentations_empty",
+            Self::PresentationsMultipleNotAllowed => "presentations_multiple_not_allowed",
             Self::PresentationNotObject { .. } => "presentation_not_object",
             Self::PresentationErrorMember { .. } => "presentation_error_member",
             Self::PresentationUnknownMember { .. } => "presentation_unknown_member",
@@ -331,6 +334,10 @@ pub fn validate_response(plan: &Plan, vp_token_json: &str) -> Result<(), Invalid
     if presentations.is_empty() {
         return Err(InvalidResponse::PresentationsEmpty);
     }
+    // DCQL: `multiple` omitted means false, i.e. at most one presentation.
+    if presentations.len() > 1 && plan.raw.get("multiple") != Some(&Value::Bool(true)) {
+        return Err(InvalidResponse::PresentationsMultipleNotAllowed);
+    }
     for (index, presentation) in presentations.iter().enumerate() {
         check_presentation(plan, index, presentation)?;
     }
@@ -365,10 +372,20 @@ fn check_presentation(plan: &Plan, index: usize, p: &Json) -> Result<(), Invalid
             .ok_or(InvalidResponse::PresentationMemberWrongType { index, member })
     };
 
+    // Presence of every member first, then types, then the offer and the proof.
+    for member in MEMBERS {
+        get(member)?;
+    }
     let circuit_id = string("circuit_id")?;
     let proof_system = string("proof_system")?;
     let proof = string("proof")?;
     let results = get("results")?;
+    if !matches!(results, Json::Object(_)) {
+        return Err(InvalidResponse::PresentationMemberWrongType {
+            index,
+            member: "results",
+        });
+    }
 
     // Fail closed: a request that stated no list offered nothing to match.
     let offered = |list: &Option<Vec<String>>, v: &str| {
@@ -437,6 +454,14 @@ fn check_results(plan: &Plan, index: usize, results: &Json) -> Result<(), Invali
         return Err(InvalidResponse::ResultHandleUnexpected {
             handle: handle.clone(),
         });
+    }
+    // Every handle is present before any value is judged (rule 6 before 7).
+    for function in &plan.functions {
+        if !entries.iter().any(|(h, _)| *h == function.handle) {
+            return Err(InvalidResponse::ResultHandleMissing {
+                handle: function.handle.clone(),
+            });
+        }
     }
     for function in &plan.functions {
         let handle = function.handle.clone();
