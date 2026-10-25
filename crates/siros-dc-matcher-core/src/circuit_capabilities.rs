@@ -176,9 +176,9 @@ impl Constraint {
                 .as_str()
                 .is_some_and(|s| values.iter().any(|v| v == s)),
             Self::Type(ParamKind::String) => value.is_string(),
-            Self::Type(ParamKind::FullDate) => {
-                value.as_str().is_some_and(crate::zkp_req::is_full_date)
-            }
+            Self::Type(ParamKind::FullDate) => value
+                .as_str()
+                .is_some_and(|d| siros_zkp_req_nym_auth::date::Date::parse(d).is_some()),
             // A JSON number with no fractional part. 2^53 is where f64 stops
             // being exact; the catalog's reference implementation draws the
             // same line.
@@ -328,15 +328,26 @@ impl Capabilities {
         credential_types: &[&str],
         items: &[RequestedItem<'_>],
     ) -> bool {
-        // 3. presentation and credential.
-        if self.presentation != presentation
-            || !credential_formats.contains(&self.credential_format.as_str())
-            || !credential_types.contains(&self.credential_type.as_str())
-        {
-            return false;
-        }
+        self.proves_over(presentation, credential_formats, credential_types) && self.supports(items)
+    }
 
-        // 4. every item is supported: its function is declared, each param it
+    /// Check 1 of [`Self::serves`]: the presentation, and the credential's format and type.
+    #[must_use]
+    pub fn proves_over(
+        &self,
+        presentation: &str,
+        credential_formats: &[&str],
+        credential_types: &[&str],
+    ) -> bool {
+        self.presentation == presentation
+            && credential_formats.contains(&self.credential_format.as_str())
+            && credential_types.contains(&self.credential_type.as_str())
+    }
+
+    /// Checks 2 and 3 of [`Self::serves`]: the items' functions and params.
+    #[must_use]
+    pub fn supports(&self, items: &[RequestedItem<'_>]) -> bool {
+        // Every item is supported: its function is declared, each param it
         // carries is listed there and accepted.
         for item in items {
             let Some(function) = self.functions.iter().find(|f| f.id == item.function_id) else {
@@ -354,7 +365,7 @@ impl Capabilities {
             }
         }
         // ... and no function is asked for more often than its `max`, and
-        // 5. every function the circuit always includes was asked for.
+        // every function the circuit always includes was asked for.
         self.functions.iter().all(|f| {
             let n = items.iter().filter(|i| i.function_id == f.id).count();
             let within_max = f

@@ -312,11 +312,6 @@ RustBuffer uniffi_siros_dc_matcher_ffi_fn_func_match_dcql(RustBuffer blob, RustB
 RustBuffer uniffi_siros_dc_matcher_ffi_fn_func_match_dcql_with_context(RustBuffer blob, RustBuffer dcql_json, RustBuffer client_metadata_json, RustCallStatus *_Nonnull out_status
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_SIROS_DC_MATCHER_FFI_FN_FUNC_ZKP_REQ_PLAN
-#define UNIFFI_FFIDEF_UNIFFI_SIROS_DC_MATCHER_FFI_FN_FUNC_ZKP_REQ_PLAN
-RustBuffer uniffi_siros_dc_matcher_ffi_fn_func_zkp_req_plan(RustBuffer credential_query_json, RustBuffer client_metadata_json, RustCallStatus *_Nonnull out_status
-);
-#endif
 #ifndef UNIFFI_FFIDEF_FFI_SIROS_DC_MATCHER_FFI_RUSTBUFFER_ALLOC
 #define UNIFFI_FFIDEF_FFI_SIROS_DC_MATCHER_FFI_RUSTBUFFER_ALLOC
 RustBuffer ffi_siros_dc_matcher_ffi_rustbuffer_alloc(uint64_t size, RustCallStatus *_Nonnull out_status
@@ -612,12 +607,6 @@ uint16_t uniffi_siros_dc_matcher_ffi_checksum_func_match_dcql(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_SIROS_DC_MATCHER_FFI_CHECKSUM_FUNC_MATCH_DCQL_WITH_CONTEXT
 #define UNIFFI_FFIDEF_UNIFFI_SIROS_DC_MATCHER_FFI_CHECKSUM_FUNC_MATCH_DCQL_WITH_CONTEXT
 uint16_t uniffi_siros_dc_matcher_ffi_checksum_func_match_dcql_with_context(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_SIROS_DC_MATCHER_FFI_CHECKSUM_FUNC_ZKP_REQ_PLAN
-#define UNIFFI_FFIDEF_UNIFFI_SIROS_DC_MATCHER_FFI_CHECKSUM_FUNC_ZKP_REQ_PLAN
-uint16_t uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_plan(void
     
 );
 #endif

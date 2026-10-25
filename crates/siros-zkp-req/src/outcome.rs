@@ -94,6 +94,8 @@ pub enum RequestRule {
     TrustedAuthoritiesInvalid,
     /// `require_cryptographic_holder_binding` is not a boolean (OpenID4VP 1.0, Section 6.1).
     HolderBindingInvalid,
+    /// `multiple` is not a boolean (OpenID4VP 1.0, Section 6.1).
+    MultipleInvalid,
     /// `client_metadata` has no `vp_formats_supported.zkp_req` object (Section 1.2).
     FormatsMissing,
     /// `proof_backend_values` is not a non-empty array of strings (Section 1.2).
@@ -125,6 +127,7 @@ impl RequestRule {
             Self::OptionInvalid { .. } => "option_invalid",
             Self::TrustedAuthoritiesInvalid => "trusted_authorities_invalid",
             Self::HolderBindingInvalid => "holder_binding_invalid",
+            Self::MultipleInvalid => "multiple_invalid",
             Self::FormatsMissing => "formats_missing",
             Self::ProofBackendValuesInvalid => "proof_backend_values_invalid",
             Self::SystemIdValuesInvalid => "system_id_values_invalid",

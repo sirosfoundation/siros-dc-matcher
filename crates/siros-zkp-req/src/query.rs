@@ -128,6 +128,9 @@ pub struct ZkpReqQuery {
     pub trusted_authorities: Option<Vec<TrustedAuthority>>,
     /// `require_cryptographic_holder_binding`; `true` when absent (OpenID4VP 1.0, Section 6.1).
     pub require_holder_binding: bool,
+    /// `multiple`: whether several presentations may answer; `false` when absent (OpenID4VP
+    /// 1.0, Section 6.1).
+    pub multiple: bool,
 }
 
 impl ZkpReqQuery {
@@ -161,9 +164,12 @@ impl ZkpReqQuery {
             options,
             has_req_sets,
             trusted_authorities: read_authorities(query.get("trusted_authorities"))?,
-            require_holder_binding: read_holder_binding(
+            require_holder_binding: read_bool(
                 query.get("require_cryptographic_holder_binding"),
+                true,
+                RequestRule::HolderBindingInvalid,
             )?,
+            multiple: read_bool(query.get("multiple"), false, RequestRule::MultipleInvalid)?,
         })
     }
 
@@ -349,10 +355,15 @@ fn read_authorities(value: Option<&Value>) -> Result<Option<Vec<TrustedAuthority
     list.map(Some).ok_or(RequestRule::TrustedAuthoritiesInvalid)
 }
 
-fn read_holder_binding(value: Option<&Value>) -> Result<bool, RequestRule> {
+/// A boolean member, `default` when absent.
+fn read_bool(
+    value: Option<&Value>,
+    default: bool,
+    invalid: RequestRule,
+) -> Result<bool, RequestRule> {
     match value {
-        None => Ok(true),
+        None => Ok(default),
         Some(Value::Bool(b)) => Ok(*b),
-        Some(_) => Err(RequestRule::HolderBindingInvalid),
+        Some(_) => Err(invalid),
     }
 }

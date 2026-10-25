@@ -232,22 +232,7 @@ impl NymAuthQuery {
     ///
     /// [`CatalogueRule`]: the first rule the query breaks.
     pub fn from_query(query: ZkpReqQuery) -> Result<Option<Self>, CatalogueRule> {
-        let Some(form) = form_of(&query.credential_type)? else {
-            return Ok(None);
-        };
-        if !query.require_holder_binding {
-            return Err(CatalogueRule::HolderBindingWaived);
-        }
-        let items = query
-            .items
-            .iter()
-            .enumerate()
-            .map(|(index, item)| read_item(index, item, form))
-            .collect::<Result<Vec<_>, _>>()?;
-        for option in &query.options {
-            check_option(option, &items)?;
-        }
-        Ok(Some(Self { query, form, items }))
+        Ok(validate(&query)?.map(|(form, items)| Self { query, form, items }))
     }
 
     /// The typed items of `option`, with their `_req` indexes.
@@ -260,6 +245,31 @@ impl NymAuthQuery {
             .iter()
             .filter_map(move |&index| self.items.get(index).map(|item| (index, item)))
     }
+}
+
+/// The catalogue's rules for `query`: its form and typed items, or `None` when `meta` asks for
+/// another credential type and the catalogue does not apply.
+///
+/// # Errors
+///
+/// [`CatalogueRule`]: the first rule the query breaks.
+pub fn validate(query: &ZkpReqQuery) -> Result<Option<(Form, Vec<Item>)>, CatalogueRule> {
+    let Some(form) = form_of(&query.credential_type)? else {
+        return Ok(None);
+    };
+    if !query.require_holder_binding {
+        return Err(CatalogueRule::HolderBindingWaived);
+    }
+    let items = query
+        .items
+        .iter()
+        .enumerate()
+        .map(|(index, item)| read_item(index, item, form))
+        .collect::<Result<Vec<_>, _>>()?;
+    for option in &query.options {
+        check_option(option, &items)?;
+    }
+    Ok(Some((form, items)))
 }
 
 fn form_of(credential_type: &CredentialType) -> Result<Option<Form>, CatalogueRule> {

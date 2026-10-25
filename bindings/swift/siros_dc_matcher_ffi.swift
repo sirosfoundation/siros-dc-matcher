@@ -1495,15 +1495,18 @@ public struct FfiMatchedCredential {
      */
     public var meta: [String: String]
     /**
-     * For a `zkp_req` query: a JSON object `{"circuit": {...}, "plan":
-     * {...}}` holding the circuit this wallet chose (its registered
-     * capability: `system` and string `params`) and the request as the
-     * matcher normalised it. `None` for every other format.
+     * For a `zkp_req` query: a JSON object `{"circuit": {...},
+     * "proof_backend": "...", "req_set": n, "items": [...]}` holding the
+     * circuit this wallet chose (its registered capability: `system` and
+     * string `params`), the proof backend of the pair, and the answered
+     * option (`zkp_req`, Sections 1.3 and 2.1): its index in `_req_sets`,
+     * absent without them, and its `_req` indexes. `None` for every other
+     * format.
      *
-     * JSON strings, not records, so the planner's shape can follow the
-     * rulebook without a binding regeneration each time. The plan's `raw`
-     * member is the verifier's request as sent and is **not authenticated**
-     * here. A `zkp_req` match has an empty `claims`.
+     * A JSON string, not a record, so its shape can follow the draft without
+     * a binding regeneration each time. Everything in it comes from the
+     * verifier's request, which is **not authenticated** here. A `zkp_req`
+     * match has an empty `claims`.
      */
     public var zkpReq: String?
 
@@ -1536,15 +1539,18 @@ public struct FfiMatchedCredential {
          * produce it, so it is carried rather than matched on.
          */meta: [String: String], 
         /**
-         * For a `zkp_req` query: a JSON object `{"circuit": {...}, "plan":
-         * {...}}` holding the circuit this wallet chose (its registered
-         * capability: `system` and string `params`) and the request as the
-         * matcher normalised it. `None` for every other format.
+         * For a `zkp_req` query: a JSON object `{"circuit": {...},
+         * "proof_backend": "...", "req_set": n, "items": [...]}` holding the
+         * circuit this wallet chose (its registered capability: `system` and
+         * string `params`), the proof backend of the pair, and the answered
+         * option (`zkp_req`, Sections 1.3 and 2.1): its index in `_req_sets`,
+         * absent without them, and its `_req` indexes. `None` for every other
+         * format.
          *
-         * JSON strings, not records, so the planner's shape can follow the
-         * rulebook without a binding regeneration each time. The plan's `raw`
-         * member is the verifier's request as sent and is **not authenticated**
-         * here. A `zkp_req` match has an empty `claims`.
+         * A JSON string, not a record, so its shape can follow the draft without
+         * a binding regeneration each time. Everything in it comes from the
+         * verifier's request, which is **not authenticated** here. A `zkp_req`
+         * match has an empty `claims`.
          */zkpReq: String?) {
         self.queryId = queryId
         self.credentialId = credentialId
@@ -1910,83 +1916,6 @@ extension MatchError: Foundation.LocalizedError {
     }
 }
 
-
-/**
- * Why a `zkp_req` query could not be planned.
- */
-public enum ZkpReqPlanError {
-
-    
-    
-    /**
-     * The query is structurally broken: the planner's verdict, unchanged.
-     *
-     * This says the request is malformed, never that it cannot be served.
-     */
-    case InvalidRequest(
-        /**
-         * A stable identifier for the defect, the planner's own code:
-         * `query_not_parseable`, `req_missing_or_empty`, `req_ambiguous`,
-         * `item_missing_function_id`, `item_missing_handle`,
-         * `param_wrong_type`, `param_invalid_full_date`, `duplicate_handle`,
-         * `claims_present`, `claim_sets_present`, `req_sets_present`,
-         * `invalid_meta` or `invalid_client_metadata`. Match on this, not on
-         * `reason`.
-         */code: String, 
-        /**
-         * The planner's message, for logs. Its wording may change.
-         */reason: String
-    )
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeZkpReqPlanError: FfiConverterRustBuffer {
-    typealias SwiftType = ZkpReqPlanError
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ZkpReqPlanError {
-        let variant: Int32 = try readInt(&buf)
-        switch variant {
-
-        
-
-        
-        case 1: return .InvalidRequest(
-            code: try FfiConverterString.read(from: &buf), 
-            reason: try FfiConverterString.read(from: &buf)
-            )
-
-         default: throw UniffiInternalError.unexpectedEnumCase
-        }
-    }
-
-    public static func write(_ value: ZkpReqPlanError, into buf: inout [UInt8]) {
-        switch value {
-
-        
-
-        
-        
-        case let .InvalidRequest(code,reason):
-            writeInt(&buf, Int32(1))
-            FfiConverterString.write(code, into: &buf)
-            FfiConverterString.write(reason, into: &buf)
-            
-        }
-    }
-}
-
-
-extension ZkpReqPlanError: Equatable, Hashable {}
-
-extension ZkpReqPlanError: Foundation.LocalizedError {
-    public var errorDescription: String? {
-        String(reflecting: self)
-    }
-}
-
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
@@ -2263,9 +2192,8 @@ public func matchDcql(blob: Data, dcqlJson: String)throws  -> FfiMatchOutcome {
  *
  * What [`match_dcql`] does, for a caller that also has the verifier's
  * `client_metadata` (as JSON). A `zkp_req` query is matched against the
- * circuit lists in its `vp_formats_supported`; with `None` those are absent
- * and impose no constraint. A `zkp_req` query with `claims` as an object
- * (the rulebook example shape) is accepted here although it is not DCQL.
+ * lists in its `vp_formats_supported.zkp_req`, which `zkp_req`, Section 1.2
+ * requires: with `None`, no `zkp_req` query matches.
  *
  * # Errors
  *
@@ -2277,54 +2205,6 @@ public func matchDcqlWithContext(blob: Data, dcqlJson: String, clientMetadataJso
     uniffi_siros_dc_matcher_ffi_fn_func_match_dcql_with_context(
         FfiConverterData.lower(blob),
         FfiConverterString.lower(dcqlJson),
-        FfiConverterOptionString.lower(clientMetadataJson),$0
-    )
-})
-}
-/**
- * Plan a `zkp_req` credential query, without a blob.
- *
- * `credential_query_json` is one Credential Query object (an element of
- * `dcql_query.credentials`), not the whole `dcql_query`. In either rulebook
- * shape: `req` beside `meta`, or `claims: {"_req": [...]}`.
- * `client_metadata_json` is the request's `client_metadata`, if it has one.
- *
- * This is the function the matcher itself calls (`zkp_req::plan` in the
- * core crate), so the plan a wallet reads here is the plan matching used. It
- * judges structure only; whether the request can be served is the wallet's.
- *
- * # The plan JSON
- *
- * A JSON object with exactly these members; this shape is stable, and the
- * same object is the `plan` member of [`FfiMatchedCredential::zkp_req`]:
- *
- * - `functions`: array, in request order, of `{function_id, handle, params}`.
- * `function_id` is `id` in a `req` item and `fn_id` in a `_req` item;
- * `handle` is `return` or `id` respectively. `params` is a flat object:
- * the declared params that were present, plus every other param unchanged.
- * Values of declared params are strings, and `full-date` ones are
- * validated.
- * - `system_filter`: `{proof_systems?, system_ids?}`, the verifier's
- * `proof_system_values` and `system_id_values` (from either form of
- * `vp_formats_supported.zkp_req`). A member is absent when the verifier
- * did not send it; a present empty list is passed through, not rejected.
- * - `meta_doctype`: `meta.doctype_value`, or `null`.
- * - `raw`: the credential query exactly as parsed, so members this version
- * does not know survive. It is verifier-supplied and unauthenticated.
- *
- * Normative cases for both the plan and every rejection are the vectors in
- * `crates/siros-dc-matcher-core/tests/vectors/zkp_req/`.
- *
- * # Errors
- *
- * [`ZkpReqPlanError::InvalidRequest`] with the planner's code and reason
- * (`ZkpReqPlanException` in Kotlin). Input that is not JSON is the
- * `query_not_parseable` or `invalid_client_metadata` code.
- */
-public func zkpReqPlan(credentialQueryJson: String, clientMetadataJson: String?)throws  -> String {
-    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeZkpReqPlanError.lift) {
-    uniffi_siros_dc_matcher_ffi_fn_func_zkp_req_plan(
-        FfiConverterString.lower(credentialQueryJson),
         FfiConverterOptionString.lower(clientMetadataJson),$0
     )
 })
@@ -2351,10 +2231,7 @@ private var initializationResult: InitializationResult = {
     if (uniffi_siros_dc_matcher_ffi_checksum_func_match_dcql() != 1962) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_siros_dc_matcher_ffi_checksum_func_match_dcql_with_context() != 62278) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_plan() != 27818) {
+    if (uniffi_siros_dc_matcher_ffi_checksum_func_match_dcql_with_context() != 26825) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_add_credential() != 64015) {

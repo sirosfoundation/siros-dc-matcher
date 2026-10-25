@@ -736,8 +736,6 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
-
-
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -780,8 +778,6 @@ internal interface UniffiLib : Library {
     fun uniffi_siros_dc_matcher_ffi_fn_func_match_dcql(`blob`: RustBuffer.ByValue,`dcqlJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_siros_dc_matcher_ffi_fn_func_match_dcql_with_context(`blob`: RustBuffer.ByValue,`dcqlJson`: RustBuffer.ByValue,`clientMetadataJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-    ): RustBuffer.ByValue
-    fun uniffi_siros_dc_matcher_ffi_fn_func_zkp_req_plan(`credentialQueryJson`: RustBuffer.ByValue,`clientMetadataJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun ffi_siros_dc_matcher_ffi_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -901,8 +897,6 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_siros_dc_matcher_ffi_checksum_func_match_dcql_with_context(
     ): Short
-    fun uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_plan(
-    ): Short
     fun uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_add_credential(
     ): Short
     fun uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_add_icon(
@@ -940,10 +934,7 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_siros_dc_matcher_ffi_checksum_func_match_dcql() != 1962.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_siros_dc_matcher_ffi_checksum_func_match_dcql_with_context() != 62278.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_plan() != 27818.toShort()) {
+    if (lib.uniffi_siros_dc_matcher_ffi_checksum_func_match_dcql_with_context() != 26825.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_add_credential() != 64015.toShort()) {
@@ -2021,15 +2012,18 @@ data class FfiMatchedCredential (
      */
     var `meta`: Map<kotlin.String, kotlin.String>, 
     /**
-     * For a `zkp_req` query: a JSON object `{"circuit": {...}, "plan":
-     * {...}}` holding the circuit this wallet chose (its registered
-     * capability: `system` and string `params`) and the request as the
-     * matcher normalised it. `None` for every other format.
+     * For a `zkp_req` query: a JSON object `{"circuit": {...},
+     * "proof_backend": "...", "req_set": n, "items": [...]}` holding the
+     * circuit this wallet chose (its registered capability: `system` and
+     * string `params`), the proof backend of the pair, and the answered
+     * option (`zkp_req`, Sections 1.3 and 2.1): its index in `_req_sets`,
+     * absent without them, and its `_req` indexes. `None` for every other
+     * format.
      *
-     * JSON strings, not records, so the planner's shape can follow the
-     * rulebook without a binding regeneration each time. The plan's `raw`
-     * member is the verifier's request as sent and is **not authenticated**
-     * here. A `zkp_req` match has an empty `claims`.
+     * A JSON string, not a record, so its shape can follow the draft without
+     * a binding regeneration each time. Everything in it comes from the
+     * verifier's request, which is **not authenticated** here. A `zkp_req`
+     * match has an empty `claims`.
      */
     var `zkpReq`: kotlin.String?
 ) {
@@ -2346,90 +2340,6 @@ public object FfiConverterTypeMatchError : FfiConverterRustBuffer<MatchException
             is MatchException.UnsupportedProtocol -> {
                 buf.putInt(3)
                 FfiConverterSequenceString.write(value.`offered`, buf)
-                Unit
-            }
-        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
-    }
-
-}
-
-
-
-
-
-/**
- * Why a `zkp_req` query could not be planned.
- */
-sealed class ZkpReqPlanException: kotlin.Exception() {
-    
-    /**
-     * The query is structurally broken: the planner's verdict, unchanged.
-     *
-     * This says the request is malformed, never that it cannot be served.
-     */
-    class InvalidRequest(
-        
-        /**
-         * A stable identifier for the defect, the planner's own code:
-         * `query_not_parseable`, `req_missing_or_empty`, `req_ambiguous`,
-         * `item_missing_function_id`, `item_missing_handle`,
-         * `param_wrong_type`, `param_invalid_full_date`, `duplicate_handle`,
-         * `claims_present`, `claim_sets_present`, `req_sets_present`,
-         * `invalid_meta` or `invalid_client_metadata`. Match on this, not on
-         * `reason`.
-         */
-        val `code`: kotlin.String, 
-        
-        /**
-         * The planner's message, for logs. Its wording may change.
-         */
-        val `reason`: kotlin.String
-        ) : ZkpReqPlanException() {
-        override val message
-            get() = "code=${ `code` }, reason=${ `reason` }"
-    }
-    
-
-    companion object ErrorHandler : UniffiRustCallStatusErrorHandler<ZkpReqPlanException> {
-        override fun lift(error_buf: RustBuffer.ByValue): ZkpReqPlanException = FfiConverterTypeZkpReqPlanError.lift(error_buf)
-    }
-
-    
-}
-
-/**
- * @suppress
- */
-public object FfiConverterTypeZkpReqPlanError : FfiConverterRustBuffer<ZkpReqPlanException> {
-    override fun read(buf: ByteBuffer): ZkpReqPlanException {
-        
-
-        return when(buf.getInt()) {
-            1 -> ZkpReqPlanException.InvalidRequest(
-                FfiConverterString.read(buf),
-                FfiConverterString.read(buf),
-                )
-            else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
-        }
-    }
-
-    override fun allocationSize(value: ZkpReqPlanException): ULong {
-        return when(value) {
-            is ZkpReqPlanException.InvalidRequest -> (
-                // Add the size for the Int that specifies the variant plus the size needed for all fields
-                4UL
-                + FfiConverterString.allocationSize(value.`code`)
-                + FfiConverterString.allocationSize(value.`reason`)
-            )
-        }
-    }
-
-    override fun write(value: ZkpReqPlanException, buf: ByteBuffer) {
-        when(value) {
-            is ZkpReqPlanException.InvalidRequest -> {
-                buf.putInt(1)
-                FfiConverterString.write(value.`code`, buf)
-                FfiConverterString.write(value.`reason`, buf)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
@@ -2759,9 +2669,8 @@ public object FfiConverterMapStringString: FfiConverterRustBuffer<Map<kotlin.Str
          *
          * What [`match_dcql`] does, for a caller that also has the verifier's
          * `client_metadata` (as JSON). A `zkp_req` query is matched against the
-         * circuit lists in its `vp_formats_supported`; with `None` those are absent
-         * and impose no constraint. A `zkp_req` query with `claims` as an object
-         * (the rulebook example shape) is accepted here although it is not DCQL.
+         * lists in its `vp_formats_supported.zkp_req`, which `zkp_req`, Section 1.2
+         * requires: with `None`, no `zkp_req` query matches.
          *
          * # Errors
          *
@@ -2773,56 +2682,6 @@ public object FfiConverterMapStringString: FfiConverterRustBuffer<Map<kotlin.Str
     uniffiRustCallWithError(MatchException) { _status ->
     UniffiLib.INSTANCE.uniffi_siros_dc_matcher_ffi_fn_func_match_dcql_with_context(
         FfiConverterByteArray.lower(`blob`),FfiConverterString.lower(`dcqlJson`),FfiConverterOptionalString.lower(`clientMetadataJson`),_status)
-}
-    )
-    }
-    
-
-        /**
-         * Plan a `zkp_req` credential query, without a blob.
-         *
-         * `credential_query_json` is one Credential Query object (an element of
-         * `dcql_query.credentials`), not the whole `dcql_query`. In either rulebook
-         * shape: `req` beside `meta`, or `claims: {"_req": [...]}`.
-         * `client_metadata_json` is the request's `client_metadata`, if it has one.
-         *
-         * This is the function the matcher itself calls (`zkp_req::plan` in the
-         * core crate), so the plan a wallet reads here is the plan matching used. It
-         * judges structure only; whether the request can be served is the wallet's.
-         *
-         * # The plan JSON
-         *
-         * A JSON object with exactly these members; this shape is stable, and the
-         * same object is the `plan` member of [`FfiMatchedCredential::zkp_req`]:
-         *
-         * - `functions`: array, in request order, of `{function_id, handle, params}`.
-         * `function_id` is `id` in a `req` item and `fn_id` in a `_req` item;
-         * `handle` is `return` or `id` respectively. `params` is a flat object:
-         * the declared params that were present, plus every other param unchanged.
-         * Values of declared params are strings, and `full-date` ones are
-         * validated.
-         * - `system_filter`: `{proof_systems?, system_ids?}`, the verifier's
-         * `proof_system_values` and `system_id_values` (from either form of
-         * `vp_formats_supported.zkp_req`). A member is absent when the verifier
-         * did not send it; a present empty list is passed through, not rejected.
-         * - `meta_doctype`: `meta.doctype_value`, or `null`.
-         * - `raw`: the credential query exactly as parsed, so members this version
-         * does not know survive. It is verifier-supplied and unauthenticated.
-         *
-         * Normative cases for both the plan and every rejection are the vectors in
-         * `crates/siros-dc-matcher-core/tests/vectors/zkp_req/`.
-         *
-         * # Errors
-         *
-         * [`ZkpReqPlanError::InvalidRequest`] with the planner's code and reason
-         * (`ZkpReqPlanException` in Kotlin). Input that is not JSON is the
-         * `query_not_parseable` or `invalid_client_metadata` code.
-         */
-    @Throws(ZkpReqPlanException::class) fun `zkpReqPlan`(`credentialQueryJson`: kotlin.String, `clientMetadataJson`: kotlin.String?): kotlin.String {
-            return FfiConverterString.lift(
-    uniffiRustCallWithError(ZkpReqPlanException) { _status ->
-    UniffiLib.INSTANCE.uniffi_siros_dc_matcher_ffi_fn_func_zkp_req_plan(
-        FfiConverterString.lower(`credentialQueryJson`),FfiConverterOptionalString.lower(`clientMetadataJson`),_status)
 }
     )
     }

@@ -29,7 +29,6 @@ use std::collections::HashMap;
 use siros_dc_matcher_core::db::CredentialDatabase;
 use siros_dc_matcher_core::evaluator::{credentials, resolve, ProfilePolicy};
 use siros_dc_matcher_core::request::{self, RequestContext};
-use siros_dc_matcher_core::zkp_req;
 use siros_dcql::{execute, DcqlQuery};
 
 use crate::FfiCapability;
@@ -97,15 +96,18 @@ pub struct FfiMatchedCredential {
     /// A pseudonym context changes what is produced, not which credential can
     /// produce it, so it is carried rather than matched on.
     pub meta: HashMap<String, String>,
-    /// For a `zkp_req` query: a JSON object `{"circuit": {...}, "plan":
-    /// {...}}` holding the circuit this wallet chose (its registered
-    /// capability: `system` and string `params`) and the request as the
-    /// matcher normalised it. `None` for every other format.
+    /// For a `zkp_req` query: a JSON object `{"circuit": {...},
+    /// "proof_backend": "...", "req_set": n, "items": [...]}` holding the
+    /// circuit this wallet chose (its registered capability: `system` and
+    /// string `params`), the proof backend of the pair, and the answered
+    /// option (`zkp_req`, Sections 1.3 and 2.1): its index in `_req_sets`,
+    /// absent without them, and its `_req` indexes. `None` for every other
+    /// format.
     ///
-    /// JSON strings, not records, so the planner's shape can follow the
-    /// rulebook without a binding regeneration each time. The plan's `raw`
-    /// member is the verifier's request as sent and is **not authenticated**
-    /// here. A `zkp_req` match has an empty `claims`.
+    /// A JSON string, not a record, so its shape can follow the draft without
+    /// a binding regeneration each time. Everything in it comes from the
+    /// verifier's request, which is **not authenticated** here. A `zkp_req`
+    /// match has an empty `claims`.
     pub zkp_req: Option<String>,
 }
 
@@ -252,90 +254,12 @@ pub fn match_dcql(blob: Vec<u8>, dcql_json: String) -> Result<FfiMatchOutcome, M
     match_dcql_with_context(blob, dcql_json, None)
 }
 
-/// Why a `zkp_req` query could not be planned.
-#[derive(Debug, thiserror::Error, uniffi::Error)]
-pub enum ZkpReqPlanError {
-    /// The query is structurally broken: the planner's verdict, unchanged.
-    ///
-    /// This says the request is malformed, never that it cannot be served.
-    #[error("invalid zkp_req request ({code}): {reason}")]
-    InvalidRequest {
-        /// A stable identifier for the defect, the planner's own code:
-        /// `query_not_parseable`, `req_missing_or_empty`, `req_ambiguous`,
-        /// `item_missing_function_id`, `item_missing_handle`,
-        /// `param_wrong_type`, `param_invalid_full_date`, `duplicate_handle`,
-        /// `claims_present`, `claim_sets_present`, `req_sets_present`,
-        /// `invalid_meta` or `invalid_client_metadata`. Match on this, not on
-        /// `reason`.
-        code: String,
-        /// The planner's message, for logs. Its wording may change.
-        reason: String,
-    },
-}
-
-/// Plan a `zkp_req` credential query, without a blob.
-///
-/// `credential_query_json` is one Credential Query object (an element of
-/// `dcql_query.credentials`), not the whole `dcql_query`. In either rulebook
-/// shape: `req` beside `meta`, or `claims: {"_req": [...]}`.
-/// `client_metadata_json` is the request's `client_metadata`, if it has one.
-///
-/// This is the function the matcher itself calls (`zkp_req::plan` in the
-/// core crate), so the plan a wallet reads here is the plan matching used. It
-/// judges structure only; whether the request can be served is the wallet's.
-///
-/// # The plan JSON
-///
-/// A JSON object with exactly these members; this shape is stable, and the
-/// same object is the `plan` member of [`FfiMatchedCredential::zkp_req`]:
-///
-/// - `functions`: array, in request order, of `{function_id, handle, params}`.
-///   `function_id` is `id` in a `req` item and `fn_id` in a `_req` item;
-///   `handle` is `return` or `id` respectively. `params` is a flat object:
-///   the declared params that were present, plus every other param unchanged.
-///   Values of declared params are strings, and `full-date` ones are
-///   validated.
-/// - `system_filter`: `{proof_systems?, system_ids?}`, the verifier's
-///   `proof_system_values` and `system_id_values` (from either form of
-///   `vp_formats_supported.zkp_req`). A member is absent when the verifier
-///   did not send it; a present empty list is passed through, not rejected.
-/// - `meta_doctype`: `meta.doctype_value`, or `null`.
-/// - `raw`: the credential query exactly as parsed, so members this version
-///   does not know survive. It is verifier-supplied and unauthenticated.
-///
-/// Normative cases for both the plan and every rejection are the vectors in
-/// `crates/siros-dc-matcher-core/tests/vectors/zkp_req/`.
-///
-/// # Errors
-///
-/// [`ZkpReqPlanError::InvalidRequest`] with the planner's code and reason
-/// (`ZkpReqPlanException` in Kotlin). Input that is not JSON is the
-/// `query_not_parseable` or `invalid_client_metadata` code.
-#[uniffi::export]
-pub fn zkp_req_plan(
-    credential_query_json: String,
-    client_metadata_json: Option<String>,
-) -> Result<String, ZkpReqPlanError> {
-    let plan =
-        zkp_req::plan(&credential_query_json, client_metadata_json.as_deref()).map_err(|e| {
-            ZkpReqPlanError::InvalidRequest {
-                code: e.code().to_owned(),
-                reason: e.to_string(),
-            }
-        })?;
-    serde_json::to_string(&plan).map_err(|e| ZkpReqPlanError::InvalidRequest {
-        code: "plan_not_serializable".to_owned(),
-        reason: e.to_string(),
-    })
-}
-
 /// Match a bare DCQL query, with the request's `client_metadata`.
 ///
 /// What [`match_dcql`] does, for a caller that also has the verifier's
 /// `client_metadata` (as JSON). A `zkp_req` query is matched against the
-/// circuit lists in its `vp_formats_supported`; with `None` those are absent
-/// and impose no constraint. A `zkp_req` query with `claims` as an object
-/// (the rulebook example shape) is accepted here although it is not DCQL.
+/// lists in its `vp_formats_supported.zkp_req`, which `zkp_req`, Section 1.2
+/// requires: with `None`, no `zkp_req` query matches.
 ///
 /// # Errors
 ///
