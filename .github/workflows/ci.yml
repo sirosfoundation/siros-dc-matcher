@@ -228,12 +228,16 @@ jobs:
       # because they are what runs inside the credential picker, where the
       # toolchain is whatever the wallet's build uses, not ours.
       #
-      # -ffi and -testhost are deliberately excluded: they declare 1.88 in
-      # their own manifests. Checking them here would only re-discover that.
+      # The zkp_req crates are in the matcher, so they hold the same floor.
+      #
+      # -ffi, -testhost and siros-zkp-req-wasm are deliberately excluded: they
+      # declare 1.88 in their own manifests. Checking them here would only
+      # re-discover that.
       - name: The 1.82 crates build on 1.82
         run: |
           cargo check --locked --all-features \
-            -p siros-dcql -p siros-dc-matcher-core -p siros-dc-matcher-wasm
+            -p siros-dcql -p siros-dc-matcher-core -p siros-dc-matcher-wasm \
+            -p siros-zkp-req -p siros-zkp-req-nym-auth
 
   semver:
     name: siros-dcql API matches its version
@@ -265,3 +269,68 @@ jobs:
       # an unpublished workspace sibling. That is easy to add by accident and
       # only fails at release time otherwise.
       - run: cargo publish --locked --dry-run -p siros-dcql
+
+  browser:
+    name: Build the browser presenter
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: ./.github/actions/rust-toolchain
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - run: cargo clippy --locked -p siros-zkp-req-wasm --target wasm32-unknown-unknown -- -D warnings
+      - run: cargo build --locked -p siros-zkp-req-wasm --target wasm32-unknown-unknown --release
+
+      # A browser instantiates the module with wasm-bindgen's glue, which
+      # provides wasm-bindgen's import modules and nothing else. A dependency
+      # that imports `env` or WASI (getrandom without a JS backend, C code)
+      # builds, and then fails at instantiation in the page.
+      - name: The module imports only wasm-bindgen's modules
+        run: |
+          python3 - target/wasm32-unknown-unknown/release/siros_zkp_req_wasm.wasm <<'PY'
+          import sys
+          d = open(sys.argv[1], "rb").read()
+          if d[:8] != b"\0asm\1\0\0\0":
+              sys.exit("not a wasm module")
+          def leb(i):
+              n = shift = 0
+              while True:
+                  b = d[i]; i += 1
+                  n |= (b & 0x7f) << shift; shift += 7
+                  if b < 0x80:
+                      return n, i
+          def name(i):
+              n, i = leb(i)
+              return d[i:i + n].decode(), i + n
+          def limits(i):
+              flags, i = leb(i)
+              _, i = leb(i)
+              return leb(i)[1] if flags & 1 else i
+          modules, i = set(), 8
+          while i < len(d):
+              section = d[i]
+              size, i = leb(i + 1)
+              if section == 2:
+                  count, k = leb(i)
+                  for _ in range(count):
+                      module, k = name(k)
+                      _, k = name(k)
+                      kind, k = d[k], k + 1
+                      if kind == 0:
+                          _, k = leb(k)
+                      elif kind == 1:
+                          k = limits(k + 1)
+                      elif kind == 2:
+                          k = limits(k)
+                      elif kind == 3:
+                          k += 2
+                      else:
+                          sys.exit(f"import kind {kind}")
+                      modules.add(module)
+              i += size
+          allowed = {"__wbindgen_placeholder__", "__wbindgen_externref_xform__"}
+          if not modules <= allowed:
+              sys.exit("the module imports " + ", ".join(sorted(modules - allowed)))
+          print("import modules:", ", ".join(sorted(modules)))
+          PY

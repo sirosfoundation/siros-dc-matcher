@@ -71,6 +71,7 @@ cargo test                      # everything, host targets
 cargo clippy --all-targets -- -D warnings
 cargo fmt --all -- --check
 cargo build -p siros-dc-matcher-wasm --target wasm32-wasip1 --release
+cargo build -p siros-zkp-req-wasm --target wasm32-unknown-unknown --release
 ```
 
 `siros-dcql` is published to crates.io and therefore may not depend on any other
@@ -82,7 +83,8 @@ Two floors are checked separately, because they differ on purpose:
 ```sh
 # Everything that ships inside the credential picker holds Rust 1.82.
 cargo +1.82 check --locked --all-features \
-  -p siros-dcql -p siros-dc-matcher-core -p siros-dc-matcher-wasm
+  -p siros-dcql -p siros-dc-matcher-core -p siros-dc-matcher-wasm \
+  -p siros-zkp-req -p siros-zkp-req-nym-auth
 
 # siros-dcql's public API against the version it declares.
 # Unlike fmt and clippy this is not part of the toolchain:
@@ -92,9 +94,9 @@ cargo semver-checks --package siros-dcql
 
 `cargo +1.82` needs that toolchain present: `rustup toolchain install 1.82`.
 
-`siros-dc-matcher-ffi` and `-testhost` declare 1.88 in their own manifests —
-uniffi's bindgen chain and wasmtime both need it — and neither ships in the
-picker. If you raise a floor, raise it in the manifest that owns it and say
+`siros-dc-matcher-ffi`, `-testhost` and `siros-zkp-req-wasm` declare 1.88 in
+their own manifests — uniffi's bindgen chain, wasmtime and wasm-bindgen need it —
+and none ships in the picker. If you raise a floor, raise it in the manifest that owns it and say
 why there.
 
 ## Changelog
