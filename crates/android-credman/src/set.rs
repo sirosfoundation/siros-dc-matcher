@@ -6,7 +6,7 @@
 
 use crate::entry::{DelegationType, Field, PaymentDisplay, VerificationDisplay, VerificationLink};
 #[cfg(target_arch = "wasm32")]
-use crate::levels::{imp::Credman, EntryKey, V2, V3};
+use crate::levels::{imp::Credman, EntryKey, V1, V2, V3, V5, V6, V7};
 use crate::text::C8StringExt;
 use c8str::{C8Str, C8String};
 use core::fmt;
@@ -198,11 +198,6 @@ impl<'a, K: EntryKind> SetEntry<'a, K> {
         }
     }
 
-    #[cfg(target_arch = "wasm32")]
-    pub(crate) const fn sent_link(&self) -> Option<Sent<VerificationLink<'a>>> {
-        self.link
-    }
-
     /// The display text.
     pub const fn metadata_display_text(&self) -> Option<&'a C8Str> {
         match self.metadata_display_text {
@@ -211,22 +206,12 @@ impl<'a, K: EntryKind> SetEntry<'a, K> {
         }
     }
 
-    #[cfg(target_arch = "wasm32")]
-    pub(crate) const fn sent_metadata_display_text(&self) -> Option<Sent<&'a C8Str>> {
-        self.metadata_display_text
-    }
-
     /// The entry's own delegation.
     pub const fn delegation(&self) -> Option<DelegationType> {
         match self.delegation {
             Some(delegation) => Some(delegation.value),
             None => None,
         }
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    pub(crate) const fn sent_delegation(&self) -> Option<Sent<DelegationType>> {
-        self.delegation
     }
 
     /// Whether the entry carries text that a host at `level` does not show:
@@ -253,6 +238,33 @@ impl<'a, K: EntryKind> SetEntry<'a, K> {
         }
         object.push_str_lossy("}");
         object
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl<K: EntryKind> SetEntry<'_, K> {
+    /// Sends the entry at `key` in the order of Google's matchers: the add
+    /// call with the standard metadata object, the delegation (the entry's
+    /// own, else `default`), the link, the fields, the display text.
+    pub(crate) fn send(
+        &self,
+        host: &Credman,
+        key: &EntryKey<'_>,
+        default: Option<Sent<DelegationType>>,
+    ) {
+        self.kind.add(host, key, &self.metadata(host.level()));
+        if let Some(delegation) = self.delegation.or(default) {
+            (delegation.send)(host, key, &delegation.value);
+        }
+        if let Some(link) = self.link {
+            (link.send)(host, key, &link.value);
+        }
+        for field in self.fields {
+            host.add_field_to_entry_set(key, field);
+        }
+        if let Some(text) = self.metadata_display_text {
+            (text.send)(host, key, &text.value);
+        }
     }
 }
 
@@ -350,7 +362,7 @@ impl Sent<DelegationType> {
         Self {
             value,
             #[cfg(target_arch = "wasm32")]
-            send: crate::sets_on_host::send_delegation,
+            send: send_delegation,
         }
     }
 }
@@ -360,7 +372,7 @@ impl<'a> Sent<VerificationLink<'a>> {
         Self {
             value,
             #[cfg(target_arch = "wasm32")]
-            send: crate::sets_on_host::send_link,
+            send: send_link,
         }
     }
 }
@@ -370,8 +382,29 @@ impl<'a> Sent<&'a C8Str> {
         Self {
             value,
             #[cfg(target_arch = "wasm32")]
-            send: crate::sets_on_host::send_metadata_display_text,
+            send: send_metadata_display_text,
         }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn send_delegation(host: &Credman, key: &EntryKey<'_>, delegation: &DelegationType) {
+    if host.reaches(7) {
+        host.set_delegation_type_for_entry_in_set(key, *delegation);
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn send_link(host: &Credman, key: &EntryKey<'_>, link: &VerificationLink<'_>) {
+    if host.reaches(6) {
+        host.set_additional_disclaimer_and_url_for_verification_entry_in_credential_set(key, link);
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn send_metadata_display_text(host: &Credman, key: &EntryKey<'_>, text: &&C8Str) {
+    if host.reaches(5) {
+        host.add_metadata_display_text_to_entry_set(key, text);
     }
 }
 
