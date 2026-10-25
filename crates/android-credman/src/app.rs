@@ -1,35 +1,60 @@
 use android_credman_sys::CallingAppInfo;
-use c8str::{C8Str, C8StrError};
+use c8str::{C8Str, C8StrError, C8String};
+use core::fmt;
 
 /// The caller as the platform verified it. Trust it over any name or origin
 /// inside the request.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CallingApp {
-    raw: CallingAppInfo,
+    package_name: C8String,
+    origin: Option<C8String>,
 }
 
 impl CallingApp {
-    pub const fn from_raw(raw: CallingAppInfo) -> Self {
-        Self { raw }
+    /// Reads each field up to its first NUL inside the field. An empty
+    /// origin is `None`.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub(crate) fn from_host(info: &CallingAppInfo) -> Result<Self, CallingAppError> {
+        let package_name = C8Str::from_bytes_until_nul(&info.package_name)
+            .map_err(CallingAppError::PackageName)?;
+        let origin = C8Str::from_bytes_until_nul(&info.origin).map_err(CallingAppError::Origin)?;
+        Ok(Self {
+            package_name: package_name.into(),
+            origin: (!origin.is_empty()).then(|| origin.into()),
+        })
     }
 
-    pub const fn raw(&self) -> &CallingAppInfo {
-        &self.raw
+    pub fn package_name(&self) -> &C8Str {
+        &self.package_name
     }
 
-    /// # Errors
-    ///
-    /// [`C8StrError`] when the field holds no NUL or is not UTF-8 before it.
-    pub const fn package_name(&self) -> Result<&C8Str, C8StrError> {
-        C8Str::from_bytes_until_nul(&self.raw.package_name)
+    /// The page's origin when a browser calls; `None` for a native app.
+    pub fn origin(&self) -> Option<&C8Str> {
+        self.origin.as_deref()
     }
+}
 
-    /// Empty for a native app.
-    ///
-    /// # Errors
-    ///
-    /// [`C8StrError`] when the field holds no NUL or is not UTF-8 before it.
-    pub const fn origin(&self) -> Result<&C8Str, C8StrError> {
-        C8Str::from_bytes_until_nul(&self.raw.origin)
+/// A `CallingAppInfo` field with no NUL inside it, or with bytes before the
+/// NUL that are not UTF-8.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallingAppError {
+    PackageName(C8StrError),
+    Origin(C8StrError),
+}
+
+impl fmt::Display for CallingAppError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::PackageName(cause) => write!(f, "calling app package name: {cause}"),
+            Self::Origin(cause) => write!(f, "calling app origin: {cause}"),
+        }
+    }
+}
+
+impl std::error::Error for CallingAppError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::PackageName(cause) | Self::Origin(cause) => Some(cause),
+        }
     }
 }

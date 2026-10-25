@@ -31,3 +31,5 @@ sets.add_entry_set(&EntrySet::new(set_id, Slot::one(&entry), &[]));
   give the alternatives of one slot distinct ids.
 - `Host` exists on `wasm32` only. Implement `SetSink` to test a matcher
   elsewhere.
+- Raw pointers exist only inside the `unsafe` calls into
+  `android-credman-sys`; every type here is safe Rust.

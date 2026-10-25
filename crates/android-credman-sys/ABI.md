@@ -186,7 +186,7 @@ checks the same WebAssembly signatures.
 | | `len` | bytes asked for | H |
 | | return | bytes copied; may be less than `len`. A matcher keeps reading until it has the whole blob | GT fake returns `min(len, size − offset)` and 0 past the end ([lines 149–153][GT]) |
 | `GetWasmVersion` | `version` | required out-pointer | H |
-| `GetCallingAppInfo` | `info` | required; a whole 768-byte struct. Each field is NUL-terminated when shorter than the field. A field the host fills to the brim has no terminator, and the bytes are expected to be UTF-8; a matcher reads each field inside its buffer and treats a missing NUL or invalid UTF-8 as an error | H (layout); field encoding unconfirmed: conservative |
+| `GetCallingAppInfo` | `info` | required; a whole 768-byte struct. Each field is NUL-terminated when shorter than the field. A field the host fills to the brim has no terminator, and the bytes are expected to be UTF-8; a matcher reads each field inside its buffer and treats a missing NUL or invalid UTF-8 as an error. An array field cannot be NULL, so an empty `origin` stands for none | H (layout); field encoding unconfirmed: conservative |
 
 ### Entry sets (`credman_v2`, levels 2 and 3)
 

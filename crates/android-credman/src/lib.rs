@@ -23,8 +23,7 @@ mod set;
 mod sets_on_host;
 mod version;
 
-pub use android_credman_sys::CallingAppInfo;
-pub use app::CallingApp;
+pub use app::{CallingApp, CallingAppError};
 pub use c8str::{C8Str, C8StrError, C8String};
 pub use entry::{
     Field, InlineIssuanceEntry, LegacyEntry, LegacyField, PackageInfo, PaymentDisplay,

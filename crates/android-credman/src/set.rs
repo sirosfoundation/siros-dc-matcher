@@ -10,10 +10,14 @@ use c8str::C8Str;
 pub(crate) mod sealed {
     pub trait Sealed {
         #[cfg(target_arch = "wasm32")]
-        fn add_to_set(&self, at: &crate::sets_on_host::Address, metadata: Option<&c8str::C8Str>);
+        fn add_to_set(
+            &self,
+            at: &crate::sets_on_host::Address<'_>,
+            metadata: Option<&c8str::C8Str>,
+        );
 
         #[cfg(target_arch = "wasm32")]
-        fn after_fields(&self, _at: &crate::sets_on_host::Address) {}
+        fn after_fields(&self, _at: &crate::sets_on_host::Address<'_>) {}
     }
 }
 
@@ -34,28 +38,28 @@ impl<K: EntryKind> EntryKind for WithMetadataDisplayText<'_, K> {}
 
 impl sealed::Sealed for VerificationDisplay<'_> {
     #[cfg(target_arch = "wasm32")]
-    fn add_to_set(&self, at: &crate::sets_on_host::Address, metadata: Option<&C8Str>) {
+    fn add_to_set(&self, at: &crate::sets_on_host::Address<'_>, metadata: Option<&C8Str>) {
         crate::sets_on_host::verification(at, self, metadata);
     }
 }
 
 impl sealed::Sealed for PaymentDisplay<'_> {
     #[cfg(target_arch = "wasm32")]
-    fn add_to_set(&self, at: &crate::sets_on_host::Address, metadata: Option<&C8Str>) {
+    fn add_to_set(&self, at: &crate::sets_on_host::Address<'_>, metadata: Option<&C8Str>) {
         crate::sets_on_host::payment(at, self, metadata);
     }
 }
 
 impl sealed::Sealed for PaymentWithInfo<'_> {
     #[cfg(target_arch = "wasm32")]
-    fn add_to_set(&self, at: &crate::sets_on_host::Address, metadata: Option<&C8Str>) {
+    fn add_to_set(&self, at: &crate::sets_on_host::Address<'_>, metadata: Option<&C8Str>) {
         crate::sets_on_host::payment_with_info(at, self, metadata);
     }
 }
 
 impl sealed::Sealed for AnyEntry<'_> {
     #[cfg(target_arch = "wasm32")]
-    fn add_to_set(&self, at: &crate::sets_on_host::Address, metadata: Option<&C8Str>) {
+    fn add_to_set(&self, at: &crate::sets_on_host::Address<'_>, metadata: Option<&C8Str>) {
         match self {
             Self::Verification(display) => display.add_to_set(at, metadata),
             Self::Payment(display) => display.add_to_set(at, metadata),
@@ -66,38 +70,38 @@ impl sealed::Sealed for AnyEntry<'_> {
 
 impl<K: EntryKind> sealed::Sealed for WithDelegation<K> {
     #[cfg(target_arch = "wasm32")]
-    fn add_to_set(&self, at: &crate::sets_on_host::Address, metadata: Option<&C8Str>) {
+    fn add_to_set(&self, at: &crate::sets_on_host::Address<'_>, metadata: Option<&C8Str>) {
         self.kind.add_to_set(at, metadata);
         crate::sets_on_host::delegation(at, self.delegation);
     }
 
     #[cfg(target_arch = "wasm32")]
-    fn after_fields(&self, at: &crate::sets_on_host::Address) {
+    fn after_fields(&self, at: &crate::sets_on_host::Address<'_>) {
         self.kind.after_fields(at);
     }
 }
 
 impl<K: EntryKind> sealed::Sealed for WithLink<'_, K> {
     #[cfg(target_arch = "wasm32")]
-    fn add_to_set(&self, at: &crate::sets_on_host::Address, metadata: Option<&C8Str>) {
+    fn add_to_set(&self, at: &crate::sets_on_host::Address<'_>, metadata: Option<&C8Str>) {
         self.kind.add_to_set(at, metadata);
         crate::sets_on_host::link(at, &self.link);
     }
 
     #[cfg(target_arch = "wasm32")]
-    fn after_fields(&self, at: &crate::sets_on_host::Address) {
+    fn after_fields(&self, at: &crate::sets_on_host::Address<'_>) {
         self.kind.after_fields(at);
     }
 }
 
 impl<K: EntryKind> sealed::Sealed for WithMetadataDisplayText<'_, K> {
     #[cfg(target_arch = "wasm32")]
-    fn add_to_set(&self, at: &crate::sets_on_host::Address, metadata: Option<&C8Str>) {
+    fn add_to_set(&self, at: &crate::sets_on_host::Address<'_>, metadata: Option<&C8Str>) {
         self.kind.add_to_set(at, metadata);
     }
 
     #[cfg(target_arch = "wasm32")]
-    fn after_fields(&self, at: &crate::sets_on_host::Address) {
+    fn after_fields(&self, at: &crate::sets_on_host::Address<'_>) {
         self.kind.after_fields(at);
         crate::sets_on_host::metadata_display_text(at, self.text);
     }
