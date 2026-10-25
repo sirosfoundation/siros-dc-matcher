@@ -28,7 +28,7 @@ inferred, and its Evidence column gives the strength.
 | **GR** | Google's Rust matcher [`matcher-rs/src`][GR] (`bindings.rs`, `credman.rs`, `reporter.rs`) | CMWallet `abcf38a3` | What Google passes; module placement is wrong (§7) |
 | **GA** | Google's shipped matcher binaries [`app/src/main/assets/*.wasm`][GA] | CMWallet `abcf38a3` | Their import tables, read with a parser |
 | **GT** | Google's host fake [`matcher/test_runner.cc`][GT] and [`matcher/test_plan.md`][GT-plan], written "based on the real Android Credential Manager's host implementation (`RegistryRuntime.kt`)" | CMWallet `abcf38a3` | How Google models the host's bookkeeping |
-| **AX** | androidx registry types: [`VerificationEntryDisplayProperties.kt`][AX-entry], [`VerificationFieldDisplayProperties.kt`][AX-field], [`InlineIssuanceEntry.kt`][AX-inline], [`DelegationType.kt`][AX-deleg], [`RegisterCredentialsRequest.kt`][AX-req] | androidx `2b7ce630` | The registry side of the same display data |
+| **AX** | androidx registry types: [`VerificationEntryDisplayProperties.kt`][AX-entry], [`VerificationFieldDisplayProperties.kt`][AX-field], [`InlineIssuanceEntry.kt`][AX-inline], [`DelegationType.kt`][AX-deleg], [`RegisterCredentialsRequest.kt`][AX-req], [`ProviderGetCredentialRequest.kt`][AX-select] | androidx `2b7ce630` | The registry side of the same display data, and what the wallet receives on selection |
 | **MP** | OpenWallet Foundation Multipaz C++ matcher [`CredentialDatabase.cpp`][MP] | multipaz `5c15239f` | A production matcher's calls |
 | **SD** | Device findings of this repository: [`docs/abi.md`][SD-doc] lines 31–50, commits [`3d61ac7`][SD-icon] and [`6cd02c9`][SD-badge] | siros-dc-matcher `ac573c2` | Observed on a Pixel through logcat and the share sheet |
 | **EP** | Elpaso wallet [patch 0003][EP] on Google's C matcher | elpaso `4f89c660` | Observed on a device |
@@ -147,7 +147,7 @@ checks the same WebAssembly signatures.
 
 | Function | Parameter | Rule | Empty value | Evidence |
 |---|---|---|---|---|
-| `AddStringIdEntry` | `cred_id` | required | unconfirmed | GC, GR, MP, SP all pass a string. Fields attach by it, so it is unique among standalone entries (GT keys entries by id) |
+| `AddStringIdEntry` | `cred_id` | required | unconfirmed | GC, GR, MP, SP all pass a string. Fields attach by it, so it is unique among standalone entries (GT keys entries by id). AX returns it to the wallet as `selectedEntryId` ([lines 29–42][AX-select]) |
 | | `icon`, `icon_len` | required | an empty image is treated as no image | Conservative. SD shows NULL drops an `AddEntryToSet` entry; AX types the registry icon non-null ([lines 45–47][AX-entry]). SP passes NULL here; GC passes the blob pointer with length 0 when its registry has no icon |
 | | `title` | required | unconfirmed | AX `title: CharSequence` non-null ([line 45][AX-entry]). GR passes NULL for an empty title (§7) |
 | | `subtitle` | nullable | unconfirmed | AX `subtitle: CharSequence?` ([line 46][AX-entry]); GC passes an absent registry value as NULL ([line 115][GC-v1]); GR NULL when empty |
@@ -192,15 +192,15 @@ checks the same WebAssembly signatures.
 
 | Function | Parameter | Rule | Empty value | Evidence |
 |---|---|---|---|---|
-| `AddEntrySet` | `set_id` | required; unique within the invocation | unconfirmed | SD: declaring an id twice discards the whole output. GR builds a distinct id per combination ([`reporter.rs` lines 296–325][GR-reporter]). GC repeats ids (§7) |
+| `AddEntrySet` | `set_id` | required; unique within the invocation | unconfirmed | SD: declaring an id twice discards the whole output. GR builds a distinct id per combination ([`reporter.rs` lines 296–325][GR-reporter]). GC repeats ids (§7). AX returns it to the wallet as `credentialSetId` ([lines 44–64][AX-select]) |
 | | `set_length` | ≥ 1: the number of positions | — | GC, GR, MP pass the number of slots. 0 is conservative-forbidden |
-| `AddEntryToSet` | `cred_id` | required; distinct among the alternatives of one position | — | GT keys entries by position, then id ([`test_runner.cc` lines 161–171][GT]) |
-| | `icon`, `icon_len` | required: the host drops an entry without an icon | — | **SD device**: "`WasmRuntime: Null icon for icon`" and no entry ([`docs/abi.md` lines 36–42][SD-doc]) |
+| `AddEntryToSet` | `cred_id` | required; distinct among the alternatives of one position | — | GT keys entries by position, then id ([`test_runner.cc` lines 161–171][GT]). AX returns it to the wallet as `credentialId` ([lines 87–95][AX-select]) |
+| | `icon`, `icon_len` | required: the host drops an entry without an icon. A 64×64 PNG shows; a 4×4 PNG was dropped | — | **SD device**: "`WasmRuntime: Null icon for icon`" and no entry; the PNG sizes ([`docs/abi.md` lines 36–42][SD-doc]) |
 | | `title` | required | unconfirmed | AX non-null; GR NULL when empty (§7) |
 | | `subtitle` | nullable | unconfirmed | AX nullable; GR NULL when empty |
 | | `disclaimer` | nullable | drawn as a blank note | **SD device** ([`6cd02c9`][SD-badge]); GC passes an absent `explainer` as NULL ([line 135][GC-v2]); MP NULL ([line 413][MP]) |
 | | `warning` | nullable | drawn as a blank badge | **SD device**; GC NULL ([line 135][GC-v2]); MP NULL ([line 414][MP]) |
-| | `metadata` | nullable | unconfirmed | MP passes NULL on every entry ([line 415][MP]); GR NULL when empty. Returned to the wallet on selection |
+| | `metadata` | nullable | unconfirmed | MP passes NULL on every entry ([line 415][MP]); GR NULL when empty. Returned to the wallet on selection (AX `SelectedCredential.metadata`, [lines 87–95][AX-select]) |
 | | `set_id` | required; declared earlier by `AddEntrySet` | — | GC, GR, MP declare first |
 | | `set_index` | 0 ≤ `set_index` < `set_length` | — | GC, GR, MP number positions from 0 |
 | `AddFieldToEntrySet` | `cred_id`, `set_id`, `set_index` | required; name an entry added earlier | — | GT appends to the entry at that position and id ([lines 173–179][GT]); this repository's test host refuses a mismatch |
@@ -346,6 +346,7 @@ Run on a current Pixel with `adb logcat | grep WasmRuntime` open.
 [AX-inline]: https://github.com/androidx/androidx/blob/2b7ce63091feaf4d7df5ab264581f074720946d0/credentials/registry/registry-provider/src/main/java/androidx/credentials/registry/provider/digitalcredentials/InlineIssuanceEntry.kt#L47-L62
 [AX-deleg]: https://github.com/androidx/androidx/blob/2b7ce63091feaf4d7df5ab264581f074720946d0/credentials/registry/registry-provider/src/main/java/androidx/credentials/registry/provider/DelegationType.kt#L40-L64
 [AX-req]: https://github.com/androidx/androidx/blob/2b7ce63091feaf4d7df5ab264581f074720946d0/credentials/registry/registry-provider/src/main/java/androidx/credentials/registry/provider/RegisterCredentialsRequest.kt#L27-L31
+[AX-select]: https://github.com/androidx/androidx/blob/2b7ce63091feaf4d7df5ab264581f074720946d0/credentials/registry/registry-provider/src/main/java/androidx/credentials/registry/provider/ProviderGetCredentialRequest.kt#L29-L95
 [MP]: https://github.com/openwallet-foundation/multipaz/blob/5c15239f5875e4e9f42dc1fac7a62f0e4db533fe/multipaz-dcapi-credman/src/androidMain/matcher/CredentialDatabase.cpp#L380-L455
 [SD-doc]: https://github.com/sirosfoundation/siros-dc-matcher/blob/ac573c2843afeb3d4d9d19924aa81572cabbd304/docs/abi.md#L31-L50
 [SD-icon]: https://github.com/sirosfoundation/siros-dc-matcher/commit/3d61ac791f1f004914e0bbf732704cfc445755ce

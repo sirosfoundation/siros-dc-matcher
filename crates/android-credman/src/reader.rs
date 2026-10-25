@@ -1,6 +1,9 @@
 use crate::host::Host;
 use std::io::{self, Read, Seek, SeekFrom};
 
+/// The credential blob the wallet registered, as [`Read`] and [`Seek`], for
+/// a decoder that streams it. Each read asks the host for the bytes with
+/// [`Host::read_credentials_at`].
 #[derive(Debug, Clone)]
 pub struct CredentialReader {
     host: Host,
@@ -9,6 +12,7 @@ pub struct CredentialReader {
 }
 
 impl CredentialReader {
+    /// A reader at offset 0. Reads the blob's length once.
     pub fn new(host: Host) -> Self {
         Self {
             host,
@@ -17,10 +21,12 @@ impl CredentialReader {
         }
     }
 
+    /// The blob's length in bytes.
     pub fn len(&self) -> u64 {
         self.size
     }
 
+    /// Whether the blob holds no bytes.
     pub fn is_empty(&self) -> bool {
         self.size == 0
     }

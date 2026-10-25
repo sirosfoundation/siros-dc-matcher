@@ -1,7 +1,7 @@
-//! An [`EntrySet`] has at least one slot and every slot at least one entry;
-//! positions and the declared length follow from the slots. The entry kind
-//! is a type parameter: a binary links the calls of the kinds it builds and
-//! no others.
+//! Entry sets, the picker's options from host level 2. An [`EntrySet`] has at
+//! least one slot and every slot at least one entry; positions and the
+//! declared length follow from the slots. The entry kind is a type
+//! parameter: a binary links the calls of the kinds it builds and no others.
 
 use crate::entry::{Field, PaymentDisplay, VerificationDisplay, VerificationLink};
 use crate::version::{V3, V5, V6, V7};
@@ -21,11 +21,15 @@ pub(crate) mod sealed {
     }
 }
 
-/// Selects the calls that add the entry: `AddEntryToSet` for
-/// [`VerificationDisplay`], `AddPaymentEntryToSet` for [`PaymentDisplay`],
-/// `AddPaymentEntryToSetV2` for [`PaymentWithInfo`]. [`AnyEntry`] mixes them;
-/// [`WithDelegation`], [`WithLink`] and [`WithMetadataDisplayText`] add a
-/// level's call to any kind.
+/// What a set entry shows, which selects the calls that add it:
+/// [`AddEntryToSet`] for [`VerificationDisplay`], [`AddPaymentEntryToSet`] for
+/// [`PaymentDisplay`], [`AddPaymentEntryToSetV2`] for [`PaymentWithInfo`].
+/// [`AnyEntry`] mixes them; [`WithDelegation`], [`WithLink`] and
+/// [`WithMetadataDisplayText`] add a level's call to any kind.
+///
+/// [`AddEntryToSet`]: android_credman_sys::v2::AddEntryToSet
+/// [`AddPaymentEntryToSet`]: android_credman_sys::v2::AddPaymentEntryToSet
+/// [`AddPaymentEntryToSetV2`]: android_credman_sys::v3::AddPaymentEntryToSetV2
 pub trait EntryKind: Copy + sealed::Sealed {}
 
 impl EntryKind for VerificationDisplay<'_> {}
@@ -107,14 +111,21 @@ impl<K: EntryKind> sealed::Sealed for WithMetadataDisplayText<'_, K> {
     }
 }
 
+/// A payment entry with more text about the transaction, sent by
+/// [`AddPaymentEntryToSetV2`]. Level 3.
+///
+/// [`AddPaymentEntryToSetV2`]: android_credman_sys::v3::AddPaymentEntryToSetV2
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PaymentWithInfo<'a> {
     pub level: V3,
     pub display: PaymentDisplay<'a>,
+    /// Text about the transaction, such as the request's transaction data
+    /// carries. How the picker shows it is unconfirmed.
     pub additional_info: Option<&'a C8Str>,
 }
 
-/// For slots that mix kinds.
+/// An entry of any kind, for slots that mix verification and payment
+/// entries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnyEntry<'a> {
     Verification(VerificationDisplay<'a>),
@@ -122,7 +133,11 @@ pub enum AnyEntry<'a> {
     PaymentWithInfo(PaymentWithInfo<'a>),
 }
 
-/// `SetDelegationTypeForEntryInSet`, sent right after the entry.
+/// An entry of kind `K` that sets how the wallet completes the request when
+/// the user picks it, with [`SetDelegationTypeForEntryInSet`] right after the
+/// entry. Level 7.
+///
+/// [`SetDelegationTypeForEntryInSet`]: android_credman_sys::v7::SetDelegationTypeForEntryInSet
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WithDelegation<K> {
     pub kind: K,
@@ -130,7 +145,11 @@ pub struct WithDelegation<K> {
     pub delegation: DelegationType,
 }
 
-/// The level-6 link, sent right after the entry.
+/// An entry of kind `K` with a second disclaimer and a link, sent with
+/// [`SetAdditionalDisclaimerAndUrlForVerificationEntryInCredentialSet`] right
+/// after the entry. Level 6.
+///
+/// [`SetAdditionalDisclaimerAndUrlForVerificationEntryInCredentialSet`]: android_credman_sys::v6::SetAdditionalDisclaimerAndUrlForVerificationEntryInCredentialSet
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WithLink<'a, K> {
     pub kind: K,
@@ -138,7 +157,11 @@ pub struct WithLink<'a, K> {
     pub link: VerificationLink<'a>,
 }
 
-/// `AddMetadataDisplayTextToEntrySet`, sent after the fields.
+/// An entry of kind `K` with display text, sent with
+/// [`AddMetadataDisplayTextToEntrySet`] after the entry's fields. Where the
+/// picker shows it is unconfirmed. Level 5.
+///
+/// [`AddMetadataDisplayTextToEntrySet`]: android_credman_sys::v5::AddMetadataDisplayTextToEntrySet
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WithMetadataDisplayText<'a, K> {
     pub kind: K,
@@ -146,15 +169,21 @@ pub struct WithMetadataDisplayText<'a, K> {
     pub text: &'a C8Str,
 }
 
+/// How the wallet completes the request when the user picks the entry:
 /// androidx's `DelegationType` values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DelegationType {
-    /// The wallet's UI handles the selection.
+    /// The host launches the wallet's activity, which handles any user
+    /// interaction.
     NoDelegation = 0,
-    /// The wallet's background service fulfils it.
+    /// The host calls the wallet's background fulfilment service and shows a
+    /// loading indicator meanwhile. A selected set falls back to
+    /// [`Self::NoDelegation`] unless all its entries are `Full`.
     Full = 1,
 }
 
+/// One entry in a slot of an [`EntrySet`]: a credential the user can pick
+/// for that position, shown as kind `K`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SetEntry<'a, K> {
     cred_id: &'a C8Str,
@@ -164,6 +193,9 @@ pub struct SetEntry<'a, K> {
 }
 
 impl<'a, K: EntryKind> SetEntry<'a, K> {
+    /// `cred_id` comes back to the wallet when the user selects the entry.
+    /// It is distinct among the alternatives of one slot; the fields and the
+    /// level-5 to level-7 calls attach by it.
     pub const fn new(cred_id: &'a C8Str, kind: K) -> Self {
         Self {
             cred_id,
@@ -173,35 +205,41 @@ impl<'a, K: EntryKind> SetEntry<'a, K> {
         }
     }
 
-    /// Returned to the wallet on selection.
+    /// Text the host returns to the wallet with the id on selection.
     pub const fn with_metadata(mut self, metadata: &'a C8Str) -> Self {
         self.metadata = Some(metadata);
         self
     }
 
+    /// Rows naming the values the entry discloses, sent after the entry.
     pub const fn with_fields(mut self, fields: &'a [Field<'a>]) -> Self {
         self.fields = fields;
         self
     }
 
+    /// The id the wallet receives on selection.
     pub const fn cred_id(&self) -> &'a C8Str {
         self.cred_id
     }
 
+    /// What the entry shows.
     pub const fn kind(&self) -> &K {
         &self.kind
     }
 
+    /// The text the wallet receives with the id on selection.
     pub const fn metadata(&self) -> Option<&'a C8Str> {
         self.metadata
     }
 
+    /// The rows sent after the entry.
     pub const fn fields(&self) -> &'a [Field<'a>] {
         self.fields
     }
 }
 
-/// The user picks one alternative per slot.
+/// One position of an [`EntrySet`]: the alternatives the user chooses
+/// between, such as the credentials that answer one query.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Slot<'a, K> {
     first: &'a SetEntry<'a, K>,
@@ -209,6 +247,7 @@ pub struct Slot<'a, K> {
 }
 
 impl<'a, K: EntryKind> Slot<'a, K> {
+    /// A position with one entry.
     pub const fn one(entry: &'a SetEntry<'a, K>) -> Self {
         Self {
             first: entry,
@@ -216,6 +255,7 @@ impl<'a, K: EntryKind> Slot<'a, K> {
         }
     }
 
+    /// A position with `first` and the further alternatives `others`.
     pub const fn with_alternatives(
         first: &'a SetEntry<'a, K>,
         others: &'a [SetEntry<'a, K>],
@@ -223,11 +263,14 @@ impl<'a, K: EntryKind> Slot<'a, K> {
         Self { first, others }
     }
 
+    /// The entries, `first` first.
     pub fn alternatives(&self) -> impl Iterator<Item = &'a SetEntry<'a, K>> {
         core::iter::once(self.first).chain(self.others)
     }
 }
 
+/// One option in the picker, which the user selects whole, picking one
+/// alternative in each slot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EntrySet<'a, K> {
     id: &'a C8Str,
@@ -236,26 +279,38 @@ pub struct EntrySet<'a, K> {
 }
 
 impl<'a, K: EntryKind> EntrySet<'a, K> {
+    /// `id` comes back to the wallet when the user selects the set. Declare
+    /// it once per invocation: the host discards everything the matcher added
+    /// when one id is declared twice. The slots are `first`, then `others`,
+    /// in position order.
     pub const fn new(id: &'a C8Str, first: Slot<'a, K>, others: &'a [Slot<'a, K>]) -> Self {
         Self { id, first, others }
     }
 
+    /// The id the wallet receives on selection.
     pub const fn id(&self) -> &'a C8Str {
         self.id
     }
 
+    /// The number of positions, which the declaration sends as the set's
+    /// length.
     pub const fn slot_count(&self) -> usize {
         1 + self.others.len()
     }
 
+    /// The slots in position order.
     pub fn slots(&self) -> impl Iterator<Item = &Slot<'a, K>> {
         core::iter::once(&self.first).chain(self.others)
     }
 }
 
-/// Implemented by `V2` on the host, and by a stand-in in a test.
+/// Where a matcher sends its entry sets: [`crate::V2`] sends them to the host,
+/// and a test implements it to record them.
 pub trait SetSink {
-    /// Sends the declaration, then each alternative: its kind's calls up to
-    /// the fields, the fields, then its kind's calls after them.
+    /// Declares the set with [`AddEntrySet`], then sends each alternative:
+    /// its kind's calls up to the fields, the fields, then its kind's calls
+    /// after them.
+    ///
+    /// [`AddEntrySet`]: android_credman_sys::v2::AddEntrySet
     fn add_entry_set<K: EntryKind>(&mut self, set: &EntrySet<'_, K>);
 }
