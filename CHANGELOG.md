@@ -44,6 +44,10 @@ existed.
   import against the ABI table, with its exact signature, plus the `_start`
   and `memory` exports. CI runs it on every build and before a release, in
   place of the name scan over the first 8 KiB.
+- `clippy.toml` forbids std's `HashMap`, `HashSet` and `RandomState` in the
+  crates that link into `matcher.wasm`, so `random_get` cannot come back
+  through a new set or map. The FFI and test-host crates carry their own
+  `clippy.toml` without the rule.
 
 ## v0.11.0 — 2026-10-20
 

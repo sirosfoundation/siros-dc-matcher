@@ -1,0 +1,13 @@
+# std's HashMap and HashSet hash with RandomState, which seeds itself from
+# WASI `random_get`. The Credential Manager host lacks that function: a
+# matcher that builds one of them traps when it does (releases v0.8.0 to
+# v0.11.0 did, on zkp_req requests). The crates that link into matcher.wasm
+# use rustc_hash::FxHashMap and FxHashSet, which need no seed.
+#
+# siros-dc-matcher-ffi and siros-dc-matcher-testhost never link into
+# matcher.wasm and carry their own clippy.toml without this rule.
+disallowed-types = [
+    { path = "std::collections::HashMap", reason = "its RandomState reads WASI random_get, which the Credential Manager host lacks; use rustc_hash::FxHashMap" },
+    { path = "std::collections::HashSet", reason = "its RandomState reads WASI random_get, which the Credential Manager host lacks; use rustc_hash::FxHashSet" },
+    { path = "std::collections::hash_map::RandomState", reason = "reads WASI random_get, which the Credential Manager host lacks; use rustc_hash::FxBuildHasher" },
+]
