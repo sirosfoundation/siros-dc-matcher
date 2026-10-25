@@ -2,13 +2,10 @@
 //! `Option` of one (NULL for `None`), so each call meets the rules of
 //! `ABI.md`.
 
-use crate::app::CallingApp;
-use crate::entry::{
-    Field, InlineIssuanceEntry, LegacyEntry, PaymentDisplay, PaymentEntry, StringIdEntry,
-    VerificationDisplay,
-};
-use crate::version::WasmVersion;
-use android_credman_sys::{c_char, credman, CallingAppInfo};
+use crate::app::{CallingApp, CallingAppError};
+use crate::entry::{InlineIssuanceEntry, LegacyEntry, PackageInfo, PaymentEntry, StringIdEntry};
+use crate::version::{WasmVersion, V4};
+use android_credman_sys::{credman, v4, CallingAppInfo};
 use c8str::C8Str;
 use core::ffi::c_void;
 use core::ptr;
@@ -84,37 +81,46 @@ impl Host {
         blob
     }
 
-    pub fn calling_app(&self) -> CallingApp {
+    /// # Errors
+    ///
+    /// [`CallingAppError`] when a field holds no NUL or is not UTF-8 before
+    /// it.
+    pub fn calling_app(&self) -> Result<CallingApp, CallingAppError> {
         let mut info = CallingAppInfo::ZEROED;
         // SAFETY: `info` is a whole CallingAppInfo the host fills.
         unsafe { credman::GetCallingAppInfo(&mut info) };
-        CallingApp::from_raw(info)
+        CallingApp::from_host(&info)
     }
 
     pub fn add_string_id_entry(&self, entry: &StringIdEntry<'_>) {
-        let id = entry.cred_id.as_ptr();
-        let d = VerificationParts::of(&entry.display);
+        let display = &entry.display;
         // SAFETY: see the module documentation.
         unsafe {
             credman::AddStringIdEntry(
-                id,
-                d.icon.0,
-                d.icon.1,
-                d.title,
-                d.subtitle,
-                d.disclaimer,
-                d.warning,
+                entry.cred_id.as_ptr(),
+                display.icon.as_ptr().cast(),
+                display.icon.len(),
+                display.title.as_ptr(),
+                display.subtitle.map_or(ptr::null(), C8Str::as_ptr),
+                display.disclaimer.map_or(ptr::null(), C8Str::as_ptr),
+                display.warning.map_or(ptr::null(), C8Str::as_ptr),
             );
         }
-        entry
-            .fields
-            .iter()
-            .for_each(|field| standalone_field(id, field));
+        for field in entry.fields {
+            // SAFETY: see the module documentation.
+            unsafe {
+                credman::AddFieldForStringIdEntry(
+                    entry.cred_id.as_ptr(),
+                    field.name.as_ptr(),
+                    field.value.map_or(ptr::null(), C8Str::as_ptr),
+                );
+            }
+        }
         if let Some(link) = entry.link {
             // SAFETY: see the module documentation.
             unsafe {
                 credman::SetAdditionalDisclaimerAndUrlForVerificationEntry(
-                    id,
+                    entry.cred_id.as_ptr(),
                     link.secondary_disclaimer.as_ptr(),
                     link.url_display_text.as_ptr(),
                     link.url_value.as_ptr(),
@@ -124,13 +130,12 @@ impl Host {
     }
 
     pub fn add_legacy_entry(&self, entry: &LegacyEntry<'_>) {
-        let (icon, icon_len) = icon_parts(entry.icon);
         // SAFETY: see the module documentation.
         unsafe {
             credman::AddEntry(
                 entry.cred_id,
-                icon,
-                icon_len,
+                entry.icon.as_ptr().cast(),
+                entry.icon.len(),
                 entry.title.as_ptr(),
                 entry.subtitle.as_ptr(),
                 entry.disclaimer.as_ptr(),
@@ -144,110 +149,52 @@ impl Host {
     }
 
     pub fn add_payment_entry(&self, entry: &PaymentEntry<'_>) {
-        let p = PaymentParts::of(&entry.display);
+        let display = &entry.display;
         // SAFETY: see the module documentation.
         unsafe {
             credman::AddPaymentEntry(
                 entry.cred_id.as_ptr(),
-                p.merchant,
-                p.method,
-                p.method_subtitle,
-                p.method_icon.0,
-                p.method_icon.1,
-                p.amount,
-                p.bank_icon.0,
-                p.bank_icon.1,
-                p.provider_icon.0,
-                p.provider_icon.1,
+                display.merchant_name.as_ptr(),
+                display.payment_method_name.as_ptr(),
+                display
+                    .payment_method_subtitle
+                    .map_or(ptr::null(), C8Str::as_ptr),
+                display.payment_method_icon.as_ptr().cast(),
+                display.payment_method_icon.len(),
+                display.transaction_amount.as_ptr(),
+                display.bank_icon.map_or(ptr::null(), <[u8]>::as_ptr).cast(),
+                display.bank_icon.map_or(0, <[u8]>::len),
+                display
+                    .payment_provider_icon
+                    .map_or(ptr::null(), <[u8]>::as_ptr)
+                    .cast(),
+                display.payment_provider_icon.map_or(0, <[u8]>::len),
             );
         }
     }
 
     pub fn add_inline_issuance_entry(&self, entry: &InlineIssuanceEntry<'_>) {
-        let (icon, icon_len) = optional_icon_parts(entry.icon);
         // SAFETY: see the module documentation.
         unsafe {
             credman::AddInlineIssuanceEntry(
                 entry.cred_id.as_ptr(),
-                icon,
-                icon_len,
-                optional(entry.title),
-                optional(entry.subtitle),
+                entry.icon.map_or(ptr::null(), <[u8]>::as_ptr).cast(),
+                entry.icon.map_or(0, <[u8]>::len),
+                entry.title.map_or(ptr::null(), C8Str::as_ptr),
+                entry.subtitle.map_or(ptr::null(), C8Str::as_ptr),
             );
         }
     }
 }
 
-fn standalone_field(id: *const c_char, field: &Field<'_>) {
-    // SAFETY: see the module documentation.
-    unsafe { credman::AddFieldForStringIdEntry(id, field.name.as_ptr(), optional(field.value)) };
-}
-
-pub(crate) fn optional(text: Option<&C8Str>) -> *const c_char {
-    text.map_or(ptr::null(), C8Str::as_ptr)
-}
-
-pub(crate) fn icon_parts(icon: &[u8]) -> (*const c_char, usize) {
-    (icon.as_ptr().cast::<c_char>(), icon.len())
-}
-
-pub(crate) fn optional_icon_parts(icon: Option<&[u8]>) -> (*const c_char, usize) {
-    icon.map_or((ptr::null(), 0), icon_parts)
-}
-
-pub(crate) struct PaymentParts {
-    pub(crate) merchant: *const c_char,
-    pub(crate) method: *const c_char,
-    pub(crate) method_subtitle: *const c_char,
-    pub(crate) method_icon: (*const c_char, usize),
-    pub(crate) amount: *const c_char,
-    pub(crate) bank_icon: (*const c_char, usize),
-    pub(crate) provider_icon: (*const c_char, usize),
-}
-
-impl PaymentParts {
-    pub(crate) fn of(display: &PaymentDisplay<'_>) -> Self {
-        Self {
-            merchant: display.merchant_name.as_ptr(),
-            method: display.payment_method_name.as_ptr(),
-            method_subtitle: optional(display.payment_method_subtitle),
-            method_icon: icon_parts(display.payment_method_icon),
-            amount: display.transaction_amount.as_ptr(),
-            bank_icon: optional_icon_parts(display.bank_icon),
-            provider_icon: optional_icon_parts(display.payment_provider_icon),
-        }
-    }
-}
-
-pub(crate) struct VerificationParts {
-    pub(crate) icon: (*const c_char, usize),
-    pub(crate) title: *const c_char,
-    pub(crate) subtitle: *const c_char,
-    pub(crate) disclaimer: *const c_char,
-    pub(crate) warning: *const c_char,
-}
-
-impl VerificationParts {
-    pub(crate) fn of(display: &VerificationDisplay<'_>) -> Self {
-        Self {
-            icon: icon_parts(display.icon),
-            title: display.title.as_ptr(),
-            subtitle: optional(display.subtitle),
-            disclaimer: optional(display.disclaimer),
-            warning: optional(display.warning),
-        }
-    }
-}
-
-impl crate::version::V4 {
-    pub fn self_declare_package_info(&self, info: &crate::entry::PackageInfo<'_>) {
-        let (icon, icon_len) = icon_parts(info.icon);
+impl V4 {
+    pub fn self_declare_package_info(&self, info: &PackageInfo<'_>) {
         // SAFETY: see the module documentation.
         unsafe {
-            android_credman_sys::v4::SelfDeclarePackageInfo(
+            v4::SelfDeclarePackageInfo(
                 info.display_name.as_ptr(),
-                icon,
-                icon_len,
+                info.icon.as_ptr().cast(),
+                info.icon.len(),
             );
         }
     }

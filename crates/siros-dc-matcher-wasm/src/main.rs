@@ -47,7 +47,7 @@ extern "C" fn _start() {
     main();
 }
 
-use android_credman::SetSink;
+use android_credman::{CallingAppError, SetSink};
 use picker::{emit_set, Member};
 use siros_dc_matcher_core::db::CredentialDatabase;
 use siros_dc_matcher_core::evaluator::{credentials, resolve, ProfilePolicy};
@@ -83,11 +83,14 @@ fn main() {
     };
     let request = host.request();
     let blob = host.credentials();
-    let origin = verified_origin(&host.calling_app());
+    let caller = host.calling_app();
     let input = Input {
         request: &request,
         blob: &blob,
-        origin: &origin,
+        origin: caller
+            .as_ref()
+            .map(|app| app.origin().map_or("", android_credman::C8Str::as_str))
+            .map_err(|error| *error),
         host_abi: host.version().get(),
     };
     run(&input, &mut sets);
@@ -98,33 +101,15 @@ fn main() {
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {}
 
-/// The origin the platform verified, as text.
-///
-/// Read through the checked constructor. When the host filled the field
-/// without a NUL, or with bytes that are not UTF-8, it is decoded within its
-/// buffer with replacement characters: a matcher that traps produces no
-/// picker entries, which the user reads as "no matching credential", and
-/// mangled text beats silence.
-#[cfg(target_arch = "wasm32")]
-fn verified_origin(app: &android_credman::CallingApp) -> String {
-    match app.origin() {
-        Ok(origin) => origin.as_str().to_owned(),
-        Err(_) => {
-            let field = &app.raw().origin;
-            let end = field.iter().position(|&b| b == 0).unwrap_or(field.len());
-            String::from_utf8_lossy(field.split_at(end).0).into_owned()
-        }
-    }
-}
-
 /// What the host hands one invocation.
 struct Input<'a> {
     /// The DC API request JSON.
     request: &'a [u8],
     /// The blob this wallet registered.
     blob: &'a [u8],
-    /// The caller's origin as the platform verified it; empty for an app.
-    origin: &'a str,
+    /// The caller's origin as the platform verified it, empty for an app;
+    /// the error when the host's report could not be read.
+    origin: Result<&'a str, CallingAppError>,
     /// The level `GetWasmVersion` reported, recorded in entry metadata.
     host_abi: u32,
 }
@@ -135,7 +120,7 @@ struct Input<'a> {
 /// tests, against a real request and the committed golden blob, with a
 /// stand-in [`SetSink`].
 fn run(input: &Input<'_>, sets: &mut impl SetSink) {
-    let (request, origin) = (input.request, input.origin);
+    let request = input.request;
     let Ok(db) = CredentialDatabase::from_cbor(input.blob) else {
         // Nothing can be offered from a blob we cannot read, and nothing can
         // be said about it either: the debug flag lives inside the blob. This
@@ -146,6 +131,15 @@ fn run(input: &Input<'_>, sets: &mut impl SetSink) {
     };
     let diag = Diagnostics {
         enabled: db.profile.debug,
+    };
+    // Every entry carries the verified origin for the wallet to check, so a
+    // caller the host reported unreadably leaves nothing to offer.
+    let origin = match input.origin {
+        Ok(origin) => origin,
+        Err(error) => {
+            diag.emit(sets, "caller", || error.to_string());
+            return;
+        }
     };
 
     // The whole request context, not only the query: a `zkp_req` request is
@@ -500,7 +494,7 @@ mod tests {
     }
 
     /// One invocation of the decision path, with emission dropped.
-    fn invoke(request: &[u8], blob: &[u8], origin: &str) {
+    fn invoke(request: &[u8], blob: &[u8], origin: Result<&str, CallingAppError>) {
         let input = Input {
             request,
             blob,
@@ -508,6 +502,11 @@ mod tests {
             host_abi: 0,
         };
         run(&input, &mut Discard);
+    }
+
+    /// What `calling_app` returns for an origin field with no NUL.
+    fn unreadable_caller() -> CallingAppError {
+        CallingAppError::Origin(android_credman::C8Str::from_bytes_until_nul(b"x").unwrap_err())
     }
 
     fn mdl_request(claim: &str) -> String {
@@ -527,15 +526,25 @@ mod tests {
         invoke(
             mdl_request("family_name").as_bytes(),
             &blob,
-            "https://verifier.example",
+            Ok("https://verifier.example"),
         );
         // Unsatisfiable: it has no age_over_21. §6.4 says offer nothing.
-        invoke(mdl_request("age_over_21").as_bytes(), &blob, "");
+        invoke(mdl_request("age_over_21").as_bytes(), &blob, Ok(""));
         // No supported request at all.
-        invoke(b"{\"requests\":[]}", &blob, "");
+        invoke(b"{\"requests\":[]}", &blob, Ok(""));
         // A blob the decoder rejects.
-        invoke(mdl_request("family_name").as_bytes(), b"\x00\x01\x02", "");
-        invoke(b"", b"", "");
+        invoke(
+            mdl_request("family_name").as_bytes(),
+            b"\x00\x01\x02",
+            Ok(""),
+        );
+        invoke(b"", b"", Ok(""));
+        // A caller the host reported unreadably.
+        invoke(
+            mdl_request("family_name").as_bytes(),
+            &blob,
+            Err(unreadable_caller()),
+        );
     }
 
     /// With the debug flag in the profile, the same paths run through the
@@ -545,13 +554,18 @@ mod tests {
         let mut db = CredentialDatabase::from_cbor(&golden_blob()).unwrap();
         db.profile.debug = true;
         let blob = db.to_cbor().unwrap();
-        invoke(mdl_request("age_over_21").as_bytes(), &blob, "");
+        invoke(mdl_request("age_over_21").as_bytes(), &blob, Ok(""));
         invoke(
             b"{\"requests\":[{\"protocol\":\"urn:example:x\",\"data\":{}}]}",
             &blob,
-            "",
+            Ok(""),
         );
-        invoke(mdl_request("family_name").as_bytes(), &blob, "");
+        invoke(mdl_request("family_name").as_bytes(), &blob, Ok(""));
+        invoke(
+            mdl_request("family_name").as_bytes(),
+            &blob,
+            Err(unreadable_caller()),
+        );
     }
 
     /// Off is the production state, and it must cost nothing: the message
@@ -608,7 +622,7 @@ mod tests {
         for debug in [false, true] {
             for blob in [nym_blob(debug), golden_blob()] {
                 for query in &queries {
-                    invoke(zkp_req_request(query.clone()).as_bytes(), &blob, "");
+                    invoke(zkp_req_request(query.clone()).as_bytes(), &blob, Ok(""));
                 }
             }
         }
