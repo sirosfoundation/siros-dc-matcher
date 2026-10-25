@@ -64,3 +64,6 @@ pub mod prover;
 pub mod verify;
 #[cfg(feature = "credential")]
 pub mod x509;
+
+#[cfg(feature = "test-fixtures")]
+pub mod testing;

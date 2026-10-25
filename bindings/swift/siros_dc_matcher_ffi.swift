@@ -415,6 +415,38 @@ fileprivate struct FfiConverterUInt32: FfiConverterPrimitive {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterUInt64: FfiConverterPrimitive {
+    typealias FfiType = UInt64
+    typealias SwiftType = UInt64
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt64 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterInt64: FfiConverterPrimitive {
+    typealias FfiType = Int64
+    typealias SwiftType = Int64
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Int64 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: Int64, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterBool : FfiConverter {
     typealias FfiType = Int8
     typealias SwiftType = Bool
@@ -493,6 +525,559 @@ fileprivate struct FfiConverterData: FfiConverterRustBuffer {
         writeInt(&buf, len)
         writeBytes(&buf, value)
     }
+}
+
+
+
+
+/**
+ * A presentation ready for the device signature, then for the prover.
+ */
+public protocol FfiPreparedProtocol : AnyObject {
+    
+    /**
+     * The `ZkpPresentation` (CBOR) of the prover's output.
+     *
+     * # Errors
+     *
+     * [`ZkpReqError::Host`] when the prover's pseudonym is not the catalogue's, or its
+     * `zk_proof` breaks the backend's length rules.
+     */
+    func assemble(zkProof: Data, pseudonym: Data) throws  -> Data
+    
+    /**
+     * The data the device key signs with ES256.
+     */
+    func dataToSign()  -> Data
+    
+    /**
+     * The prover's job, once `device_signature` (`r ‖ s`) verifies under the MSO's device key.
+     *
+     * # Errors
+     *
+     * `device_binding`, or [`ZkpReqError::Host`] for a signature that is not 64 bytes.
+     */
+    func job(deviceSignature: Data) throws  -> FfiProofJob
+    
+    /**
+     * The identifier of the device key.
+     */
+    func keyId()  -> String
+    
+    /**
+     * The statement the proof establishes.
+     */
+    func statement()  -> FfiStatement
+    
+}
+
+/**
+ * A presentation ready for the device signature, then for the prover.
+ */
+open class FfiPrepared:
+    FfiPreparedProtocol {
+    fileprivate let pointer: UnsafeMutableRawPointer!
+
+    /// Used to instantiate a [FFIObject] without an actual pointer, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoPointer {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+    required public init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
+        self.pointer = pointer
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noPointer: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing [Pointer] the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noPointer: NoPointer) {
+        self.pointer = nil
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiClonePointer() -> UnsafeMutableRawPointer {
+        return try! rustCall { uniffi_siros_dc_matcher_ffi_fn_clone_ffiprepared(self.pointer, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        guard let pointer = pointer else {
+            return
+        }
+
+        try! rustCall { uniffi_siros_dc_matcher_ffi_fn_free_ffiprepared(pointer, $0) }
+    }
+
+    
+
+    
+    /**
+     * The `ZkpPresentation` (CBOR) of the prover's output.
+     *
+     * # Errors
+     *
+     * [`ZkpReqError::Host`] when the prover's pseudonym is not the catalogue's, or its
+     * `zk_proof` breaks the backend's length rules.
+     */
+open func assemble(zkProof: Data, pseudonym: Data)throws  -> Data {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeZkpReqError.lift) {
+    uniffi_siros_dc_matcher_ffi_fn_method_ffiprepared_assemble(self.uniffiClonePointer(),
+        FfiConverterData.lower(zkProof),
+        FfiConverterData.lower(pseudonym),$0
+    )
+})
+}
+    
+    /**
+     * The data the device key signs with ES256.
+     */
+open func dataToSign() -> Data {
+    return try!  FfiConverterData.lift(try! rustCall() {
+    uniffi_siros_dc_matcher_ffi_fn_method_ffiprepared_data_to_sign(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+    /**
+     * The prover's job, once `device_signature` (`r ‖ s`) verifies under the MSO's device key.
+     *
+     * # Errors
+     *
+     * `device_binding`, or [`ZkpReqError::Host`] for a signature that is not 64 bytes.
+     */
+open func job(deviceSignature: Data)throws  -> FfiProofJob {
+    return try  FfiConverterTypeFfiProofJob.lift(try rustCallWithError(FfiConverterTypeZkpReqError.lift) {
+    uniffi_siros_dc_matcher_ffi_fn_method_ffiprepared_job(self.uniffiClonePointer(),
+        FfiConverterData.lower(deviceSignature),$0
+    )
+})
+}
+    
+    /**
+     * The identifier of the device key.
+     */
+open func keyId() -> String {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_siros_dc_matcher_ffi_fn_method_ffiprepared_key_id(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+    /**
+     * The statement the proof establishes.
+     */
+open func statement() -> FfiStatement {
+    return try!  FfiConverterTypeFfiStatement.lift(try! rustCall() {
+    uniffi_siros_dc_matcher_ffi_fn_method_ffiprepared_statement(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFfiPrepared: FfiConverter {
+
+    typealias FfiType = UnsafeMutableRawPointer
+    typealias SwiftType = FfiPrepared
+
+    public static func lift(_ pointer: UnsafeMutableRawPointer) throws -> FfiPrepared {
+        return FfiPrepared(unsafeFromRawPointer: pointer)
+    }
+
+    public static func lower(_ value: FfiPrepared) -> UnsafeMutableRawPointer {
+        return value.uniffiClonePointer()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiPrepared {
+        let v: UInt64 = try readInt(&buf)
+        // The Rust code won't compile if a pointer won't fit in a UInt64.
+        // We have to go via `UInt` because that's the thing that's the size of a pointer.
+        let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
+        if (ptr == nil) {
+            throw UniffiInternalError.unexpectedNullPointer
+        }
+        return try lift(ptr!)
+    }
+
+    public static func write(_ value: FfiPrepared, into buf: inout [UInt8]) {
+        // This fiddling is because `Int` is the thing that's the same size as a pointer.
+        // The Rust code won't compile if a pointer won't fit in a `UInt64`.
+        writeInt(&buf, UInt64(bitPattern: Int64(Int(bitPattern: lower(value)))))
+    }
+}
+
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiPrepared_lift(_ pointer: UnsafeMutableRawPointer) throws -> FfiPrepared {
+    return try FfiConverterTypeFfiPrepared.lift(pointer)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiPrepared_lower(_ value: FfiPrepared) -> UnsafeMutableRawPointer {
+    return FfiConverterTypeFfiPrepared.lower(value)
+}
+
+
+
+
+/**
+ * A system's verifier, implemented by the host.
+ */
+public protocol FfiProofVerifier : AnyObject {
+    
+    /**
+     * Verifies `zk_proof` against `statement` and the pseudonym of `results`.
+     */
+    func verify(statement: FfiStatement, pseudonym: Data, zkProof: Data)  -> FfiProofCheck
+    
+}
+
+/**
+ * A system's verifier, implemented by the host.
+ */
+open class FfiProofVerifierImpl:
+    FfiProofVerifier {
+    fileprivate let pointer: UnsafeMutableRawPointer!
+
+    /// Used to instantiate a [FFIObject] without an actual pointer, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoPointer {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+    required public init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
+        self.pointer = pointer
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noPointer: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing [Pointer] the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noPointer: NoPointer) {
+        self.pointer = nil
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiClonePointer() -> UnsafeMutableRawPointer {
+        return try! rustCall { uniffi_siros_dc_matcher_ffi_fn_clone_ffiproofverifier(self.pointer, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        guard let pointer = pointer else {
+            return
+        }
+
+        try! rustCall { uniffi_siros_dc_matcher_ffi_fn_free_ffiproofverifier(pointer, $0) }
+    }
+
+    
+
+    
+    /**
+     * Verifies `zk_proof` against `statement` and the pseudonym of `results`.
+     */
+open func verify(statement: FfiStatement, pseudonym: Data, zkProof: Data) -> FfiProofCheck {
+    return try!  FfiConverterTypeFfiProofCheck.lift(try! rustCall() {
+    uniffi_siros_dc_matcher_ffi_fn_method_ffiproofverifier_verify(self.uniffiClonePointer(),
+        FfiConverterTypeFfiStatement.lower(statement),
+        FfiConverterData.lower(pseudonym),
+        FfiConverterData.lower(zkProof),$0
+    )
+})
+}
+    
+
+}
+// Magic number for the Rust proxy to call using the same mechanism as every other method,
+// to free the callback once it's dropped by Rust.
+private let IDX_CALLBACK_FREE: Int32 = 0
+// Callback return codes
+private let UNIFFI_CALLBACK_SUCCESS: Int32 = 0
+private let UNIFFI_CALLBACK_ERROR: Int32 = 1
+private let UNIFFI_CALLBACK_UNEXPECTED_ERROR: Int32 = 2
+
+// Put the implementation in a struct so we don't pollute the top-level namespace
+fileprivate struct UniffiCallbackInterfaceFfiProofVerifier {
+
+    // Create the VTable using a series of closures.
+    // Swift automatically converts these into C callback functions.
+    static var vtable: UniffiVTableCallbackInterfaceFfiProofVerifier = UniffiVTableCallbackInterfaceFfiProofVerifier(
+        verify: { (
+            uniffiHandle: UInt64,
+            statement: RustBuffer,
+            pseudonym: RustBuffer,
+            zkProof: RustBuffer,
+            uniffiOutReturn: UnsafeMutablePointer<RustBuffer>,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> FfiProofCheck in
+                guard let uniffiObj = try? FfiConverterTypeFfiProofVerifier.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.verify(
+                     statement: try FfiConverterTypeFfiStatement.lift(statement),
+                     pseudonym: try FfiConverterData.lift(pseudonym),
+                     zkProof: try FfiConverterData.lift(zkProof)
+                )
+            }
+
+            
+            let writeReturn = { uniffiOutReturn.pointee = FfiConverterTypeFfiProofCheck.lower($0) }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        },
+        uniffiFree: { (uniffiHandle: UInt64) -> () in
+            let result = try? FfiConverterTypeFfiProofVerifier.handleMap.remove(handle: uniffiHandle)
+            if result == nil {
+                print("Uniffi callback interface FfiProofVerifier: handle missing in uniffiFree")
+            }
+        }
+    )
+}
+
+private func uniffiCallbackInitFfiProofVerifier() {
+    uniffi_siros_dc_matcher_ffi_fn_init_callback_vtable_ffiproofverifier(&UniffiCallbackInterfaceFfiProofVerifier.vtable)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFfiProofVerifier: FfiConverter {
+    fileprivate static var handleMap = UniffiHandleMap<FfiProofVerifier>()
+
+    typealias FfiType = UnsafeMutableRawPointer
+    typealias SwiftType = FfiProofVerifier
+
+    public static func lift(_ pointer: UnsafeMutableRawPointer) throws -> FfiProofVerifier {
+        return FfiProofVerifierImpl(unsafeFromRawPointer: pointer)
+    }
+
+    public static func lower(_ value: FfiProofVerifier) -> UnsafeMutableRawPointer {
+        guard let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: handleMap.insert(obj: value))) else {
+            fatalError("Cast to UnsafeMutableRawPointer failed")
+        }
+        return ptr
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiProofVerifier {
+        let v: UInt64 = try readInt(&buf)
+        // The Rust code won't compile if a pointer won't fit in a UInt64.
+        // We have to go via `UInt` because that's the thing that's the size of a pointer.
+        let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
+        if (ptr == nil) {
+            throw UniffiInternalError.unexpectedNullPointer
+        }
+        return try lift(ptr!)
+    }
+
+    public static func write(_ value: FfiProofVerifier, into buf: inout [UInt8]) {
+        // This fiddling is because `Int` is the thing that's the same size as a pointer.
+        // The Rust code won't compile if a pointer won't fit in a `UInt64`.
+        writeInt(&buf, UInt64(bitPattern: Int64(Int(bitPattern: lower(value)))))
+    }
+}
+
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiProofVerifier_lift(_ pointer: UnsafeMutableRawPointer) throws -> FfiProofVerifier {
+    return try FfiConverterTypeFfiProofVerifier.lift(pointer)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiProofVerifier_lower(_ value: FfiProofVerifier) -> UnsafeMutableRawPointer {
+    return FfiConverterTypeFfiProofVerifier.lower(value)
+}
+
+
+
+
+/**
+ * The session a presentation is bound to.
+ */
+public protocol FfiSessionProtocol : AnyObject {
+    
+    /**
+     * The CBOR `Handover` (OpenID4VP 1.0, B.2.6).
+     */
+    func handover()  -> Data
+    
+    /**
+     * `verifier_id`.
+     */
+    func verifierId()  -> String
+    
+}
+
+/**
+ * The session a presentation is bound to.
+ */
+open class FfiSession:
+    FfiSessionProtocol {
+    fileprivate let pointer: UnsafeMutableRawPointer!
+
+    /// Used to instantiate a [FFIObject] without an actual pointer, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoPointer {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+    required public init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
+        self.pointer = pointer
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noPointer: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing [Pointer] the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noPointer: NoPointer) {
+        self.pointer = nil
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiClonePointer() -> UnsafeMutableRawPointer {
+        return try! rustCall { uniffi_siros_dc_matcher_ffi_fn_clone_ffisession(self.pointer, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        guard let pointer = pointer else {
+            return
+        }
+
+        try! rustCall { uniffi_siros_dc_matcher_ffi_fn_free_ffisession(pointer, $0) }
+    }
+
+    
+
+    
+    /**
+     * The CBOR `Handover` (OpenID4VP 1.0, B.2.6).
+     */
+open func handover() -> Data {
+    return try!  FfiConverterData.lift(try! rustCall() {
+    uniffi_siros_dc_matcher_ffi_fn_method_ffisession_handover(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+    /**
+     * `verifier_id`.
+     */
+open func verifierId() -> String {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_siros_dc_matcher_ffi_fn_method_ffisession_verifier_id(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFfiSession: FfiConverter {
+
+    typealias FfiType = UnsafeMutableRawPointer
+    typealias SwiftType = FfiSession
+
+    public static func lift(_ pointer: UnsafeMutableRawPointer) throws -> FfiSession {
+        return FfiSession(unsafeFromRawPointer: pointer)
+    }
+
+    public static func lower(_ value: FfiSession) -> UnsafeMutableRawPointer {
+        return value.uniffiClonePointer()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiSession {
+        let v: UInt64 = try readInt(&buf)
+        // The Rust code won't compile if a pointer won't fit in a UInt64.
+        // We have to go via `UInt` because that's the thing that's the size of a pointer.
+        let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
+        if (ptr == nil) {
+            throw UniffiInternalError.unexpectedNullPointer
+        }
+        return try lift(ptr!)
+    }
+
+    public static func write(_ value: FfiSession, into buf: inout [UInt8]) {
+        // This fiddling is because `Int` is the thing that's the same size as a pointer.
+        // The Rust code won't compile if a pointer won't fit in a `UInt64`.
+        writeInt(&buf, UInt64(bitPattern: Int64(Int(bitPattern: lower(value)))))
+    }
+}
+
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiSession_lift(_ pointer: UnsafeMutableRawPointer) throws -> FfiSession {
+    return try FfiConverterTypeFfiSession.lift(pointer)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiSession_lower(_ value: FfiSession) -> UnsafeMutableRawPointer {
+    return FfiConverterTypeFfiSession.lower(value)
 }
 
 
@@ -823,6 +1408,129 @@ public func FfiConverterTypeSirosBlobBuilder_lift(_ pointer: UnsafeMutableRawPoi
 #endif
 public func FfiConverterTypeSirosBlobBuilder_lower(_ value: SirosBlobBuilder) -> UnsafeMutableRawPointer {
     return FfiConverterTypeSirosBlobBuilder.lower(value)
+}
+
+
+/**
+ * A credential, option, system and proof backend that answer a query.
+ */
+public struct FfiCandidate {
+    /**
+     * The wallet's identifier of the credential.
+     */
+    public var credentialId: String
+    /**
+     * The system of the pair.
+     */
+    public var systemId: String
+    /**
+     * The proof backend of the pair.
+     */
+    public var proofBackend: String
+    /**
+     * The option's index in `_req_sets`; `None` without them.
+     */
+    public var reqSet: UInt64?
+    /**
+     * The `_req` indexes of the option.
+     */
+    public var items: [UInt64]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * The wallet's identifier of the credential.
+         */credentialId: String, 
+        /**
+         * The system of the pair.
+         */systemId: String, 
+        /**
+         * The proof backend of the pair.
+         */proofBackend: String, 
+        /**
+         * The option's index in `_req_sets`; `None` without them.
+         */reqSet: UInt64?, 
+        /**
+         * The `_req` indexes of the option.
+         */items: [UInt64]) {
+        self.credentialId = credentialId
+        self.systemId = systemId
+        self.proofBackend = proofBackend
+        self.reqSet = reqSet
+        self.items = items
+    }
+}
+
+
+
+extension FfiCandidate: Equatable, Hashable {
+    public static func ==(lhs: FfiCandidate, rhs: FfiCandidate) -> Bool {
+        if lhs.credentialId != rhs.credentialId {
+            return false
+        }
+        if lhs.systemId != rhs.systemId {
+            return false
+        }
+        if lhs.proofBackend != rhs.proofBackend {
+            return false
+        }
+        if lhs.reqSet != rhs.reqSet {
+            return false
+        }
+        if lhs.items != rhs.items {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(credentialId)
+        hasher.combine(systemId)
+        hasher.combine(proofBackend)
+        hasher.combine(reqSet)
+        hasher.combine(items)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFfiCandidate: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiCandidate {
+        return
+            try FfiCandidate(
+                credentialId: FfiConverterString.read(from: &buf), 
+                systemId: FfiConverterString.read(from: &buf), 
+                proofBackend: FfiConverterString.read(from: &buf), 
+                reqSet: FfiConverterOptionUInt64.read(from: &buf), 
+                items: FfiConverterSequenceUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: FfiCandidate, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.credentialId, into: &buf)
+        FfiConverterString.write(value.systemId, into: &buf)
+        FfiConverterString.write(value.proofBackend, into: &buf)
+        FfiConverterOptionUInt64.write(value.reqSet, into: &buf)
+        FfiConverterSequenceUInt64.write(value.items, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiCandidate_lift(_ buf: RustBuffer) throws -> FfiCandidate {
+    return try FfiConverterTypeFfiCandidate.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiCandidate_lower(_ value: FfiCandidate) -> RustBuffer {
+    return FfiConverterTypeFfiCandidate.lower(value)
 }
 
 
@@ -1314,6 +2022,87 @@ public func FfiConverterTypeFfiCredential_lower(_ value: FfiCredential) -> RustB
 
 
 /**
+ * A credential that cannot answer, and why.
+ */
+public struct FfiJudged {
+    /**
+     * The wallet's identifier of the credential.
+     */
+    public var credentialId: String
+    /**
+     * The failures, in the verifier's order of options.
+     */
+    public var errors: [FfiZkpError]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * The wallet's identifier of the credential.
+         */credentialId: String, 
+        /**
+         * The failures, in the verifier's order of options.
+         */errors: [FfiZkpError]) {
+        self.credentialId = credentialId
+        self.errors = errors
+    }
+}
+
+
+
+extension FfiJudged: Equatable, Hashable {
+    public static func ==(lhs: FfiJudged, rhs: FfiJudged) -> Bool {
+        if lhs.credentialId != rhs.credentialId {
+            return false
+        }
+        if lhs.errors != rhs.errors {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(credentialId)
+        hasher.combine(errors)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFfiJudged: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiJudged {
+        return
+            try FfiJudged(
+                credentialId: FfiConverterString.read(from: &buf), 
+                errors: FfiConverterSequenceTypeFfiZkpError.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: FfiJudged, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.credentialId, into: &buf)
+        FfiConverterSequenceTypeFfiZkpError.write(value.errors, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiJudged_lift(_ buf: RustBuffer) throws -> FfiJudged {
+    return try FfiConverterTypeFfiJudged.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiJudged_lower(_ value: FfiJudged) -> RustBuffer {
+    return FfiConverterTypeFfiJudged.lower(value)
+}
+
+
+/**
  * The outcome of matching.
  */
 public struct FfiMatchOutcome {
@@ -1640,6 +2429,279 @@ public func FfiConverterTypeFfiMatchedCredential_lower(_ value: FfiMatchedCreden
 
 
 /**
+ * An option without a usable pair.
+ */
+public struct FfiOptionRefusal {
+    /**
+     * The option's index in `_req_sets`; `None` without them.
+     */
+    public var reqSet: UInt64?
+    /**
+     * Each system's refusal.
+     */
+    public var systems: [FfiPairRefusal]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * The option's index in `_req_sets`; `None` without them.
+         */reqSet: UInt64?, 
+        /**
+         * Each system's refusal.
+         */systems: [FfiPairRefusal]) {
+        self.reqSet = reqSet
+        self.systems = systems
+    }
+}
+
+
+
+extension FfiOptionRefusal: Equatable, Hashable {
+    public static func ==(lhs: FfiOptionRefusal, rhs: FfiOptionRefusal) -> Bool {
+        if lhs.reqSet != rhs.reqSet {
+            return false
+        }
+        if lhs.systems != rhs.systems {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(reqSet)
+        hasher.combine(systems)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFfiOptionRefusal: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiOptionRefusal {
+        return
+            try FfiOptionRefusal(
+                reqSet: FfiConverterOptionUInt64.read(from: &buf), 
+                systems: FfiConverterSequenceTypeFfiPairRefusal.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: FfiOptionRefusal, into buf: inout [UInt8]) {
+        FfiConverterOptionUInt64.write(value.reqSet, into: &buf)
+        FfiConverterSequenceTypeFfiPairRefusal.write(value.systems, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiOptionRefusal_lift(_ buf: RustBuffer) throws -> FfiOptionRefusal {
+    return try FfiConverterTypeFfiOptionRefusal.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiOptionRefusal_lower(_ value: FfiOptionRefusal) -> RustBuffer {
+    return FfiConverterTypeFfiOptionRefusal.lower(value)
+}
+
+
+/**
+ * Why a system forms no usable pair for an option.
+ */
+public struct FfiPairRefusal {
+    /**
+     * The system.
+     */
+    public var systemId: String
+    /**
+     * `system_not_listed`, `no_listed_backend`, `credential_type`, or the system's
+     * `unsupported` reason.
+     */
+    public var code: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * The system.
+         */systemId: String, 
+        /**
+         * `system_not_listed`, `no_listed_backend`, `credential_type`, or the system's
+         * `unsupported` reason.
+         */code: String) {
+        self.systemId = systemId
+        self.code = code
+    }
+}
+
+
+
+extension FfiPairRefusal: Equatable, Hashable {
+    public static func ==(lhs: FfiPairRefusal, rhs: FfiPairRefusal) -> Bool {
+        if lhs.systemId != rhs.systemId {
+            return false
+        }
+        if lhs.code != rhs.code {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(systemId)
+        hasher.combine(code)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFfiPairRefusal: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiPairRefusal {
+        return
+            try FfiPairRefusal(
+                systemId: FfiConverterString.read(from: &buf), 
+                code: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: FfiPairRefusal, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.systemId, into: &buf)
+        FfiConverterString.write(value.code, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiPairRefusal_lift(_ buf: RustBuffer) throws -> FfiPairRefusal {
+    return try FfiConverterTypeFfiPairRefusal.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiPairRefusal_lower(_ value: FfiPairRefusal) -> RustBuffer {
+    return FfiConverterTypeFfiPairRefusal.lower(value)
+}
+
+
+/**
+ * What a system's prover needs.
+ */
+public struct FfiProofJob {
+    /**
+     * The public values.
+     */
+    public var statement: FfiStatement
+    /**
+     * The credential's `IssuerSigned`, as issued.
+     */
+    public var issuerSigned: Data
+    /**
+     * The 16-byte `secret_seed`. The host zeroes its copy after proving.
+     */
+    public var secretSeed: Data
+    /**
+     * The device signature, `r ‖ s`, verified under the MSO's device key.
+     */
+    public var deviceSignature: Data
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * The public values.
+         */statement: FfiStatement, 
+        /**
+         * The credential's `IssuerSigned`, as issued.
+         */issuerSigned: Data, 
+        /**
+         * The 16-byte `secret_seed`. The host zeroes its copy after proving.
+         */secretSeed: Data, 
+        /**
+         * The device signature, `r ‖ s`, verified under the MSO's device key.
+         */deviceSignature: Data) {
+        self.statement = statement
+        self.issuerSigned = issuerSigned
+        self.secretSeed = secretSeed
+        self.deviceSignature = deviceSignature
+    }
+}
+
+
+
+extension FfiProofJob: Equatable, Hashable {
+    public static func ==(lhs: FfiProofJob, rhs: FfiProofJob) -> Bool {
+        if lhs.statement != rhs.statement {
+            return false
+        }
+        if lhs.issuerSigned != rhs.issuerSigned {
+            return false
+        }
+        if lhs.secretSeed != rhs.secretSeed {
+            return false
+        }
+        if lhs.deviceSignature != rhs.deviceSignature {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(statement)
+        hasher.combine(issuerSigned)
+        hasher.combine(secretSeed)
+        hasher.combine(deviceSignature)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFfiProofJob: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiProofJob {
+        return
+            try FfiProofJob(
+                statement: FfiConverterTypeFfiStatement.read(from: &buf), 
+                issuerSigned: FfiConverterData.read(from: &buf), 
+                secretSeed: FfiConverterData.read(from: &buf), 
+                deviceSignature: FfiConverterData.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: FfiProofJob, into buf: inout [UInt8]) {
+        FfiConverterTypeFfiStatement.write(value.statement, into: &buf)
+        FfiConverterData.write(value.issuerSigned, into: &buf)
+        FfiConverterData.write(value.secretSeed, into: &buf)
+        FfiConverterData.write(value.deviceSignature, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiProofJob_lift(_ buf: RustBuffer) throws -> FfiProofJob {
+    return try FfiConverterTypeFfiProofJob.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiProofJob_lower(_ value: FfiProofJob) -> RustBuffer {
+    return FfiConverterTypeFfiProofJob.lower(value)
+}
+
+
+/**
  * The credentials answering one credential query.
  *
  * Complete, and independent of the `combinations` field on `FfiMatchOutcome`.
@@ -1728,6 +2790,736 @@ public func FfiConverterTypeFfiQueryMatch_lower(_ value: FfiQueryMatch) -> RustB
 
 
 /**
+ * One entry of `results`.
+ */
+public struct FfiResult {
+    /**
+     * The `return` handle.
+     */
+    public var handle: String
+    /**
+     * The result, CBOR: a `bstr` pseudonym or `true`.
+     */
+    public var value: Data
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * The `return` handle.
+         */handle: String, 
+        /**
+         * The result, CBOR: a `bstr` pseudonym or `true`.
+         */value: Data) {
+        self.handle = handle
+        self.value = value
+    }
+}
+
+
+
+extension FfiResult: Equatable, Hashable {
+    public static func ==(lhs: FfiResult, rhs: FfiResult) -> Bool {
+        if lhs.handle != rhs.handle {
+            return false
+        }
+        if lhs.value != rhs.value {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(handle)
+        hasher.combine(value)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFfiResult: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiResult {
+        return
+            try FfiResult(
+                handle: FfiConverterString.read(from: &buf), 
+                value: FfiConverterData.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: FfiResult, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.handle, into: &buf)
+        FfiConverterData.write(value.value, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiResult_lift(_ buf: RustBuffer) throws -> FfiResult {
+    return try FfiConverterTypeFfiResult.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiResult_lower(_ value: FfiResult) -> RustBuffer {
+    return FfiConverterTypeFfiResult.lower(value)
+}
+
+
+/**
+ * The public values of a proof (system rulebooks, Section 4).
+ */
+public struct FfiStatement {
+    /**
+     * The system.
+     */
+    public var systemId: String
+    /**
+     * The proof backend.
+     */
+    public var proofBackend: String
+    /**
+     * The `docType` the circuits check.
+     */
+    public var docType: String
+    /**
+     * The Document Signer certificate, DER.
+     */
+    public var issuerCertificate: Data
+    /**
+     * The issuer key Q: x, big-endian.
+     */
+    public var issuerKeyX: Data
+    /**
+     * The issuer key Q: y, big-endian.
+     */
+    public var issuerKeyY: Data
+    /**
+     * T: `YYYY-MM-DDThh:mm:ssZ`.
+     */
+    public var proofTime: String
+    /**
+     * E: `YYYY-MM-DD`; `None` for the system's widest value.
+     */
+    public var earliest: String?
+    /**
+     * C: `YYYY-MM-DD`; `None` for the system's widest value.
+     */
+    public var cutoff: String?
+    /**
+     * `verifier_input`.
+     */
+    public var verifierInput: Data
+    /**
+     * The encoded `SessionTranscript`.
+     */
+    public var sessionTranscript: Data
+    /**
+     * e2.
+     */
+    public var challengeDigest: Data
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * The system.
+         */systemId: String, 
+        /**
+         * The proof backend.
+         */proofBackend: String, 
+        /**
+         * The `docType` the circuits check.
+         */docType: String, 
+        /**
+         * The Document Signer certificate, DER.
+         */issuerCertificate: Data, 
+        /**
+         * The issuer key Q: x, big-endian.
+         */issuerKeyX: Data, 
+        /**
+         * The issuer key Q: y, big-endian.
+         */issuerKeyY: Data, 
+        /**
+         * T: `YYYY-MM-DDThh:mm:ssZ`.
+         */proofTime: String, 
+        /**
+         * E: `YYYY-MM-DD`; `None` for the system's widest value.
+         */earliest: String?, 
+        /**
+         * C: `YYYY-MM-DD`; `None` for the system's widest value.
+         */cutoff: String?, 
+        /**
+         * `verifier_input`.
+         */verifierInput: Data, 
+        /**
+         * The encoded `SessionTranscript`.
+         */sessionTranscript: Data, 
+        /**
+         * e2.
+         */challengeDigest: Data) {
+        self.systemId = systemId
+        self.proofBackend = proofBackend
+        self.docType = docType
+        self.issuerCertificate = issuerCertificate
+        self.issuerKeyX = issuerKeyX
+        self.issuerKeyY = issuerKeyY
+        self.proofTime = proofTime
+        self.earliest = earliest
+        self.cutoff = cutoff
+        self.verifierInput = verifierInput
+        self.sessionTranscript = sessionTranscript
+        self.challengeDigest = challengeDigest
+    }
+}
+
+
+
+extension FfiStatement: Equatable, Hashable {
+    public static func ==(lhs: FfiStatement, rhs: FfiStatement) -> Bool {
+        if lhs.systemId != rhs.systemId {
+            return false
+        }
+        if lhs.proofBackend != rhs.proofBackend {
+            return false
+        }
+        if lhs.docType != rhs.docType {
+            return false
+        }
+        if lhs.issuerCertificate != rhs.issuerCertificate {
+            return false
+        }
+        if lhs.issuerKeyX != rhs.issuerKeyX {
+            return false
+        }
+        if lhs.issuerKeyY != rhs.issuerKeyY {
+            return false
+        }
+        if lhs.proofTime != rhs.proofTime {
+            return false
+        }
+        if lhs.earliest != rhs.earliest {
+            return false
+        }
+        if lhs.cutoff != rhs.cutoff {
+            return false
+        }
+        if lhs.verifierInput != rhs.verifierInput {
+            return false
+        }
+        if lhs.sessionTranscript != rhs.sessionTranscript {
+            return false
+        }
+        if lhs.challengeDigest != rhs.challengeDigest {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(systemId)
+        hasher.combine(proofBackend)
+        hasher.combine(docType)
+        hasher.combine(issuerCertificate)
+        hasher.combine(issuerKeyX)
+        hasher.combine(issuerKeyY)
+        hasher.combine(proofTime)
+        hasher.combine(earliest)
+        hasher.combine(cutoff)
+        hasher.combine(verifierInput)
+        hasher.combine(sessionTranscript)
+        hasher.combine(challengeDigest)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFfiStatement: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiStatement {
+        return
+            try FfiStatement(
+                systemId: FfiConverterString.read(from: &buf), 
+                proofBackend: FfiConverterString.read(from: &buf), 
+                docType: FfiConverterString.read(from: &buf), 
+                issuerCertificate: FfiConverterData.read(from: &buf), 
+                issuerKeyX: FfiConverterData.read(from: &buf), 
+                issuerKeyY: FfiConverterData.read(from: &buf), 
+                proofTime: FfiConverterString.read(from: &buf), 
+                earliest: FfiConverterOptionString.read(from: &buf), 
+                cutoff: FfiConverterOptionString.read(from: &buf), 
+                verifierInput: FfiConverterData.read(from: &buf), 
+                sessionTranscript: FfiConverterData.read(from: &buf), 
+                challengeDigest: FfiConverterData.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: FfiStatement, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.systemId, into: &buf)
+        FfiConverterString.write(value.proofBackend, into: &buf)
+        FfiConverterString.write(value.docType, into: &buf)
+        FfiConverterData.write(value.issuerCertificate, into: &buf)
+        FfiConverterData.write(value.issuerKeyX, into: &buf)
+        FfiConverterData.write(value.issuerKeyY, into: &buf)
+        FfiConverterString.write(value.proofTime, into: &buf)
+        FfiConverterOptionString.write(value.earliest, into: &buf)
+        FfiConverterOptionString.write(value.cutoff, into: &buf)
+        FfiConverterData.write(value.verifierInput, into: &buf)
+        FfiConverterData.write(value.sessionTranscript, into: &buf)
+        FfiConverterData.write(value.challengeDigest, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiStatement_lift(_ buf: RustBuffer) throws -> FfiStatement {
+    return try FfiConverterTypeFfiStatement.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiStatement_lower(_ value: FfiStatement) -> RustBuffer {
+    return FfiConverterTypeFfiStatement.lower(value)
+}
+
+
+/**
+ * A credential the wallet stores.
+ */
+public struct FfiStoredCredential {
+    /**
+     * The wallet's identifier.
+     */
+    public var id: String
+    /**
+     * The credential format, `mso_mdoc`.
+     */
+    public var format: String
+    /**
+     * The credential as issued: base64url without padding of an `IssuerSigned`, a `Document`
+     * or a one-document `DeviceResponse`.
+     */
+    public var data: String
+    /**
+     * The identifier of the device key.
+     */
+    public var kid: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * The wallet's identifier.
+         */id: String, 
+        /**
+         * The credential format, `mso_mdoc`.
+         */format: String, 
+        /**
+         * The credential as issued: base64url without padding of an `IssuerSigned`, a `Document`
+         * or a one-document `DeviceResponse`.
+         */data: String, 
+        /**
+         * The identifier of the device key.
+         */kid: String) {
+        self.id = id
+        self.format = format
+        self.data = data
+        self.kid = kid
+    }
+}
+
+
+
+extension FfiStoredCredential: Equatable, Hashable {
+    public static func ==(lhs: FfiStoredCredential, rhs: FfiStoredCredential) -> Bool {
+        if lhs.id != rhs.id {
+            return false
+        }
+        if lhs.format != rhs.format {
+            return false
+        }
+        if lhs.data != rhs.data {
+            return false
+        }
+        if lhs.kid != rhs.kid {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(format)
+        hasher.combine(data)
+        hasher.combine(kid)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFfiStoredCredential: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiStoredCredential {
+        return
+            try FfiStoredCredential(
+                id: FfiConverterString.read(from: &buf), 
+                format: FfiConverterString.read(from: &buf), 
+                data: FfiConverterString.read(from: &buf), 
+                kid: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: FfiStoredCredential, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.id, into: &buf)
+        FfiConverterString.write(value.format, into: &buf)
+        FfiConverterString.write(value.data, into: &buf)
+        FfiConverterString.write(value.kid, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiStoredCredential_lift(_ buf: RustBuffer) throws -> FfiStoredCredential {
+    return try FfiConverterTypeFfiStoredCredential.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiStoredCredential_lower(_ value: FfiStoredCredential) -> RustBuffer {
+    return FfiConverterTypeFfiStoredCredential.lower(value)
+}
+
+
+/**
+ * What an accepted presentation establishes.
+ */
+public struct FfiVerified {
+    /**
+     * The system.
+     */
+    public var systemId: String
+    /**
+     * The proof backend.
+     */
+    public var proofBackend: String
+    /**
+     * The answered option's index in `_req_sets`.
+     */
+    public var reqSet: UInt64?
+    /**
+     * `results`: each handle and its result, CBOR.
+     */
+    public var results: [FfiResult]
+    /**
+     * The Document Signer certificate the proof was made against.
+     */
+    public var issuerCertificate: Data
+    /**
+     * The proof time, `YYYY-MM-DDThh:mm:ssZ`.
+     */
+    public var proofTime: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * The system.
+         */systemId: String, 
+        /**
+         * The proof backend.
+         */proofBackend: String, 
+        /**
+         * The answered option's index in `_req_sets`.
+         */reqSet: UInt64?, 
+        /**
+         * `results`: each handle and its result, CBOR.
+         */results: [FfiResult], 
+        /**
+         * The Document Signer certificate the proof was made against.
+         */issuerCertificate: Data, 
+        /**
+         * The proof time, `YYYY-MM-DDThh:mm:ssZ`.
+         */proofTime: String) {
+        self.systemId = systemId
+        self.proofBackend = proofBackend
+        self.reqSet = reqSet
+        self.results = results
+        self.issuerCertificate = issuerCertificate
+        self.proofTime = proofTime
+    }
+}
+
+
+
+extension FfiVerified: Equatable, Hashable {
+    public static func ==(lhs: FfiVerified, rhs: FfiVerified) -> Bool {
+        if lhs.systemId != rhs.systemId {
+            return false
+        }
+        if lhs.proofBackend != rhs.proofBackend {
+            return false
+        }
+        if lhs.reqSet != rhs.reqSet {
+            return false
+        }
+        if lhs.results != rhs.results {
+            return false
+        }
+        if lhs.issuerCertificate != rhs.issuerCertificate {
+            return false
+        }
+        if lhs.proofTime != rhs.proofTime {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(systemId)
+        hasher.combine(proofBackend)
+        hasher.combine(reqSet)
+        hasher.combine(results)
+        hasher.combine(issuerCertificate)
+        hasher.combine(proofTime)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFfiVerified: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiVerified {
+        return
+            try FfiVerified(
+                systemId: FfiConverterString.read(from: &buf), 
+                proofBackend: FfiConverterString.read(from: &buf), 
+                reqSet: FfiConverterOptionUInt64.read(from: &buf), 
+                results: FfiConverterSequenceTypeFfiResult.read(from: &buf), 
+                issuerCertificate: FfiConverterData.read(from: &buf), 
+                proofTime: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: FfiVerified, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.systemId, into: &buf)
+        FfiConverterString.write(value.proofBackend, into: &buf)
+        FfiConverterOptionUInt64.write(value.reqSet, into: &buf)
+        FfiConverterSequenceTypeFfiResult.write(value.results, into: &buf)
+        FfiConverterData.write(value.issuerCertificate, into: &buf)
+        FfiConverterString.write(value.proofTime, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiVerified_lift(_ buf: RustBuffer) throws -> FfiVerified {
+    return try FfiConverterTypeFfiVerified.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiVerified_lower(_ value: FfiVerified) -> RustBuffer {
+    return FfiConverterTypeFfiVerified.lower(value)
+}
+
+
+/**
+ * The presentations of one answered query.
+ */
+public struct FfiVpTokenEntry {
+    /**
+     * The Credential Query's `id`.
+     */
+    public var queryId: String
+    /**
+     * The CBOR presentations.
+     */
+    public var presentations: [Data]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * The Credential Query's `id`.
+         */queryId: String, 
+        /**
+         * The CBOR presentations.
+         */presentations: [Data]) {
+        self.queryId = queryId
+        self.presentations = presentations
+    }
+}
+
+
+
+extension FfiVpTokenEntry: Equatable, Hashable {
+    public static func ==(lhs: FfiVpTokenEntry, rhs: FfiVpTokenEntry) -> Bool {
+        if lhs.queryId != rhs.queryId {
+            return false
+        }
+        if lhs.presentations != rhs.presentations {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(queryId)
+        hasher.combine(presentations)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFfiVpTokenEntry: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiVpTokenEntry {
+        return
+            try FfiVpTokenEntry(
+                queryId: FfiConverterString.read(from: &buf), 
+                presentations: FfiConverterSequenceData.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: FfiVpTokenEntry, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.queryId, into: &buf)
+        FfiConverterSequenceData.write(value.presentations, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiVpTokenEntry_lift(_ buf: RustBuffer) throws -> FfiVpTokenEntry {
+    return try FfiConverterTypeFfiVpTokenEntry.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiVpTokenEntry_lower(_ value: FfiVpTokenEntry) -> RustBuffer {
+    return FfiConverterTypeFfiVpTokenEntry.lower(value)
+}
+
+
+/**
+ * Why a credential cannot answer: an item's failure, or the credential's.
+ */
+public struct FfiZkpError {
+    /**
+     * The system rulebook's code (Section 9): `age_out_of_range`, `seed_mismatch`,
+     * `validity`, `issuer_signature`, `issuer_untrusted`, `device_binding`,
+     * `credential_form`.
+     */
+    public var code: String
+    /**
+     * The `_req` index of a failing item; `None` for the credential's own checks.
+     */
+    public var item: UInt64?
+    /**
+     * The option's index in `_req_sets` of a failing item.
+     */
+    public var reqSet: UInt64?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * The system rulebook's code (Section 9): `age_out_of_range`, `seed_mismatch`,
+         * `validity`, `issuer_signature`, `issuer_untrusted`, `device_binding`,
+         * `credential_form`.
+         */code: String, 
+        /**
+         * The `_req` index of a failing item; `None` for the credential's own checks.
+         */item: UInt64?, 
+        /**
+         * The option's index in `_req_sets` of a failing item.
+         */reqSet: UInt64?) {
+        self.code = code
+        self.item = item
+        self.reqSet = reqSet
+    }
+}
+
+
+
+extension FfiZkpError: Equatable, Hashable {
+    public static func ==(lhs: FfiZkpError, rhs: FfiZkpError) -> Bool {
+        if lhs.code != rhs.code {
+            return false
+        }
+        if lhs.item != rhs.item {
+            return false
+        }
+        if lhs.reqSet != rhs.reqSet {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(code)
+        hasher.combine(item)
+        hasher.combine(reqSet)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFfiZkpError: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiZkpError {
+        return
+            try FfiZkpError(
+                code: FfiConverterString.read(from: &buf), 
+                item: FfiConverterOptionUInt64.read(from: &buf), 
+                reqSet: FfiConverterOptionUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: FfiZkpError, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.code, into: &buf)
+        FfiConverterOptionUInt64.write(value.item, into: &buf)
+        FfiConverterOptionUInt64.write(value.reqSet, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiZkpError_lift(_ buf: RustBuffer) throws -> FfiZkpError {
+    return try FfiConverterTypeFfiZkpError.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiZkpError_lower(_ value: FfiZkpError) -> RustBuffer {
+    return FfiConverterTypeFfiZkpError.lower(value)
+}
+
+
+/**
  * Why a blob could not be built.
  */
 public enum BlobError {
@@ -1810,6 +3602,381 @@ extension BlobError: Foundation.LocalizedError {
         String(reflecting: self)
     }
 }
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * The channel a request arrived on.
+ */
+
+public enum FfiChannel {
+    
+    /**
+     * The Digital Credentials API, with the calling origin the platform reports.
+     */
+    case dcApi(
+        /**
+         * The origin.
+         */origin: String
+    )
+    /**
+     * Redirects, including a `request_uri` from a QR code or a link.
+     */
+    case redirect
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFfiChannel: FfiConverterRustBuffer {
+    typealias SwiftType = FfiChannel
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiChannel {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .dcApi(origin: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 2: return .redirect
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: FfiChannel, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .dcApi(origin):
+            writeInt(&buf, Int32(1))
+            FfiConverterString.write(origin, into: &buf)
+            
+        
+        case .redirect:
+            writeInt(&buf, Int32(2))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiChannel_lift(_ buf: RustBuffer) throws -> FfiChannel {
+    return try FfiConverterTypeFfiChannel.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiChannel_lower(_ value: FfiChannel) -> RustBuffer {
+    return FfiConverterTypeFfiChannel.lower(value)
+}
+
+
+
+extension FfiChannel: Equatable, Hashable {}
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * What a system's verifier says of a proof.
+ */
+
+public enum FfiProofCheck {
+    
+    /**
+     * The proof verifies.
+     */
+    case accepted
+    /**
+     * `zk_proof` breaks the backend's format.
+     */
+    case encoding
+    /**
+     * A circuit's proof fails.
+     */
+    case invalid
+    /**
+     * The proof's public values differ from the statement.
+     */
+    case publicInput
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFfiProofCheck: FfiConverterRustBuffer {
+    typealias SwiftType = FfiProofCheck
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiProofCheck {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .accepted
+        
+        case 2: return .encoding
+        
+        case 3: return .invalid
+        
+        case 4: return .publicInput
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: FfiProofCheck, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .accepted:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .encoding:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .invalid:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .publicInput:
+            writeInt(&buf, Int32(4))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiProofCheck_lift(_ buf: RustBuffer) throws -> FfiProofCheck {
+    return try FfiConverterTypeFfiProofCheck.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiProofCheck_lower(_ value: FfiProofCheck) -> RustBuffer {
+    return FfiConverterTypeFfiProofCheck.lower(value)
+}
+
+
+
+extension FfiProofCheck: Equatable, Hashable {}
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * The form of `verifier_id` the trust framework fixes, with what it is made from.
+ */
+
+public enum FfiVerifierIdForm {
+    
+    /**
+     * `semantic`: the end Relying Party's semantic identifier, from the registration
+     * certificate when present, else from the access certificate.
+     */
+    case semantic(
+        /**
+         * The semantic identifier.
+         */semanticIdentifier: String
+    )
+    /**
+     * `x509_san_dns`: the Client Identifier.
+     */
+    case x509SanDns(
+        /**
+         * Whether the registration certificate names an intermediary.
+         */registrationNamesIntermediary: Bool
+    )
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFfiVerifierIdForm: FfiConverterRustBuffer {
+    typealias SwiftType = FfiVerifierIdForm
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiVerifierIdForm {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .semantic(semanticIdentifier: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 2: return .x509SanDns(registrationNamesIntermediary: try FfiConverterBool.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: FfiVerifierIdForm, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .semantic(semanticIdentifier):
+            writeInt(&buf, Int32(1))
+            FfiConverterString.write(semanticIdentifier, into: &buf)
+            
+        
+        case let .x509SanDns(registrationNamesIntermediary):
+            writeInt(&buf, Int32(2))
+            FfiConverterBool.write(registrationNamesIntermediary, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiVerifierIdForm_lift(_ buf: RustBuffer) throws -> FfiVerifierIdForm {
+    return try FfiConverterTypeFfiVerifierIdForm.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiVerifierIdForm_lower(_ value: FfiVerifierIdForm) -> RustBuffer {
+    return FfiConverterTypeFfiVerifierIdForm.lower(value)
+}
+
+
+
+extension FfiVerifierIdForm: Equatable, Hashable {}
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * The outcome of matching one query.
+ */
+
+public enum FfiZkpMatch {
+    
+    /**
+     * The credentials that can answer, best first: show the consent screen.
+     */
+    case candidates(
+        /**
+         * The candidates.
+         */candidates: [FfiCandidate]
+    )
+    /**
+     * No credential can answer: send `access_denied`.
+     */
+    case rejected(
+        /**
+         * Each credential that matched the query's type, and why it cannot answer.
+         */rejected: [FfiJudged]
+    )
+    /**
+     * No option has a usable pair: send `vp_formats_not_supported`.
+     */
+    case unsupported(
+        /**
+         * Each option and why.
+         */options: [FfiOptionRefusal]
+    )
+    /**
+     * The query breaks a rule: send `invalid_request`.
+     */
+    case invalid(
+        /**
+         * The rule's identifier.
+         */code: String
+    )
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFfiZkpMatch: FfiConverterRustBuffer {
+    typealias SwiftType = FfiZkpMatch
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiZkpMatch {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .candidates(candidates: try FfiConverterSequenceTypeFfiCandidate.read(from: &buf)
+        )
+        
+        case 2: return .rejected(rejected: try FfiConverterSequenceTypeFfiJudged.read(from: &buf)
+        )
+        
+        case 3: return .unsupported(options: try FfiConverterSequenceTypeFfiOptionRefusal.read(from: &buf)
+        )
+        
+        case 4: return .invalid(code: try FfiConverterString.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: FfiZkpMatch, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .candidates(candidates):
+            writeInt(&buf, Int32(1))
+            FfiConverterSequenceTypeFfiCandidate.write(candidates, into: &buf)
+            
+        
+        case let .rejected(rejected):
+            writeInt(&buf, Int32(2))
+            FfiConverterSequenceTypeFfiJudged.write(rejected, into: &buf)
+            
+        
+        case let .unsupported(options):
+            writeInt(&buf, Int32(3))
+            FfiConverterSequenceTypeFfiOptionRefusal.write(options, into: &buf)
+            
+        
+        case let .invalid(code):
+            writeInt(&buf, Int32(4))
+            FfiConverterString.write(code, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiZkpMatch_lift(_ buf: RustBuffer) throws -> FfiZkpMatch {
+    return try FfiConverterTypeFfiZkpMatch.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiZkpMatch_lower(_ value: FfiZkpMatch) -> RustBuffer {
+    return FfiConverterTypeFfiZkpMatch.lower(value)
+}
+
+
+
+extension FfiZkpMatch: Equatable, Hashable {}
+
+
 
 
 /**
@@ -1916,6 +4083,184 @@ extension MatchError: Foundation.LocalizedError {
     }
 }
 
+
+/**
+ * Why a `zkp_req` call gave no result. `error_code` is what the wallet sends the verifier
+ * for the request (`zkp_req`, Section 5); the rest is for the user and the logs.
+ */
+public enum ZkpReqError {
+
+    
+    
+    /**
+     * The request breaks a rule of `zkp_req` or of the nym_auth catalogue.
+     */
+    case InvalidRequest(
+        /**
+         * `invalid_request`.
+         */errorCode: String, 
+        /**
+         * The rule's identifier.
+         */code: String
+    )
+    /**
+     * The credential cannot answer the candidate's option.
+     */
+    case Rejected(
+        /**
+         * `access_denied`.
+         */errorCode: String, 
+        /**
+         * Each failure, with the system rulebook's code.
+         */errors: [FfiZkpError]
+    )
+    /**
+     * The candidate's system and backend no longer form a usable pair for its option.
+     */
+    case Unsupported(
+        /**
+         * `access_denied`.
+         */errorCode: String, 
+        /**
+         * Why the pair is not usable.
+         */code: String
+    )
+    /**
+     * An input of the host, or the prover's output, is not one the presenter can use.
+     */
+    case Host(
+        /**
+         * `access_denied`.
+         */errorCode: String, 
+        /**
+         * What is wrong.
+         */code: String
+    )
+    /**
+     * The verifier refused a presentation.
+     */
+    case Refused(
+        /**
+         * The system rulebook's code (Section 9), or the step of `zkp_req`, Section 4.1.
+         */code: String, 
+        /**
+         * A finer identifier of the failed check.
+         */detail: String
+    )
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeZkpReqError: FfiConverterRustBuffer {
+    typealias SwiftType = ZkpReqError
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ZkpReqError {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        
+
+        
+        case 1: return .InvalidRequest(
+            errorCode: try FfiConverterString.read(from: &buf), 
+            code: try FfiConverterString.read(from: &buf)
+            )
+        case 2: return .Rejected(
+            errorCode: try FfiConverterString.read(from: &buf), 
+            errors: try FfiConverterSequenceTypeFfiZkpError.read(from: &buf)
+            )
+        case 3: return .Unsupported(
+            errorCode: try FfiConverterString.read(from: &buf), 
+            code: try FfiConverterString.read(from: &buf)
+            )
+        case 4: return .Host(
+            errorCode: try FfiConverterString.read(from: &buf), 
+            code: try FfiConverterString.read(from: &buf)
+            )
+        case 5: return .Refused(
+            code: try FfiConverterString.read(from: &buf), 
+            detail: try FfiConverterString.read(from: &buf)
+            )
+
+         default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: ZkpReqError, into buf: inout [UInt8]) {
+        switch value {
+
+        
+
+        
+        
+        case let .InvalidRequest(errorCode,code):
+            writeInt(&buf, Int32(1))
+            FfiConverterString.write(errorCode, into: &buf)
+            FfiConverterString.write(code, into: &buf)
+            
+        
+        case let .Rejected(errorCode,errors):
+            writeInt(&buf, Int32(2))
+            FfiConverterString.write(errorCode, into: &buf)
+            FfiConverterSequenceTypeFfiZkpError.write(errors, into: &buf)
+            
+        
+        case let .Unsupported(errorCode,code):
+            writeInt(&buf, Int32(3))
+            FfiConverterString.write(errorCode, into: &buf)
+            FfiConverterString.write(code, into: &buf)
+            
+        
+        case let .Host(errorCode,code):
+            writeInt(&buf, Int32(4))
+            FfiConverterString.write(errorCode, into: &buf)
+            FfiConverterString.write(code, into: &buf)
+            
+        
+        case let .Refused(code,detail):
+            writeInt(&buf, Int32(5))
+            FfiConverterString.write(code, into: &buf)
+            FfiConverterString.write(detail, into: &buf)
+            
+        }
+    }
+}
+
+
+extension ZkpReqError: Equatable, Hashable {}
+
+extension ZkpReqError: Foundation.LocalizedError {
+    public var errorDescription: String? {
+        String(reflecting: self)
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionUInt64: FfiConverterRustBuffer {
+    typealias SwiftType = UInt64?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterUInt64.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterUInt64.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
@@ -1943,6 +4288,55 @@ fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionSequenceData: FfiConverterRustBuffer {
+    typealias SwiftType = [Data]?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterSequenceData.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterSequenceData.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceUInt64: FfiConverterRustBuffer {
+    typealias SwiftType = [UInt64]
+
+    public static func write(_ value: [UInt64], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterUInt64.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [UInt64] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [UInt64]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterUInt64.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
     typealias SwiftType = [String]
 
@@ -1960,6 +4354,56 @@ fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterString.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceData: FfiConverterRustBuffer {
+    typealias SwiftType = [Data]
+
+    public static func write(_ value: [Data], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterData.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [Data] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [Data]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterData.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeFfiCandidate: FfiConverterRustBuffer {
+    typealias SwiftType = [FfiCandidate]
+
+    public static func write(_ value: [FfiCandidate], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeFfiCandidate.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [FfiCandidate] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [FfiCandidate]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeFfiCandidate.read(from: &buf))
         }
         return seq
     }
@@ -2043,6 +4487,31 @@ fileprivate struct FfiConverterSequenceTypeFfiCombination: FfiConverterRustBuffe
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeFfiJudged: FfiConverterRustBuffer {
+    typealias SwiftType = [FfiJudged]
+
+    public static func write(_ value: [FfiJudged], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeFfiJudged.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [FfiJudged] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [FfiJudged]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeFfiJudged.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeFfiMatchedCredential: FfiConverterRustBuffer {
     typealias SwiftType = [FfiMatchedCredential]
 
@@ -2068,6 +4537,56 @@ fileprivate struct FfiConverterSequenceTypeFfiMatchedCredential: FfiConverterRus
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeFfiOptionRefusal: FfiConverterRustBuffer {
+    typealias SwiftType = [FfiOptionRefusal]
+
+    public static func write(_ value: [FfiOptionRefusal], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeFfiOptionRefusal.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [FfiOptionRefusal] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [FfiOptionRefusal]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeFfiOptionRefusal.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeFfiPairRefusal: FfiConverterRustBuffer {
+    typealias SwiftType = [FfiPairRefusal]
+
+    public static func write(_ value: [FfiPairRefusal], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeFfiPairRefusal.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [FfiPairRefusal] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [FfiPairRefusal]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeFfiPairRefusal.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeFfiQueryMatch: FfiConverterRustBuffer {
     typealias SwiftType = [FfiQueryMatch]
 
@@ -2085,6 +4604,106 @@ fileprivate struct FfiConverterSequenceTypeFfiQueryMatch: FfiConverterRustBuffer
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeFfiQueryMatch.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeFfiResult: FfiConverterRustBuffer {
+    typealias SwiftType = [FfiResult]
+
+    public static func write(_ value: [FfiResult], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeFfiResult.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [FfiResult] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [FfiResult]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeFfiResult.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeFfiStoredCredential: FfiConverterRustBuffer {
+    typealias SwiftType = [FfiStoredCredential]
+
+    public static func write(_ value: [FfiStoredCredential], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeFfiStoredCredential.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [FfiStoredCredential] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [FfiStoredCredential]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeFfiStoredCredential.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeFfiVpTokenEntry: FfiConverterRustBuffer {
+    typealias SwiftType = [FfiVpTokenEntry]
+
+    public static func write(_ value: [FfiVpTokenEntry], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeFfiVpTokenEntry.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [FfiVpTokenEntry] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [FfiVpTokenEntry]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeFfiVpTokenEntry.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeFfiZkpError: FfiConverterRustBuffer {
+    typealias SwiftType = [FfiZkpError]
+
+    public static func write(_ value: [FfiZkpError], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeFfiZkpError.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [FfiZkpError] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [FfiZkpError]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeFfiZkpError.read(from: &buf))
         }
         return seq
     }
@@ -2209,6 +4828,142 @@ public func matchDcqlWithContext(blob: Data, dcqlJson: String, clientMetadataJso
     )
 })
 }
+/**
+ * The JWK SHA-256 Thumbprint (RFC 7638) of an elliptic-curve JWK.
+ *
+ * # Errors
+ *
+ * [`ZkpReqError::Host`] for text that is no EC JWK.
+ */
+public func zkpReqJwkThumbprint(jwkJson: String)throws  -> Data {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeZkpReqError.lift) {
+    uniffi_siros_dc_matcher_ffi_fn_func_zkp_req_jwk_thumbprint(
+        FfiConverterString.lower(jwkJson),$0
+    )
+})
+}
+/**
+ * Matches one `zkp_req` Credential Query against the wallet's credentials.
+ *
+ * `query_json` is the Credential Query, `client_metadata_json` the request's
+ * `client_metadata`. `credentials` are those of the query's format and type, a superset is
+ * fine. `anchors` are the DER certificates the query's `trusted_authorities` designate,
+ * required when it has some. `systems` are the system ids the host proves, in the wallet's
+ * order of preference. `now` is the wallet's clock in seconds since the epoch.
+ *
+ * # Errors
+ *
+ * [`ZkpReqError::Host`] for an input the presenter cannot use.
+ */
+public func zkpReqMatch(queryJson: String, clientMetadataJson: String, credentials: [FfiStoredCredential], anchors: [Data]?, systems: [String], now: Int64)throws  -> FfiZkpMatch {
+    return try  FfiConverterTypeFfiZkpMatch.lift(try rustCallWithError(FfiConverterTypeZkpReqError.lift) {
+    uniffi_siros_dc_matcher_ffi_fn_func_zkp_req_match(
+        FfiConverterString.lower(queryJson),
+        FfiConverterString.lower(clientMetadataJson),
+        FfiConverterSequenceTypeFfiStoredCredential.lower(credentials),
+        FfiConverterOptionSequenceData.lower(anchors),
+        FfiConverterSequenceString.lower(systems),
+        FfiConverterInt64.lower(now),$0
+    )
+})
+}
+/**
+ * Checks the consented candidate again and builds its statement (system rulebooks,
+ * Section 7). The same inputs as [`zkp_req_match`], with the session and the credential's
+ * delivered `secret_seed`.
+ *
+ * # Errors
+ *
+ * [`ZkpReqError`]: what fails, with the Section 9 codes.
+ */
+public func zkpReqPrepare(candidate: FfiCandidate, queryJson: String, clientMetadataJson: String, session: FfiSession, credential: FfiStoredCredential, secretSeed: Data, anchors: [Data]?, now: Int64)throws  -> FfiPrepared {
+    return try  FfiConverterTypeFfiPrepared.lift(try rustCallWithError(FfiConverterTypeZkpReqError.lift) {
+    uniffi_siros_dc_matcher_ffi_fn_func_zkp_req_prepare(
+        FfiConverterTypeFfiCandidate.lower(candidate),
+        FfiConverterString.lower(queryJson),
+        FfiConverterString.lower(clientMetadataJson),
+        FfiConverterTypeFfiSession.lower(session),
+        FfiConverterTypeFfiStoredCredential.lower(credential),
+        FfiConverterData.lower(secretSeed),
+        FfiConverterOptionSequenceData.lower(anchors),
+        FfiConverterInt64.lower(now),$0
+    )
+})
+}
+/**
+ * The session of a validated Request Object: the policy of signed requests and encrypted
+ * responses, the `Handover` for the response-encryption key with this JWK thumbprint, and
+ * `verifier_id` in the trust framework's form.
+ *
+ * # Errors
+ *
+ * [`ZkpReqError::InvalidRequest`] for a rule of the policy or of the verifier identity, and
+ * [`ZkpReqError::Host`] for a thumbprint of no key in the request.
+ */
+public func zkpReqSession(requestObjectJson: String, signed: Bool, channel: FfiChannel, jwkThumbprint: Data, verifierId: FfiVerifierIdForm)throws  -> FfiSession {
+    return try  FfiConverterTypeFfiSession.lift(try rustCallWithError(FfiConverterTypeZkpReqError.lift) {
+    uniffi_siros_dc_matcher_ffi_fn_func_zkp_req_session(
+        FfiConverterString.lower(requestObjectJson),
+        FfiConverterBool.lower(signed),
+        FfiConverterTypeFfiChannel.lower(channel),
+        FfiConverterData.lower(jwkThumbprint),
+        FfiConverterTypeFfiVerifierIdForm.lower(verifierId),$0
+    )
+})
+}
+/**
+ * Verifies a presentation against the verifier's own query, session, clock and trust
+ * anchors, with the host's proof verifier.
+ *
+ * # Errors
+ *
+ * [`ZkpReqError::Refused`] with the system rulebook's code.
+ */
+public func zkpReqVerify(queryJson: String, clientMetadataJson: String, session: FfiSession, presentation: Data, now: Int64, toleranceFuture: Int64, tolerancePast: Int64, trustAnchors: [Data], verifier: FfiProofVerifier)throws  -> FfiVerified {
+    return try  FfiConverterTypeFfiVerified.lift(try rustCallWithError(FfiConverterTypeZkpReqError.lift) {
+    uniffi_siros_dc_matcher_ffi_fn_func_zkp_req_verify(
+        FfiConverterString.lower(queryJson),
+        FfiConverterString.lower(clientMetadataJson),
+        FfiConverterTypeFfiSession.lower(session),
+        FfiConverterData.lower(presentation),
+        FfiConverterInt64.lower(now),
+        FfiConverterInt64.lower(toleranceFuture),
+        FfiConverterInt64.lower(tolerancePast),
+        FfiConverterSequenceData.lower(trustAnchors),
+        FfiConverterTypeFfiProofVerifier.lower(verifier),$0
+    )
+})
+}
+/**
+ * The `vp_token` of `direct_post.cwt` (`zkp_req`, Section 6.1), CBOR: each presentation is
+ * the map itself.
+ *
+ * # Errors
+ *
+ * [`ZkpReqError::Host`] for bytes that are no presentation.
+ */
+public func zkpReqVpTokenCbor(entries: [FfiVpTokenEntry])throws  -> Data {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeZkpReqError.lift) {
+    uniffi_siros_dc_matcher_ffi_fn_func_zkp_req_vp_token_cbor(
+        FfiConverterSequenceTypeFfiVpTokenEntry.lower(entries),$0
+    )
+})
+}
+/**
+ * The `vp_token` of JSON Response Modes (`zkp_req`, Section 6.1): each presentation is the
+ * base64url, without padding, of its CBOR.
+ *
+ * # Errors
+ *
+ * [`ZkpReqError::Host`] for bytes that are no presentation.
+ */
+public func zkpReqVpTokenJson(entries: [FfiVpTokenEntry])throws  -> String {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeZkpReqError.lift) {
+    uniffi_siros_dc_matcher_ffi_fn_func_zkp_req_vp_token_json(
+        FfiConverterSequenceTypeFfiVpTokenEntry.lower(entries),$0
+    )
+})
+}
 
 private enum InitializationResult {
     case ok
@@ -2234,6 +4989,51 @@ private var initializationResult: InitializationResult = {
     if (uniffi_siros_dc_matcher_ffi_checksum_func_match_dcql_with_context() != 26825) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_jwk_thumbprint() != 44324) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_match() != 50997) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_prepare() != 12649) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_session() != 31277) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_verify() != 17520) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_vp_token_cbor() != 9199) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_vp_token_json() != 3217) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_siros_dc_matcher_ffi_checksum_method_ffiprepared_assemble() != 17164) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_siros_dc_matcher_ffi_checksum_method_ffiprepared_data_to_sign() != 20262) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_siros_dc_matcher_ffi_checksum_method_ffiprepared_job() != 17581) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_siros_dc_matcher_ffi_checksum_method_ffiprepared_key_id() != 33064) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_siros_dc_matcher_ffi_checksum_method_ffiprepared_statement() != 39156) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_siros_dc_matcher_ffi_checksum_method_ffiproofverifier_verify() != 60481) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_siros_dc_matcher_ffi_checksum_method_ffisession_handover() != 43487) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_siros_dc_matcher_ffi_checksum_method_ffisession_verifier_id() != 15515) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_add_credential() != 64015) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -2256,6 +5056,7 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
 
+    uniffiCallbackInitFfiProofVerifier()
     return InitializationResult.ok
 }()
 

@@ -1960,9 +1960,12 @@ dependencies = [
 name = "siros-dc-matcher-ffi"
 version = "0.11.0"
 dependencies = [
+ "p256",
  "serde_json",
  "siros-dc-matcher-core",
  "siros-dcql",
+ "siros-zkp-req",
+ "siros-zkp-req-nym-auth",
  "thiserror 2.0.20",
  "uniffi",
 ]
@@ -2014,6 +2017,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "siros-zkp-req",
+ "siros-zkp-req-nym-auth",
  "x509-cert",
  "zeroize",
 ]
