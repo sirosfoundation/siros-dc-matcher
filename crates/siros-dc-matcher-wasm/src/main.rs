@@ -285,10 +285,10 @@ fn run(input: &Input<'_>, sets: &mut impl SetSink) {
                 title: &credential.title,
                 subtitle: &credential.subtitle,
                 metadata,
-                // A null icon costs the entry, not just its picture: the
-                // host drops the whole entry and logs `Null icon for icon` in
-                // its own process, so a credential registered without image
-                // bytes would silently not exist in the picker. #19 gave the
+                // A null icon costs the whole entry: the host drops it and
+                // logs `Null icon for icon` in its own process, so a
+                // credential registered without image bytes would silently
+                // not exist in the picker. #19 gave the
                 // diagnostic entries this fallback; a real entry needs it at
                 // least as much, because a user is looking for that
                 // credential. The `filter` covers a zero-length `IconRef`,
@@ -448,9 +448,9 @@ impl Diagnostics {
         let entry = Member {
             credential_id: "siros-debug-entry",
             title: "[SIROS DEBUG] no match",
-            // Picker subtitles are typically single-line and short; keep the
-            // message itself terse rather than truncating here, so nothing
-            // important silently falls off the end.
+            // Picker subtitles are typically single-line and short. The
+            // message is written terse and passed whole, so nothing important
+            // silently falls off the end.
             subtitle: &message,
             metadata: "{}".to_owned(),
             icon: FALLBACK_ICON_PNG,
