@@ -3,15 +3,18 @@
 //! app, and fill the credential picker with entries. It wraps
 //! `android-credman-sys`, whose `ABI.md` holds the rules and their evidence.
 //!
+//! - The traits [`V1`] to [`V7`] give each host level's functions as safe
+//!   calls. [`Host::credman`] hands out `dyn V1`; `version::<dyn V5>()`
+//!   grants a higher level when the host reports it.
+//! - [`Host::entry_sets`] sends [`EntrySet`]s from level 2. Each entry
+//!   option is sent when the host reaches its level, and the standard
+//!   metadata object tells the wallet whether text was left out.
 //! - `None` reaches the host as NULL and hides the element; `Some` of an
 //!   empty string shows it blank.
-//! - [`Host::entry_sets`] exists from level 2. A call above it takes its
-//!   level's token, from [`Host::version`]. [`Host::connect_with`] checks the
-//!   level itself for the options it applies.
 //! - The caller keeps two set rules: declare a set id once per invocation,
 //!   and give the alternatives of one slot distinct ids.
-//! - [`Host`] exists on `wasm32` only; [`SetSink`] lets a test stand in for
-//!   it.
+//! - [`Host`] and the level traits exist on `wasm32` only; [`SetSink`] lets a
+//!   test stand in for the host.
 
 #![deny(unsafe_op_in_unsafe_fn)]
 // Links to the wasm32-only host API resolve on wasm32, where rustdoc checks
@@ -24,26 +27,28 @@ mod entry;
 #[cfg(target_arch = "wasm32")]
 mod host;
 #[cfg(target_arch = "wasm32")]
+mod levels;
+#[cfg(target_arch = "wasm32")]
 mod reader;
 mod set;
 #[cfg(target_arch = "wasm32")]
 mod sets_on_host;
-mod version;
+mod text;
 
 pub use app::{CallingApp, CallingAppError};
-pub use c8str::{C8Str, C8StrError, C8String};
+pub use c8str::{C8Str, C8StrError, C8String, NonZeroChar};
 pub use entry::{
-    Field, InlineIssuanceEntry, LegacyEntry, LegacyField, PaymentDisplay, PaymentEntry,
-    StringIdEntry, VerificationDisplay, VerificationLink,
+    DelegationType, Field, InlineIssuanceEntry, LegacyDisplay, LegacyEntry, LegacyField,
+    PackageInfo, PaymentDisplay, PaymentEntry, StringIdEntry, VerificationDisplay,
+    VerificationLink,
 };
 #[cfg(target_arch = "wasm32")]
-pub use host::{CredentialsError, Host, HostOptions, PackageInfo};
+pub use host::{CredentialsError, Host, HostOptions};
+#[cfg(target_arch = "wasm32")]
+pub use levels::{EntryKey, Level, V1, V2, V3, V4, V5, V6, V7};
 #[cfg(target_arch = "wasm32")]
 pub use reader::CredentialReader;
-pub use set::{
-    AnyEntry, DelegationType, EntryKind, EntrySet, PaymentWithInfo, SetEntry, SetSink, Slot,
-    WithLink, WithMetadataDisplayText,
-};
+pub use set::{AnyEntry, EntryKind, EntrySet, Payment, SetEntry, SetSink, Slot};
 #[cfg(target_arch = "wasm32")]
 pub use sets_on_host::EntrySets;
-pub use version::{WasmVersion, V3, V5, V6};
+pub use text::{C8StringExt, C8Writer};

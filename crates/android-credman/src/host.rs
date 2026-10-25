@@ -1,85 +1,65 @@
-//! Every pointer passed here comes from a borrowed `&C8Str`, `&[u8]` or an
-//! `Option` of one (NULL for `None`), so each call meets the rules of
-//! `ABI.md`.
-
 use crate::app::{CallingApp, CallingAppError};
-use crate::entry::{InlineIssuanceEntry, LegacyEntry, PaymentEntry, StringIdEntry};
-use crate::set::DelegationType;
-use crate::sets_on_host::{Delegation, EntrySets};
-use crate::version::{WasmVersion, V4};
-use android_credman_sys::{credman, v4, CallingAppInfo};
-use c8str::C8Str;
-use core::ffi::c_void;
-use core::{fmt, ptr};
+use crate::entry::{
+    DelegationType, InlineIssuanceEntry, LegacyEntry, PackageInfo, PaymentEntry, StringIdEntry,
+};
+use crate::levels::imp::Credman;
+use crate::levels::{V1, V2, V4};
+use crate::sets_on_host::EntrySets;
+use core::fmt;
 use std::collections::TryReserveError;
 
 /// The host of one matcher invocation: the verifier's request, the wallet's
 /// credentials, the calling app, the standalone entries, and the entry sets
-/// from [`Host::entry_sets`].
+/// from [`Host::entry_sets`]. [`Host::credman`] gives the host's functions
+/// one by one.
 #[derive(Debug, Clone, Copy)]
 pub struct Host {
-    version: WasmVersion,
-    delegation: Option<Delegation>,
+    credman: Credman,
+    delegation: Option<DelegationType>,
 }
 
 impl Host {
-    /// Reads the host level with [`GetWasmVersion`](credman::GetWasmVersion).
-    /// A matcher connects first, here or with [`Host::connect_with`].
+    /// Reads the host level with
+    /// [`GetWasmVersion`](android_credman_sys::credman::GetWasmVersion). A
+    /// matcher connects first, here or with [`Host::connect_with`].
     pub fn connect() -> Self {
-        let mut level = 0u32;
-        // SAFETY: `level` is a live u32 the host writes once.
-        unsafe { credman::GetWasmVersion(&mut level) };
         Self {
-            version: WasmVersion::reported(level),
+            credman: Credman::connect(),
             delegation: None,
         }
     }
 
-    /// The reported level, which hands out the token of each level the host
-    /// reaches.
-    pub fn version(&self) -> WasmVersion {
-        self.version
+    /// The host's functions at the base level. `version` grants a higher
+    /// level when the host reports it.
+    pub fn credman(&self) -> &dyn V1 {
+        &self.credman
     }
 
     /// Where the matcher sends its entry sets, when the host reaches level 2.
-    /// Every entry carries the delegation setting of [`HostOptions`].
-    pub fn entry_sets(&self) -> Option<EntrySets> {
-        self.version
-            .v2()
-            .map(|level| EntrySets::new(level, self.delegation))
+    pub fn entry_sets(&self) -> Option<EntrySets<'_>> {
+        self.credman()
+            .version::<dyn V2>()
+            .map(|host| EntrySets::new(host, self.delegation))
     }
 
-    /// The verifier's request: the Digital Credentials API request as JSON,
-    /// read with [`GetRequestSize`](credman::GetRequestSize) and
-    /// [`GetRequestBuffer`](credman::GetRequestBuffer). A matcher reads it
-    /// once.
+    /// The verifier's request: the Digital Credentials API request as JSON.
+    /// A matcher reads it once.
     ///
     /// # Errors
     ///
     /// [`TryReserveError`] when the reported length cannot be allocated.
     pub fn request(&self) -> Result<Vec<u8>, TryReserveError> {
-        let mut size = 0u32;
-        // SAFETY: `size` is a live u32 the host writes once.
-        unsafe { credman::GetRequestSize(&mut size) };
-        let mut request = zeroed(size as usize)?;
-        // SAFETY: the buffer holds the `size` bytes the host writes.
-        unsafe { credman::GetRequestBuffer(request.as_mut_ptr().cast::<c_void>()) };
-        Ok(request)
+        self.credman().request()
     }
 
-    /// The length in bytes of the credential blob the wallet registered, from
-    /// [`GetCredentialsSize`](credman::GetCredentialsSize).
+    /// The length in bytes of the credential blob the wallet registered.
     pub fn credentials_size(&self) -> usize {
-        let mut size = 0u32;
-        // SAFETY: `size` is a live u32 the host writes once.
-        unsafe { credman::GetCredentialsSize(&mut size) };
-        size as usize
+        self.credman().credentials_size()
     }
 
-    /// Copies the blob's bytes from `offset` into `buffer` with
-    /// [`ReadCredentialsBuffer`](credman::ReadCredentialsBuffer). Returns the
-    /// count the host copied, which may be lower than `buffer.len()` and is 0
-    /// past the end.
+    /// Copies the blob's bytes from `offset` into `buffer`. Returns the count
+    /// the host copied, which may be lower than `buffer.len()` and is 0 past
+    /// the end.
     ///
     /// # Errors
     ///
@@ -91,11 +71,7 @@ impl Host {
         offset: usize,
     ) -> Result<usize, CredentialsError> {
         let asked = buffer.len();
-        // SAFETY: the buffer is valid for `asked` bytes, the most the host
-        // writes.
-        let copied = unsafe {
-            credman::ReadCredentialsBuffer(buffer.as_mut_ptr().cast::<c_void>(), offset, asked)
-        };
+        let copied = self.credman().read_credentials_buffer(buffer, offset);
         if copied > asked {
             return Err(CredentialsError::Overrun { asked, copied });
         }
@@ -125,125 +101,49 @@ impl Host {
         Ok(blob)
     }
 
-    /// The app that called the Digital Credentials API, read with
-    /// [`GetCallingAppInfo`](credman::GetCallingAppInfo) and converted once.
+    /// The app that called the Digital Credentials API, converted once.
     ///
     /// # Errors
     ///
     /// [`CallingAppError`] when a field holds no NUL or is not UTF-8 before
     /// it.
     pub fn calling_app(&self) -> Result<CallingApp, CallingAppError> {
-        let mut info = CallingAppInfo::ZEROED;
-        // SAFETY: `info` is a whole CallingAppInfo the host fills.
-        unsafe { credman::GetCallingAppInfo(&mut info) };
-        CallingApp::from_host(&info)
+        CallingApp::from_host(&self.credman().calling_app_info())
     }
 
-    /// Adds a standalone verification entry, then its fields, then its link,
-    /// with [`AddStringIdEntry`](credman::AddStringIdEntry),
-    /// [`AddFieldForStringIdEntry`](credman::AddFieldForStringIdEntry) and
-    /// [`SetAdditionalDisclaimerAndUrlForVerificationEntry`](credman::SetAdditionalDisclaimerAndUrlForVerificationEntry).
+    /// Adds a standalone verification entry, then its fields, then its link.
     /// For a host below level 2, which has no sets.
     pub fn add_string_id_entry(&self, entry: &StringIdEntry<'_>) {
-        let display = &entry.display;
-        // SAFETY: see the module documentation.
-        unsafe {
-            credman::AddStringIdEntry(
-                entry.cred_id.as_ptr(),
-                display.icon.as_ptr().cast(),
-                display.icon.len(),
-                display.title.as_ptr(),
-                display.subtitle.map_or(ptr::null(), C8Str::as_ptr),
-                display.disclaimer.map_or(ptr::null(), C8Str::as_ptr),
-                display.warning.map_or(ptr::null(), C8Str::as_ptr),
-            );
-        }
+        let host = self.credman();
+        host.add_string_id_entry(entry.cred_id, &entry.display);
         for field in entry.fields {
-            // SAFETY: see the module documentation.
-            unsafe {
-                credman::AddFieldForStringIdEntry(
-                    entry.cred_id.as_ptr(),
-                    field.name.as_ptr(),
-                    field.value.map_or(ptr::null(), C8Str::as_ptr),
-                );
-            }
+            host.add_field_for_string_id_entry(entry.cred_id, field);
         }
         if let Some(link) = entry.link {
-            // SAFETY: see the module documentation.
-            unsafe {
-                credman::SetAdditionalDisclaimerAndUrlForVerificationEntry(
-                    entry.cred_id.as_ptr(),
-                    link.secondary_disclaimer.as_ptr(),
-                    link.url_display_text.as_ptr(),
-                    link.url_value.as_ptr(),
-                );
-            }
+            host.set_additional_disclaimer_and_url_for_verification_entry(entry.cred_id, &link);
         }
     }
 
-    /// Adds a standalone entry named by a number, then its fields, with
-    /// [`AddEntry`](credman::AddEntry) and [`AddField`](credman::AddField).
-    /// Google's header deprecates them for [`Host::add_string_id_entry`].
+    /// Adds a standalone entry named by a number, then its fields. Google's
+    /// header deprecates it for [`Host::add_string_id_entry`].
     pub fn add_legacy_entry(&self, entry: &LegacyEntry<'_>) {
-        // SAFETY: see the module documentation.
-        unsafe {
-            credman::AddEntry(
-                entry.cred_id,
-                entry.icon.as_ptr().cast(),
-                entry.icon.len(),
-                entry.title.as_ptr(),
-                entry.subtitle.as_ptr(),
-                entry.disclaimer.as_ptr(),
-                entry.warning.as_ptr(),
-            );
-        }
+        let host = self.credman();
+        host.add_entry(entry.cred_id, &entry.display);
         for field in entry.fields {
-            // SAFETY: see the module documentation.
-            unsafe { credman::AddField(entry.cred_id, field.name.as_ptr(), field.value.as_ptr()) };
+            host.add_field(entry.cred_id, field);
         }
     }
 
-    /// Adds a standalone payment entry with
-    /// [`AddPaymentEntry`](credman::AddPaymentEntry). For a host below level
-    /// 2, which has no sets.
+    /// Adds a standalone payment entry. For a host below level 2, which has
+    /// no sets.
     pub fn add_payment_entry(&self, entry: &PaymentEntry<'_>) {
-        let display = &entry.display;
-        // SAFETY: see the module documentation.
-        unsafe {
-            credman::AddPaymentEntry(
-                entry.cred_id.as_ptr(),
-                display.merchant_name.as_ptr(),
-                display.payment_method_name.as_ptr(),
-                display
-                    .payment_method_subtitle
-                    .map_or(ptr::null(), C8Str::as_ptr),
-                display.payment_method_icon.as_ptr().cast(),
-                display.payment_method_icon.len(),
-                display.transaction_amount.as_ptr(),
-                display.bank_icon.map_or(ptr::null(), <[u8]>::as_ptr).cast(),
-                display.bank_icon.map_or(0, <[u8]>::len),
-                display
-                    .payment_provider_icon
-                    .map_or(ptr::null(), <[u8]>::as_ptr)
-                    .cast(),
-                display.payment_provider_icon.map_or(0, <[u8]>::len),
-            );
-        }
+        self.credman()
+            .add_payment_entry(entry.cred_id, &entry.display);
     }
 
-    /// Adds an entry that offers to issue a credential the wallet lacks, with
-    /// [`AddInlineIssuanceEntry`](credman::AddInlineIssuanceEntry).
+    /// Adds an entry that offers to issue a credential the wallet lacks.
     pub fn add_inline_issuance_entry(&self, entry: &InlineIssuanceEntry<'_>) {
-        // SAFETY: see the module documentation.
-        unsafe {
-            credman::AddInlineIssuanceEntry(
-                entry.cred_id.as_ptr(),
-                entry.icon.map_or(ptr::null(), <[u8]>::as_ptr).cast(),
-                entry.icon.map_or(0, <[u8]>::len),
-                entry.title.map_or(ptr::null(), C8Str::as_ptr),
-                entry.subtitle.map_or(ptr::null(), C8Str::as_ptr),
-            );
-        }
+        self.credman().add_inline_issuance_entry(entry);
     }
 }
 
@@ -257,7 +157,7 @@ fn zeroed(size: usize) -> Result<Vec<u8>, TryReserveError> {
 
 /// Why the credential blob could not be read. Every variant but `TooLarge`
 /// is the host breaking the
-/// [`ReadCredentialsBuffer`](credman::ReadCredentialsBuffer) contract.
+/// [`V1::read_credentials_buffer`] contract.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CredentialsError {
     /// The blob's reported length cannot be allocated.
@@ -310,57 +210,30 @@ impl std::error::Error for CredentialsError {
     }
 }
 
-/// What [`Host::connect_with`] declares to the host after reading its level.
+/// What [`Host::connect_with`] applies after reading the host level.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct HostOptions<'a> {
-    /// Declared once with [`SelfDeclarePackageInfo`](v4::SelfDeclarePackageInfo)
-    /// when the host reaches level 4, and skipped below it. Google's header
-    /// says the call works for system apps only; what the picker does with
-    /// the values is unconfirmed.
+    /// Declared once with [`V4::self_declare_package_info`] when the host
+    /// reaches level 4. Google's header says the call works for system apps
+    /// only; what the picker does with the values is unconfirmed.
     pub package_info: Option<PackageInfo<'a>>,
-    /// Sent for every set entry with
-    /// [`SetDelegationTypeForEntryInSet`](android_credman_sys::v7::SetDelegationTypeForEntryInSet)
-    /// right after the entry, when the host reaches level 7, and skipped
-    /// below it. It applies to all entries. A wallet that sets
-    /// [`DelegationType::Full`] declares a background fulfilment service
-    /// (androidx).
+    /// The delegation of every set entry without its own, sent from level 7.
     pub delegation: Option<DelegationType>,
-}
-
-/// The wallet app's display name and icon, for
-/// [`HostOptions::package_info`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PackageInfo<'a> {
-    pub display_name: &'a C8Str,
-    /// At least one byte (conservative).
-    pub icon: &'a [u8],
 }
 
 impl Host {
     /// Reads the host level as [`Host::connect`] does, then applies the
-    /// options the level allows.
+    /// options.
     pub fn connect_with(options: HostOptions<'_>) -> Self {
-        let mut host = Self::connect();
-        if let (Some(info), Some(level)) = (options.package_info, host.version.v4()) {
-            level.declare_package_info(&info);
+        let host = Self {
+            credman: Credman::connect(),
+            delegation: options.delegation,
+        };
+        if let (Some(info), Some(level)) =
+            (options.package_info, host.credman().version::<dyn V4>())
+        {
+            level.self_declare_package_info(&info);
         }
-        host.delegation = options
-            .delegation
-            .zip(host.version.v7())
-            .map(|(kind, level)| Delegation::new(level, kind));
         host
-    }
-}
-
-impl V4 {
-    fn declare_package_info(self, info: &PackageInfo<'_>) {
-        // SAFETY: see the module documentation.
-        unsafe {
-            v4::SelfDeclarePackageInfo(
-                info.display_name.as_ptr(),
-                info.icon.as_ptr().cast(),
-                info.icon.len(),
-            );
-        }
     }
 }
