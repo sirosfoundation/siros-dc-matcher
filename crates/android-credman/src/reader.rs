@@ -1,4 +1,4 @@
-use crate::host::Host;
+use crate::host::{CredentialsError, Host};
 use std::io::{self, Read, Seek, SeekFrom};
 
 /// The credential blob the wallet registered, as [`Read`] and [`Seek`], for
@@ -7,7 +7,7 @@ use std::io::{self, Read, Seek, SeekFrom};
 #[derive(Debug, Clone)]
 pub struct CredentialReader {
     host: Host,
-    size: u64,
+    size: usize,
     position: u64,
 }
 
@@ -16,14 +16,14 @@ impl CredentialReader {
     pub fn new(host: Host) -> Self {
         Self {
             host,
-            size: host.credentials_size() as u64,
+            size: host.credentials_size(),
             position: 0,
         }
     }
 
     /// The blob's length in bytes.
     pub fn len(&self) -> u64 {
-        self.size
+        self.size as u64
     }
 
     /// Whether the blob holds no bytes.
@@ -33,19 +33,39 @@ impl CredentialReader {
 }
 
 impl Read for CredentialReader {
-    /// `Ok(0)` also when the host returns nothing before the end.
+    /// Asks the host for up to `out.len()` bytes; it copies at most what
+    /// remains of the blob. A host that breaks that contract makes an
+    /// [`io::Error`] carrying a [`CredentialsError`].
     fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
-        let remaining = self.size.saturating_sub(self.position);
-        let asked = usize::try_from(remaining).map_or(out.len(), |r| r.min(out.len()));
-        if asked == 0 {
+        // A position beyond usize lies past the end, where a read returns 0.
+        let Ok(offset) = usize::try_from(self.position) else {
+            return Ok(0);
+        };
+        let size = self.size;
+        let remaining = size.saturating_sub(offset);
+        if remaining == 0 || out.is_empty() {
             return Ok(0);
         }
-        let offset = usize::try_from(self.position)
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "position beyond usize"))?;
         let copied = self
             .host
-            .read_credentials_at(out.split_at_mut(asked).0, offset);
-        self.position = self.position.saturating_add(copied as u64);
+            .read_credentials_at(out, offset)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        if copied == 0 {
+            let error = CredentialsError::Incomplete {
+                delivered: offset,
+                size,
+            };
+            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, error));
+        }
+        if copied > remaining {
+            let error = CredentialsError::PastEnd {
+                offset,
+                copied,
+                size,
+            };
+            return Err(io::Error::new(io::ErrorKind::InvalidData, error));
+        }
+        self.position += copied as u64;
         Ok(copied)
     }
 }
@@ -54,7 +74,7 @@ impl Seek for CredentialReader {
     fn seek(&mut self, to: SeekFrom) -> io::Result<u64> {
         let target = match to {
             SeekFrom::Start(n) => Some(n),
-            SeekFrom::End(n) => self.size.checked_add_signed(n),
+            SeekFrom::End(n) => (self.size as u64).checked_add_signed(n),
             SeekFrom::Current(n) => self.position.checked_add_signed(n),
         };
         let target = target

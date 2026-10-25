@@ -37,7 +37,7 @@ pub use entry::{
     StringIdEntry, VerificationDisplay, VerificationLink,
 };
 #[cfg(target_arch = "wasm32")]
-pub use host::{Host, HostOptions, PackageInfo};
+pub use host::{CredentialsError, Host, HostOptions, PackageInfo};
 #[cfg(target_arch = "wasm32")]
 pub use reader::CredentialReader;
 pub use set::{
