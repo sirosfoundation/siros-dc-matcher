@@ -1,59 +1,83 @@
-#![doc = include_str!("../README.md")]
+//! Raw imports of the Android Credential Manager matcher host ABI.
+//!
+//! Every function the host offers a matcher, under its exact import module
+//! and name, with the C types of the interface. [`ABI.md`](../ABI.md) is the
+//! contract: for each parameter it says whether NULL is accepted, what a
+//! length means and which host version guarantees the function, with the
+//! evidence for each claim. The doc comment on each function summarises its
+//! row.
+//!
+//! # Linking
+//!
+//! A WebAssembly module names its imports, and a host that lacks a named
+//! import may refuse to instantiate the module. Rust emits an import only for
+//! a function the final binary calls, so a matcher imports exactly what it
+//! uses. Each host level beyond the first is behind a Cargo feature
+//! (`v2` … `v7`), which keeps a matcher from reaching a level by accident.
+//! Calling a function of level N on a host that reports less than N through
+//! [`credman::GetWasmVersion`] is outside the contract; the `android-credman`
+//! crate makes that check a precondition of the call.
+//!
+//! # Conventions
+//!
+//! - Strings are NUL-terminated UTF-8. NULL is accepted only where the
+//!   function's documentation says so, and NULL there means "absent", which
+//!   the host renders differently from an empty string.
+//! - Images are a pointer and a byte length. Where an image is optional,
+//!   "absent" is a NULL pointer with length 0.
+//! - The host reads every argument before it returns, so the caller may free
+//!   its buffers afterwards.
+//! - `size_t` and pointers are 32 bits wide on `wasm32`; `long long` is 64.
+//!
+//! The functions exist only on `wasm32`. [`CallingAppInfo`] exists everywhere
+//! so that code reading it can be tested on the build machine.
 
-use std::ffi::{c_char, c_void};
+#![no_std]
+#![deny(missing_docs)]
 
-#[cfg(not(target_arch = "wasm32"))]
-pub mod test_shim;
+pub use core::ffi::c_char;
 
-/// Represents information about the application requesting the credential.
+/// The caller as the platform verified it, filled by
+/// [`credman::GetCallingAppInfo`].
 ///
-/// This struct is populated by the Android system (`GetCallingAppInfo`) to let your Matcher
-/// decide if it trusts the caller.
-///
-/// # Security Note
-/// You should use this to implement "Allow Lists". For example, only allowing
-/// a high-value ID card to be presented to specific, trusted `package_names` or `origins`.
+/// Two fixed-size byte fields. Each holds a NUL-terminated string when the
+/// value is shorter than the field; the layout is part of the ABI.
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CallingAppInfo {
-    /// The Android Package Name of the caller (e.g., `com.amazon.mShop.android.shopping`).
-    ///
-    /// * **Usage:** Populated when the request comes from an installed Android App.
-    /// * **Format:** Null-terminated C-string if length < 256.
+    /// Package name of the calling Android app.
     pub package_name: [u8; 256],
-
-    /// The Web Origin of the caller (e.g., `https://www.paypal.com`).
-    ///
-    /// * **Usage:** Populated when the request comes from a Browser (Chrome/System WebView).
-    /// * **Format:** Null-terminated C-string if length < 512.
+    /// Web origin, when a browser calls on behalf of a page. Empty for a
+    /// native app.
     pub origin: [u8; 512],
 }
 
-// -------------------------------------------------------------------------
-// Module: credman
-// Contains the core API functions exposed by the Android Credential Manager
-// sandbox environment to the WASM Matcher.
-// -------------------------------------------------------------------------
+impl CallingAppInfo {
+    /// A value with both fields zeroed, for the host to fill.
+    pub const ZEROED: CallingAppInfo = CallingAppInfo {
+        package_name: [0; 256],
+        origin: [0; 512],
+    };
+}
+
+const _: () = assert!(core::mem::size_of::<CallingAppInfo>() == 256 + 512);
+const _: () = assert!(core::mem::align_of::<CallingAppInfo>() == 1);
+
+/// Module `credman`: inputs, the version probe, and the emission functions
+/// present on every host.
 #[cfg(target_arch = "wasm32")]
 pub mod credman {
-    use super::*;
+    use super::{c_char, CallingAppInfo};
+    use core::ffi::c_void;
 
     #[link(wasm_import_module = "credman")]
-    unsafe extern "C" {
-        /// **DEPRECATED**: Adds a standard credential entry using a numeric ID.
+    extern "C" {
+        /// Adds a standalone entry identified by an integer. Superseded by
+        /// [`AddStringIdEntry`].
         ///
-        /// * **Status:** Legacy. Do not use for new implementations.
-        /// * **Replacement:** Use [`AddStringIdEntry`] instead.
-        ///
-        /// # Parameters
-        /// * `cred_id`: Legacy numeric callback identifier.
-        /// * `icon`: Optional icon bytes pointer.
-        /// * `icon_len`: Icon byte length.
-        /// * `title`: Primary row title.
-        /// * `subtitle`: Optional secondary row text.
-        /// * `disclaimer`: Optional legal/disclaimer text.
-        /// * `warning`: Optional warning text.
-        #[link_name = "AddEntry"]
+        /// Every pointer is non-null by the conservative rule: no matcher in
+        /// the evidence calls it: `icon` with `icon_len > 0`, `title`, `subtitle`,
+        /// `disclaimer`, `warning`.
         pub fn AddEntry(
             cred_id: i64,
             icon: *const c_char,
@@ -64,34 +88,22 @@ pub mod credman {
             warning: *const c_char,
         );
 
-        /// **DEPRECATED**: Adds a field to a numeric ID entry.
+        /// Adds a display field to an entry added by [`AddEntry`].
+        /// Superseded by [`AddFieldForStringIdEntry`].
         ///
-        /// * **Status:** Legacy.
-        /// * **Replacement:** Use [`AddFieldForStringIdEntry`] instead.
-        ///
-        /// # Parameters
-        /// * `cred_id`: Legacy numeric callback identifier.
-        /// * `field_display_name`: Field label.
-        /// * `field_display_value`: Field value.
-        #[link_name = "AddField"]
+        /// Both strings non-null by the conservative rule.
         pub fn AddField(
             cred_id: i64,
             field_display_name: *const c_char,
             field_display_value: *const c_char,
         );
 
-        /// Adds a standard credential entry to the Android system selector.
+        /// Adds a standalone entry identified by a string.
         ///
-        /// This is the primary function to display an Identity Credential (mDL, Employee ID, etc.).
-        ///
-        /// # Parameters
-        /// * `cred_id`: **REQUIRED**. A unique string ID. This is returned to your app if the user selects this entry.
-        /// * `icon`: *Optional*. Pointer to PNG/WEBP image data. Pass `null` if no icon.
-        /// * `icon_len`: Length of the icon buffer. Pass `0` if `icon` is `null`.
-        /// * `title`: **REQUIRED**. The main large text (e.g., "California Driver's License").
-        /// * `subtitle`: *Optional*. Secondary text below the title (e.g., "Exp: 12/2028").
-        /// * `disclaimer`: *Optional*. Small legal text in the footer.
-        /// * `warning`: *Optional*. Text displayed in a warning color (e.g., "Expired").
+        /// Non-null: `cred_id`, `icon` (with `icon_len > 0`), `title`.
+        /// Nullable: `subtitle`, `disclaimer`, `warning`; NULL omits the line.
+        /// An empty `disclaimer` or `warning` is shown as a present, blank
+        /// label.
         pub fn AddStringIdEntry(
             cred_id: *const c_char,
             icon: *const c_char,
@@ -102,72 +114,48 @@ pub mod credman {
             warning: *const c_char,
         );
 
-        /// Adds a key-value detail field to a specific credential entry.
+        /// Adds a display field to the entry [`AddStringIdEntry`] added with
+        /// the same `cred_id`.
         ///
-        /// These fields are usually displayed in an "accordion" or detail view when the
-        /// user inspects the card.
-        ///
-        /// # Parameters
-        /// * `cred_id`: **REQUIRED**. Must match the `cred_id` of a previously added entry.
-        /// * `field_display_name`: **REQUIRED**. The label (e.g., "Member Since").
-        /// * `field_display_value`: Usually a value (e.g., "2024"). Some hosts also accept `null`.
-        ///
-        /// # Note on Ordering
-        /// Fields are typically displayed in the order they are added.
+        /// Non-null: `cred_id`, `field_display_name`. Nullable:
+        /// `field_display_value`; NULL shows the name alone.
         pub fn AddFieldForStringIdEntry(
             cred_id: *const c_char,
             field_display_name: *const c_char,
             field_display_value: *const c_char,
         );
 
-        /// Copies the Verifier's JSON request into the provided buffer.
-        ///
-        /// Use this to read the OID4VP or mDoc request data.
-        /// * **Pre-requisite:** Call [`GetRequestSize`] first to allocate a sufficiently large buffer.
+        /// Copies the request into `buffer`: exactly the number of bytes
+        /// [`GetRequestSize`] reported, with no terminator added. `buffer`
+        /// must be non-null and hold that many bytes.
         pub fn GetRequestBuffer(buffer: *mut c_void);
 
-        /// Gets the size (in bytes) of the Verifier's JSON request.
+        /// Writes the request's length in bytes to `size`, which must be
+        /// non-null.
         pub fn GetRequestSize(size: *mut u32);
 
-        /// Reads a chunk of the registered credential metadata.
-        ///
-        /// This function supports **offset-based reading**, which is critical for parsing
-        /// large credential stores (e.g., multiple SD-JWTs) without exhausting the WASM memory limit.
-        ///
-        /// # Returns
-        /// The number of bytes actually read.
+        /// Copies up to `len` bytes of the registered blob, starting at
+        /// `offset`, into `buffer`, and returns how many it copied. The count
+        /// can be lower than `len`. `buffer` must be non-null and hold `len`
+        /// bytes.
         pub fn ReadCredentialsBuffer(buffer: *mut c_void, offset: usize, len: usize) -> usize;
 
-        /// Gets the total size (in bytes) of the registered metadata blob.
+        /// Writes the registered blob's length in bytes to `size`, which must
+        /// be non-null.
         pub fn GetCredentialsSize(size: *mut u32);
 
-        /// Gets the API version of the host Credential Manager.
+        /// Writes the host's ABI level to `version`, which must be non-null.
         ///
-        /// Use this to detect if `credman_v2` features (like Sets) are available.
+        /// Level N guarantees the functions this crate puts at level N and
+        /// below. A host that lacks this import predates `credman_v2`.
         pub fn GetWasmVersion(version: *mut u32);
 
-        /// Populates the [`CallingAppInfo`] struct with details about the Verifier.
-        pub fn GetCallingAppInfo(info: *mut CallingAppInfo);
-
-        /// Adds a high-fidelity "Payment" style entry (SCA).
+        /// Adds a standalone payment entry.
         ///
-        /// Used for **Strong Customer Authentication**. This entry type is rendered with
-        /// special UI emphasis on the `amount` and `merchant` to prevent transaction fraud.
-        ///
-        /// # Parameters
-        /// * `cred_id`: **REQUIRED**. Unique ID returned to your app.
-        /// * `merchant_name`: **REQUIRED**. The merchant name (e.g., "Starbucks").
-        ///   *If missing, the entry may be rejected by the OS.*
-        /// * `payment_method_name`: *Optional*. e.g., "Visa Infinite". Defaults to generic if null.
-        /// * `payment_method_subtitle`: *Optional*. e.g., "**** 1234".
-        /// * `payment_method_icon`: *Optional*. The card network logo.
-        /// * `payment_method_icon_len`: Length of `payment_method_icon`.
-        /// * `transaction_amount`: **REQUIRED**. The formatted amount (e.g., "$12.50").
-        ///   *Must match the `transaction_data` in the request JSON.*
-        /// * `bank_icon`: *Optional*. The issuer bank's logo.
-        /// * `bank_icon_len`: Length of `bank_icon`.
-        /// * `payment_provider_icon`: *Optional*. Additional provider branding.
-        /// * `payment_provider_icon_len`: Length of `payment_provider_icon`.
+        /// Non-null: `cred_id`, `merchant_name`, `payment_method_name`,
+        /// `payment_method_icon` (with its length > 0), `transaction_amount`.
+        /// Nullable: `payment_method_subtitle`; `bank_icon` and
+        /// `payment_provider_icon` as NULL with length 0.
         pub fn AddPaymentEntry(
             cred_id: *const c_char,
             merchant_name: *const c_char,
@@ -182,10 +170,11 @@ pub mod credman {
             payment_provider_icon_len: usize,
         );
 
-        /// Adds an entry that triggers an "Inline Issuance" flow.
+        /// Adds an entry that offers to issue a credential the wallet lacks.
         ///
-        /// Use this when you don't have the requested credential, but you want to offer
-        /// the user a chance to issue/provision it right now.
+        /// Non-null: `cred_id`. Nullable: `icon` (NULL with length 0),
+        /// `title`, `subtitle`. The host shows its own title and icon unless
+        /// the registering app is privileged.
         pub fn AddInlineIssuanceEntry(
             cred_id: *const c_char,
             icon: *const c_char,
@@ -194,257 +183,48 @@ pub mod credman {
             subtitle: *const c_char,
         );
 
-        /// Updates an entry to include specific regulatory disclosures and a verification URL.
+        /// Adds a second disclaimer and a link to the entry
+        /// [`AddStringIdEntry`] added with the same `cred_id`.
         ///
-        /// Often used for "Verified by [Issuer]" links or region-specific legal requirements.
+        /// Every pointer is non-null by the conservative rule: no matcher in
+        /// the evidence calls it.
         pub fn SetAdditionalDisclaimerAndUrlForVerificationEntry(
             cred_id: *const c_char,
             secondary_disclaimer: *const c_char,
             url_display_text: *const c_char,
             url_value: *const c_char,
         );
+
+        /// Fills `info`, which must be non-null and point at a whole
+        /// [`CallingAppInfo`].
+        pub fn GetCallingAppInfo(info: *mut CallingAppInfo);
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(
-    unsafe_op_in_unsafe_fn,
-    clippy::missing_safety_doc,
-    clippy::too_many_arguments
-)]
-pub mod credman {
-    use super::*;
-    use crate::test_shim;
-
-    #[allow(non_snake_case)]
-    pub unsafe fn AddEntry(
-        cred_id: i64,
-        icon: *const c_char,
-        icon_len: usize,
-        title: *const c_char,
-        subtitle: *const c_char,
-        disclaimer: *const c_char,
-        warning: *const c_char,
-    ) {
-        test_shim::record(test_shim::DisplayEvent::AddEntry {
-            cred_id,
-            icon: test_shim::bytes_from_ptr(icon, icon_len),
-            title: test_shim::c_str_to_string(title),
-            subtitle: test_shim::c_str_to_string(subtitle),
-            disclaimer: test_shim::c_str_to_string(disclaimer),
-            warning: test_shim::c_str_to_string(warning),
-        });
-    }
-
-    #[allow(non_snake_case)]
-    pub unsafe fn AddField(
-        cred_id: i64,
-        field_display_name: *const c_char,
-        field_display_value: *const c_char,
-    ) {
-        test_shim::record(test_shim::DisplayEvent::AddField {
-            cred_id,
-            display_name: test_shim::c_str_to_string(field_display_name),
-            display_value: test_shim::c_str_to_string(field_display_value),
-        });
-    }
-
-    #[allow(non_snake_case)]
-    pub unsafe fn AddStringIdEntry(
-        cred_id: *const c_char,
-        icon: *const c_char,
-        icon_len: usize,
-        title: *const c_char,
-        subtitle: *const c_char,
-        disclaimer: *const c_char,
-        warning: *const c_char,
-    ) {
-        let cred_id = test_shim::c_str_to_string(cred_id).unwrap_or_default();
-        let title = test_shim::c_str_to_string(title).unwrap_or_default();
-        test_shim::record(test_shim::DisplayEvent::AddStringIdEntry {
-            cred_id,
-            icon: test_shim::bytes_from_ptr(icon, icon_len),
-            title,
-            subtitle: test_shim::c_str_to_string(subtitle),
-            disclaimer: test_shim::c_str_to_string(disclaimer),
-            warning: test_shim::c_str_to_string(warning),
-        });
-    }
-
-    #[allow(non_snake_case)]
-    pub unsafe fn AddFieldForStringIdEntry(
-        cred_id: *const c_char,
-        field_display_name: *const c_char,
-        field_display_value: *const c_char,
-    ) {
-        let cred_id = test_shim::c_str_to_string(cred_id).unwrap_or_default();
-        let display_name = test_shim::c_str_to_string(field_display_name).unwrap_or_default();
-        test_shim::record(test_shim::DisplayEvent::AddFieldForStringIdEntry {
-            cred_id,
-            display_name,
-            display_value: test_shim::c_str_to_string(field_display_value),
-        });
-    }
-
-    #[allow(non_snake_case)]
-    pub unsafe fn GetRequestBuffer(buffer: *mut c_void) {
-        test_shim::write_request(buffer);
-    }
-
-    #[allow(non_snake_case)]
-    pub unsafe fn GetRequestSize(size: *mut u32) {
-        if let Some(size) = size.as_mut() {
-            *size = test_shim::request_len();
-        }
-    }
-
-    #[allow(non_snake_case)]
-    pub unsafe fn ReadCredentialsBuffer(buffer: *mut c_void, offset: usize, len: usize) -> usize {
-        test_shim::read_credentials(buffer, offset, len)
-    }
-
-    #[allow(non_snake_case)]
-    pub unsafe fn GetCredentialsSize(size: *mut u32) {
-        if let Some(size) = size.as_mut() {
-            *size = test_shim::credentials_len();
-        }
-    }
-
-    #[allow(non_snake_case)]
-    pub unsafe fn GetWasmVersion(version: *mut u32) {
-        if let Some(version) = version.as_mut() {
-            *version = 0;
-        }
-    }
-
-    #[allow(non_snake_case)]
-    pub unsafe fn GetCallingAppInfo(info: *mut CallingAppInfo) {
-        if let Some(info) = info.as_mut() {
-            *info = CallingAppInfo {
-                package_name: [0; 256],
-                origin: [0; 512],
-            };
-        }
-    }
-
-    #[allow(non_snake_case)]
-    pub unsafe fn AddPaymentEntry(
-        cred_id: *const c_char,
-        merchant_name: *const c_char,
-        payment_method_name: *const c_char,
-        payment_method_subtitle: *const c_char,
-        payment_method_icon: *const c_char,
-        payment_method_icon_len: usize,
-        transaction_amount: *const c_char,
-        bank_icon: *const c_char,
-        bank_icon_len: usize,
-        payment_provider_icon: *const c_char,
-        payment_provider_icon_len: usize,
-    ) {
-        test_shim::record(test_shim::DisplayEvent::AddPaymentEntry {
-            cred_id: test_shim::c_str_to_string(cred_id).unwrap_or_default(),
-            merchant_name: test_shim::c_str_to_string(merchant_name).unwrap_or_default(),
-            payment_method_name: test_shim::c_str_to_string(payment_method_name),
-            payment_method_subtitle: test_shim::c_str_to_string(payment_method_subtitle),
-            payment_method_icon: test_shim::bytes_from_ptr(
-                payment_method_icon,
-                payment_method_icon_len,
-            ),
-            transaction_amount: test_shim::c_str_to_string(transaction_amount).unwrap_or_default(),
-            bank_icon: test_shim::bytes_from_ptr(bank_icon, bank_icon_len),
-            payment_provider_icon: test_shim::bytes_from_ptr(
-                payment_provider_icon,
-                payment_provider_icon_len,
-            ),
-        });
-    }
-
-    #[allow(non_snake_case)]
-    pub unsafe fn AddInlineIssuanceEntry(
-        cred_id: *const c_char,
-        icon: *const c_char,
-        icon_len: usize,
-        title: *const c_char,
-        subtitle: *const c_char,
-    ) {
-        test_shim::record(test_shim::DisplayEvent::AddInlineIssuanceEntry {
-            cred_id: test_shim::c_str_to_string(cred_id).unwrap_or_default(),
-            icon: test_shim::bytes_from_ptr(icon, icon_len),
-            title: test_shim::c_str_to_string(title).unwrap_or_default(),
-            subtitle: test_shim::c_str_to_string(subtitle),
-        });
-    }
-
-    #[allow(non_snake_case)]
-    pub unsafe fn SetAdditionalDisclaimerAndUrlForVerificationEntry(
-        cred_id: *const c_char,
-        secondary_disclaimer: *const c_char,
-        url_display_text: *const c_char,
-        url_value: *const c_char,
-    ) {
-        test_shim::record(
-            test_shim::DisplayEvent::SetAdditionalDisclaimerAndUrlForVerificationEntry {
-                cred_id: test_shim::c_str_to_string(cred_id).unwrap_or_default(),
-                secondary_disclaimer: test_shim::c_str_to_string(secondary_disclaimer),
-                url_display_text: test_shim::c_str_to_string(url_display_text),
-                url_value: test_shim::c_str_to_string(url_value),
-            },
-        );
-    }
-}
-
-// -------------------------------------------------------------------------
-// Module: credman_v2
-// Set (grouping) logic for credentials — represents an OR-selection.
-//
-// This module corresponds to Android 15+ features that allow grouping
-// multiple credentials (e.g., multiple SD-JWTs) into a single parent
-// item that expands. A Set is rendered as a parent row; selecting it
-// reveals child credentials. Only one child may be selected — it is an
-// OR-select across children.
-//
-// # Mixing Sets and Standalone Entries
-// You can mix calls to `credman::AddStringIdEntry` and `credman_v2::AddEntrySet`.
-// Each call creates a separate top-level entry in the Android Credential Manager
-// selector. If multiple Sets are provided, each will appear as its own visual
-// group.
-//
-// Constraints:
-// - You MUST create a Set with the expected child count before adding children.
-// - The `set_length` must equal the number of children you add.
-// - `set_index` is 0-based and MUST be within [0, set_length).
-// - Sets should be non-empty; empty sets are invalid.
-// -------------------------------------------------------------------------
-#[cfg(target_arch = "wasm32")]
+/// Module `credman_v2`: entry sets, from host level 2.
+///
+/// A set is one option the user selects as a whole. `AddEntrySet` declares
+/// its id and its number of positions; each position holds one or more
+/// alternative entries, of which the user picks one. Every position from 0 to
+/// `set_length - 1` needs at least one entry, a set id is declared once per
+/// invocation, and an entry is named by its set, position and `cred_id`.
+#[cfg(all(target_arch = "wasm32", feature = "v2"))]
 pub mod credman_v2 {
-    use super::*;
+    use super::c_char;
 
     #[link(wasm_import_module = "credman_v2")]
-    unsafe extern "C" {
-        /// Creates a new "Entry Set" (a visual group/folder of credentials).
-        ///
-        /// # Parameters
-        /// * `set_id`: **REQUIRED**. A unique string ID for this group.
-        /// * `set_length`: **REQUIRED**. The number of set slots (not alternatives).
+    extern "C" {
+        /// Declares a set with `set_length` positions. `set_id` is non-null
+        /// and unique within the invocation; `set_length` is at least 1.
         pub fn AddEntrySet(set_id: *const c_char, set_length: i32);
 
-        /// Adds a standard credential to a specific "Entry Set".
+        /// Adds an alternative at position `set_index` of the set `set_id`.
         ///
-        /// # Parameters
-        /// * `cred_id`: **REQUIRED**. Callback identifier for this credential entry.
-        /// * `icon`: Optional icon bytes pointer.
-        /// * `icon_len`: Icon byte length.
-        /// * `title`: **REQUIRED**. Primary row title.
-        /// * `subtitle`: Optional secondary row text.
-        /// * `disclaimer`: Optional legal/disclaimer text.
-        /// * `warning`: Optional warning text.
-        /// * `metadata`: Optional opaque JSON/string payload returned on selection.
-        /// * `set_id`: **REQUIRED**. Must match a `set_id` created via `AddEntrySet`.
-        /// * `set_index`: **REQUIRED**. The 0-based index (order) of this item in the set.
-        ///
-        /// # Relationship to OR-selection
-        /// Each call to `AddEntryToSet` for a given `set_index` adds an alternative for
-        /// that position in the set.
+        /// Non-null: `cred_id`, `icon` (with `icon_len > 0`; the host drops an
+        /// entry without one), `title`, `set_id`. Nullable: `subtitle`,
+        /// `disclaimer`, `warning`, `metadata`. An empty `disclaimer` or
+        /// `warning` is shown as a present, blank label. `metadata` returns
+        /// to the wallet when the user selects the entry.
         pub fn AddEntryToSet(
             cred_id: *const c_char,
             icon: *const c_char,
@@ -458,14 +238,11 @@ pub mod credman_v2 {
             set_index: i32,
         );
 
-        /// Adds a field (key-value) to a credential inside a set.
+        /// Adds a display field to the entry named by `cred_id`, `set_id` and
+        /// `set_index`.
         ///
-        /// # Parameters
-        /// * `cred_id`: Entry identifier already emitted for this set slot.
-        /// * `field_display_name`: Field label shown to the user.
-        /// * `field_display_value`: Field value; some hosts accept `null`.
-        /// * `set_id`: Set identifier created by `AddEntrySet`.
-        /// * `set_index`: 0-based slot index for the target entry.
+        /// Non-null: `cred_id`, `field_display_name`, `set_id`. Nullable:
+        /// `field_display_value`; NULL shows the name alone.
         pub fn AddFieldToEntrySet(
             cred_id: *const c_char,
             field_display_name: *const c_char,
@@ -474,23 +251,11 @@ pub mod credman_v2 {
             set_index: i32,
         );
 
-        /// Adds a Payment/SCA credential to an "Entry Set".
+        /// Adds a payment alternative at position `set_index` of the set
+        /// `set_id`.
         ///
-        /// # Parameters
-        /// * `cred_id`: **REQUIRED**. Callback identifier for this payment entry.
-        /// * `merchant_name`: **REQUIRED**. Must match the transaction request.
-        /// * `payment_method_name`: Optional payment method title.
-        /// * `payment_method_subtitle`: Optional payment method subtitle.
-        /// * `payment_method_icon`: Optional icon bytes pointer.
-        /// * `payment_method_icon_len`: Icon byte length.
-        /// * `transaction_amount`: **REQUIRED**. Must match the transaction request.
-        /// * `bank_icon`: Optional bank icon bytes pointer.
-        /// * `bank_icon_len`: Bank icon byte length.
-        /// * `payment_provider_icon`: Optional provider icon bytes pointer.
-        /// * `payment_provider_icon_len`: Provider icon byte length.
-        /// * `metadata`: Optional opaque JSON/string payload returned on selection.
-        /// * `set_id`: Set identifier created by `AddEntrySet`.
-        /// * `set_index`: 0-based slot index for the target entry.
+        /// Pointer rules as [`crate::credman::AddPaymentEntry`], plus nullable
+        /// `metadata` and non-null `set_id`.
         pub fn AddPaymentEntryToSet(
             cred_id: *const c_char,
             merchant_name: *const c_char,
@@ -508,14 +273,9 @@ pub mod credman_v2 {
             set_index: i32,
         );
 
-        /// Adds a Payment/SCA credential to an "Entry Set" with `additional_info`.
-        ///
-        /// This function is used by newer host versions (v3+) and corresponds to
-        /// `AddPaymentEntryToSetV2` in the C ABI.
-        ///
-        /// # Parameters
-        /// Same as [`AddPaymentEntryToSet`] plus:
-        /// * `additional_info`: Optional extra context shown by v3+ host UIs.
+        /// [`AddPaymentEntryToSet`] with a nullable `additional_info`. Host
+        /// level 3: it lives in this module but arrived after it.
+        #[cfg(feature = "v3")]
         pub fn AddPaymentEntryToSetV2(
             cred_id: *const c_char,
             merchant_name: *const c_char,
@@ -536,165 +296,19 @@ pub mod credman_v2 {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(
-    unsafe_op_in_unsafe_fn,
-    clippy::missing_safety_doc,
-    clippy::too_many_arguments
-)]
-pub mod credman_v2 {
-    use super::*;
-    use crate::test_shim;
-
-    #[allow(non_snake_case)]
-    pub unsafe fn AddEntrySet(set_id: *const c_char, set_length: i32) {
-        test_shim::record(test_shim::DisplayEvent::AddEntrySet {
-            set_id: test_shim::c_str_to_string(set_id).unwrap_or_default(),
-            set_length,
-        });
-    }
-
-    #[allow(non_snake_case)]
-    pub unsafe fn AddEntryToSet(
-        cred_id: *const c_char,
-        icon: *const c_char,
-        icon_len: usize,
-        title: *const c_char,
-        subtitle: *const c_char,
-        disclaimer: *const c_char,
-        warning: *const c_char,
-        metadata: *const c_char,
-        set_id: *const c_char,
-        set_index: i32,
-    ) {
-        test_shim::record(test_shim::DisplayEvent::AddEntryToSet {
-            cred_id: test_shim::c_str_to_string(cred_id).unwrap_or_default(),
-            icon: test_shim::bytes_from_ptr(icon, icon_len),
-            title: test_shim::c_str_to_string(title).unwrap_or_default(),
-            subtitle: test_shim::c_str_to_string(subtitle),
-            disclaimer: test_shim::c_str_to_string(disclaimer),
-            warning: test_shim::c_str_to_string(warning),
-            metadata: test_shim::c_str_to_string(metadata),
-            set_id: test_shim::c_str_to_string(set_id).unwrap_or_default(),
-            set_index,
-        });
-    }
-
-    #[allow(non_snake_case)]
-    pub unsafe fn AddFieldToEntrySet(
-        cred_id: *const c_char,
-        field_display_name: *const c_char,
-        field_display_value: *const c_char,
-        set_id: *const c_char,
-        set_index: i32,
-    ) {
-        test_shim::record(test_shim::DisplayEvent::AddFieldToEntrySet {
-            cred_id: test_shim::c_str_to_string(cred_id).unwrap_or_default(),
-            field_display_name: test_shim::c_str_to_string(field_display_name).unwrap_or_default(),
-            field_display_value: test_shim::c_str_to_string(field_display_value),
-            set_id: test_shim::c_str_to_string(set_id).unwrap_or_default(),
-            set_index,
-        });
-    }
-
-    #[allow(non_snake_case)]
-    pub unsafe fn AddPaymentEntryToSet(
-        cred_id: *const c_char,
-        merchant_name: *const c_char,
-        payment_method_name: *const c_char,
-        payment_method_subtitle: *const c_char,
-        payment_method_icon: *const c_char,
-        payment_method_icon_len: usize,
-        transaction_amount: *const c_char,
-        bank_icon: *const c_char,
-        bank_icon_len: usize,
-        payment_provider_icon: *const c_char,
-        payment_provider_icon_len: usize,
-        metadata: *const c_char,
-        set_id: *const c_char,
-        set_index: i32,
-    ) {
-        test_shim::record(test_shim::DisplayEvent::AddPaymentEntryToSet {
-            cred_id: test_shim::c_str_to_string(cred_id).unwrap_or_default(),
-            merchant_name: test_shim::c_str_to_string(merchant_name).unwrap_or_default(),
-            payment_method_name: test_shim::c_str_to_string(payment_method_name),
-            payment_method_subtitle: test_shim::c_str_to_string(payment_method_subtitle),
-            payment_method_icon: test_shim::bytes_from_ptr(
-                payment_method_icon,
-                payment_method_icon_len,
-            ),
-            transaction_amount: test_shim::c_str_to_string(transaction_amount).unwrap_or_default(),
-            bank_icon: test_shim::bytes_from_ptr(bank_icon, bank_icon_len),
-            payment_provider_icon: test_shim::bytes_from_ptr(
-                payment_provider_icon,
-                payment_provider_icon_len,
-            ),
-            metadata: test_shim::c_str_to_string(metadata),
-            set_id: test_shim::c_str_to_string(set_id).unwrap_or_default(),
-            set_index,
-        });
-    }
-
-    #[allow(non_snake_case)]
-    pub unsafe fn AddPaymentEntryToSetV2(
-        cred_id: *const c_char,
-        merchant_name: *const c_char,
-        payment_method_name: *const c_char,
-        payment_method_subtitle: *const c_char,
-        payment_method_icon: *const c_char,
-        payment_method_icon_len: usize,
-        transaction_amount: *const c_char,
-        bank_icon: *const c_char,
-        bank_icon_len: usize,
-        payment_provider_icon: *const c_char,
-        payment_provider_icon_len: usize,
-        additional_info: *const c_char,
-        metadata: *const c_char,
-        set_id: *const c_char,
-        set_index: i32,
-    ) {
-        test_shim::record(test_shim::DisplayEvent::AddPaymentEntryToSetV2 {
-            cred_id: test_shim::c_str_to_string(cred_id).unwrap_or_default(),
-            merchant_name: test_shim::c_str_to_string(merchant_name).unwrap_or_default(),
-            payment_method_name: test_shim::c_str_to_string(payment_method_name),
-            payment_method_subtitle: test_shim::c_str_to_string(payment_method_subtitle),
-            payment_method_icon: test_shim::bytes_from_ptr(
-                payment_method_icon,
-                payment_method_icon_len,
-            ),
-            transaction_amount: test_shim::c_str_to_string(transaction_amount).unwrap_or_default(),
-            bank_icon: test_shim::bytes_from_ptr(bank_icon, bank_icon_len),
-            payment_provider_icon: test_shim::bytes_from_ptr(
-                payment_provider_icon,
-                payment_provider_icon_len,
-            ),
-            additional_info: test_shim::c_str_to_string(additional_info),
-            metadata: test_shim::c_str_to_string(metadata),
-            set_id: test_shim::c_str_to_string(set_id).unwrap_or_default(),
-            set_index,
-        });
-    }
-}
-
-// -------------------------------------------------------------------------
-// Module: credman_v4
-// System-only capabilities introduced in newer host versions.
-// -------------------------------------------------------------------------
-#[cfg(target_arch = "wasm32")]
+/// Module `credman_v4`, from host level 4.
+#[cfg(all(target_arch = "wasm32", feature = "v4"))]
 pub mod credman_v4 {
-    use super::*;
+    use super::c_char;
 
     #[link(wasm_import_module = "credman_v4")]
-    unsafe extern "C" {
-        /// Declares package identity metadata for system applications.
+    extern "C" {
+        /// Declares the display name and icon of the registering app. The
+        /// host honours it for system apps only.
         ///
-        /// # Parameters
-        /// * `package_display_name`: Human-readable package/app name.
-        /// * `package_icon`: Optional icon bytes pointer for package branding.
-        /// * `package_icon_len`: Package icon byte length.
-        ///
-        /// # Notes
-        /// Hosts generally restrict this to privileged/system contexts.
+        /// Both are non-null by the conservative rule: no matcher in the
+        /// evidence calls it: `package_display_name`, and `package_icon` with
+        /// `package_icon_len > 0`.
         pub fn SelfDeclarePackageInfo(
             package_display_name: *const c_char,
             package_icon: *const c_char,
@@ -703,22 +317,63 @@ pub mod credman_v4 {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-#[allow(unsafe_op_in_unsafe_fn, clippy::missing_safety_doc)]
-pub mod credman_v4 {
-    use super::*;
-    use crate::test_shim;
+/// Module `credman_v5`, from host level 5.
+#[cfg(all(target_arch = "wasm32", feature = "v5"))]
+pub mod credman_v5 {
+    use super::c_char;
 
-    #[allow(non_snake_case)]
-    pub unsafe fn SelfDeclarePackageInfo(
-        package_display_name: *const c_char,
-        package_icon: *const c_char,
-        package_icon_len: usize,
-    ) {
-        test_shim::record(test_shim::DisplayEvent::SelfDeclarePackageInfo {
-            package_display_name: test_shim::c_str_to_string(package_display_name)
-                .unwrap_or_default(),
-            package_icon: test_shim::bytes_from_ptr(package_icon, package_icon_len),
-        });
+    #[link(wasm_import_module = "credman_v5")]
+    extern "C" {
+        /// Adds a line of metadata text to the entry named by `cred_id`,
+        /// `set_id` and `set_index`. Every pointer is non-null.
+        pub fn AddMetadataDisplayTextToEntrySet(
+            cred_id: *const c_char,
+            metadata_display_text: *const c_char,
+            set_id: *const c_char,
+            set_index: i32,
+        );
+    }
+}
+
+/// Module `credman_v6`, from host level 6.
+#[cfg(all(target_arch = "wasm32", feature = "v6"))]
+pub mod credman_v6 {
+    use super::c_char;
+
+    #[link(wasm_import_module = "credman_v6")]
+    extern "C" {
+        /// [`crate::credman::SetAdditionalDisclaimerAndUrlForVerificationEntry`]
+        /// for the entry named by `cred_id`, `set_id` and `set_index`.
+        ///
+        /// Every pointer is non-null by the conservative rule. Google's PNV
+        /// matcher passes NULL for the three texts when its registry omits
+        /// them; no device test confirms the host accepts that.
+        pub fn SetAdditionalDisclaimerAndUrlForVerificationEntryInCredentialSet(
+            cred_id: *const c_char,
+            secondary_disclaimer: *const c_char,
+            url_display_text: *const c_char,
+            url_value: *const c_char,
+            set_id: *const c_char,
+            set_index: i32,
+        );
+    }
+}
+
+/// Module `credman_v7`, from host level 7.
+#[cfg(all(target_arch = "wasm32", feature = "v7"))]
+pub mod credman_v7 {
+    use super::c_char;
+
+    #[link(wasm_import_module = "credman_v7")]
+    extern "C" {
+        /// Sets how the entry named by `cred_id`, `set_id` and `set_index` is
+        /// fulfilled: 0 by the wallet's own UI, 1 silently through the
+        /// wallet's background service. Pointers are non-null.
+        pub fn SetDelegationTypeForEntryInSet(
+            cred_id: *const c_char,
+            delegation_type: i32,
+            set_id: *const c_char,
+            set_index: i32,
+        );
     }
 }

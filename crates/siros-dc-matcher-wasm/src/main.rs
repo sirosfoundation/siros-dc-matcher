@@ -17,11 +17,22 @@
 //!
 //! An entry with no icon is dropped, and declaring one set id twice discards
 //! everything — both silently. See [`Diagnostics`] for the full account.
+//!
+//! # The host
+//!
+//! Every host call goes through `android-credman`, whose types carry the
+//! contract in `crates/android-credman-sys/ABI.md`. This binary needs host
+//! level 2 (entry sets) and enables that level alone, so its imports are the
+//! `credman` inputs and the three `credman_v2` set functions.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 #![deny(clippy::indexing_slicing)]
+// Off the wasm target there is no host, so the decision path is reached from
+// the unit tests alone. The wasm build, which CI lints, keeps dead code an
+// error.
+#![cfg_attr(not(any(target_arch = "wasm32", test)), allow(dead_code))]
 
-mod abi;
+mod picker;
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 mod simple_allocator;
 
@@ -44,10 +55,11 @@ extern "C" fn _start() {
     main();
 }
 
+use android_credman::SetSink;
+use picker::{emit_set, Member};
 use siros_dc_matcher_core::db::CredentialDatabase;
 use siros_dc_matcher_core::evaluator::{credentials, resolve, ProfilePolicy};
 use siros_dc_matcher_core::request::{diagnose, first_supported_context};
-use siros_dc_matcher_core::sink::Entry;
 use siros_dc_matcher_core::zkp_req::{Params, Plan};
 use siros_dcql::execute;
 
@@ -69,21 +81,70 @@ const SET_PREFIX: &str = "siros";
 /// quietly omits some is one the user cannot reason about.
 const MAX_COMBINATIONS: usize = 32;
 
+#[cfg(target_arch = "wasm32")]
 fn main() {
-    let request = abi::request_bytes();
-    let blob = abi::credentials_bytes();
-    let (_package, origin) = abi::calling_app_info();
-    run(&request, &blob, &origin);
+    let host = android_credman::Host::connect();
+    // Every entry this matcher offers is in a set. A host below level 2 has
+    // no sets, so it gets nothing, and the inputs are not read.
+    let Some(mut sets) = host.version().v2() else {
+        return;
+    };
+    let request = host.request();
+    let blob = host.credentials();
+    let origin = verified_origin(&host.calling_app());
+    let input = Input {
+        request: &request,
+        blob: &blob,
+        origin: &origin,
+        host_abi: host.version().get(),
+    };
+    run(&input, &mut sets);
 }
 
-/// One matcher invocation, from the host's three inputs to emitted entries.
+/// Off the wasm target there is no host. The binary still builds there so
+/// that its decision path is unit tested through [`run`].
+#[cfg(not(target_arch = "wasm32"))]
+fn main() {}
+
+/// The origin the platform verified, as text.
 ///
-/// Separate from [`main`] so it can be driven on the host in tests: off the
-/// wasm target, `abi::emit` is a no-op and the three readers return nothing,
-/// so this is the only way to exercise the decision path against a real
-/// request and the committed golden blob.
-fn run(request: &[u8], blob: &[u8], origin: &str) {
-    let Ok(db) = CredentialDatabase::from_cbor(blob) else {
+/// Read through the checked constructor. When the host filled the field
+/// without a NUL, or with bytes that are not UTF-8, it is decoded within its
+/// buffer with replacement characters: a matcher that traps produces no
+/// picker entries, which the user reads as "no matching credential", and
+/// mangled text beats silence.
+#[cfg(target_arch = "wasm32")]
+fn verified_origin(app: &android_credman::CallingApp) -> String {
+    match app.origin() {
+        Ok(origin) => origin.as_str().to_owned(),
+        Err(_) => {
+            let field = &app.raw().origin;
+            let end = field.iter().position(|&b| b == 0).unwrap_or(field.len());
+            String::from_utf8_lossy(field.split_at(end).0).into_owned()
+        }
+    }
+}
+
+/// What the host hands one invocation.
+struct Input<'a> {
+    /// The DC API request JSON.
+    request: &'a [u8],
+    /// The blob this wallet registered.
+    blob: &'a [u8],
+    /// The caller's origin as the platform verified it; empty for an app.
+    origin: &'a str,
+    /// The level `GetWasmVersion` reported, recorded in entry metadata.
+    host_abi: u32,
+}
+
+/// One matcher invocation, from the host's inputs to emitted entries.
+///
+/// Separate from [`main`] so it can be driven on the build machine in
+/// tests, against a real request and the committed golden blob, with a
+/// stand-in [`SetSink`].
+fn run(input: &Input<'_>, sets: &mut impl SetSink) {
+    let (request, origin) = (input.request, input.origin);
+    let Ok(db) = CredentialDatabase::from_cbor(input.blob) else {
         // Nothing can be offered from a blob we cannot read, and nothing can
         // be said about it either: the debug flag lives inside the blob. This
         // is indistinguishable from "no matching credential" in the picker —
@@ -102,7 +163,7 @@ fn run(request: &[u8], blob: &[u8], origin: &str) {
     let Some((context, query)) = first_supported_context(request, &db.profile, None)
         .and_then(|context| Some((context.clone(), context.matching_query()?)))
     else {
-        diag.emit("request", || diagnose(request, &db.profile));
+        diag.emit(sets, "request", || diagnose(request, &db.profile));
         return;
     };
     let protocol = context.protocol.as_str();
@@ -117,7 +178,7 @@ fn run(request: &[u8], blob: &[u8], origin: &str) {
     // would be worse than offering nothing: the user consents to a
     // presentation that cannot satisfy the verifier.
     if !result.satisfiable {
-        diag.emit("unsatisfiable", || {
+        diag.emit(sets, "unsatisfiable", || {
             format!(
                 "{protocol}: parsed {} cred queries, not satisfiable",
                 query.credentials.len()
@@ -131,7 +192,7 @@ fn run(request: &[u8], blob: &[u8], origin: &str) {
     // are separate combinations, and therefore separate sets.
     let enumerated = result.combinations(MAX_COMBINATIONS);
     if enumerated.combinations.is_empty() {
-        diag.emit("zero", || {
+        diag.emit(sets, "zero", || {
             format!(
                 "{protocol}: satisfiable but zero combinations ({} held)",
                 held.len()
@@ -161,7 +222,6 @@ fn run(request: &[u8], blob: &[u8], origin: &str) {
         };
 
         let set_id = format!("{SET_PREFIX}-{index}");
-        abi::emit::entry_set(&set_id, resolved.len());
 
         // Why the verifier says it wants this combination (§6.2). Computed
         // once per combination and shown on each of its entries: the purposes
@@ -170,7 +230,8 @@ fn run(request: &[u8], blob: &[u8], origin: &str) {
         // card in it is being offered for those reasons.
         let purpose = siros_dc_matcher_core::purpose::line(&combination.purposes);
 
-        for (position, (query_id, candidate, credential)) in resolved.iter().enumerate() {
+        let mut members = Vec::with_capacity(resolved.len());
+        for (query_id, candidate, credential) in &resolved {
             // Resolved by core, which the FFI also calls: the wallet needs to
             // know which proof to produce, and deriving that in two places is
             // how the two would come to disagree.
@@ -200,7 +261,7 @@ fn run(request: &[u8], blob: &[u8], origin: &str) {
                 // itself. The wallet is told it separately, so carrying it
                 // lets the wallet check the matcher was shown the same caller.
                 "verified_origin": origin,
-                "host_abi": abi::wasm_version(),
+                "host_abi": input.host_abi,
                 // How many further options existed. A picker showing the first
                 // few of many is telling the user those are all they have.
                 //
@@ -213,64 +274,63 @@ fn run(request: &[u8], blob: &[u8], origin: &str) {
             })
             .to_string();
 
-            abi::emit::entry(
-                &set_id,
-                position,
-                &Entry {
-                    credential_id: &credential.id,
-                    title: &credential.title,
-                    subtitle: &credential.subtitle,
-                    metadata: &metadata,
-                    // Never `None`. A null icon is not a missing picture:
-                    // the host drops the whole entry and logs `Null icon for
-                    // icon` in its own process, so a credential registered
-                    // without image bytes would silently not exist in the
-                    // picker. #19 gave the diagnostic entries this fallback;
-                    // a real entry needs it at least as much, because a user
-                    // is looking for that credential.
-                    // `filter`, not just `unwrap_or`: a zero-length `IconRef`
-                    // yields `Some(&[])`, and the emitter maps an empty slice
-                    // to the same null pointer as `None` — so without this the
-                    // fallback misses exactly the case it was added for.
-                    icon: Some(
-                        db.icon_bytes(credential)
-                            .filter(|bytes| !bytes.is_empty())
-                            .unwrap_or(FALLBACK_ICON_PNG),
-                    ),
-                    disclaimer: purpose.as_deref(),
-                },
-            );
-
             // A `zkp_req` match discloses no claims, so its rows describe
             // the proof being asked for instead, from the plan.
-            if let Some(zk) = zk {
-                for (name, value) in zkp_req_rows(&zk.plan) {
-                    abi::emit::field(&set_id, position, &credential.id, &name, &value);
-                }
-                continue;
-            }
-
-            // Only the claims this match actually discloses. Showing every
-            // claim the credential holds would misrepresent the request the
-            // user is being asked to consent to.
-            for claim in &candidate.claims {
-                if let Some(stored) = credential.claims.iter().find(|c| {
-                    c.path.iter().map(String::as_str).eq(claim
-                        .path
-                        .iter()
-                        .filter_map(siros_dcql::PathComponent::as_key))
-                }) {
-                    abi::emit::field(
-                        &set_id,
-                        position,
-                        &credential.id,
-                        &stored.display,
-                        stored.display_value.as_deref().unwrap_or(&stored.value),
-                    );
-                }
-            }
+            let fields = match zk {
+                Some(zk) => zkp_req_rows(&zk.plan),
+                None => disclosed_fields(credential, candidate),
+            };
+            members.push(Member {
+                credential_id: &credential.id,
+                title: &credential.title,
+                subtitle: &credential.subtitle,
+                metadata,
+                // A null icon costs the entry, not just its picture: the
+                // host drops the whole entry and logs `Null icon for icon` in
+                // its own process, so a credential registered without image
+                // bytes would silently not exist in the picker. #19 gave the
+                // diagnostic entries this fallback; a real entry needs it at
+                // least as much, because a user is looking for that
+                // credential. The `filter` covers a zero-length `IconRef`,
+                // which yields `Some(&[])` and reaches the host as no image.
+                icon: db
+                    .icon_bytes(credential)
+                    .filter(|bytes| !bytes.is_empty())
+                    .unwrap_or(FALLBACK_ICON_PNG),
+                disclaimer: purpose.as_deref(),
+                fields,
+            });
         }
+        emit_set(sets, &set_id, &members);
     }
+}
+
+/// The display fields for the claims a match discloses, as
+/// `(display name, display value)`.
+///
+/// Only the claims this match actually discloses. Showing every claim the
+/// credential holds would misrepresent the request the user is being asked
+/// to consent to.
+fn disclosed_fields(
+    credential: &siros_dc_matcher_core::db::Credential,
+    candidate: &siros_dcql::Candidate,
+) -> Vec<(String, String)> {
+    candidate
+        .claims
+        .iter()
+        .filter_map(|claim| {
+            credential.claims.iter().find(|c| {
+                c.path.iter().map(String::as_str).eq(claim
+                    .path
+                    .iter()
+                    .filter_map(siros_dcql::PathComponent::as_key))
+            })
+        })
+        .map(|stored| {
+            let value = stored.display_value.as_deref().unwrap_or(&stored.value);
+            (stored.display.clone(), value.to_owned())
+        })
+        .collect()
 }
 
 // ============================================================================
@@ -379,30 +439,27 @@ impl Diagnostics {
     /// The message is a closure rather than a string so that composing it —
     /// which for the no-request case means re-parsing the request JSON — costs
     /// nothing on the production path, where diagnostics are off.
-    fn emit(&self, kind: &str, message: impl FnOnce() -> String) {
+    fn emit(&self, sets: &mut impl SetSink, kind: &str, message: impl FnOnce() -> String) {
         if !self.enabled {
             return;
         }
         let message = message();
         let set_id = format!("siros-debug-{kind}");
-        abi::emit::entry_set(&set_id, 1);
-        abi::emit::entry(
-            &set_id,
-            0,
-            &Entry {
-                credential_id: "siros-debug-entry",
-                title: "[SIROS DEBUG] no match",
-                // Picker subtitles are typically single-line and short; keep
-                // the message itself terse rather than truncating here, so
-                // nothing important silently falls off the end.
-                subtitle: &message,
-                metadata: "{}",
-                icon: Some(FALLBACK_ICON_PNG),
-                // A diagnostic entry has no verifier reason to show; the
-                // whole message is already in the subtitle.
-                disclaimer: None,
-            },
-        );
+        let entry = Member {
+            credential_id: "siros-debug-entry",
+            title: "[SIROS DEBUG] no match",
+            // Picker subtitles are typically single-line and short; keep the
+            // message itself terse rather than truncating here, so nothing
+            // important silently falls off the end.
+            subtitle: &message,
+            metadata: "{}".to_owned(),
+            icon: FALLBACK_ICON_PNG,
+            // A diagnostic entry has no verifier reason to show; the whole
+            // message is already in the subtitle.
+            disclaimer: None,
+            fields: Vec::new(),
+        };
+        emit_set(sets, &set_id, &[entry]);
     }
 }
 
@@ -439,32 +496,54 @@ mod tests {
         .expect("golden vector")
     }
 
+    /// Stands in for the host and drops what it is given.
+    struct Discard;
+
+    impl SetSink for Discard {
+        fn add_entry_set<K: android_credman::EntryKind>(
+            &mut self,
+            _set: &android_credman::EntrySet<'_, K>,
+        ) {
+        }
+    }
+
+    /// One invocation of the decision path, with emission dropped.
+    fn invoke(request: &[u8], blob: &[u8], origin: &str) {
+        let input = Input {
+            request,
+            blob,
+            origin,
+            host_abi: 0,
+        };
+        run(&input, &mut Discard);
+    }
+
     fn mdl_request(claim: &str) -> String {
         format!(
             r#"{{"requests":[{{"protocol":"openid4vp-v1-unsigned","data":{{"dcql_query":{{"credentials":[{{"id":"mdl","format":"mso_mdoc","meta":{{"doctype_value":"org.iso.18013.5.1.mDL"}},"claims":[{{"path":["org.iso.18013.5.1","{claim}"]}}]}}]}}}}}}]}}"#
         )
     }
 
-    /// The whole decision path, host-side. `abi::emit` is a no-op here, so
-    /// what this proves is that every branch runs to completion without
+    /// The whole decision path, host-side. Emission is dropped here, so what
+    /// this proves is that every branch runs to completion without
     /// trapping on real inputs - the property the denied `unwrap`/`panic`
     /// lints exist for. A trap in the sandbox is a silent "no match".
     #[test]
     fn run_completes_on_every_path() {
         let blob = golden_blob();
         // Satisfiable: the golden credential has family_name.
-        run(
+        invoke(
             mdl_request("family_name").as_bytes(),
             &blob,
             "https://verifier.example",
         );
         // Unsatisfiable: it has no age_over_21. §6.4 says offer nothing.
-        run(mdl_request("age_over_21").as_bytes(), &blob, "");
+        invoke(mdl_request("age_over_21").as_bytes(), &blob, "");
         // No supported request at all.
-        run(b"{\"requests\":[]}", &blob, "");
+        invoke(b"{\"requests\":[]}", &blob, "");
         // A blob the decoder rejects.
-        run(mdl_request("family_name").as_bytes(), b"\x00\x01\x02", "");
-        run(b"", b"", "");
+        invoke(mdl_request("family_name").as_bytes(), b"\x00\x01\x02", "");
+        invoke(b"", b"", "");
     }
 
     /// With the debug flag in the profile, the same paths run through the
@@ -474,13 +553,13 @@ mod tests {
         let mut db = CredentialDatabase::from_cbor(&golden_blob()).unwrap();
         db.profile.debug = true;
         let blob = db.to_cbor().unwrap();
-        run(mdl_request("age_over_21").as_bytes(), &blob, "");
-        run(
+        invoke(mdl_request("age_over_21").as_bytes(), &blob, "");
+        invoke(
             b"{\"requests\":[{\"protocol\":\"urn:example:x\",\"data\":{}}]}",
             &blob,
             "",
         );
-        run(mdl_request("family_name").as_bytes(), &blob, "");
+        invoke(mdl_request("family_name").as_bytes(), &blob, "");
     }
 
     /// Off is the production state, and it must cost nothing: the message
@@ -489,14 +568,14 @@ mod tests {
     #[test]
     fn disabled_diagnostics_never_compose_their_message() {
         let composed = Cell::new(false);
-        Diagnostics { enabled: false }.emit("x", || {
+        Diagnostics { enabled: false }.emit(&mut Discard, "x", || {
             composed.set(true);
             String::new()
         });
         assert!(!composed.get());
 
         let composed = Cell::new(false);
-        Diagnostics { enabled: true }.emit("x", || {
+        Diagnostics { enabled: true }.emit(&mut Discard, "x", || {
             composed.set(true);
             String::new()
         });
@@ -537,7 +616,7 @@ mod tests {
         for debug in [false, true] {
             for blob in [nym_blob(debug), golden_blob()] {
                 for query in &queries {
-                    run(zkp_req_request(query.clone()).as_bytes(), &blob, "");
+                    invoke(zkp_req_request(query.clone()).as_bytes(), &blob, "");
                 }
             }
         }

@@ -14,6 +14,9 @@ name = "matcher"
 path = "src/main.rs"
 
 [dependencies]
+# Host level 2 and no higher: the matcher emits entry sets, and enabling a
+# level adds its imports to the ones every host must resolve.
+android-credman = { workspace = true, features = ["v2"] }
 siros-dc-matcher-core = { workspace = true }
 siros-dcql = { workspace = true }
 serde_json = { workspace = true }
