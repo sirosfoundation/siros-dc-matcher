@@ -1,7 +1,8 @@
 //! The host's functions as safe calls, one trait per host level. Each level
 //! implies the one below. [`Host::credman`](crate::Host::credman) hands out
-//! the base level; a matcher reaches a higher one with `version`, which
-//! checks the level `GetWasmVersion` reported.
+//! the base, [`Credman`]; [`Credman::version`] grants the singleton of a
+//! higher level when the level `GetWasmVersion` reported reaches it. Every
+//! call is static, so a binary imports only the functions it calls.
 //!
 //! Every pointer passed here comes from a borrowed `&C8Str`, `&[u8]` or an
 //! `Option` of one (NULL for `None`), so each call meets the rules of
@@ -17,35 +18,22 @@ use core::ffi::c_void;
 use core::ptr;
 use std::collections::TryReserveError;
 
-pub(crate) mod imp {
-    /// The one implementor of every level: the host at the level
-    /// `GetWasmVersion` reported. Outside the crate it is reached only as
-    /// `dyn V1` and the views `version` grants.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub struct Credman {
-        pub(crate) level: u32,
+mod sealed {
+    pub trait Sealed {}
+
+    pub trait View {
+        fn view(level: u32) -> Option<&'static Self>;
     }
 }
 
-use imp::Credman;
-
-mod sealed {
-    pub trait Sealed {
-        /// The implementor behind every view.
-        fn credman(&self) -> &super::Credman;
-    }
-
-    pub trait View {
-        fn view(credman: &super::Credman) -> Option<&Self>;
-    }
+/// The host at the base level, holding the level `GetWasmVersion`
+/// reported.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Credman {
+    level: u32,
 }
 
 impl Credman {
-    /// Whether the reported level reaches `level`.
-    pub(crate) fn reaches(&self, level: u32) -> bool {
-        self.level >= level
-    }
-
     /// Reads the host level with [`GetWasmVersion`](credman::GetWasmVersion).
     pub(crate) fn connect() -> Self {
         let mut level = 0u32;
@@ -53,21 +41,51 @@ impl Credman {
         unsafe { credman::GetWasmVersion(&mut level) };
         Self { level }
     }
-}
 
-impl sealed::Sealed for Credman {
-    fn credman(&self) -> &Credman {
-        self
+    /// The level `GetWasmVersion` reported.
+    pub const fn level(&self) -> u32 {
+        self.level
+    }
+
+    /// The host at level `L`, when the reported level reaches it.
+    pub fn version<L: Level>(&self) -> Option<&'static L> {
+        L::view(self.level)
     }
 }
 
+impl sealed::Sealed for Credman {}
 impl V1 for Credman {}
-impl V2 for Credman {}
-impl V3 for Credman {}
-impl V4 for Credman {}
-impl V5 for Credman {}
-impl V6 for Credman {}
-impl V7 for Credman {}
+
+/// A level's singleton, [`Credman2`] to [`Credman7`], which
+/// [`Credman::version`] grants.
+pub trait Level: sealed::View {}
+
+macro_rules! level {
+    ($singleton:ident, $instance:ident, $level:literal, [$($trait:ident),+]) => {
+        #[doc = concat!("The host at level ", $level, ", from [`Credman::version`].")]
+        #[derive(Debug, PartialEq, Eq)]
+        pub struct $singleton(());
+
+        static $instance: $singleton = $singleton(());
+
+        impl sealed::View for $singleton {
+            fn view(level: u32) -> Option<&'static Self> {
+                (level >= $level).then_some(&$instance)
+            }
+        }
+
+        impl Level for $singleton {}
+        impl sealed::Sealed for $singleton {}
+        $(impl $trait for $singleton {})+
+    };
+}
+
+level!(Credman2, CREDMAN2, 2, [V1, V2]);
+level!(Credman3, CREDMAN3, 3, [V1, V2, V3]);
+level!(Credman4, CREDMAN4, 4, [V1, V2, V3, V4]);
+level!(Credman5, CREDMAN5, 5, [V1, V2, V3, V4, V5]);
+level!(Credman6, CREDMAN6, 6, [V1, V2, V3, V4, V5, V6]);
+level!(Credman7, CREDMAN7, 7, [V1, V2, V3, V4, V5, V6, V7]);
 
 /// How the host names an entry in a set: the set, the position and the
 /// entry's id. Fields and the calls of levels 5 to 7 attach by it.
@@ -84,11 +102,6 @@ pub struct EntryKey<'a> {
 /// The functions every host provides (module `credman`): the inputs, the
 /// standalone entries a matcher adds below level 2, and the level probe.
 pub trait V1: sealed::Sealed {
-    /// The level `GetWasmVersion` reported.
-    fn level(&self) -> u32 {
-        self.credman().level
-    }
-
     /// The Digital Credentials API request as JSON, read with
     /// [`GetRequestSize`](credman::GetRequestSize) and
     /// [`GetRequestBuffer`](credman::GetRequestBuffer).
@@ -453,33 +466,3 @@ pub trait V7: V6 {
         }
     }
 }
-
-/// A level's view of the host, `dyn V1` to `dyn V7`, which `version` grants.
-pub trait Level: sealed::View {}
-
-macro_rules! level {
-    ($trait:ident, |$credman:ident| $reaches:expr) => {
-        impl sealed::View for dyn $trait {
-            fn view($credman: &Credman) -> Option<&Self> {
-                ($reaches).then_some($credman as &Self)
-            }
-        }
-
-        impl Level for dyn $trait {}
-
-        impl<'d> dyn $trait + 'd {
-            /// This host as `L`, when the reported level reaches `L`'s.
-            pub fn version<L: Level + ?Sized>(&self) -> Option<&L> {
-                L::view(self.credman())
-            }
-        }
-    };
-}
-
-level!(V1, |credman| true);
-level!(V2, |credman| credman.level >= 2);
-level!(V3, |credman| credman.level >= 3);
-level!(V4, |credman| credman.level >= 4);
-level!(V5, |credman| credman.level >= 5);
-level!(V6, |credman| credman.level >= 6);
-level!(V7, |credman| credman.level >= 7);

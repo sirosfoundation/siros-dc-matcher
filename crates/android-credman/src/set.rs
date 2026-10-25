@@ -6,7 +6,9 @@
 
 use crate::entry::{DelegationType, Field, PaymentDisplay, VerificationDisplay, VerificationLink};
 #[cfg(target_arch = "wasm32")]
-use crate::levels::{imp::Credman, EntryKey, V1, V2, V3, V5, V6, V7};
+use crate::levels::{
+    Credman, Credman2, Credman3, Credman5, Credman6, Credman7, EntryKey, V2, V3, V5, V6, V7,
+};
 use crate::text::C8StringExt;
 use c8str::{C8Str, C8String};
 use core::fmt;
@@ -22,7 +24,8 @@ pub(crate) mod sealed {
         #[cfg(target_arch = "wasm32")]
         fn add(
             &self,
-            host: &crate::levels::imp::Credman,
+            base: &crate::levels::Credman,
+            host: &crate::levels::Credman2,
             key: &crate::levels::EntryKey<'_>,
             metadata: &c8str::C8Str,
         );
@@ -48,7 +51,7 @@ impl sealed::Sealed for VerificationDisplay<'_> {
     }
 
     #[cfg(target_arch = "wasm32")]
-    fn add(&self, host: &Credman, key: &EntryKey<'_>, metadata: &C8Str) {
+    fn add(&self, _base: &Credman, host: &Credman2, key: &EntryKey<'_>, metadata: &C8Str) {
         host.add_entry_to_set(key, self, Some(metadata));
     }
 }
@@ -59,16 +62,15 @@ impl sealed::Sealed for Payment<'_> {
     }
 
     #[cfg(target_arch = "wasm32")]
-    fn add(&self, host: &Credman, key: &EntryKey<'_>, metadata: &C8Str) {
-        if host.reaches(3) {
-            host.add_payment_entry_to_set_v2(
+    fn add(&self, base: &Credman, host: &Credman2, key: &EntryKey<'_>, metadata: &C8Str) {
+        match base.version::<Credman3>() {
+            Some(level) => level.add_payment_entry_to_set_v2(
                 key,
                 &self.display,
                 self.additional_info,
                 Some(metadata),
-            );
-        } else {
-            host.add_payment_entry_to_set(key, &self.display, Some(metadata));
+            ),
+            None => host.add_payment_entry_to_set(key, &self.display, Some(metadata)),
         }
     }
 }
@@ -82,10 +84,10 @@ impl sealed::Sealed for AnyEntry<'_> {
     }
 
     #[cfg(target_arch = "wasm32")]
-    fn add(&self, host: &Credman, key: &EntryKey<'_>, metadata: &C8Str) {
+    fn add(&self, base: &Credman, host: &Credman2, key: &EntryKey<'_>, metadata: &C8Str) {
         match self {
-            Self::Verification(display) => display.add(host, key, metadata),
-            Self::Payment(payment) => payment.add(host, key, metadata),
+            Self::Verification(display) => display.add(base, host, key, metadata),
+            Self::Payment(payment) => payment.add(base, host, key, metadata),
         }
     }
 }
@@ -248,22 +250,23 @@ impl<K: EntryKind> SetEntry<'_, K> {
     /// own, else `default`), the link, the fields, the display text.
     pub(crate) fn send(
         &self,
-        host: &Credman,
+        base: &Credman,
+        host: &Credman2,
         key: &EntryKey<'_>,
         default: Option<Sent<DelegationType>>,
     ) {
-        self.kind.add(host, key, &self.metadata(host.level()));
+        self.kind.add(base, host, key, &self.metadata(base.level()));
         if let Some(delegation) = self.delegation.or(default) {
-            (delegation.send)(host, key, &delegation.value);
+            (delegation.send)(base, key, &delegation.value);
         }
         if let Some(link) = self.link {
-            (link.send)(host, key, &link.value);
+            (link.send)(base, key, &link.value);
         }
         for field in self.fields {
             host.add_field_to_entry_set(key, field);
         }
         if let Some(text) = self.metadata_display_text {
-            (text.send)(host, key, &text.value);
+            (text.send)(base, key, &text.value);
         }
     }
 }
@@ -388,22 +391,22 @@ impl<'a> Sent<&'a C8Str> {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn send_delegation(host: &Credman, key: &EntryKey<'_>, delegation: &DelegationType) {
-    if host.reaches(7) {
+fn send_delegation(base: &Credman, key: &EntryKey<'_>, delegation: &DelegationType) {
+    if let Some(host) = base.version::<Credman7>() {
         host.set_delegation_type_for_entry_in_set(key, *delegation);
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-fn send_link(host: &Credman, key: &EntryKey<'_>, link: &VerificationLink<'_>) {
-    if host.reaches(6) {
+fn send_link(base: &Credman, key: &EntryKey<'_>, link: &VerificationLink<'_>) {
+    if let Some(host) = base.version::<Credman6>() {
         host.set_additional_disclaimer_and_url_for_verification_entry_in_credential_set(key, link);
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-fn send_metadata_display_text(host: &Credman, key: &EntryKey<'_>, text: &&C8Str) {
-    if host.reaches(5) {
+fn send_metadata_display_text(base: &Credman, key: &EntryKey<'_>, text: &&C8Str) {
+    if let Some(host) = base.version::<Credman5>() {
         host.add_metadata_display_text_to_entry_set(key, text);
     }
 }

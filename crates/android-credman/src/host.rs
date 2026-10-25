@@ -2,8 +2,7 @@ use crate::app::{CallingApp, CallingAppError};
 use crate::entry::{
     DelegationType, InlineIssuanceEntry, LegacyEntry, PackageInfo, PaymentEntry, StringIdEntry,
 };
-use crate::levels::imp::Credman;
-use crate::levels::{V1, V4};
+use crate::levels::{Credman, Credman2, Credman4, V1, V4};
 use crate::set::Sent;
 use crate::sets_on_host::EntrySets;
 use core::fmt;
@@ -30,17 +29,17 @@ impl Host {
         }
     }
 
-    /// The host's functions at the base level. `version` grants a higher
-    /// level when the host reports it.
-    pub fn credman(&self) -> &dyn V1 {
+    /// The host's functions at the base level. [`Credman::version`] grants
+    /// a higher level when the host reports it.
+    pub fn credman(&self) -> &Credman {
         &self.credman
     }
 
     /// Where the matcher sends its entry sets, when the host reaches level 2.
     pub fn entry_sets(&self) -> Option<EntrySets<'_>> {
         self.credman
-            .reaches(2)
-            .then(|| EntrySets::new(&self.credman, self.delegation))
+            .version::<Credman2>()
+            .map(|host| EntrySets::new(&self.credman, host, self.delegation))
     }
 
     /// The verifier's request: the Digital Credentials API request as JSON.
@@ -230,8 +229,10 @@ impl Host {
             credman: Credman::connect(),
             delegation: options.delegation.map(Sent::delegation),
         };
-        if let Some(info) = options.package_info.filter(|_| host.credman.reaches(4)) {
-            host.credman.self_declare_package_info(&info);
+        if let (Some(info), Some(level)) =
+            (options.package_info, host.credman.version::<Credman4>())
+        {
+            level.self_declare_package_info(&info);
         }
         host
     }
