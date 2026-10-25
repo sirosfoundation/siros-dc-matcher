@@ -4,6 +4,8 @@
 
 use crate::app::{CallingApp, CallingAppError};
 use crate::entry::{InlineIssuanceEntry, LegacyEntry, PaymentEntry, StringIdEntry};
+use crate::set::DelegationType;
+use crate::sets_on_host::{Delegation, EntrySets};
 use crate::version::{WasmVersion, V4};
 use android_credman_sys::{credman, v4, CallingAppInfo};
 use c8str::C8Str;
@@ -12,11 +14,12 @@ use core::{fmt, ptr};
 use std::collections::TryReserveError;
 
 /// The host of one matcher invocation: the verifier's request, the wallet's
-/// credentials, the calling app, and the standalone entries. Entry sets go
-/// through the [`V2`](crate::V2) token from [`Host::version`].
+/// credentials, the calling app, the standalone entries, and the entry sets
+/// from [`Host::entry_sets`].
 #[derive(Debug, Clone, Copy)]
 pub struct Host {
     version: WasmVersion,
+    delegation: Option<Delegation>,
 }
 
 impl Host {
@@ -28,6 +31,7 @@ impl Host {
         unsafe { credman::GetWasmVersion(&mut level) };
         Self {
             version: WasmVersion::reported(level),
+            delegation: None,
         }
     }
 
@@ -35,6 +39,14 @@ impl Host {
     /// reaches.
     pub fn version(&self) -> WasmVersion {
         self.version
+    }
+
+    /// Where the matcher sends its entry sets, when the host reaches level 2.
+    /// Every entry carries the delegation setting of [`HostOptions`].
+    pub fn entry_sets(&self) -> Option<EntrySets> {
+        self.version
+            .v2()
+            .map(|level| EntrySets::new(level, self.delegation))
     }
 
     /// The verifier's request: the Digital Credentials API request as JSON,
@@ -306,6 +318,13 @@ pub struct HostOptions<'a> {
     /// says the call works for system apps only; what the picker does with
     /// the values is unconfirmed.
     pub package_info: Option<PackageInfo<'a>>,
+    /// Sent for every set entry with
+    /// [`SetDelegationTypeForEntryInSet`](android_credman_sys::v7::SetDelegationTypeForEntryInSet)
+    /// right after the entry, when the host reaches level 7, and skipped
+    /// below it. It applies to all entries. A wallet that sets
+    /// [`DelegationType::Full`] declares a background fulfilment service
+    /// (androidx).
+    pub delegation: Option<DelegationType>,
 }
 
 /// The wallet app's display name and icon, for
@@ -318,13 +337,17 @@ pub struct PackageInfo<'a> {
 }
 
 impl Host {
-    /// Reads the host level as [`Host::connect`] does, then makes the
-    /// declarations `options` holds that the level allows.
+    /// Reads the host level as [`Host::connect`] does, then applies the
+    /// options the level allows.
     pub fn connect_with(options: HostOptions<'_>) -> Self {
-        let host = Self::connect();
+        let mut host = Self::connect();
         if let (Some(info), Some(level)) = (options.package_info, host.version.v4()) {
             level.declare_package_info(&info);
         }
+        host.delegation = options
+            .delegation
+            .zip(host.version.v7())
+            .map(|(kind, level)| Delegation::new(level, kind));
         host
     }
 }
