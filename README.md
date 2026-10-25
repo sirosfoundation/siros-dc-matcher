@@ -51,7 +51,7 @@ cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 cargo clippy --locked -p siros-dc-matcher-wasm --target wasm32-wasip1 \
   --profile wasm-release -- -D warnings
 cargo clippy --locked -p android-credman-sys -p android-credman \
-  --target wasm32-wasip1 --all-features -- -D warnings
+  --target wasm32-wasip1 -- -D warnings
 make matcher && python3 scripts/check_matcher_abi.py \
   target/wasm32-wasip1/wasm-release/matcher.wasm
 make check-bindings    # committed bindings match the current API
@@ -105,7 +105,7 @@ Two profile details are load-bearing and easy to undo:
 
 | Crate | Target | Contents |
 |---|---|---|
-| [`android-credman-sys`](crates/android-credman-sys) | `wasm32` | The Credential Manager host imports, one feature per host level. [`ABI.md`](crates/android-credman-sys/ABI.md) is the contract and its evidence. |
+| [`android-credman-sys`](crates/android-credman-sys) | `wasm32` | The Credential Manager host imports, one module per host level. [`ABI.md`](crates/android-credman-sys/ABI.md) is the contract and its evidence. |
 | [`android-credman`](crates/android-credman) | any | The host ABI as types: nullability, version gating, set shape. |
 | [`siros-dcql`](crates/siros-dcql) | any | OpenID4VP 1.0 DCQL: claims-path pointers (§7), credential and credential-set queries (§6.1–6.3), selection (§6.4). No I/O, no platform. Published to crates.io. |
 | [`siros-dc-matcher-core`](crates/siros-dc-matcher-core) | any | The credential blob and its CBOR codec, the match profile and its evaluator, protocol dispatch. |

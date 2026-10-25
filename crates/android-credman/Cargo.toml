@@ -11,15 +11,3 @@ readme = "README.md"
 [dependencies]
 android-credman-sys = { path = "../android-credman-sys", version = "0.1.0" }
 c8str = { workspace = true }
-
-[features]
-default = ["std"]
-# `CredentialReader`.
-std = []
-# Host levels: each enables its token.
-v2 = ["android-credman-sys/v2"]
-v3 = ["v2", "android-credman-sys/v3"]
-v4 = ["android-credman-sys/v4"]
-v5 = ["v2", "android-credman-sys/v5"]
-v6 = ["v2", "android-credman-sys/v6"]
-v7 = ["v2", "android-credman-sys/v7"]

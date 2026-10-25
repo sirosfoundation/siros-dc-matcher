@@ -1,54 +1,51 @@
 //! An [`EntrySet`] has at least one slot and every slot at least one entry;
 //! positions and the declared length follow from the slots. The entry kind
-//! is a type parameter, so a matcher that builds only
-//! [`VerificationDisplay`] entries links no payment function.
+//! is a type parameter: a binary links the calls of the kinds it builds and
+//! no others.
 
-#[cfg(feature = "v6")]
-use crate::entry::VerificationLink;
-use crate::entry::{Field, PaymentDisplay, VerificationDisplay};
-#[cfg(feature = "v3")]
-use crate::version::V3;
-#[cfg(feature = "v5")]
-use crate::version::V5;
-#[cfg(feature = "v6")]
-use crate::version::V6;
-#[cfg(feature = "v7")]
-use crate::version::V7;
+use crate::entry::{Field, PaymentDisplay, VerificationDisplay, VerificationLink};
+use crate::version::{V3, V5, V6, V7};
 use c8str::C8Str;
 
 pub(crate) mod sealed {
     pub trait Sealed {
-        #[cfg(all(target_arch = "wasm32", feature = "v2"))]
+        #[cfg(target_arch = "wasm32")]
         fn add_to_set(&self, at: &crate::sets_on_host::Address, metadata: Option<&c8str::C8Str>);
+
+        #[cfg(target_arch = "wasm32")]
+        fn after_fields(&self, _at: &crate::sets_on_host::Address) {}
     }
 }
 
-/// Selects the function that adds the entry: `AddEntryToSet` for
+/// Selects the calls that add the entry: `AddEntryToSet` for
 /// [`VerificationDisplay`], `AddPaymentEntryToSet` for [`PaymentDisplay`],
-/// `AddPaymentEntryToSetV2` for [`PaymentWithInfo`]. [`AnyEntry`] mixes them.
+/// `AddPaymentEntryToSetV2` for [`PaymentWithInfo`]. [`AnyEntry`] mixes them;
+/// [`WithDelegation`], [`WithLink`] and [`WithMetadataDisplayText`] add a
+/// level's call to any kind.
 pub trait EntryKind: Copy + sealed::Sealed {}
 
 impl EntryKind for VerificationDisplay<'_> {}
 impl EntryKind for PaymentDisplay<'_> {}
-impl EntryKind for AnyEntry<'_> {}
-#[cfg(feature = "v3")]
 impl EntryKind for PaymentWithInfo<'_> {}
+impl EntryKind for AnyEntry<'_> {}
+impl<K: EntryKind> EntryKind for WithDelegation<K> {}
+impl<K: EntryKind> EntryKind for WithLink<'_, K> {}
+impl<K: EntryKind> EntryKind for WithMetadataDisplayText<'_, K> {}
 
 impl sealed::Sealed for VerificationDisplay<'_> {
-    #[cfg(all(target_arch = "wasm32", feature = "v2"))]
+    #[cfg(target_arch = "wasm32")]
     fn add_to_set(&self, at: &crate::sets_on_host::Address, metadata: Option<&C8Str>) {
         crate::sets_on_host::verification(at, self, metadata);
     }
 }
 
 impl sealed::Sealed for PaymentDisplay<'_> {
-    #[cfg(all(target_arch = "wasm32", feature = "v2"))]
+    #[cfg(target_arch = "wasm32")]
     fn add_to_set(&self, at: &crate::sets_on_host::Address, metadata: Option<&C8Str>) {
         crate::sets_on_host::payment(at, self, metadata);
     }
 }
 
-#[cfg(feature = "v3")]
 impl sealed::Sealed for PaymentWithInfo<'_> {
     #[cfg(target_arch = "wasm32")]
     fn add_to_set(&self, at: &crate::sets_on_host::Address, metadata: Option<&C8Str>) {
@@ -57,18 +54,55 @@ impl sealed::Sealed for PaymentWithInfo<'_> {
 }
 
 impl sealed::Sealed for AnyEntry<'_> {
-    #[cfg(all(target_arch = "wasm32", feature = "v2"))]
+    #[cfg(target_arch = "wasm32")]
     fn add_to_set(&self, at: &crate::sets_on_host::Address, metadata: Option<&C8Str>) {
         match self {
             Self::Verification(display) => display.add_to_set(at, metadata),
             Self::Payment(display) => display.add_to_set(at, metadata),
-            #[cfg(feature = "v3")]
             Self::PaymentWithInfo(payment) => payment.add_to_set(at, metadata),
         }
     }
 }
 
-#[cfg(feature = "v3")]
+impl<K: EntryKind> sealed::Sealed for WithDelegation<K> {
+    #[cfg(target_arch = "wasm32")]
+    fn add_to_set(&self, at: &crate::sets_on_host::Address, metadata: Option<&C8Str>) {
+        self.kind.add_to_set(at, metadata);
+        crate::sets_on_host::delegation(at, self.delegation);
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn after_fields(&self, at: &crate::sets_on_host::Address) {
+        self.kind.after_fields(at);
+    }
+}
+
+impl<K: EntryKind> sealed::Sealed for WithLink<'_, K> {
+    #[cfg(target_arch = "wasm32")]
+    fn add_to_set(&self, at: &crate::sets_on_host::Address, metadata: Option<&C8Str>) {
+        self.kind.add_to_set(at, metadata);
+        crate::sets_on_host::link(at, &self.link);
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn after_fields(&self, at: &crate::sets_on_host::Address) {
+        self.kind.after_fields(at);
+    }
+}
+
+impl<K: EntryKind> sealed::Sealed for WithMetadataDisplayText<'_, K> {
+    #[cfg(target_arch = "wasm32")]
+    fn add_to_set(&self, at: &crate::sets_on_host::Address, metadata: Option<&C8Str>) {
+        self.kind.add_to_set(at, metadata);
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn after_fields(&self, at: &crate::sets_on_host::Address) {
+        self.kind.after_fields(at);
+        crate::sets_on_host::metadata_display_text(at, self.text);
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PaymentWithInfo<'a> {
     pub level: V3,
@@ -81,12 +115,34 @@ pub struct PaymentWithInfo<'a> {
 pub enum AnyEntry<'a> {
     Verification(VerificationDisplay<'a>),
     Payment(PaymentDisplay<'a>),
-    #[cfg(feature = "v3")]
     PaymentWithInfo(PaymentWithInfo<'a>),
 }
 
+/// `SetDelegationTypeForEntryInSet`, sent right after the entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WithDelegation<K> {
+    pub kind: K,
+    pub level: V7,
+    pub delegation: DelegationType,
+}
+
+/// The level-6 link, sent right after the entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WithLink<'a, K> {
+    pub kind: K,
+    pub level: V6,
+    pub link: VerificationLink<'a>,
+}
+
+/// `AddMetadataDisplayTextToEntrySet`, sent after the fields.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WithMetadataDisplayText<'a, K> {
+    pub kind: K,
+    pub level: V5,
+    pub text: &'a C8Str,
+}
+
 /// androidx's `DelegationType` values.
-#[cfg(feature = "v7")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DelegationType {
     /// The wallet's UI handles the selection.
@@ -101,12 +157,6 @@ pub struct SetEntry<'a, K> {
     kind: K,
     metadata: Option<&'a C8Str>,
     fields: &'a [Field<'a>],
-    #[cfg(feature = "v7")]
-    delegation: Option<(V7, DelegationType)>,
-    #[cfg(feature = "v6")]
-    link: Option<(V6, VerificationLink<'a>)>,
-    #[cfg(feature = "v5")]
-    metadata_display_text: Option<(V5, &'a C8Str)>,
 }
 
 impl<'a, K: EntryKind> SetEntry<'a, K> {
@@ -116,12 +166,6 @@ impl<'a, K: EntryKind> SetEntry<'a, K> {
             kind,
             metadata: None,
             fields: &[],
-            #[cfg(feature = "v7")]
-            delegation: None,
-            #[cfg(feature = "v6")]
-            link: None,
-            #[cfg(feature = "v5")]
-            metadata_display_text: None,
         }
     }
 
@@ -133,24 +177,6 @@ impl<'a, K: EntryKind> SetEntry<'a, K> {
 
     pub const fn with_fields(mut self, fields: &'a [Field<'a>]) -> Self {
         self.fields = fields;
-        self
-    }
-
-    #[cfg(feature = "v7")]
-    pub const fn with_delegation(mut self, level: V7, delegation: DelegationType) -> Self {
-        self.delegation = Some((level, delegation));
-        self
-    }
-
-    #[cfg(feature = "v6")]
-    pub const fn with_link(mut self, level: V6, link: VerificationLink<'a>) -> Self {
-        self.link = Some((level, link));
-        self
-    }
-
-    #[cfg(feature = "v5")]
-    pub const fn with_metadata_display_text(mut self, level: V5, text: &'a C8Str) -> Self {
-        self.metadata_display_text = Some((level, text));
         self
     }
 
@@ -168,21 +194,6 @@ impl<'a, K: EntryKind> SetEntry<'a, K> {
 
     pub const fn fields(&self) -> &'a [Field<'a>] {
         self.fields
-    }
-
-    #[cfg(feature = "v7")]
-    pub fn delegation(&self) -> Option<DelegationType> {
-        self.delegation.map(|(_, delegation)| delegation)
-    }
-
-    #[cfg(feature = "v6")]
-    pub fn link(&self) -> Option<VerificationLink<'a>> {
-        self.link.map(|(_, link)| link)
-    }
-
-    #[cfg(feature = "v5")]
-    pub fn metadata_display_text(&self) -> Option<&'a C8Str> {
-        self.metadata_display_text.map(|(_, text)| text)
     }
 }
 
@@ -240,7 +251,7 @@ impl<'a, K: EntryKind> EntrySet<'a, K> {
 
 /// Implemented by `V2` on the host, and by a stand-in in a test.
 pub trait SetSink {
-    /// Sends the declaration, then each alternative followed by its
-    /// delegation, link, fields and metadata display text.
+    /// Sends the declaration, then each alternative: its kind's calls up to
+    /// the fields, the fields, then its kind's calls after them.
     fn add_entry_set<K: EntryKind>(&mut self, set: &EntrySet<'_, K>);
 }

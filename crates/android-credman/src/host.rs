@@ -8,8 +8,6 @@ use crate::entry::{
     VerificationDisplay,
 };
 use crate::version::WasmVersion;
-use alloc::vec;
-use alloc::vec::Vec;
 use android_credman_sys::{c_char, credman, CallingAppInfo};
 use c8str::C8Str;
 use core::ffi::c_void;
@@ -241,13 +239,12 @@ impl VerificationParts {
     }
 }
 
-#[cfg(feature = "v4")]
 impl crate::version::V4 {
     pub fn self_declare_package_info(&self, info: &crate::entry::PackageInfo<'_>) {
         let (icon, icon_len) = icon_parts(info.icon);
         // SAFETY: see the module documentation.
         unsafe {
-            android_credman_sys::credman_v4::SelfDeclarePackageInfo(
+            android_credman_sys::v4::SelfDeclarePackageInfo(
                 info.display_name.as_ptr(),
                 icon,
                 icon_len,

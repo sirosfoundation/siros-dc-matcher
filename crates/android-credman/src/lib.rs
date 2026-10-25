@@ -9,20 +9,17 @@
 //!   and give the alternatives of one slot distinct ids.
 //! - `Host` exists on `wasm32` only; [`SetSink`] lets a test stand in for it.
 
-#![cfg_attr(not(feature = "std"), no_std)]
 #![deny(unsafe_op_in_unsafe_fn)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-
-extern crate alloc;
 
 mod app;
 mod entry;
 #[cfg(target_arch = "wasm32")]
 mod host;
-#[cfg(all(target_arch = "wasm32", feature = "std"))]
+#[cfg(target_arch = "wasm32")]
 mod reader;
 mod set;
-#[cfg(all(target_arch = "wasm32", feature = "v2"))]
+#[cfg(target_arch = "wasm32")]
 mod sets_on_host;
 mod version;
 
@@ -35,23 +32,10 @@ pub use entry::{
 };
 #[cfg(target_arch = "wasm32")]
 pub use host::Host;
-#[cfg(all(target_arch = "wasm32", feature = "std"))]
+#[cfg(target_arch = "wasm32")]
 pub use reader::CredentialReader;
-#[cfg(feature = "v7")]
-pub use set::DelegationType;
-#[cfg(feature = "v3")]
-pub use set::PaymentWithInfo;
-pub use set::{AnyEntry, EntryKind, EntrySet, SetEntry, SetSink, Slot};
-pub use version::WasmVersion;
-#[cfg(feature = "v2")]
-pub use version::V2;
-#[cfg(feature = "v3")]
-pub use version::V3;
-#[cfg(feature = "v4")]
-pub use version::V4;
-#[cfg(feature = "v5")]
-pub use version::V5;
-#[cfg(feature = "v6")]
-pub use version::V6;
-#[cfg(feature = "v7")]
-pub use version::V7;
+pub use set::{
+    AnyEntry, DelegationType, EntryKind, EntrySet, PaymentWithInfo, SetEntry, SetSink, Slot,
+    WithDelegation, WithLink, WithMetadataDisplayText,
+};
+pub use version::{WasmVersion, V2, V3, V4, V5, V6, V7};

@@ -9,13 +9,3 @@ rust-version = "1.82"
 readme = "README.md"
 
 [dependencies]
-
-# One feature per host level: `vN` declares the functions of level N.
-# Level 3 is `AddPaymentEntryToSetV2`, imported from `credman_v2`.
-[features]
-v2 = []
-v3 = []
-v4 = []
-v5 = []
-v6 = []
-v7 = []
