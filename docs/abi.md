@@ -18,7 +18,7 @@ CI runs it on every build.
 | `GetRequestSize` / `GetRequestBuffer` | `credman` | The DC API request JSON, shaped `{"requests":[{"protocol":…,"data":…}]}` |
 | `GetCredentialsSize` / `ReadCredentialsBuffer` | `credman` | The blob the wallet registered, read at an offset until complete. Format is entirely the wallet's own |
 | `AddEntrySet` / `AddEntryToSet` / `AddFieldToEntrySet` | `credman_v2` | Grouped entries. Required for DCQL `credential_sets`, and carries a free-form `metadata` string |
-| `fd_write`, `proc_exit` | `wasi_snapshot_preview1` | The host provides a WASI preview-1 *subset*: Google's shipped matchers import `fd_write`, `fd_seek`, `fd_close`, `fd_fdstat_get` and `proc_exit`. It lacks `random_get`, which std's default hasher reads. The host links a module that imports it and the call traps: v0.8.0 to v0.11.0 did that on `zkp_req` requests. The crates that link into the matcher therefore use `rustc-hash` collections. The Makefile stubs out the two `environ_*` imports rustc's CRT adds unconditionally |
+| `fd_write`, `proc_exit` | `wasi_snapshot_preview1` | The host provides a WASI preview-1 *subset*: Google's shipped matchers import `fd_write`, `fd_seek`, `fd_close`, `fd_fdstat_get` and `proc_exit`. It lacks `random_get`, which std's default hasher reads. The host links a module that imports it and the call traps: v0.8.0 to v0.11.0 did that on `zkp_req` requests. The crates that link into the matcher therefore use `rustc-hash` collections, and `clippy.toml` forbids std's. The Makefile stubs out the two `environ_*` imports rustc's CRT adds unconditionally |
 
 ## Exports
 
