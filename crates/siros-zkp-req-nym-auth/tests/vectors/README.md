@@ -7,6 +7,7 @@
 | `proof_time.json` | the 20-character `proof_time` and the Verifier's tolerance | `tests/proof_time_vectors.rs` |
 | `session.json` | the `SessionTranscript` of both channels and e2 | `tests/known_answers.rs` |
 | `pseudonym.json` | `verifier_input` and the `sha-256` pseudonym | `tests/known_answers.rs` |
+| `readdit.json` | readdit's values for a credential, a session and a v0.4 presentation | `tests/readdit.rs` |
 
 The rulebook is the nym_auth rulebook repository at commit `e65861c`. `scripts/vectors_digest.sh`
 prints the digest of the whole set, with the protocol's request vectors.
@@ -52,3 +53,13 @@ make.
 Copied from zk-cred-vega `6bc2622`, `test-vectors/nymauth/` (BSD-2-Clause), which shares them
 byte for byte with zk-cred-longfellow; an independent Python encoder generated the session
 vectors there. Each file names its provenance.
+
+## `readdit.json`
+
+What readdit-demo `1cf3f26` computes with `native/longfellow/nym-longfellow` and
+`native/vega/nym-vega`, the reference code of the system rulebooks' Section 10, for a credential of
+the test issuer and the redirect session of `CLIENT_ID`, `NONCE` and `RESPONSE_URI`:
+`SessionTranscript`, the device's `Sig_structure`, e2, the fields of the mdoc, the issuer key,
+`verifier_input` and the pseudonym, and for Longfellow a v0.4 presentation of fixed parts.
+`scripts/readdit-differential` regenerates it. readdit has no license, so the repository holds its
+computed values only.
