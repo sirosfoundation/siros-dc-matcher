@@ -1,0 +1,21 @@
+pub mod credential_entry;
+pub mod credential_set;
+pub mod credential_slot;
+pub mod field;
+pub mod inline_issuance_entry;
+pub mod matcher_response;
+pub mod package_info;
+pub mod payment_entry;
+pub mod string_id_entry;
+pub mod verification_update;
+
+pub use credential_entry::CredentialEntry;
+pub use credential_set::CredentialSet;
+pub use credential_slot::CredentialSlot;
+pub use field::Field;
+pub use inline_issuance_entry::InlineIssuanceEntry;
+pub use matcher_response::{MatcherResponse, MatcherResult};
+pub use package_info::PackageInfo;
+pub use payment_entry::PaymentEntry;
+pub use string_id_entry::StringIdEntry;
+pub use verification_update::VerificationEntryUpdate;
