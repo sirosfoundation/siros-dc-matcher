@@ -56,6 +56,7 @@ fn rejection_code(r: &Rejection) -> &'static str {
         Rejection::Results => "results",
         Rejection::Proof(ProofFailure::Invalid) => "proof_invalid",
         Rejection::Proof(ProofFailure::PublicInput) => "public_input",
+        Rejection::Proof(ProofFailure::Internal) => "verifier_internal",
     }
 }
 

@@ -126,6 +126,7 @@ impl Rejection {
             Self::Results => "results",
             Self::Proof(ProofFailure::Invalid) => "proof_invalid",
             Self::Proof(ProofFailure::PublicInput) => "public_input",
+            Self::Proof(ProofFailure::Internal) => "verifier_internal",
         }
     }
 }

@@ -669,6 +669,8 @@ pub enum FfiProofCheck {
     Invalid,
     /// The proof's public values differ from the statement.
     PublicInput,
+    /// The verifier failed on its own inputs, artifacts or code, and judged nothing.
+    Internal,
 }
 
 /// A system's verifier, implemented by the host.
@@ -700,6 +702,7 @@ impl NymAuthProofVerifier for ForeignVerifier {
             FfiProofCheck::Encoding => Err(ProofFailure::Encoding),
             FfiProofCheck::Invalid => Err(ProofFailure::Invalid),
             FfiProofCheck::PublicInput => Err(ProofFailure::PublicInput),
+            FfiProofCheck::Internal => Err(ProofFailure::Internal),
         }
     }
 }

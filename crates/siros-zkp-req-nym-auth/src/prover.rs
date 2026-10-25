@@ -112,6 +112,8 @@ pub enum ProofFailure {
     Invalid,
     /// The proof's public values differ from the statement: `public_input`.
     PublicInput,
+    /// The verifier failed on its own inputs, artifacts or code, and judged nothing.
+    Internal,
 }
 
 /// A system's verifier.

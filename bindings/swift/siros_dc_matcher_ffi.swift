@@ -3706,6 +3706,10 @@ public enum FfiProofCheck {
      * The proof's public values differ from the statement.
      */
     case publicInput
+    /**
+     * The verifier failed on its own inputs, artifacts or code, and judged nothing.
+     */
+    case `internal`
 }
 
 
@@ -3726,6 +3730,8 @@ public struct FfiConverterTypeFfiProofCheck: FfiConverterRustBuffer {
         case 3: return .invalid
         
         case 4: return .publicInput
+        
+        case 5: return .`internal`
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -3749,6 +3755,10 @@ public struct FfiConverterTypeFfiProofCheck: FfiConverterRustBuffer {
         
         case .publicInput:
             writeInt(&buf, Int32(4))
+        
+        
+        case .`internal`:
+            writeInt(&buf, Int32(5))
         
         }
     }

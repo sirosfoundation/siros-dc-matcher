@@ -703,6 +703,28 @@ impl Prepared {
     }
 }
 
+impl Prepared {
+    /// The job, the prover and `assemble`, for a host that links a prover.
+    ///
+    /// # Errors
+    ///
+    /// [`ProveError`]: the device signature, the prover's failure, or its output.
+    pub fn prove(
+        &self,
+        device_signature: &[u8],
+        prover: &dyn NymAuthProver,
+    ) -> Result<ZkpPresentation, ProveError> {
+        let job = self.job(device_signature)?;
+        let output = prover.prove(&job).map_err(|failure| match failure {
+            ProverFailure::CredentialForm => {
+                ProveError::Rejected(vec![ZkpError::Credential(CredentialCode::CredentialForm)])
+            }
+            other => ProveError::Prover(other),
+        })?;
+        self.assemble(&output)
+    }
+}
+
 /// The device key, as the host's `WalletContext.sign` offers it.
 pub trait Signer {
     /// Signs `data` with the key `kid` and the JOSE algorithm `alg`; returns `r ‖ s` for ES256.
@@ -727,12 +749,5 @@ pub fn present(
     let signature = signer
         .sign(prepared.key_id(), "ES256", prepared.data_to_sign())
         .map_err(ProveError::Signer)?;
-    let job = prepared.job(&signature)?;
-    let output = prover.prove(&job).map_err(|failure| match failure {
-        ProverFailure::CredentialForm => {
-            ProveError::Rejected(vec![ZkpError::Credential(CredentialCode::CredentialForm)])
-        }
-        other => ProveError::Prover(other),
-    })?;
-    prepared.assemble(&output)
+    prepared.prove(&signature, prover)
 }

@@ -4075,7 +4075,11 @@ enum class FfiProofCheck {
     /**
      * The proof's public values differ from the statement.
      */
-    PUBLIC_INPUT;
+    PUBLIC_INPUT,
+    /**
+     * The verifier failed on its own inputs, artifacts or code, and judged nothing.
+     */
+    INTERNAL;
     companion object
 }
 
