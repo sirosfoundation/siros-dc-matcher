@@ -23,23 +23,13 @@ siros-zkp-req-nym-auth = { path = "../crates/siros-zkp-req-nym-auth", default-fe
 siros-zkp-backend-longfellow = { path = "siros-zkp-backend-longfellow" }
 siros-zkp-backend-vega = { path = "siros-zkp-backend-vega" }
 # Without the js feature: its wasm-bindgen API stays out of siros-zkp-req-wasm.
-zk-cred-longfellow = { git = "https://github.com/sirosfoundation/zk-cred-longfellow", rev = "0f3cc25faa5ee1bd1cb54dc38583488fc6fd1dfe", default-features = false }
-zk-cred-vega = { git = "https://github.com/sirosfoundation/zk-cred-vega", rev = "6bc2622c4e52223507dc74b0431f98bca23e907c" }
+zk-cred-longfellow = { git = "https://github.com/sirosfoundation/zk-cred-longfellow", rev = "9756a0d39310aede1a48bfdeb16fcfceee932921", default-features = false }
+zk-cred-vega = { git = "https://github.com/sirosfoundation/zk-cred-vega", rev = "da7ec89cdd919b7ca5440382bc0e8e11211880a8" }
 sha2 = "0.10.9"
 zstd = { version = "0.13.3", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ciborium = "0.2"
-
-# Local only: the branches zkp-backend-fixes of both repositories, in worktrees beside this one.
-# They split the proof-encoding and public-input outcomes, accept dates from year 0000, put
-# zk-cred-longfellow's wasm-bindgen API behind a feature, and build vega-prover for wasm32.
-# Replace these with their upstream revisions once merged.
-[patch."https://github.com/sirosfoundation/zk-cred-longfellow"]
-zk-cred-longfellow = { path = "../../zk-cred-longfellow-zkp-backend" }
-
-[patch."https://github.com/sirosfoundation/zk-cred-vega"]
-zk-cred-vega = { path = "../../zk-cred-vega-zkp-backend" }
 
 # Proving speed matters in the browser. The real-proof tests run with --release.
 [profile.release]
