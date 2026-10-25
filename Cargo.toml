@@ -53,3 +53,20 @@ strip = "debuginfo"
 inherits = "release"
 panic = "abort"
 strip = true
+
+# The zkp_req tests sign and verify ES256 and X.509 by the hundred. Without
+# optimisation, these crates take most of the suite's time: the refusal table
+# runs in 1.00 s as built by default and in 0.21 s with this, measured back to
+# back on the same machine load.
+[profile.dev.package.p256]
+opt-level = 3
+[profile.dev.package.primeorder]
+opt-level = 3
+[profile.dev.package.elliptic-curve]
+opt-level = 3
+[profile.dev.package.crypto-bigint]
+opt-level = 3
+[profile.dev.package.ecdsa]
+opt-level = 3
+[profile.dev.package.sha2]
+opt-level = 3
