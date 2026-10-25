@@ -6,6 +6,8 @@ members = [
     "crates/siros-dc-matcher-wasm",
     "crates/siros-dc-matcher-ffi",
     "crates/siros-dc-matcher-testhost",
+    "crates/siros-zkp-req",
+    "crates/siros-zkp-req-nym-auth",
 ]
 
 [workspace.package]
@@ -21,6 +23,8 @@ rust-version = "1.82"
 [workspace.dependencies]
 siros-dcql = { version = "0.11.0", path = "crates/siros-dcql" }
 siros-dc-matcher-core = { path = "crates/siros-dc-matcher-core" }
+siros-zkp-req = { path = "crates/siros-zkp-req" }
+siros-zkp-req-nym-auth = { path = "crates/siros-zkp-req-nym-auth", default-features = false }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

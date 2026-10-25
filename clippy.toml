@@ -1,0 +1,2 @@
+# The zkp_req crates enable clippy::cognitive_complexity; each function stays within this.
+cognitive-complexity-threshold = 15

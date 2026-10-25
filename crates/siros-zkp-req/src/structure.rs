@@ -1,0 +1,126 @@
+//! The Verifier's checks of a presentation against its own query, steps 1 to 5 of
+//! `zkp_req`, Section 4.1. Steps 6 to 8 build the statement and verify the proof; the system
+//! defines them.
+
+use std::fmt;
+
+use crate::cbor::Value;
+use crate::formats::ZkpFormats;
+use crate::presentation::ZkpPresentation;
+use crate::query::{QueryOption, ReqItem, ZkpReqQuery};
+
+/// Why a presentation breaks steps 1 to 5 of Section 4.1.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StructureRejection {
+    /// Step 1: the Verifier did not list `system_id`.
+    SystemNotListed,
+    /// Step 1: the Verifier did not list `proof_backend`.
+    BackendNotListed,
+    /// Step 2: the system does not run on the proof backend.
+    SystemNotOnBackend,
+    /// Step 3: the query has `_req_sets` and the presentation has no `req_set`.
+    ReqSetMissing,
+    /// Step 3: the query has no `_req_sets` and the presentation has a `req_set`.
+    ReqSetExtra,
+    /// Step 3: `req_set` names no option.
+    ReqSetUnknown,
+    /// Step 4: the keys of `results` differ from the option's `return` handles.
+    ResultKeys,
+    /// Step 5: an item whose function has no result has a value other than `true`.
+    ResultNotTrue {
+        /// The item's `_req` index.
+        item: usize,
+    },
+}
+
+impl fmt::Display for StructureRejection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::SystemNotListed => "system_id is not listed",
+            Self::BackendNotListed => "proof_backend is not listed",
+            Self::SystemNotOnBackend => "the system does not run on the proof backend",
+            Self::ReqSetMissing => "req_set is missing",
+            Self::ReqSetExtra => "req_set is present for a query without _req_sets",
+            Self::ReqSetUnknown => "req_set names no option",
+            Self::ResultKeys => "results keys differ from the option's return handles",
+            Self::ResultNotTrue { .. } => "a function without a result has a value other than true",
+        })
+    }
+}
+
+impl std::error::Error for StructureRejection {}
+
+/// The answered option of `presentation`, after steps 1 to 5 of Section 4.1.
+///
+/// `runs_on` says whether a system runs on a proof backend. `has_result` says whether an
+/// item's function has a result (the function catalogue's rule).
+///
+/// # Errors
+///
+/// [`StructureRejection`]: the first step that fails.
+pub fn answered_option<'q>(
+    query: &'q ZkpReqQuery,
+    formats: &ZkpFormats,
+    presentation: &ZkpPresentation,
+    runs_on: impl Fn(&str, &str) -> bool,
+    has_result: impl Fn(&ReqItem) -> bool,
+) -> Result<&'q QueryOption, StructureRejection> {
+    if !formats.lists_system(&presentation.system_id) {
+        return Err(StructureRejection::SystemNotListed);
+    }
+    if !formats.lists_backend(&presentation.proof_backend) {
+        return Err(StructureRejection::BackendNotListed);
+    }
+    if !runs_on(&presentation.system_id, &presentation.proof_backend) {
+        return Err(StructureRejection::SystemNotOnBackend);
+    }
+    let option = option_of(query, presentation.req_set)?;
+    check_results(query, option, &presentation.results, has_result)?;
+    Ok(option)
+}
+
+fn option_of(
+    query: &ZkpReqQuery,
+    req_set: Option<u64>,
+) -> Result<&QueryOption, StructureRejection> {
+    match (query.has_req_sets, req_set) {
+        (true, None) => Err(StructureRejection::ReqSetMissing),
+        (false, Some(_)) => Err(StructureRejection::ReqSetExtra),
+        (_, req_set) => {
+            let index = req_set.map(usize::try_from).transpose();
+            index
+                .ok()
+                .and_then(|i| query.option(i))
+                .ok_or(StructureRejection::ReqSetUnknown)
+        }
+    }
+}
+
+fn check_results(
+    query: &ZkpReqQuery,
+    option: &QueryOption,
+    results: &[(String, Value)],
+    has_result: impl Fn(&ReqItem) -> bool,
+) -> Result<(), StructureRejection> {
+    let mut handles = Vec::with_capacity(option.items.len());
+    for &index in &option.items {
+        let item = query
+            .items
+            .get(index)
+            .ok_or(StructureRejection::ReqSetUnknown)?;
+        let Some(handle) = &item.ret else { continue };
+        let value = results
+            .iter()
+            .find(|(k, _)| k == handle.as_str())
+            .map(|(_, v)| v)
+            .ok_or(StructureRejection::ResultKeys)?;
+        if !has_result(item) && *value != Value::Bool(true) {
+            return Err(StructureRejection::ResultNotTrue { item: index });
+        }
+        handles.push(handle.as_str());
+    }
+    if results.len() != handles.len() {
+        return Err(StructureRejection::ResultKeys);
+    }
+    Ok(())
+}
