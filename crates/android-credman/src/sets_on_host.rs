@@ -120,7 +120,7 @@ pub(crate) fn payment_with_info(
     let p = PaymentParts::of(&entry.display);
     // SAFETY: see the module documentation of `host`.
     unsafe {
-        credman_v2::AddPaymentEntryToSetV2(
+        android_credman_sys::credman_v3::AddPaymentEntryToSetV2(
             at.cred_id,
             p.merchant,
             p.method,
