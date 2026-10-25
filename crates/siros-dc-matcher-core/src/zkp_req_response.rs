@@ -31,7 +31,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 #![deny(missing_docs)]
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 use std::fmt;
 
 use serde::de::{self, Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
@@ -542,7 +542,7 @@ pub fn parse_response(
     let Json::Object(token) = token else {
         return Err(InvalidResponse::ResponseNotParseable);
     };
-    let mut seen = HashSet::new();
+    let mut seen = FxHashSet::default();
     for (k, _) in &token {
         if !seen.insert(k.as_str()) {
             return Err(InvalidResponse::DuplicateMember { member: k.clone() });
@@ -732,7 +732,7 @@ fn check_results(
         };
         named.push((handle.as_str(), v));
     }
-    let wanted: HashSet<&str> = plan.functions.iter().map(|f| f.handle.as_str()).collect();
+    let wanted: FxHashSet<&str> = plan.functions.iter().map(|f| f.handle.as_str()).collect();
     if let Some((handle, _)) = named.iter().find(|(h, _)| !wanted.contains(h)) {
         return Err(InvalidResponse::ResultHandleUnexpected {
             handle: (*handle).to_owned(),
