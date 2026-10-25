@@ -81,8 +81,11 @@ fn main() {
     let Some(mut sets) = host.version().v2() else {
         return;
     };
-    let request = host.request();
-    let blob = host.credentials();
+    // Without both inputs there is nothing to offer, and no debug flag to
+    // report the failure with.
+    let (Ok(request), Ok(blob)) = (host.request(), host.credentials()) else {
+        return;
+    };
     let caller = host.calling_app();
     let input = Input {
         request: &request,

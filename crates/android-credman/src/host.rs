@@ -8,7 +8,8 @@ use crate::version::{WasmVersion, V4};
 use android_credman_sys::{credman, v4, CallingAppInfo};
 use c8str::C8Str;
 use core::ffi::c_void;
-use core::ptr;
+use core::{fmt, ptr};
+use std::collections::TryReserveError;
 
 /// The host of one matcher invocation: the verifier's request, the wallet's
 /// credentials, the calling app, and the standalone entries. Entry sets go
@@ -40,14 +41,18 @@ impl Host {
     /// read with [`GetRequestSize`](credman::GetRequestSize) and
     /// [`GetRequestBuffer`](credman::GetRequestBuffer). A matcher reads it
     /// once.
-    pub fn request(&self) -> Vec<u8> {
+    ///
+    /// # Errors
+    ///
+    /// [`TryReserveError`] when the reported length cannot be allocated.
+    pub fn request(&self) -> Result<Vec<u8>, TryReserveError> {
         let mut size = 0u32;
         // SAFETY: `size` is a live u32 the host writes once.
         unsafe { credman::GetRequestSize(&mut size) };
-        let mut request = vec![0u8; size as usize];
+        let mut request = zeroed(size as usize)?;
         // SAFETY: the buffer holds the `size` bytes the host writes.
         unsafe { credman::GetRequestBuffer(request.as_mut_ptr().cast::<c_void>()) };
-        request
+        Ok(request)
     }
 
     /// The length in bytes of the credential blob the wallet registered, from
@@ -63,36 +68,49 @@ impl Host {
     /// [`ReadCredentialsBuffer`](credman::ReadCredentialsBuffer). Returns the
     /// count the host copied, which may be lower than `buffer.len()` and is 0
     /// past the end.
-    pub fn read_credentials_at(&self, buffer: &mut [u8], offset: usize) -> usize {
-        // SAFETY: the buffer is valid for `buffer.len()` bytes, the most the
-        // host writes.
-        unsafe {
-            credman::ReadCredentialsBuffer(
-                buffer.as_mut_ptr().cast::<c_void>(),
-                offset,
-                buffer.len(),
-            )
+    ///
+    /// # Errors
+    ///
+    /// [`CredentialsError::Overrun`] when the host reports more bytes than
+    /// `buffer` holds.
+    pub fn read_credentials_at(
+        &self,
+        buffer: &mut [u8],
+        offset: usize,
+    ) -> Result<usize, CredentialsError> {
+        let asked = buffer.len();
+        // SAFETY: the buffer is valid for `asked` bytes, the most the host
+        // writes.
+        let copied = unsafe {
+            credman::ReadCredentialsBuffer(buffer.as_mut_ptr().cast::<c_void>(), offset, asked)
+        };
+        if copied > asked {
+            return Err(CredentialsError::Overrun { asked, copied });
         }
+        Ok(copied)
     }
 
-    /// The credential blob the wallet registered. Reads until the reported
-    /// size or until a read returns nothing, and returns the bytes delivered.
-    /// A matcher reads it once.
-    pub fn credentials(&self) -> Vec<u8> {
+    /// The credential blob the wallet registered, read in as many calls as
+    /// the host needs. A matcher reads it once.
+    ///
+    /// # Errors
+    ///
+    /// [`CredentialsError`] when the reported length cannot be allocated,
+    /// the host copies nothing before that length, or it reports more bytes
+    /// than it was asked for.
+    pub fn credentials(&self) -> Result<Vec<u8>, CredentialsError> {
         let size = self.credentials_size();
-        let mut blob = vec![0u8; size];
-        let mut offset = 0;
-        while offset < size {
-            let copied = self.read_credentials_at(blob.split_at_mut(offset).1, offset);
+        let mut blob = zeroed(size).map_err(CredentialsError::TooLarge)?;
+        let mut delivered = 0;
+        while let Some(rest) = blob.get_mut(delivered..).filter(|rest| !rest.is_empty()) {
+            let copied = self.read_credentials_at(rest, delivered)?;
             if copied == 0 {
-                break;
+                return Err(CredentialsError::Incomplete { delivered, size });
             }
-            // Any value at or past `size` ends the loop, so saturating keeps
-            // the arithmetic defined without changing the outcome.
-            offset = offset.saturating_add(copied);
+            // At most `rest.len()`, so `delivered` stays within `size`.
+            delivered += copied;
         }
-        blob.truncate(offset);
-        blob
+        Ok(blob)
     }
 
     /// The app that called the Digital Credentials API, read with
@@ -213,6 +231,69 @@ impl Host {
                 entry.title.map_or(ptr::null(), C8Str::as_ptr),
                 entry.subtitle.map_or(ptr::null(), C8Str::as_ptr),
             );
+        }
+    }
+}
+
+/// `size` zero bytes, or the reason they cannot be allocated.
+fn zeroed(size: usize) -> Result<Vec<u8>, TryReserveError> {
+    let mut buffer = Vec::new();
+    buffer.try_reserve_exact(size)?;
+    buffer.resize(size, 0);
+    Ok(buffer)
+}
+
+/// Why the credential blob could not be read. Every variant but `TooLarge`
+/// is the host breaking the
+/// [`ReadCredentialsBuffer`](credman::ReadCredentialsBuffer) contract.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CredentialsError {
+    /// The blob's reported length cannot be allocated.
+    TooLarge(TryReserveError),
+    /// The host reported copying `copied` bytes into a buffer of `asked`.
+    Overrun { asked: usize, copied: usize },
+    /// The host copied nothing at byte `delivered` of the `size` bytes it
+    /// reported.
+    Incomplete { delivered: usize, size: usize },
+    /// The host reported copying `copied` bytes from `offset`, past the
+    /// `size` bytes it reported.
+    PastEnd {
+        offset: usize,
+        copied: usize,
+        size: usize,
+    },
+}
+
+impl fmt::Display for CredentialsError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TooLarge(cause) => write!(f, "credential blob too large: {cause}"),
+            Self::Overrun { asked, copied } => {
+                write!(
+                    f,
+                    "host reported {copied} credential bytes for a {asked}-byte buffer"
+                )
+            }
+            Self::Incomplete { delivered, size } => {
+                write!(f, "host stopped at credential byte {delivered} of {size}")
+            }
+            Self::PastEnd {
+                offset,
+                copied,
+                size,
+            } => write!(
+                f,
+                "host reported {copied} credential bytes from {offset}, past its size {size}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for CredentialsError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::TooLarge(cause) => Some(cause),
+            Self::Overrun { .. } | Self::Incomplete { .. } | Self::PastEnd { .. } => None,
         }
     }
 }
