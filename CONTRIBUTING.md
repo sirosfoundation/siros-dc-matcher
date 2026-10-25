@@ -8,8 +8,8 @@ source it governs is worth nothing.
 
 This repository is an independent implementation of the OpenID4VP DCQL query
 language and of the Android Credential Manager matcher ABI. It is licensed
-BSD-2-Clause, except `crates/android-credman-sys` and `crates/android-credman`,
-which are MIT OR Apache-2.0 and used here under MIT (see the README).
+BSD-2-Clause, except `crates/android-credman-sys` and `crates/android-credman`:
+MIT OR Apache-2.0, used here under MIT.
 
 The OpenWallet Foundation's [Multipaz](https://github.com/openwallet-foundation-labs/multipaz)
 project ships an Apache-2.0 credential matcher that solves the same problem
@@ -30,12 +30,8 @@ carried over line by line, or comments.
 ### You may
 
 - Use the host ABI — function names, signatures, module names, calling
-  conventions. It is an interface required for interoperability. It was first
-  extracted from the shipping `.wasm` binary's import and export tables;
-  `android-credman-sys` now declares every function of Google's reference
-  header, restating that interface and nothing else, and
-  `crates/android-credman-sys/ABI.md` cites the header and the matchers it
-  learned from by location, in its own words.
+  conventions. It is an interface required for interoperability.
+  `android-credman-sys` declares it from Google's reference header.
 - Run Multipaz's matcher binary and compare its output against ours.
 - Commit behaviour observed that way as test vectors. A vector describing what a
   program does is a fact about it.

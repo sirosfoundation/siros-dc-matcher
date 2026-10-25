@@ -1,29 +1,25 @@
 # The Credential Manager matcher ABI
 
-The whole host ABI — all 22 functions, the rule for every parameter, which
-host version guarantees what, and the evidence for each claim — is
+The full host ABI, with its evidence, is
 [`crates/android-credman-sys/ABI.md`](../crates/android-credman-sys/ABI.md).
-This page covers what this matcher uses and what follows from it.
 
 ## Imports
 
-`matcher.wasm` needs host level 2 and imports nothing above it.
-`scripts/check_matcher_abi.py` checks the built module against the ABI table;
-CI runs it on every build.
+`matcher.wasm` needs host level 2.
 
 | Function | Module | Purpose |
 |---|---|---|
-| `GetWasmVersion` | `credman` | Host ABI level. Below 2 there are no entry sets, and the matcher emits nothing |
+| `GetWasmVersion` | `credman` | Host ABI level. Below 2 the matcher emits nothing |
 | `GetCallingAppInfo` | `credman` | Writes `{package_name[256], origin[512]}` into guest memory — the platform-verified caller |
 | `GetRequestSize` / `GetRequestBuffer` | `credman` | The DC API request JSON, shaped `{"requests":[{"protocol":…,"data":…}]}` |
-| `GetCredentialsSize` / `ReadCredentialsBuffer` | `credman` | The blob the wallet registered, read at an offset until complete. Format is entirely the wallet's own |
+| `GetCredentialsSize` / `ReadCredentialsBuffer` | `credman` | The blob the wallet registered, read at an offset until complete |
 | `AddEntrySet` / `AddEntryToSet` / `AddFieldToEntrySet` | `credman_v2` | Grouped entries. Required for DCQL `credential_sets`, and carries a free-form `metadata` string |
-| `fd_write`, `proc_exit` | `wasi_snapshot_preview1` | The host provides a WASI preview-1 *subset*: Google's shipped matchers import `fd_write`, `fd_seek`, `fd_close`, `fd_fdstat_get` and `proc_exit`. It lacks `random_get`, which std's default hasher reads. The host links a module that imports it and the call traps: v0.8.0 to v0.11.0 did that on `zkp_req` requests. The crates that link into the matcher therefore use `rustc-hash` collections, and `clippy.toml` forbids std's. The Makefile stubs out the two `environ_*` imports rustc's CRT adds unconditionally |
+| `fd_write`, `proc_exit` | `wasi_snapshot_preview1` | The host provides `fd_write`, `fd_seek`, `fd_close`, `fd_fdstat_get` and `proc_exit`, and lacks `random_get`, which std's default hasher reads; `clippy.toml` forbids std's hash collections. The Makefile stubs out the two `environ_*` imports rustc's CRT adds |
 
 ## Exports
 
-`_start` and `memory`, which the host uses, and `__main_void`, which
-wasi-libc's start-up code exports and the host ignores.
+`_start` and `memory`, which the host uses, and `__main_void`, from
+wasi-libc.
 
 ## Why this settles the toolchain
 
@@ -96,15 +92,10 @@ unsigned together and the readable one is answered.
   entries, which is indistinguishable from "no matching credential". There is
   no error surface at all. Hence `panic = "abort"` and the denied `unwrap` /
   `expect` lints.
-- **No v1 fallback.** Below host level 2 the matcher emits nothing. The host
-  links a module whose imports it lacks and traps only when one is called
-  (shown for WASI by the `random_get` releases; Google's own matchers rely on
-  the same for `credman_v2`), so a runtime branch on `GetWasmVersion` could
-  serve a level-1 host with the standalone functions. Adding one is a
-  feature decision; `ABI.md` §3 has the evidence and §9 the experiment that
-  confirms it for a `credman` module.
-- **`GetWasmVersion` is read first.** It decides whether the matcher runs at
-  all, and it goes into entry metadata, so a field report says which host ABI
-  produced the behaviour.
+- **No v1 fallback.** Below host level 2 the matcher emits nothing. A missing
+  import traps only when called (`ABI.md` §3), so a runtime branch on
+  `GetWasmVersion` could serve a level-1 host.
+- **`GetWasmVersion` goes into entry metadata**, so a field report says which
+  host ABI produced the behaviour.
 - **No network, no filesystem, hard time budget.** Everything the matcher needs
   arrives through the two buffers above.
