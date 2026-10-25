@@ -43,13 +43,20 @@ against the 307,200-byte budget (303,914 before).
 
 - `siros-zkp-req`, the `zkp_req` protocol layer, and `siros-zkp-req-nym-auth`, the nym_auth
   catalogue with the Longfellow and Vega systems, the session binding, the Wallet's credential
-  tests, a presenter in phases and the Verifier's checks. Proving runs in the host behind
-  `NymAuthProver` and `NymAuthProofVerifier`. Both crates hold Rust 1.82.
+  tests, a presenter in phases and the Verifier's checks, behind `NymAuthProver` and
+  `NymAuthProofVerifier`. Both crates hold Rust 1.82. `NymAuthSystem::circuit_artifact` gives
+  the circuit artifact pins of the system rulebooks' Section 8.
+- The `proving/` workspace: `siros-zkp-backend-longfellow` and `siros-zkp-backend-vega`
+  implement the prover and verifier of each system over zk-cred-longfellow and zk-cred-vega,
+  and check the circuit artifact the host fetched against its pin. CI runs real proofs of both
+  systems. The matcher compiles no prover.
 - FFI module `zkp_req`: `zkp_req_match`, `zkp_req_session`, `zkp_req_jwk_thumbprint`,
   `zkp_req_prepare` with `FfiPrepared`, `zkp_req_vp_token_json`, `zkp_req_vp_token_cbor`, and
-  `zkp_req_verify` with a host-implemented `FfiProofVerifier`.
-- `siros-zkp-req-wasm`, the presenter for the browser, built with `wasm-pack`; CI lints and
-  builds it for `wasm32-unknown-unknown` and checks its imports.
+  `zkp_req_verify` with a host-implemented `FfiProofVerifier`, whose `FfiProofCheck::Internal`
+  reports a verifier that failed on its own inputs.
+- `siros-zkp-req-wasm` (in `proving/`), the presenter for the browser with both provers on one
+  thread: `ZkpProvers` loads the artifacts, `ZkpPrepared.prove` returns the presentation. CI
+  lints and builds it for `wasm32-unknown-unknown` and checks its imports.
 - Vectors: 50 protocol request vectors (`crates/siros-zkp-req/tests/vectors/request`), 72
   catalogue request vectors and 149 presentation vectors
   (`crates/siros-zkp-req-nym-auth/tests/vectors/`, the latter from

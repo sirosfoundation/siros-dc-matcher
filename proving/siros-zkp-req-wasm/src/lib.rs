@@ -1,11 +1,11 @@
-//! The `zkp_req` presenter for the browser, built with `wasm-pack build --target web` and run in
-//! a Web Worker or the page.
+//! The `zkp_req` presenter for the browser, with the Longfellow and Vega provers, built with
+//! `wasm-pack build --target web` and run in a Web Worker. It proves on one thread.
 //!
 //! It is the presenter behind the wallet frontend's in-page host (`ZkpPresenterInPageHost` of
-//! `@sirosfoundation/zkp-req`): `matchQuery`, then the wallet's one consent screen, then
-//! `prepare`, the device signature, the job for a system's prover, and `assemble`. Proving
-//! stays outside: a host runs the job with a zk-cred prover (zk-cred-longfellow,
-//! zk-cred-vega). Every call checks everything again; nothing is kept between calls.
+//! `@sirosfoundation/zkp-req`): `ZkpProvers` loads the circuit artifacts the host fetched,
+//! `matchQuery` plans, the wallet shows its one consent screen, `prepare` checks the candidate
+//! again, the device key signs `dataToSign`, and `prove` returns the presentation. Every call
+//! checks everything again.
 //!
 //! Objects cross the boundary with the snake_case names of the frontend's types, bytes as
 //! `Uint8Array`. A refusal throws an object `{error_code, kind, code, errors?}`: `error_code` is
@@ -17,6 +17,8 @@
 use serde::{Deserialize, Serialize};
 use serde_bytes::ByteBuf;
 use serde_json::Value;
+use siros_zkp_backend_longfellow::{self as longfellow, LongfellowProver};
+use siros_zkp_backend_vega::{self as vega, VegaNymAuth};
 use siros_zkp_req::{Candidate, ErrorCode, Match, ZkpPresentation};
 use siros_zkp_req_nym_auth::date::Date;
 use siros_zkp_req_nym_auth::mdoc::StoredCredential;
@@ -25,7 +27,9 @@ use siros_zkp_req_nym_auth::policy::{check_request, Channel};
 use siros_zkp_req_nym_auth::presenter::{
     self, MatchInput, NymAuthMatch, Prepared, ProveError, ProveInput, Session,
 };
-use siros_zkp_req_nym_auth::prover::{ProofOutput, Statement};
+use siros_zkp_req_nym_auth::prover::{
+    NymAuthProver, ProofJob, ProofOutput, ProverFailure, Statement,
+};
 use siros_zkp_req_nym_auth::system::{pair_code, NymAuthSystem};
 use siros_zkp_req_nym_auth::verifier_id::VerifierId;
 use wasm_bindgen::prelude::*;
@@ -417,14 +421,6 @@ impl From<&Statement> for JsStatement {
     }
 }
 
-#[derive(Serialize)]
-struct JsProofJob {
-    statement: JsStatement,
-    issuer_signed: ByteBuf,
-    secret_seed: ByteBuf,
-    device_signature: ByteBuf,
-}
-
 fn prove_error(e: ProveError) -> JsValue {
     match e {
         ProveError::Invalid(rule) => invalid(rule.code()),
@@ -487,37 +483,96 @@ impl ZkpPrepared {
         to_js(&JsStatement::from(self.0.statement()))
     }
 
-    /// The prover's job, once the signature (`r ‖ s`) verifies under the MSO's device key.
+    /// Proves with `provers` once the device signature (`r ‖ s`) verifies under the MSO's
+    /// device key, and returns the CBOR `ZkpPresentation`.
     ///
     /// # Errors
     ///
-    /// Throws `device_binding`, or `{kind: "host"}` for a signature that is not 64 bytes.
-    pub fn job(&self, device_signature: &[u8]) -> Result<JsValue, JsValue> {
-        let job = self.0.job(device_signature).map_err(prove_error)?;
-        Ok(to_js(&JsProofJob {
-            statement: JsStatement::from(&job.statement),
-            issuer_signed: ByteBuf::from(job.issuer_signed.clone()),
-            secret_seed: ByteBuf::from(job.secret_seed.to_vec()),
-            device_signature: ByteBuf::from(job.device_signature.to_vec()),
-        }))
-    }
-
-    /// The CBOR `ZkpPresentation` of the prover's output.
-    ///
-    /// # Errors
-    ///
-    /// Throws `{kind: "host"}` when the pseudonym is not the catalogue's or `zk_proof` breaks
-    /// the backend's length rules.
-    pub fn assemble(&self, zk_proof: Vec<u8>, pseudonym: &[u8]) -> Result<Vec<u8>, JsValue> {
-        let pseudonym: [u8; 32] = pseudonym.try_into().map_err(|_| host("pseudonym_length"))?;
+    /// Throws `device_binding` or `credential_form` as `{kind: "rejected"}`, and `{kind:
+    /// "host"}` for a signature that is not 64 bytes or a system `provers` has not loaded.
+    pub fn prove(&self, provers: &ZkpProvers, device_signature: &[u8]) -> Result<Vec<u8>, JsValue> {
         let presentation = self
             .0
-            .assemble(&ProofOutput {
-                zk_proof,
-                pseudonym,
-            })
+            .prove(device_signature, provers)
             .map_err(prove_error)?;
         Ok(presentation.encode())
+    }
+}
+
+/// The provers of the systems whose artifacts the host loaded.
+#[wasm_bindgen]
+#[derive(Default)]
+pub struct ZkpProvers {
+    longfellow: Option<LongfellowProver>,
+    vega: Option<VegaNymAuth>,
+}
+
+#[wasm_bindgen]
+impl ZkpProvers {
+    /// No system yet.
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Loads `urn:circuits:longfellow:nym_auth:v1` from `circuits.zst`.
+    ///
+    /// # Errors
+    ///
+    /// Throws `{kind: "host"}` with `artifact_pin` for bytes that are not the pinned artifact,
+    /// `artifact_decompress`, or `artifact_refused`.
+    #[wasm_bindgen(js_name = loadLongfellow)]
+    pub fn load_longfellow(&mut self, circuits_zst: &[u8]) -> Result<(), JsValue> {
+        let prover = LongfellowProver::load(circuits_zst).map_err(|e| {
+            host(match e {
+                longfellow::ArtifactError::Pin(_) => "artifact_pin",
+                longfellow::ArtifactError::Decompress => "artifact_decompress",
+                longfellow::ArtifactError::Circuits(_) => "artifact_refused",
+            })
+        })?;
+        self.longfellow = Some(prover);
+        Ok(())
+    }
+
+    /// Loads `urn:circuits:vega:nym_auth:v1` from `shapes.zst`.
+    ///
+    /// # Errors
+    ///
+    /// Throws `{kind: "host"}` with `artifact_pin` for bytes that are not the pinned artifact,
+    /// `artifact_decompress`, or `artifact_refused`.
+    #[wasm_bindgen(js_name = loadVega)]
+    pub fn load_vega(&mut self, shapes_zst: &[u8]) -> Result<(), JsValue> {
+        let keys = VegaNymAuth::load(shapes_zst).map_err(|e| {
+            host(match e {
+                vega::ArtifactError::Pin(_) => "artifact_pin",
+                vega::ArtifactError::Decompress => "artifact_decompress",
+                vega::ArtifactError::Shapes(_) => "artifact_refused",
+            })
+        })?;
+        self.vega = Some(keys);
+        Ok(())
+    }
+
+    /// The identifiers of the loaded systems, for `matchQuery`'s `systems`.
+    pub fn systems(&self) -> Vec<String> {
+        [
+            (NymAuthSystem::LongfellowV1, self.longfellow.is_some()),
+            (NymAuthSystem::VegaV1, self.vega.is_some()),
+        ]
+        .into_iter()
+        .filter(|(_, loaded)| *loaded)
+        .map(|(system, _)| system.id().to_owned())
+        .collect()
+    }
+}
+
+impl NymAuthProver for ZkpProvers {
+    fn prove(&self, job: &ProofJob) -> Result<ProofOutput, ProverFailure> {
+        match job.statement.system {
+            NymAuthSystem::LongfellowV1 => self.longfellow.as_ref().map(|p| p.prove(job)),
+            NymAuthSystem::VegaV1 => self.vega.as_ref().map(|p| p.prove(job)),
+        }
+        .unwrap_or(Err(ProverFailure::Unavailable))
     }
 }
 

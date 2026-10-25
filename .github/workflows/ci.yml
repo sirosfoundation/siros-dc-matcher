@@ -230,9 +230,8 @@ jobs:
       #
       # The zkp_req crates are in the matcher, so they hold the same floor.
       #
-      # -ffi, -testhost and siros-zkp-req-wasm are deliberately excluded: they
-      # declare 1.88 in their own manifests. Checking them here would only
-      # re-discover that.
+      # -ffi and -testhost are deliberately excluded: they declare 1.88 in
+      # their own manifests. Checking them here would only re-discover that.
       - name: The 1.82 crates build on 1.82
         run: |
           cargo check --locked --all-features \
@@ -270,15 +269,42 @@ jobs:
       # only fails at release time otherwise.
       - run: cargo publish --locked --dry-run -p siros-dcql
 
+  # The proof backends and what links them live in the proving workspace:
+  # zk-cred-longfellow and zk-cred-vega need a Cargo newer than 1.82.
+  proving:
+    name: Proving workspace
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: proving
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: ./.github/actions/rust-toolchain
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: proving
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - run: cargo test --locked --workspace
+      # Real proofs of both systems, verified by the Verifier.
+      - run: scripts/fetch-artifacts.sh
+      - run: cargo test --locked --release -p siros-zkp-proving-e2e -- --ignored
+
   browser:
     name: Build the browser presenter
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: proving
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: ./.github/actions/rust-toolchain
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: proving
+      # zstd-sys compiles C for wasm32 with clang.
       - run: cargo clippy --locked -p siros-zkp-req-wasm --target wasm32-unknown-unknown -- -D warnings
       - run: cargo build --locked -p siros-zkp-req-wasm --target wasm32-unknown-unknown --release
 

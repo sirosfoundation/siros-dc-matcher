@@ -52,6 +52,17 @@ cargo clippy --locked -p siros-dc-matcher-wasm --target wasm32-wasip1 \
   --profile wasm-release -- -D warnings
 make check-bindings    # committed bindings match the current API
 cargo publish --locked --dry-run -p siros-dcql
+```
+
+The proof backends and the browser presenter are in the `proving/` workspace; its CI runs from
+there:
+
+```sh
+cd proving
+cargo fmt --all -- --check
+cargo clippy --locked --workspace --all-targets -- -D warnings
+cargo test --locked --workspace
+scripts/fetch-artifacts.sh && cargo test --locked --release -p siros-zkp-proving-e2e -- --ignored
 cargo clippy --locked -p siros-zkp-req-wasm --target wasm32-unknown-unknown \
   -- -D warnings       # after rustup target add wasm32-unknown-unknown
 ```
@@ -110,7 +121,9 @@ Two profile details are load-bearing and easy to undo:
 | [`siros-dc-matcher-testhost`](crates/siros-dc-matcher-testhost) | native, dev | A wasmtime host implementing the Credential Manager ABI, so the shipping `.wasm` is testable off-device. |
 | [`siros-zkp-req`](crates/siros-zkp-req) | any | The `zkp_req` protocol layer: the query and its options, the usable pair, the presentation and the `vp_token`, the Verifier's structural checks. |
 | [`siros-zkp-req-nym-auth`](crates/siros-zkp-req-nym-auth) | any | The nym_auth catalogue and its Longfellow and Vega systems: session binding, credential checks, the presenter and verifier around a host's prover. |
-| [`siros-zkp-req-wasm`](crates/siros-zkp-req-wasm) | `wasm32-unknown-unknown` | The `zkp_req` presenter for the browser, built with `wasm-pack`. |
+| [`siros-zkp-backend-longfellow`](proving/siros-zkp-backend-longfellow) | any | The Longfellow nym_auth system on `longfellow-libzk-v1`: zk-cred-longfellow behind the rulebook's artifact pins. In `proving/`. |
+| [`siros-zkp-backend-vega`](proving/siros-zkp-backend-vega) | any | The Vega nym_auth system on `vega-v1`: zk-cred-vega behind the rulebook's artifact pins. In `proving/`. |
+| [`siros-zkp-req-wasm`](proving/siros-zkp-req-wasm) | `wasm32-unknown-unknown` | The `zkp_req` presenter for the browser, with both provers, built with `wasm-pack`. In `proving/`. |
 
 [`docs/plan.md`](docs/plan.md) covers the design and the reasoning behind it.
 [`docs/zkp_req_core.md`](docs/zkp_req_core.md) covers the `zkp_req` crates, their API and the

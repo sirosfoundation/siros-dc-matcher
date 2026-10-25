@@ -8,7 +8,6 @@ members = [
     "crates/siros-dc-matcher-testhost",
     "crates/siros-zkp-req",
     "crates/siros-zkp-req-nym-auth",
-    "crates/siros-zkp-req-wasm",
 ]
 
 [workspace.package]
