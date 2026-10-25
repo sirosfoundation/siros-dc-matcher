@@ -4144,7 +4144,7 @@ public enum ZkpReqError {
          * The system rulebook's code (Section 9), or the step of `zkp_req`, Section 4.1.
          */code: String, 
         /**
-         * A finer identifier of the failed check.
+         * The failed check, for the logs. Its wording may change; match on `code`.
          */detail: String
     )
 }

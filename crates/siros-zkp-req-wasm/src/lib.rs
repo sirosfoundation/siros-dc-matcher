@@ -17,7 +17,7 @@
 use serde::{Deserialize, Serialize};
 use serde_bytes::ByteBuf;
 use serde_json::Value;
-use siros_zkp_req::{Candidate, ErrorCode, Match, PairRefusal, ZkpPresentation};
+use siros_zkp_req::{Candidate, ErrorCode, Match, ZkpPresentation};
 use siros_zkp_req_nym_auth::date::Date;
 use siros_zkp_req_nym_auth::mdoc::StoredCredential;
 use siros_zkp_req_nym_auth::outcome::ZkpError;
@@ -26,7 +26,7 @@ use siros_zkp_req_nym_auth::presenter::{
     self, MatchInput, NymAuthMatch, Prepared, ProveError, ProveInput, Session,
 };
 use siros_zkp_req_nym_auth::prover::{ProofOutput, Statement};
-use siros_zkp_req_nym_auth::system::{NymAuthSystem, Unsupported};
+use siros_zkp_req_nym_auth::system::{pair_code, NymAuthSystem};
 use siros_zkp_req_nym_auth::verifier_id::VerifierId;
 use wasm_bindgen::prelude::*;
 
@@ -202,15 +202,6 @@ enum JsMatch {
     },
 }
 
-fn pair_code(r: &PairRefusal<Unsupported>) -> &'static str {
-    match r {
-        PairRefusal::SystemNotListed => "system_not_listed",
-        PairRefusal::NoListedBackend => "no_listed_backend",
-        PairRefusal::CredentialType => "credential_type",
-        PairRefusal::Unsupported(u) => u.code(),
-    }
-}
-
 impl From<NymAuthMatch> for JsMatch {
     fn from(m: NymAuthMatch) -> Self {
         match m {
@@ -284,7 +275,7 @@ pub fn match_query(input: JsValue) -> Result<JsValue, JsValue> {
         systems: &systems,
         now: input.now,
     })
-    .map_err(|e| host(&format!("{e:?}")))?;
+    .map_err(|e| host(e.code()))?;
     Ok(to_js(&JsMatch::from(matched)))
 }
 
@@ -444,7 +435,7 @@ fn prove_error(e: ProveError) -> JsValue {
             errors: errors.iter().map(JsZkpError::from).collect(),
         }),
         ProveError::NotUsable(r) => thrown(ErrorCode::AccessDenied, "unsupported", pair_code(&r)),
-        other => host(&format!("{other:?}")),
+        other => host(other.code()),
     }
 }
 

@@ -81,6 +81,18 @@ pub enum ProverFailure {
     Failed,
 }
 
+impl ProverFailure {
+    /// A stable identifier: `credential_form` is the code of the system rulebooks' Section 9.
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::CredentialForm => "credential_form",
+            Self::Cancelled => "prover_cancelled",
+            Self::Unavailable => "prover_unavailable",
+            Self::Failed => "prover_failed",
+        }
+    }
+}
+
 /// A system's prover.
 pub trait NymAuthProver {
     /// Proves `job.statement`.

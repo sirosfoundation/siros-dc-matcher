@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 use siros_zkp_req::cbor::Value as Cbor;
-use siros_zkp_req::{Candidate, ErrorCode, Match, PairRefusal, ZkpPresentation};
+use siros_zkp_req::{Candidate, ErrorCode, Match, ZkpPresentation};
 use siros_zkp_req_nym_auth::date::Date;
 use siros_zkp_req_nym_auth::mdoc::StoredCredential;
 use siros_zkp_req_nym_auth::outcome::ZkpError;
@@ -23,7 +23,7 @@ use siros_zkp_req_nym_auth::presenter::{
 };
 use siros_zkp_req_nym_auth::prover::{NymAuthProofVerifier, ProofFailure, ProofOutput, Statement};
 use siros_zkp_req_nym_auth::session::ec_jwk_thumbprint;
-use siros_zkp_req_nym_auth::system::{NymAuthSystem, Unsupported};
+use siros_zkp_req_nym_auth::system::{pair_code, NymAuthSystem};
 use siros_zkp_req_nym_auth::verifier_id::VerifierId;
 use siros_zkp_req_nym_auth::verify::{verify, Rejection, Tolerance, VerifyInput};
 
@@ -68,7 +68,7 @@ pub enum ZkpReqError {
     Refused {
         /// The system rulebook's code (Section 9), or the step of `zkp_req`, Section 4.1.
         code: String,
-        /// A finer identifier of the failed check.
+        /// The failed check, for the logs. Its wording may change; match on `code`.
         detail: String,
     },
 }
@@ -232,15 +232,6 @@ pub enum FfiZkpMatch {
     },
 }
 
-fn pair_code(refusal: &PairRefusal<Unsupported>) -> String {
-    match refusal {
-        PairRefusal::SystemNotListed => "system_not_listed".to_owned(),
-        PairRefusal::NoListedBackend => "no_listed_backend".to_owned(),
-        PairRefusal::CredentialType => "credential_type".to_owned(),
-        PairRefusal::Unsupported(u) => u.code().to_owned(),
-    }
-}
-
 impl From<NymAuthMatch> for FfiZkpMatch {
     fn from(m: NymAuthMatch) -> Self {
         match m {
@@ -266,7 +257,7 @@ impl From<NymAuthMatch> for FfiZkpMatch {
                             .iter()
                             .map(|(system_id, r)| FfiPairRefusal {
                                 system_id: system_id.clone(),
-                                code: pair_code(r),
+                                code: pair_code(r).to_owned(),
                             })
                             .collect(),
                     })
@@ -328,7 +319,7 @@ pub fn zkp_req_match(
         systems: &systems,
         now,
     })
-    .map_err(|e| host(&format!("{e:?}")))?;
+    .map_err(|e| host(e.code()))?;
     Ok(matched.into())
 }
 
@@ -523,9 +514,9 @@ fn prove_error(e: ProveError) -> ZkpReqError {
         },
         ProveError::NotUsable(refusal) => ZkpReqError::Unsupported {
             error_code: access_denied,
-            code: pair_code(&refusal),
+            code: pair_code(&refusal).to_owned(),
         },
-        other => host(&format!("{other:?}")),
+        other => host(other.code()),
     }
 }
 

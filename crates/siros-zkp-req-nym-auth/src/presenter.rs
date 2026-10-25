@@ -23,7 +23,7 @@ use crate::mdoc::{P256Key, StoredCredential};
 use crate::outcome::{CredentialCode, InvalidRequest, ItemCode, ZkpError};
 use crate::prover::{NymAuthProver, ProofJob, ProofOutput, ProverFailure, Statement};
 use crate::session::{device_message, Handover};
-use crate::system::{NymAuthSystem, Unsupported};
+use crate::system::{pair_code, NymAuthSystem, Unsupported};
 use crate::verifier_id::{pseudonym_sha256, sha256, verifier_input, VerifierId};
 
 /// The outcome of matching one nym_auth query.
@@ -49,9 +49,23 @@ pub enum HostError {
     CredentialMismatch,
 }
 
+impl HostError {
+    /// A stable identifier.
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Time => "time",
+            Self::AnchorsMissing => "anchors_missing",
+            Self::SeedLength => "seed_length",
+            Self::SignatureLength => "signature_length",
+            Self::CandidateMismatch => "candidate_mismatch",
+            Self::CredentialMismatch => "credential_mismatch",
+        }
+    }
+}
+
 impl fmt::Display for HostError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "host input: {self:?}")
+        write!(f, "host input: {}", self.code())
     }
 }
 
@@ -361,7 +375,30 @@ impl ProveError {
             _ => siros_zkp_req::ErrorCode::AccessDenied,
         }
     }
+
+    /// A stable identifier: the code of the rule, the host input, the pair refusal, the signer
+    /// or the prover; `credential` for a credential that fails, with its codes in the variant.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Invalid(rule) => rule.code(),
+            Self::Host(e) => e.code(),
+            Self::NotUsable(refusal) => pair_code(refusal),
+            Self::Rejected(_) => "credential",
+            Self::Signer(e) => e.code(),
+            Self::Prover(e) => e.code(),
+            Self::PseudonymMismatch => "pseudonym_mismatch",
+            Self::ZkProofLength => "zk_proof_length",
+        }
+    }
 }
+
+impl fmt::Display for ProveError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.code())
+    }
+}
+
+impl std::error::Error for ProveError {}
 
 impl From<HostError> for ProveError {
     fn from(e: HostError) -> Self {
@@ -376,6 +413,16 @@ pub enum SignFailure {
     Cancelled,
     /// The key is not available.
     Unavailable,
+}
+
+impl SignFailure {
+    /// A stable identifier.
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Cancelled => "sign_cancelled",
+            Self::Unavailable => "sign_unavailable",
+        }
+    }
 }
 
 /// A presentation ready for the device signature, then for the prover.

@@ -4550,7 +4550,7 @@ sealed class ZkpReqException: kotlin.Exception() {
         val `code`: kotlin.String, 
         
         /**
-         * A finer identifier of the failed check.
+         * The failed check, for the logs. Its wording may change; match on `code`.
          */
         val `detail`: kotlin.String
         ) : ZkpReqException() {

@@ -5,7 +5,7 @@
 
 use std::fmt;
 
-use siros_zkp_req::CredentialType;
+use siros_zkp_req::{CredentialType, PairRefusal};
 
 use crate::age::Bounds;
 use crate::catalogue::{Config, Form, Function, Item, Prf, MDOC_DOCTYPE};
@@ -48,6 +48,16 @@ impl Unsupported {
 impl fmt::Display for Unsupported {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.code())
+    }
+}
+
+/// The stable identifier of a pair refusal (`zkp_req`, Section 1.3) for a nym_auth system.
+pub fn pair_code(refusal: &PairRefusal<Unsupported>) -> &'static str {
+    match refusal {
+        PairRefusal::SystemNotListed => "system_not_listed",
+        PairRefusal::NoListedBackend => "no_listed_backend",
+        PairRefusal::CredentialType => "credential_type",
+        PairRefusal::Unsupported(u) => u.code(),
     }
 }
 
