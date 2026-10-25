@@ -18,8 +18,8 @@ c8str = { workspace = true }
 default = ["std"]
 # `CredentialReader`, a `std::io::Read + Seek` view of the registered blob.
 std = []
-# Host levels, as in android-credman-sys. Each enables the capability token
-# of that level and the calls it guards.
+# Host levels. Each enables the capability token of that level and the calls
+# it guards.
 v2 = ["android-credman-sys/v2"]
 v3 = ["v2", "android-credman-sys/v3"]
 v4 = ["android-credman-sys/v4"]

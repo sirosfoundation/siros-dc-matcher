@@ -12,7 +12,7 @@
 //! A WebAssembly module names its imports, and a host that lacks a named
 //! import may refuse to instantiate the module. Rust emits an import only for
 //! a function the final binary calls, so a matcher imports exactly what it
-//! uses. Each host level beyond the first is behind a Cargo feature
+//! uses. Each host level beyond the base is behind a Cargo feature
 //! (`v2` … `v7`), which keeps a matcher from reaching a level by accident.
 //! Calling a function of level N on a host that reports less than N through
 //! [`credman::GetWasmVersion`] is outside the contract; the `android-credman`
@@ -272,10 +272,19 @@ pub mod credman_v2 {
             set_id: *const c_char,
             set_index: i32,
         );
+    }
+}
 
-        /// [`AddPaymentEntryToSet`] with a nullable `additional_info`. Host
-        /// level 3: it lives in this module but arrived after it.
-        #[cfg(feature = "v3")]
+/// Host level 3. Its one function is imported from `credman_v2`: Google's
+/// header declares it there.
+#[cfg(all(target_arch = "wasm32", feature = "v3"))]
+pub mod credman_v3 {
+    use super::c_char;
+
+    #[link(wasm_import_module = "credman_v2")]
+    extern "C" {
+        /// [`crate::credman_v2::AddPaymentEntryToSet`] with a nullable
+        /// `additional_info`.
         pub fn AddPaymentEntryToSetV2(
             cred_id: *const c_char,
             merchant_name: *const c_char,

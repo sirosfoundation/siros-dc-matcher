@@ -12,19 +12,12 @@ readme = "README.md"
 
 [dependencies]
 
-# One feature per host level. A feature makes the imports of that level
-# declarable; the matcher still has to check GetWasmVersion before calling
-# them (see android-credman). Levels without a feature are always declared.
+# One feature per host level: `vN` declares the functions of level N.
+# Level 3 is `AddPaymentEntryToSetV2`, imported from `credman_v2`.
 [features]
-# credman_v2: entry sets.
 v2 = []
-# credman_v2.AddPaymentEntryToSetV2, added to the v2 module at host level 3.
-v3 = ["v2"]
-# credman_v4: SelfDeclarePackageInfo.
+v3 = []
 v4 = []
-# credman_v5: AddMetadataDisplayTextToEntrySet.
 v5 = []
-# credman_v6: SetAdditionalDisclaimerAndUrlForVerificationEntryInCredentialSet.
 v6 = []
-# credman_v7: SetDelegationTypeForEntryInSet.
 v7 = []

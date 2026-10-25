@@ -90,6 +90,12 @@ exists in any of the 14 header revisions.
 | 6 | `credman_v6.SetAdditionalDisclaimerAndUrlForVerificationEntryInCredentialSet` | 2026-03-02 [`98e6c9c9`][HH-v6] | Module name. GP calls it with no level check (§7) |
 | 7 | `credman_v7.SetDelegationTypeForEntryInSet` | 2026-09-17 [`4230483c`][HH-v7] | GP `wasm_version >= 7` ([lines 249–251][GP-v7]) |
 
+`android-credman-sys` groups declarations by level. Google's header declares
+one function out of its level's module: `AddPaymentEntryToSetV2` (level 3)
+sits in `credman_v2`, so the level-3 group imports it from there. The
+`credman` functions added after the first header revision have dates and no
+level in any source, so they stay with `credman`.
+
 Levels 0 and 1 grant the same set: no source distinguishes them. GR's tests
 use 1 for "no sets"; GT's fake defaults to 9999.
 
@@ -129,9 +135,10 @@ The design follows from it, and holds under either model:
   that only the reported version hands out (`android-credman`), so a matcher
   calls nothing above the level the host reported.
 - **The import table stays minimal.** Rust emits an import only for a
-  function the final binary references, and each level is behind a Cargo
-  feature (`v2` … `v7`). The binary's highest import level is what an eager
-  host would need. `scripts/check_matcher_abi.py` reports it.
+  function the final binary references, and each level is behind an
+  `android-credman-sys` feature (`v2` … `v7`). The binary's highest import
+  level is what an eager host would need. `scripts/check_matcher_abi.py`
+  reports it.
 
 Device experiment 1 (§9) confirms the same for a `credman` module.
 
