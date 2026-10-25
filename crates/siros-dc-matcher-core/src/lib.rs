@@ -1,7 +1,6 @@
 //! The parts of the matcher that are not the DCQL engine and not the WASM
-//! binary: the credential blob we register with the platform, the match
-//! profile that makes the rules configurable, and the sink that emits picker
-//! entries.
+//! binary: the credential blob we register with the platform, and the match
+//! profile that makes the rules configurable.
 //!
 //! # Status
 //!
@@ -23,4 +22,3 @@ pub mod profile;
 pub mod proof_time;
 pub mod purpose;
 pub mod request;
-pub mod sink;

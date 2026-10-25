@@ -1,6 +1,8 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/android-credman-sys",
+    "crates/android-credman",
     "crates/siros-dcql",
     "crates/siros-dc-matcher-core",
     "crates/siros-dc-matcher-wasm",
@@ -14,13 +16,19 @@ license = "BSD-2-Clause"
 repository = "https://github.com/sirosfoundation/siros-dc-matcher"
 authors = ["SIROS Foundation"]
 # Held by everything that ships inside the credential picker — siros-dcql,
-# -core and -wasm — and checked on 1.82 in CI. The -ffi and -testhost crates
-# override this upward: uniffi's bindgen chain and wasmtime both need more.
+# -core, -wasm and the two android-credman crates — and checked on 1.82 in
+# CI. The -ffi and -testhost crates override this upward: uniffi's bindgen
+# chain and wasmtime both need more.
 rust-version = "1.82"
 
 [workspace.dependencies]
 siros-dcql = { version = "0.11.0", path = "crates/siros-dcql" }
 siros-dc-matcher-core = { path = "crates/siros-dc-matcher-core" }
+android-credman = { path = "crates/android-credman", version = "0.1.0" }
+
+# Strings that are UTF-8 and NUL-terminated at once: the string type of the
+# android-credman boundary.
+c8str = { version = "0.2.1", features = ["alloc"] }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

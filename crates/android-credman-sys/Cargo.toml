@@ -1,11 +1,30 @@
 [package]
 name = "android-credman-sys"
 version = "0.1.0"
+description = "Raw imports of the Android Credential Manager matcher host ABI"
 license = "MIT OR Apache-2.0"
-edition = "2024"
+# Edition 2021: this crate ships inside siros-dc-matcher's matcher.wasm,
+# whose crates hold Rust 1.82 (checked by the `msrv` CI job), and edition 2024
+# needs 1.85.
+edition = "2021"
+rust-version = "1.82"
 readme = "README.md"
 
 [dependencies]
 
+# One feature per host level. A feature makes the imports of that level
+# declarable; the matcher still has to check GetWasmVersion before calling
+# them (see android-credman). Levels without a feature are always declared.
 [features]
-test-shim = []
+# credman_v2: entry sets.
+v2 = []
+# credman_v2.AddPaymentEntryToSetV2, added to the v2 module at host level 3.
+v3 = ["v2"]
+# credman_v4: SelfDeclarePackageInfo.
+v4 = []
+# credman_v5: AddMetadataDisplayTextToEntrySet.
+v5 = []
+# credman_v6: SetAdditionalDisclaimerAndUrlForVerificationEntryInCredentialSet.
+v6 = []
+# credman_v7: SetDelegationTypeForEntryInSet.
+v7 = []

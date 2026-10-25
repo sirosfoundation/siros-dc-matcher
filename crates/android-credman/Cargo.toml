@@ -1,14 +1,28 @@
 [package]
 name = "android-credman"
 version = "0.1.0"
+description = "Typed, version-gated access to the Android Credential Manager matcher host ABI"
 license = "MIT OR Apache-2.0"
-edition = "2024"
+# Edition 2021: this crate ships inside siros-dc-matcher's matcher.wasm,
+# whose crates hold Rust 1.82 (checked by the `msrv` CI job), and edition 2024
+# needs 1.85.
+edition = "2021"
+rust-version = "1.82"
 readme = "README.md"
 
 [dependencies]
-android-credman-sys = { workspace = true }
+android-credman-sys = { path = "../android-credman-sys", version = "0.1.0" }
 c8str = { workspace = true }
-thiserror = { workspace = true }
 
 [features]
-test-shim = ["android-credman-sys/test-shim"]
+default = ["std"]
+# `CredentialReader`, a `std::io::Read + Seek` view of the registered blob.
+std = []
+# Host levels, as in android-credman-sys. Each enables the capability token
+# of that level and the calls it guards.
+v2 = ["android-credman-sys/v2"]
+v3 = ["v2", "android-credman-sys/v3"]
+v4 = ["android-credman-sys/v4"]
+v5 = ["v2", "android-credman-sys/v5"]
+v6 = ["v2", "android-credman-sys/v6"]
+v7 = ["v2", "android-credman-sys/v7"]

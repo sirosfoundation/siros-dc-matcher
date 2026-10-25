@@ -1,30 +1,47 @@
 # android-credman-sys
 
-Raw FFI bindings for the Android Credential Manager matcher ABI.
+Raw imports of the Android Credential Manager matcher host ABI: the functions
+a WebAssembly matcher calls to read the request and the registered blob and
+to offer entries in the credential picker.
 
-## Purpose
+All 22 functions of Google's reference header
+(`digitalcredentialsdev/CMWallet` `matcher/credentialmanager.h` at
+`abcf38a3`) are declared under their exact import module and name, with the
+header's C types, together with the `CallingAppInfo` layout.
 
-This crate mirrors the host-imported C ABI used by CMWallet matchers
-(`matcher/credentialmanager.h`) with Rust `extern "C"` declarations.
+[`ABI.md`](ABI.md) is the contract: for every parameter, whether NULL is
+accepted and what it means, how lengths work, and which host version
+guarantees each function, with the evidence for each rule and the device
+experiments that would settle what remains open.
 
-Use this crate when you need exact symbol-level parity.
+## Modules and features
 
-## How To Use
+| Import module | Host level | Feature |
+|---|---|---|
+| `credman` | every host | always |
+| `credman_v2` | 2 (`AddPaymentEntryToSetV2`: 3) | `v2` (`v3`) |
+| `credman_v4` | 4 | `v4` |
+| `credman_v5` | 5 | `v5` |
+| `credman_v6` | 6 | `v6` |
+| `credman_v7` | 7 | `v7` |
 
-- Read verifier request bytes via `credman::GetRequestSize` and `credman::GetRequestBuffer`.
-- Read credential blob bytes via `credman::GetCredentialsSize` and `credman::ReadCredentialsBuffer`.
-- Emit standalone entries through `credman::*` functions.
-- Emit grouped/set entries through `credman_v2::*` functions.
-- Use `credman_v4::SelfDeclarePackageInfo` only for privileged/system scenarios.
+The functions exist on `wasm32` only. A binary imports exactly the functions
+it calls; a feature makes a level's functions declarable.
 
-## Pointer and String Conventions
+## Use
 
-- Text parameters are UTF-8 C strings (`*const c_char`) and are typically nullable.
-- Binary payloads use `(ptr, len)` pairs where `ptr` may be null if `len == 0`.
-- `set_index` is 0-based for all set APIs.
+These are `unsafe` raw imports. The `android-credman` crate states the
+contract in types and gates each level on the version the host reports;
+prefer it.
 
-## Safety
+## Provenance
 
-These are raw host imports. Callers must uphold pointer validity and lifetime rules.
-Prefer the higher-level `android-credman` crate unless you need direct ABI control.
+The declarations restate the interface of the reference header (module and
+function names, parameter order and C types), which a matcher must match to
+link. The documentation is written for this crate. `ABI.md` cites the header
+and other sources by location.
 
+## Licence
+
+MIT OR Apache-2.0, at your option. See [LICENSE-MIT](LICENSE-MIT) and
+[LICENSE-APACHE](LICENSE-APACHE).
