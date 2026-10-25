@@ -5,8 +5,11 @@
 //! others.
 
 use crate::entry::{DelegationType, Field, PaymentDisplay, VerificationDisplay, VerificationLink};
+#[cfg(target_arch = "wasm32")]
+use crate::levels::{imp::Credman, EntryKey, V2, V3};
 use crate::text::C8StringExt;
 use c8str::{C8Str, C8String};
+use core::fmt;
 
 pub(crate) mod sealed {
     pub trait Sealed {
@@ -17,7 +20,12 @@ pub(crate) mod sealed {
         /// Sends the call that adds the entry, with the host's best call for
         /// the kind.
         #[cfg(target_arch = "wasm32")]
-        fn add(&self, host: &dyn crate::V2, key: &crate::EntryKey<'_>, metadata: &c8str::C8Str);
+        fn add(
+            &self,
+            host: &crate::levels::imp::Credman,
+            key: &crate::levels::EntryKey<'_>,
+            metadata: &c8str::C8Str,
+        );
     }
 }
 
@@ -40,7 +48,7 @@ impl sealed::Sealed for VerificationDisplay<'_> {
     }
 
     #[cfg(target_arch = "wasm32")]
-    fn add(&self, host: &dyn crate::V2, key: &crate::EntryKey<'_>, metadata: &C8Str) {
+    fn add(&self, host: &Credman, key: &EntryKey<'_>, metadata: &C8Str) {
         host.add_entry_to_set(key, self, Some(metadata));
     }
 }
@@ -51,15 +59,16 @@ impl sealed::Sealed for Payment<'_> {
     }
 
     #[cfg(target_arch = "wasm32")]
-    fn add(&self, host: &dyn crate::V2, key: &crate::EntryKey<'_>, metadata: &C8Str) {
-        match host.version::<dyn crate::V3>() {
-            Some(host) => host.add_payment_entry_to_set_v2(
+    fn add(&self, host: &Credman, key: &EntryKey<'_>, metadata: &C8Str) {
+        if host.reaches(3) {
+            host.add_payment_entry_to_set_v2(
                 key,
                 &self.display,
                 self.additional_info,
                 Some(metadata),
-            ),
-            None => host.add_payment_entry_to_set(key, &self.display, Some(metadata)),
+            );
+        } else {
+            host.add_payment_entry_to_set(key, &self.display, Some(metadata));
         }
     }
 }
@@ -73,7 +82,7 @@ impl sealed::Sealed for AnyEntry<'_> {
     }
 
     #[cfg(target_arch = "wasm32")]
-    fn add(&self, host: &dyn crate::V2, key: &crate::EntryKey<'_>, metadata: &C8Str) {
+    fn add(&self, host: &Credman, key: &EntryKey<'_>, metadata: &C8Str) {
         match self {
             Self::Verification(display) => display.add(host, key, metadata),
             Self::Payment(payment) => payment.add(host, key, metadata),
@@ -108,9 +117,9 @@ pub struct SetEntry<'a, K> {
     kind: K,
     data: Option<&'a C8Str>,
     fields: &'a [Field<'a>],
-    link: Option<VerificationLink<'a>>,
-    metadata_display_text: Option<&'a C8Str>,
-    delegation: Option<DelegationType>,
+    link: Option<Sent<VerificationLink<'a>>>,
+    metadata_display_text: Option<Sent<&'a C8Str>>,
+    delegation: Option<Sent<DelegationType>>,
 }
 
 impl<'a, K: EntryKind> SetEntry<'a, K> {
@@ -144,20 +153,20 @@ impl<'a, K: EntryKind> SetEntry<'a, K> {
 
     /// A second disclaimer and a link, shown from level 6.
     pub const fn with_link(mut self, link: VerificationLink<'a>) -> Self {
-        self.link = Some(link);
+        self.link = Some(Sent::link(link));
         self
     }
 
     /// androidx's `metadataDisplayText`, shown from level 5.
     pub const fn with_metadata_display_text(mut self, text: &'a C8Str) -> Self {
-        self.metadata_display_text = Some(text);
+        self.metadata_display_text = Some(Sent::metadata_display_text(text));
         self
     }
 
     /// The entry's delegation, sent from level 7 in place of the host
     /// default.
     pub const fn with_delegation(mut self, delegation: DelegationType) -> Self {
-        self.delegation = Some(delegation);
+        self.delegation = Some(Sent::delegation(delegation));
         self
     }
 
@@ -183,16 +192,40 @@ impl<'a, K: EntryKind> SetEntry<'a, K> {
 
     /// The second disclaimer and link.
     pub const fn link(&self) -> Option<VerificationLink<'a>> {
+        match self.link {
+            Some(link) => Some(link.value),
+            None => None,
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) const fn sent_link(&self) -> Option<Sent<VerificationLink<'a>>> {
         self.link
     }
 
     /// The display text.
     pub const fn metadata_display_text(&self) -> Option<&'a C8Str> {
+        match self.metadata_display_text {
+            Some(text) => Some(text.value),
+            None => None,
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) const fn sent_metadata_display_text(&self) -> Option<Sent<&'a C8Str>> {
         self.metadata_display_text
     }
 
     /// The entry's own delegation.
     pub const fn delegation(&self) -> Option<DelegationType> {
+        match self.delegation {
+            Some(delegation) => Some(delegation.value),
+            None => None,
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) const fn sent_delegation(&self) -> Option<Sent<DelegationType>> {
         self.delegation
     }
 
@@ -301,3 +334,57 @@ pub trait SetSink {
     /// [`AddEntrySet`]: android_credman_sys::v2::AddEntrySet
     fn add_entry_set<K: EntryKind>(&mut self, set: &EntrySet<'_, K>);
 }
+
+/// An option and the call that sends it. Only the builder that sets the
+/// option reaches the call, so a binary that never sets it imports nothing
+/// for it.
+#[derive(Clone, Copy)]
+pub(crate) struct Sent<T> {
+    pub(crate) value: T,
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) send: fn(&Credman, &EntryKey<'_>, &T),
+}
+
+impl Sent<DelegationType> {
+    pub(crate) const fn delegation(value: DelegationType) -> Self {
+        Self {
+            value,
+            #[cfg(target_arch = "wasm32")]
+            send: crate::sets_on_host::send_delegation,
+        }
+    }
+}
+
+impl<'a> Sent<VerificationLink<'a>> {
+    const fn link(value: VerificationLink<'a>) -> Self {
+        Self {
+            value,
+            #[cfg(target_arch = "wasm32")]
+            send: crate::sets_on_host::send_link,
+        }
+    }
+}
+
+impl<'a> Sent<&'a C8Str> {
+    const fn metadata_display_text(value: &'a C8Str) -> Self {
+        Self {
+            value,
+            #[cfg(target_arch = "wasm32")]
+            send: crate::sets_on_host::send_metadata_display_text,
+        }
+    }
+}
+
+impl<T: fmt::Debug> fmt::Debug for Sent<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.value.fmt(f)
+    }
+}
+
+impl<T: PartialEq> PartialEq for Sent<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value
+    }
+}
+
+impl<T: Eq> Eq for Sent<T> {}

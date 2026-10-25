@@ -3,7 +3,8 @@ use crate::entry::{
     DelegationType, InlineIssuanceEntry, LegacyEntry, PackageInfo, PaymentEntry, StringIdEntry,
 };
 use crate::levels::imp::Credman;
-use crate::levels::{V1, V2, V4};
+use crate::levels::{V1, V4};
+use crate::set::Sent;
 use crate::sets_on_host::EntrySets;
 use core::fmt;
 use std::collections::TryReserveError;
@@ -15,7 +16,7 @@ use std::collections::TryReserveError;
 #[derive(Debug, Clone, Copy)]
 pub struct Host {
     credman: Credman,
-    delegation: Option<DelegationType>,
+    delegation: Option<Sent<DelegationType>>,
 }
 
 impl Host {
@@ -37,9 +38,9 @@ impl Host {
 
     /// Where the matcher sends its entry sets, when the host reaches level 2.
     pub fn entry_sets(&self) -> Option<EntrySets<'_>> {
-        self.credman()
-            .version::<dyn V2>()
-            .map(|host| EntrySets::new(host, self.delegation))
+        self.credman
+            .reaches(2)
+            .then(|| EntrySets::new(&self.credman, self.delegation))
     }
 
     /// The verifier's request: the Digital Credentials API request as JSON.
@@ -49,12 +50,12 @@ impl Host {
     ///
     /// [`TryReserveError`] when the reported length cannot be allocated.
     pub fn request(&self) -> Result<Vec<u8>, TryReserveError> {
-        self.credman().request()
+        self.credman.request()
     }
 
     /// The length in bytes of the credential blob the wallet registered.
     pub fn credentials_size(&self) -> usize {
-        self.credman().credentials_size()
+        self.credman.credentials_size()
     }
 
     /// Copies the blob's bytes from `offset` into `buffer`. Returns the count
@@ -71,7 +72,7 @@ impl Host {
         offset: usize,
     ) -> Result<usize, CredentialsError> {
         let asked = buffer.len();
-        let copied = self.credman().read_credentials_buffer(buffer, offset);
+        let copied = self.credman.read_credentials_buffer(buffer, offset);
         if copied > asked {
             return Err(CredentialsError::Overrun { asked, copied });
         }
@@ -108,13 +109,13 @@ impl Host {
     /// [`CallingAppError`] when a field holds no NUL or is not UTF-8 before
     /// it.
     pub fn calling_app(&self) -> Result<CallingApp, CallingAppError> {
-        CallingApp::from_host(&self.credman().calling_app_info())
+        CallingApp::from_host(&self.credman.calling_app_info())
     }
 
     /// Adds a standalone verification entry, then its fields, then its link.
     /// For a host below level 2, which has no sets.
     pub fn add_string_id_entry(&self, entry: &StringIdEntry<'_>) {
-        let host = self.credman();
+        let host = &self.credman;
         host.add_string_id_entry(entry.cred_id, &entry.display);
         for field in entry.fields {
             host.add_field_for_string_id_entry(entry.cred_id, field);
@@ -127,7 +128,7 @@ impl Host {
     /// Adds a standalone entry named by a number, then its fields. Google's
     /// header deprecates it for [`Host::add_string_id_entry`].
     pub fn add_legacy_entry(&self, entry: &LegacyEntry<'_>) {
-        let host = self.credman();
+        let host = &self.credman;
         host.add_entry(entry.cred_id, &entry.display);
         for field in entry.fields {
             host.add_field(entry.cred_id, field);
@@ -137,13 +138,13 @@ impl Host {
     /// Adds a standalone payment entry. For a host below level 2, which has
     /// no sets.
     pub fn add_payment_entry(&self, entry: &PaymentEntry<'_>) {
-        self.credman()
+        self.credman
             .add_payment_entry(entry.cred_id, &entry.display);
     }
 
     /// Adds an entry that offers to issue a credential the wallet lacks.
     pub fn add_inline_issuance_entry(&self, entry: &InlineIssuanceEntry<'_>) {
-        self.credman().add_inline_issuance_entry(entry);
+        self.credman.add_inline_issuance_entry(entry);
     }
 }
 
@@ -227,12 +228,10 @@ impl Host {
     pub fn connect_with(options: HostOptions<'_>) -> Self {
         let host = Self {
             credman: Credman::connect(),
-            delegation: options.delegation,
+            delegation: options.delegation.map(Sent::delegation),
         };
-        if let (Some(info), Some(level)) =
-            (options.package_info, host.credman().version::<dyn V4>())
-        {
-            level.self_declare_package_info(&info);
+        if let Some(info) = options.package_info.filter(|_| host.credman.reaches(4)) {
+            host.credman.self_declare_package_info(&info);
         }
         host
     }

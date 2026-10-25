@@ -27,9 +27,6 @@ existed.
   `{"display_skipped":bool,"host_level":n,"data":{…}}`. The matcher's own
   members moved under `data`; `host_abi` became `host_level`.
 - A NUL inside a picker string becomes a space; it used to end the string.
-- `matcher.wasm` imports every `credman` function except
-  `AddPaymentEntryToSetV2` and `SelfDeclarePackageInfo`, up to `credman_v7`.
-  It calls only what the host level allows.
 
 ### Fixed
 

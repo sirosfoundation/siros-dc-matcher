@@ -101,8 +101,9 @@ The host links a module whose imports it lacks; the call traps.
   until called. MP does the same for `credman_v2`.
 
 `android-credman` hands out the base level, `dyn V1`, and grants a higher
-level only after checking the reported level. A binary imports every
-function of each level it views, whether or not it calls it.
+level only after checking the reported level. A binary imports the
+functions its code can reach: the calls of the entry kinds and options it
+uses, and every function of each level it views as `dyn`.
 `scripts/check_matcher_abi.py` reports the highest level a binary imports.
 Device experiment 1 confirms lazy resolution for a `credman` module.
 
