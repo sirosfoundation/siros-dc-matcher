@@ -1838,6 +1838,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde-wasm-bindgen"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8302e169f0eddcc139c70f139d19d6467353af16f9fce27e8c30158036a1e16b"
+dependencies = [
+ "js-sys",
+ "serde",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "serde_bytes"
 version = "0.11.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2020,6 +2031,19 @@ dependencies = [
  "siros-zkp-req-nym-auth",
  "x509-cert",
  "zeroize",
+]
+
+[[package]]
+name = "siros-zkp-req-wasm"
+version = "0.11.0"
+dependencies = [
+ "serde",
+ "serde-wasm-bindgen",
+ "serde_bytes",
+ "serde_json",
+ "siros-zkp-req",
+ "siros-zkp-req-nym-auth",
+ "wasm-bindgen",
 ]
 
 [[package]]

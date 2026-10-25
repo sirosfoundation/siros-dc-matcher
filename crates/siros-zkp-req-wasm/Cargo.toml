@@ -1,0 +1,23 @@
+[package]
+name = "siros-zkp-req-wasm"
+version = "0.11.0"
+description = "The zkp_req presenter for the browser: match, session and the prove phases around a host's prover"
+publish = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+# wasm-bindgen's toolchain floor; nothing here ships in the picker.
+rust-version = "1.88"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+siros-zkp-req = { workspace = true }
+siros-zkp-req-nym-auth = { workspace = true, features = ["credential"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde-wasm-bindgen = "0.6.5"
+serde_bytes = "0.11.19"
+wasm-bindgen = "0.2.100"
