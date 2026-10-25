@@ -1,15 +1,21 @@
-//! The Android Credential Manager matcher host ABI as types, over
-//! `android-credman-sys`, whose `ABI.md` holds the rules.
+//! A matcher's typed access to the Android Credential Manager host: read the
+//! verifier's request, the wallet's registered credentials and the calling
+//! app, and fill the credential picker with entries. It wraps
+//! `android-credman-sys`, whose `ABI.md` holds the rules and their evidence.
 //!
 //! - `None` reaches the host as NULL and hides the element; `Some` of an
 //!   empty string shows it blank.
 //! - A call above the base level takes its level's token, from
-//!   `Host::version`.
+//!   [`Host::version`].
 //! - The caller keeps two set rules: declare a set id once per invocation,
 //!   and give the alternatives of one slot distinct ids.
-//! - `Host` exists on `wasm32` only; [`SetSink`] lets a test stand in for it.
+//! - [`Host`] exists on `wasm32` only; [`SetSink`] lets a test stand in for
+//!   it.
 
 #![deny(unsafe_op_in_unsafe_fn)]
+// Links to the wasm32-only host API resolve on wasm32, where rustdoc checks
+// them.
+#![cfg_attr(not(target_arch = "wasm32"), allow(rustdoc::broken_intra_doc_links))]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 mod app;

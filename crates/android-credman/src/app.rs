@@ -2,8 +2,13 @@ use android_credman_sys::CallingAppInfo;
 use c8str::{C8Str, C8StrError, C8String};
 use core::fmt;
 
-/// The caller as the platform verified it. Trust it over any name or origin
-/// inside the request.
+/// The app that called the Digital Credentials API, as the platform verified
+/// it: its package name and, for a browser, the page's origin. Trust it over
+/// any name or origin inside the request. [`Host::calling_app`] reads it
+/// with [`GetCallingAppInfo`].
+///
+/// [`Host::calling_app`]: crate::Host::calling_app
+/// [`GetCallingAppInfo`]: android_credman_sys::credman::GetCallingAppInfo
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CallingApp {
     package_name: C8String,
@@ -24,6 +29,7 @@ impl CallingApp {
         })
     }
 
+    /// The Android package name of the calling app, such as a browser's.
     pub fn package_name(&self) -> &C8Str {
         &self.package_name
     }
@@ -34,11 +40,15 @@ impl CallingApp {
     }
 }
 
-/// A `CallingAppInfo` field with no NUL inside it, or with bytes before the
-/// NUL that are not UTF-8.
+/// Why [`Host::calling_app`] could not read the host's report: a field with
+/// no NUL inside its array, or with bytes before the NUL that are not UTF-8.
+///
+/// [`Host::calling_app`]: crate::Host::calling_app
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CallingAppError {
+    /// The package name field.
     PackageName(C8StrError),
+    /// The origin field.
     Origin(C8StrError),
 }
 
