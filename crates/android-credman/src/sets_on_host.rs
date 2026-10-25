@@ -1,19 +1,27 @@
 use crate::entry::DelegationType;
-use crate::levels::imp::Credman;
-use crate::levels::{EntryKey, V2};
+use crate::levels::{Credman, Credman2, EntryKey, V2};
 use crate::set::{EntryKind, EntrySet, Sent, SetSink};
 
 /// The host's entry sets, from [`Host::entry_sets`](crate::Host::entry_sets):
-/// the level-2 host and the host's default delegation.
+/// the base, its level-2 singleton and the host's default delegation.
 #[derive(Clone, Copy)]
 pub struct EntrySets<'h> {
-    host: &'h Credman,
+    base: &'h Credman,
+    host: &'static Credman2,
     delegation: Option<Sent<DelegationType>>,
 }
 
 impl<'h> EntrySets<'h> {
-    pub(crate) fn new(host: &'h Credman, delegation: Option<Sent<DelegationType>>) -> Self {
-        Self { host, delegation }
+    pub(crate) fn new(
+        base: &'h Credman,
+        host: &'static Credman2,
+        delegation: Option<Sent<DelegationType>>,
+    ) -> Self {
+        Self {
+            base,
+            host,
+            delegation,
+        }
     }
 }
 
@@ -30,7 +38,7 @@ impl SetSink for EntrySets<'_> {
                     set_index,
                     cred_id: entry.cred_id(),
                 };
-                entry.send(self.host, &key, self.delegation);
+                entry.send(self.base, self.host, &key, self.delegation);
             }
         }
     }

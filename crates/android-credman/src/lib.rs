@@ -4,8 +4,10 @@
 //! `android-credman-sys`, whose `ABI.md` holds the rules and their evidence.
 //!
 //! - The traits [`V1`] to [`V7`] give each host level's functions as safe
-//!   calls. [`Host::credman`] hands out `dyn V1`; `version::<dyn V5>()`
-//!   grants a higher level when the host reports it.
+//!   calls. [`Host::credman`] hands out the base, [`Credman`];
+//!   `version::<Credman5>()` grants level 5's singleton when the host
+//!   reports level 5. Every call is static, so a binary imports only what it
+//!   calls.
 //! - [`Host::entry_sets`] sends [`EntrySet`]s from level 2. Each entry
 //!   option is sent when the host reaches its level, and the standard
 //!   metadata object tells the wallet whether text was left out.
@@ -45,7 +47,10 @@ pub use entry::{
 #[cfg(target_arch = "wasm32")]
 pub use host::{CredentialsError, Host, HostOptions};
 #[cfg(target_arch = "wasm32")]
-pub use levels::{EntryKey, Level, V1, V2, V3, V4, V5, V6, V7};
+pub use levels::{
+    Credman, Credman2, Credman3, Credman4, Credman5, Credman6, Credman7, EntryKey, Level, V1, V2,
+    V3, V4, V5, V6, V7,
+};
 #[cfg(target_arch = "wasm32")]
 pub use reader::CredentialReader;
 pub use set::{AnyEntry, EntryKind, EntrySet, Payment, SetEntry, SetSink, Slot};

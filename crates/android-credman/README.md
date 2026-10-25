@@ -27,8 +27,9 @@ sets.add_entry_set(&EntrySet::new(set_id, Slot::one(&entry), &[]));
 ```
 
 - `V1` to `V7` give each host level's functions as safe calls.
-  `host.credman()` hands out `dyn V1`; `version::<dyn V5>()` grants a higher
-  level when the host reports it.
+  `host.credman()` hands out the base, `Credman`; `version::<Credman5>()`
+  grants level 5's singleton when the host reports level 5. Every call is
+  static, so a binary imports only what it calls.
 - `host.entry_sets()` exists from level 2. Each entry option is sent from its
   level: payment information from 3, display text from 5, a link from 6, a
   delegation from 7 (the entry's own, else the host default).
