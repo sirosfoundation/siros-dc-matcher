@@ -127,11 +127,3 @@ pub struct InlineIssuanceEntry<'a> {
     pub title: Option<&'a C8Str>,
     pub subtitle: Option<&'a C8Str>,
 }
-
-/// The wallet app's display name and icon, which [`V4::self_declare_package_info`](crate::V4::self_declare_package_info)
-/// declares to the host.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PackageInfo<'a> {
-    pub display_name: &'a C8Str,
-    pub icon: &'a [u8],
-}

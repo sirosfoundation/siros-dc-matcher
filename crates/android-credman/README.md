@@ -26,7 +26,8 @@ sets.add_entry_set(&EntrySet::new(set_id, Slot::one(&entry), &[]));
 - A call above the base level needs its level's token from
   `host.version()`. `WithDelegation`, `WithLink` and
   `WithMetadataDisplayText` wrap an entry kind to add the level-7, 6 and 5
-  calls.
+  calls. `Host::connect_with` checks the level itself for the package info
+  it declares.
 - The caller keeps two set rules: declare a set id once per invocation, and
   give the alternatives of one slot distinct ids.
 - `Host` exists on `wasm32` only. Implement `SetSink` to test a matcher

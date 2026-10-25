@@ -28,8 +28,8 @@ impl WasmVersion {
         (self.0 >= 3).then_some(V3(()))
     }
 
-    /// The level-4 token, for declaring the wallet app's package info.
-    pub fn v4(self) -> Option<V4> {
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub(crate) fn v4(self) -> Option<V4> {
         (self.0 >= 4).then_some(V4(()))
     }
 
@@ -58,10 +58,10 @@ pub struct V2(());
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct V3(());
 
-/// Proof that the host reaches level 4. Offers
-/// [`V4::self_declare_package_info`].
+/// Proof that the host reaches level 4, for the package info
+/// `Host::connect_with` declares.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct V4(());
+pub(crate) struct V4(());
 
 /// Proof that the host reaches level 5. Unlocks
 /// [`crate::WithMetadataDisplayText`].

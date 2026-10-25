@@ -3,7 +3,7 @@
 //! `ABI.md`.
 
 use crate::app::{CallingApp, CallingAppError};
-use crate::entry::{InlineIssuanceEntry, LegacyEntry, PackageInfo, PaymentEntry, StringIdEntry};
+use crate::entry::{InlineIssuanceEntry, LegacyEntry, PaymentEntry, StringIdEntry};
 use crate::version::{WasmVersion, V4};
 use android_credman_sys::{credman, v4, CallingAppInfo};
 use c8str::C8Str;
@@ -20,7 +20,7 @@ pub struct Host {
 
 impl Host {
     /// Reads the host level with [`GetWasmVersion`](credman::GetWasmVersion).
-    /// A matcher connects first.
+    /// A matcher connects first, here or with [`Host::connect_with`].
     pub fn connect() -> Self {
         let mut level = 0u32;
         // SAFETY: `level` is a live u32 the host writes once.
@@ -217,11 +217,39 @@ impl Host {
     }
 }
 
+/// What [`Host::connect_with`] declares to the host after reading its level.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct HostOptions<'a> {
+    /// Declared once with [`SelfDeclarePackageInfo`](v4::SelfDeclarePackageInfo)
+    /// when the host reaches level 4, and skipped below it. Google's header
+    /// says the call works for system apps only; what the picker does with
+    /// the values is unconfirmed.
+    pub package_info: Option<PackageInfo<'a>>,
+}
+
+/// The wallet app's display name and icon, for
+/// [`HostOptions::package_info`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PackageInfo<'a> {
+    pub display_name: &'a C8Str,
+    /// At least one byte (conservative).
+    pub icon: &'a [u8],
+}
+
+impl Host {
+    /// Reads the host level as [`Host::connect`] does, then makes the
+    /// declarations `options` holds that the level allows.
+    pub fn connect_with(options: HostOptions<'_>) -> Self {
+        let host = Self::connect();
+        if let (Some(info), Some(level)) = (options.package_info, host.version.v4()) {
+            level.declare_package_info(&info);
+        }
+        host
+    }
+}
+
 impl V4 {
-    /// Declares the wallet app's display name and icon to the host with
-    /// [`SelfDeclarePackageInfo`](v4::SelfDeclarePackageInfo). Google's
-    /// header says it works for system apps only.
-    pub fn self_declare_package_info(&self, info: &PackageInfo<'_>) {
+    fn declare_package_info(self, info: &PackageInfo<'_>) {
         // SAFETY: see the module documentation.
         unsafe {
             v4::SelfDeclarePackageInfo(
