@@ -1,47 +1,19 @@
 # android-credman-sys
 
-Raw imports of the Android Credential Manager matcher host ABI: the functions
-a WebAssembly matcher calls to read the request and the registered blob and
-to offer entries in the credential picker.
+Raw imports of the Android Credential Manager matcher host ABI, following
+Google's `matcher/credentialmanager.h` at CMWallet `abcf38a3`.
+[`ABI.md`](ABI.md) gives each parameter's NULL and length rule, each
+function's host level, and the evidence.
 
-All 22 functions of Google's reference header
-(`digitalcredentialsdev/CMWallet` `matcher/credentialmanager.h` at
-`abcf38a3`) are declared under their exact import module and name, with the
-header's C types, together with the `CallingAppInfo` layout.
+Use [`android-credman`](../android-credman).
 
-[`ABI.md`](ABI.md) is the contract: for every parameter, whether NULL is
-accepted and what it means, how lengths work, and which host version
-guarantees each function, with the evidence for each rule and the device
-experiments that would settle what remains open.
+## Features
 
-## Modules and features
+One per host level. The functions exist on `wasm32` only.
 
-| Import module | Host level | Feature |
-|---|---|---|
-| `credman` | every host | always |
-| `credman_v2` | 2 (`AddPaymentEntryToSetV2`: 3) | `v2` (`v3`) |
-| `credman_v4` | 4 | `v4` |
-| `credman_v5` | 5 | `v5` |
-| `credman_v6` | 6 | `v6` |
-| `credman_v7` | 7 | `v7` |
-
-The functions exist on `wasm32` only. A binary imports exactly the functions
-it calls; a feature makes a level's functions declarable.
-
-## Use
-
-These are `unsafe` raw imports. The `android-credman` crate states the
-contract in types and gates each level on the version the host reports;
-prefer it.
-
-## Provenance
-
-The declarations restate the interface of the reference header (module and
-function names, parameter order and C types), which a matcher must match to
-link. The documentation is written for this crate. `ABI.md` cites the header
-and other sources by location.
-
-## Licence
-
-MIT OR Apache-2.0, at your option. See [LICENSE-MIT](LICENSE-MIT) and
-[LICENSE-APACHE](LICENSE-APACHE).
+| Feature | Declares |
+|---|---|
+| none | `credman` |
+| `v2` | `credman_v2` |
+| `v3` | `AddPaymentEntryToSetV2`, from `credman_v2`, where Google's header declares this level-3 function |
+| `v4` … `v7` | `credman_v4` … `credman_v7` |

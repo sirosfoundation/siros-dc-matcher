@@ -3,9 +3,7 @@ name = "android-credman-sys"
 version = "0.1.0"
 description = "Raw imports of the Android Credential Manager matcher host ABI"
 license = "MIT OR Apache-2.0"
-# Edition 2021: this crate ships inside siros-dc-matcher's matcher.wasm,
-# whose crates hold Rust 1.82 (checked by the `msrv` CI job), and edition 2024
-# needs 1.85.
+# Edition 2024 needs Rust 1.85; matcher.wasm's crates hold 1.82.
 edition = "2021"
 rust-version = "1.82"
 readme = "README.md"

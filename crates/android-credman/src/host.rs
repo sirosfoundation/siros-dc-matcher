@@ -1,11 +1,6 @@
-//! The host connection: inputs, the version probe, and the base-level
-//! emission functions.
-//!
-//! Every pointer handed to the host here comes from a `&C8Str`, an
-//! `Option<&C8Str>` (NULL for `None`), a `&[u8]` or an `Option<&[u8]>` (NULL
-//! and 0 for `None`), all borrowed for the duration of the call. Those
-//! types carry the nullability rules of `ABI.md`, so each call site upholds
-//! them by construction.
+//! Every pointer passed here comes from a borrowed `&C8Str`, `&[u8]` or an
+//! `Option` of one (NULL for `None`), so each call meets the rules of
+//! `ABI.md`.
 
 use crate::app::CallingApp;
 use crate::entry::{
@@ -20,14 +15,13 @@ use c8str::C8Str;
 use core::ffi::c_void;
 use core::ptr;
 
-/// The connection to the Credential Manager host.
 #[derive(Debug, Clone, Copy)]
 pub struct Host {
     version: WasmVersion,
 }
 
 impl Host {
-    /// Asks the host for its ABI level.
+    /// Reads `GetWasmVersion`.
     pub fn connect() -> Self {
         let mut level = 0u32;
         // SAFETY: `level` is a live u32 the host writes once.
@@ -37,13 +31,11 @@ impl Host {
         }
     }
 
-    /// The level the host reported. Its methods hand out the capability
-    /// tokens.
+    /// Hands out the capability tokens.
     pub fn version(&self) -> WasmVersion {
         self.version
     }
 
-    /// The request: exactly as many bytes as the host reported.
     pub fn request(&self) -> Vec<u8> {
         let mut size = 0u32;
         // SAFETY: `size` is a live u32 the host writes once.
@@ -54,7 +46,6 @@ impl Host {
         request
     }
 
-    /// The size of the registered blob in bytes.
     pub fn credentials_size(&self) -> usize {
         let mut size = 0u32;
         // SAFETY: `size` is a live u32 the host writes once.
@@ -62,8 +53,8 @@ impl Host {
         size as usize
     }
 
-    /// Copies blob bytes from `offset` into `buffer` and returns the count
-    /// the host reported, which may be lower than the buffer's length.
+    /// Returns the count the host copied, which may be lower than
+    /// `buffer.len()`.
     pub fn read_credentials_at(&self, buffer: &mut [u8], offset: usize) -> usize {
         // SAFETY: the buffer is valid for `buffer.len()` bytes, the most the
         // host writes.
@@ -76,10 +67,8 @@ impl Host {
         }
     }
 
-    /// The registered blob, read until the reported size or until a read
-    /// returns no bytes. The host may return fewer bytes than asked per
-    /// read, so this keeps reading from where the last read stopped. The
-    /// result holds exactly the bytes the host delivered.
+    /// Reads until the reported size or until a read returns nothing, and
+    /// returns the bytes delivered.
     pub fn credentials(&self) -> Vec<u8> {
         let size = self.credentials_size();
         let mut blob = vec![0u8; size];
@@ -97,7 +86,6 @@ impl Host {
         blob
     }
 
-    /// The caller, as the platform verified it.
     pub fn calling_app(&self) -> CallingApp {
         let mut info = CallingAppInfo::ZEROED;
         // SAFETY: `info` is a whole CallingAppInfo the host fills.
@@ -105,8 +93,6 @@ impl Host {
         CallingApp::from_raw(info)
     }
 
-    /// Adds a standalone verification entry, then its fields, then its
-    /// link.
     pub fn add_string_id_entry(&self, entry: &StringIdEntry<'_>) {
         let id = entry.cred_id.as_ptr();
         let d = VerificationParts::of(&entry.display);
@@ -139,8 +125,6 @@ impl Host {
         }
     }
 
-    /// Adds a standalone entry of the superseded integer-id API, then its
-    /// fields.
     pub fn add_legacy_entry(&self, entry: &LegacyEntry<'_>) {
         let (icon, icon_len) = icon_parts(entry.icon);
         // SAFETY: see the module documentation.
@@ -161,7 +145,6 @@ impl Host {
         }
     }
 
-    /// Adds a standalone payment entry.
     pub fn add_payment_entry(&self, entry: &PaymentEntry<'_>) {
         let p = PaymentParts::of(&entry.display);
         // SAFETY: see the module documentation.
@@ -182,7 +165,6 @@ impl Host {
         }
     }
 
-    /// Adds an entry offering to issue a credential the wallet lacks.
     pub fn add_inline_issuance_entry(&self, entry: &InlineIssuanceEntry<'_>) {
         let (icon, icon_len) = optional_icon_parts(entry.icon);
         // SAFETY: see the module documentation.
@@ -198,28 +180,23 @@ impl Host {
     }
 }
 
-/// Adds one field to the standalone entry `id`.
 fn standalone_field(id: *const c_char, field: &Field<'_>) {
     // SAFETY: see the module documentation.
     unsafe { credman::AddFieldForStringIdEntry(id, field.name.as_ptr(), optional(field.value)) };
 }
 
-/// NULL for an absent string.
 pub(crate) fn optional(text: Option<&C8Str>) -> *const c_char {
     text.map_or(ptr::null(), C8Str::as_ptr)
 }
 
-/// An image as pointer and length.
 pub(crate) fn icon_parts(icon: &[u8]) -> (*const c_char, usize) {
     (icon.as_ptr().cast::<c_char>(), icon.len())
 }
 
-/// An optional image as pointer and length: NULL and 0 when absent.
 pub(crate) fn optional_icon_parts(icon: Option<&[u8]>) -> (*const c_char, usize) {
     icon.map_or((ptr::null(), 0), icon_parts)
 }
 
-/// The pointers of a [`PaymentDisplay`], in ABI order.
 pub(crate) struct PaymentParts {
     pub(crate) merchant: *const c_char,
     pub(crate) method: *const c_char,
@@ -244,7 +221,6 @@ impl PaymentParts {
     }
 }
 
-/// The pointers of a [`VerificationDisplay`], in ABI order.
 pub(crate) struct VerificationParts {
     pub(crate) icon: (*const c_char, usize),
     pub(crate) title: *const c_char,
@@ -267,8 +243,6 @@ impl VerificationParts {
 
 #[cfg(feature = "v4")]
 impl crate::version::V4 {
-    /// Declares the registering app's name and icon. Holding this token is
-    /// holding proof that the host has `credman_v4`.
     pub fn self_declare_package_info(&self, info: &crate::entry::PackageInfo<'_>) {
         let (icon, icon_len) = icon_parts(info.icon);
         // SAFETY: see the module documentation.

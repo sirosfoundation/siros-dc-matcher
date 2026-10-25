@@ -1,10 +1,6 @@
-//! A `std::io` view of the registered blob, for decoders that stream.
-
 use crate::host::Host;
 use std::io::{self, Read, Seek, SeekFrom};
 
-/// Reads the registered blob through `ReadCredentialsBuffer` at the current
-/// position, without copying it whole first.
 #[derive(Debug, Clone)]
 pub struct CredentialReader {
     host: Host,
@@ -13,7 +9,6 @@ pub struct CredentialReader {
 }
 
 impl CredentialReader {
-    /// A reader at the start of the blob.
     pub fn new(host: Host) -> Self {
         Self {
             host,
@@ -22,21 +17,17 @@ impl CredentialReader {
         }
     }
 
-    /// The blob's size in bytes, as the host reported it.
     pub fn len(&self) -> u64 {
         self.size
     }
 
-    /// Whether the host reported an empty blob.
     pub fn is_empty(&self) -> bool {
         self.size == 0
     }
 }
 
 impl Read for CredentialReader {
-    /// Reads at most `out.len()` bytes from the current position and returns
-    /// the count the host reported. `Ok(0)` at the end of the blob, or when
-    /// the host returns nothing.
+    /// `Ok(0)` also when the host returns nothing before the end.
     fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
         let remaining = self.size.saturating_sub(self.position);
         let asked = usize::try_from(remaining).map_or(out.len(), |r| r.min(out.len()));

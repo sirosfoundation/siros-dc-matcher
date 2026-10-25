@@ -13,41 +13,32 @@ existed.
 
 ### Changed
 
-- The matcher calls the Credential Manager host through two new crates,
-  `android-credman-sys` and `android-credman` (MIT OR Apache-2.0, from
-  APTITUDE-Consortium/dcapi-matcher), in place of its private `abi.rs`.
-  `crates/android-credman-sys/ABI.md` documents all 22 host functions, the
-  rule for every parameter and the evidence for each.
-- The matcher reads `GetWasmVersion` first and emits nothing below host level
-  2, where entry sets do not exist. Before, it called the `credman_v2`
-  functions whatever the host reported. On level 2 and above its picker
-  output is unchanged.
-- The registered blob is read until complete: the host may return fewer
-  bytes per `ReadCredentialsBuffer` call than asked, and one short read used
-  to leave the tail of the blob zeroed.
+- The matcher calls the host through the new `android-credman-sys` and
+  `android-credman` crates (MIT OR Apache-2.0, from
+  APTITUDE-Consortium/dcapi-matcher). `crates/android-credman-sys/ABI.md`
+  documents the host ABI.
+- Below host level 2 the matcher emits nothing; it used to call the
+  `credman_v2` functions regardless. Output on level 2 and above is
+  unchanged.
+- The registered blob is read until complete; a short
+  `ReadCredentialsBuffer` read used to leave its tail zeroed.
 - `siros-dc-matcher-core`'s unused `sink` module is removed.
 
 ### Fixed
 
-- `matcher.wasm` imported `wasi_snapshot_preview1.random_get` from v0.8.0 to
-  v0.11.0, through the `HashSet` in the `zkp_req` planner. The host does not
-  provide it. Such a module still loads, and the call traps: those releases
-  showed nothing for a `zkp_req` request that reached the planner, while
-  other requests were unaffected. The planner, the `zkp_req` response checks
-  and `siros-dcql`'s `DcqlQuery::validate` use `rustc-hash`'s `FxHashSet`
-  now, which needs no random seed, and the import is gone. `siros-dcql`
-  gains the `rustc-hash` dependency; its API is unchanged.
+- `matcher.wasm` v0.8.0 to v0.11.0 imported `wasi_snapshot_preview1.random_get`,
+  which the host lacks, and trapped on `zkp_req` requests. The `zkp_req`
+  planner and response checks and `siros-dcql`'s `DcqlQuery::validate` use
+  `rustc-hash`'s `FxHashSet` now. `siros-dcql` gains the `rustc-hash`
+  dependency; its API is unchanged.
 
 ### Added
 
-- `scripts/check_matcher_abi.py` parses the built module and checks every
-  import against the ABI table, with its exact signature, plus the `_start`
-  and `memory` exports. CI runs it on every build and before a release, in
-  place of the name scan over the first 8 KiB.
+- `scripts/check_matcher_abi.py` checks each import of `matcher.wasm`, with
+  its signature, against the ABI table, and the `_start` and `memory`
+  exports. CI and the release job run it.
 - `clippy.toml` forbids std's `HashMap`, `HashSet` and `RandomState` in the
-  crates that link into `matcher.wasm`, so `random_get` cannot come back
-  through a new set or map. The FFI and test-host crates carry their own
-  `clippy.toml` without the rule.
+  crates that link into `matcher.wasm`.
 
 ## v0.11.0 — 2026-10-20
 

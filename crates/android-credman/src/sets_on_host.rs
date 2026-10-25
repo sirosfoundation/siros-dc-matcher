@@ -1,8 +1,3 @@
-//! Entry sets and the per-entry calls of levels 5 to 7, sent to the host.
-//!
-//! The level-2 token is the emitter: holding it is holding proof that the
-//! host has `credman_v2`.
-
 use crate::entry::{PaymentDisplay, VerificationDisplay};
 use crate::host::{optional, PaymentParts, VerificationParts};
 #[cfg(feature = "v3")]
@@ -29,16 +24,14 @@ impl SetSink for V2 {
     }
 }
 
-/// The host's key for an entry: its id, its set and its position. Public
-/// only to name it in the sealed trait; the module is private.
+/// Public only to appear in the sealed trait.
 pub struct Address {
     cred_id: *const c_char,
     set_id: *const c_char,
     index: i32,
 }
 
-/// Sends one alternative, then its delegation, link, fields and metadata
-/// display text: the order Google's matchers use.
+/// The order Google's matchers use.
 fn emit_entry<K: EntryKind>(entry: &SetEntry<'_, K>, set_id: *const c_char, index: i32) {
     let at = Address {
         cred_id: entry.cred_id().as_ptr(),
@@ -62,7 +55,6 @@ fn emit_entry<K: EntryKind>(entry: &SetEntry<'_, K>, set_id: *const c_char, inde
     decorate_after_fields(&at, entry);
 }
 
-/// `AddEntryToSet`.
 pub(crate) fn verification(
     at: &Address,
     display: &VerificationDisplay<'_>,
@@ -86,7 +78,6 @@ pub(crate) fn verification(
     }
 }
 
-/// `AddPaymentEntryToSet`.
 pub(crate) fn payment(at: &Address, display: &PaymentDisplay<'_>, metadata: Option<&C8Str>) {
     let p = PaymentParts::of(display);
     // SAFETY: see the module documentation of `host`.
@@ -110,7 +101,6 @@ pub(crate) fn payment(at: &Address, display: &PaymentDisplay<'_>, metadata: Opti
     }
 }
 
-/// `AddPaymentEntryToSetV2`.
 #[cfg(feature = "v3")]
 pub(crate) fn payment_with_info(
     at: &Address,
@@ -140,7 +130,6 @@ pub(crate) fn payment_with_info(
     }
 }
 
-/// The delegation (level 7), then the verification link (level 6).
 #[cfg_attr(not(any(feature = "v6", feature = "v7")), allow(unused_variables))]
 fn decorate_before_fields<K: EntryKind>(at: &Address, entry: &SetEntry<'_, K>) {
     #[cfg(feature = "v7")]
@@ -171,7 +160,6 @@ fn decorate_before_fields<K: EntryKind>(at: &Address, entry: &SetEntry<'_, K>) {
     }
 }
 
-/// The metadata display text (level 5).
 #[cfg_attr(not(feature = "v5"), allow(unused_variables))]
 fn decorate_after_fields<K: EntryKind>(at: &Address, entry: &SetEntry<'_, K>) {
     #[cfg(feature = "v5")]

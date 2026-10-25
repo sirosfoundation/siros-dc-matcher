@@ -231,9 +231,8 @@ credential its entry: the host drops any entry with no icon (see
 credential without a resolvable one.
 
 The v1 emission fallback remains out of scope: below host level 2 the matcher
-emits nothing. The host links a module whose imports it lacks and traps only
-on the call, so a runtime branch could serve a v1 host; see
-`crates/android-credman-sys/ABI.md` §3.
+emits nothing. A missing import traps only when called, so a runtime branch
+could serve a v1 host (`crates/android-credman-sys/ABI.md` §3).
 
 `siros-dcql` goes to 0.2.0 — `QueryResult` gained a public field, which is
 breaking for struct-literal construction even though the type is produced by

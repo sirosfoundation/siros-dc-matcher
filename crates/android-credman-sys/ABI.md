@@ -1,20 +1,13 @@
-# The Credential Manager matcher ABI: the contract and its evidence
+# Credential Manager matcher ABI
 
-This document states, for every function the Android Credential Manager host
-offers a WebAssembly matcher, the exact interface and the rule for every
-parameter: whether NULL is accepted and what it means, how lengths work, and
-which host version guarantees the function. Each rule names its evidence. The
-host's source is closed, so every rule is inferred; the evidence column says
-how strongly.
-
-`android-credman-sys` declares these functions; `android-credman` encodes the
-rules in types. A rule that a type cannot hold is listed as a caller
-obligation.
+Every host function's signature, its parameters' NULL and length rules, and
+the host level that guarantees it. The host is closed source: each rule is
+inferred, and its Evidence column gives the strength.
 
 ## Contents
 
 1. [Sources](#sources)
-2. [Conventions every function shares](#conventions)
+2. [Conventions](#conventions)
 3. [Versions and linking](#versions)
 4. [Functions](#functions)
 5. [Parameters](#parameters)
@@ -25,9 +18,6 @@ obligation.
 
 <a id="sources"></a>
 ## 1. Sources
-
-Every claim cites one of these, with a line range where it helps. Commits are
-the ones read for this document.
 
 | Key | Source | Revision | Weight |
 |---|---|---|---|
@@ -45,16 +35,14 @@ the ones read for this document.
 | **SP** | Sphereon matcher [`matcher-build/src/lib.rs`][SP] | mobile-wallet `19bcf497` | A third-party matcher's calls |
 | **SR** | This repository's released `matcher.wasm`, [v0.8.0][SR] to v0.11.0, which import `wasi_snapshot_preview1.random_get` (read with a parser), and the repository owner's device report on them | releases 2026-10-14 to 2026-10-20 | Observed on a device: they load, and the host lacks `random_get` |
 
-The Android developer guide for holders
-(<https://developer.android.com/identity/digital-credentials/credential-holder>)
-describes the matcher as "a Wasm binary that Credential Manager runs in a
-sandbox" and documents none of the host functions. No public issue in
-CMWallet's tracker reports a crash on a NULL argument. Issue
+Also searched, without a rule found: the
+[Android holder guide](https://developer.android.com/identity/digital-credentials/credential-holder)
+and CMWallet's issues, where
 [#10](https://github.com/digitalcredentialsdev/CMWallet/issues/10) reports
-"No ID Found" on some Android 11 devices with no diagnosis.
+"No ID Found" on some Android 11 devices, undiagnosed.
 
 <a id="conventions"></a>
-## 2. Conventions every function shares
+## 2. Conventions
 
 | Topic | Rule | Evidence |
 |---|---|---|
@@ -73,12 +61,13 @@ CMWallet's tracker reports a crash on a NULL argument. Issue
 <a id="versions"></a>
 ## 3. Versions and linking
 
-### What `GetWasmVersion` reports
+### Levels
 
-`GetWasmVersion` writes the host's ABI level. Each import module after the
-first carries the level in its name (`credman_v2` … `credman_v7`); level 3 is
-the one exception, a function added to `credman_v2`. No `credman_v3` module
-exists in any of the 14 header revisions.
+Module `credman_vN` holds the functions of level N, with one exception:
+Google's header declares the level-3 function, `AddPaymentEntryToSetV2`, in
+`credman_v2`, and no `credman_v3` module exists in any revision.
+`android-credman-sys` groups it with level 3 and imports it from
+`credman_v2`.
 
 | Level | Guarantees | Added to the header | Evidence for the threshold |
 |---|---|---|---|
@@ -90,64 +79,37 @@ exists in any of the 14 header revisions.
 | 6 | `credman_v6.SetAdditionalDisclaimerAndUrlForVerificationEntryInCredentialSet` | 2026-03-02 [`98e6c9c9`][HH-v6] | Module name. GP calls it with no level check (§7) |
 | 7 | `credman_v7.SetDelegationTypeForEntryInSet` | 2026-09-17 [`4230483c`][HH-v7] | GP `wasm_version >= 7` ([lines 249–251][GP-v7]) |
 
-`android-credman-sys` groups declarations by level. Google's header declares
-one function out of its level's module: `AddPaymentEntryToSetV2` (level 3)
-sits in `credman_v2`, so the level-3 group imports it from there. The
-`credman` functions added after the first header revision have dates and no
-level in any source, so they stay with `credman`.
+The `credman` functions added after the first header revision have dates
+and no level in any source; they stay with `credman`. No source
+distinguishes level 0 from level 1.
 
-Levels 0 and 1 grant the same set: no source distinguishes them. GR's tests
-use 1 for "no sets"; GT's fake defaults to 9999.
-
-`GetWasmVersion` entered the header in the same commit as `credman_v2`. A
-host older than that may lack `GetWasmVersion` itself. Such a host also lacks
-`credman_v2`, so a matcher that needs sets loses nothing by calling
-`GetWasmVersion` first; every version-aware matcher in the evidence does
-(GC [line 425][GC-ver], GP [line 333][GP-ver], MP [line 382][MP], GR
+`GetWasmVersion` entered the header with `credman_v2`, so a host without
+`credman_v2` may lack it too. Every version-aware matcher calls it first (GC
+[line 425][GC-ver], GP [line 333][GP-ver], MP [line 382][MP], GR
 [`reporter.rs` line 285][GR-reporter]).
 
-### Linking: an import the host lacks links, and its call traps
+### Linking
 
-A WebAssembly host may refuse to instantiate a module that names an import
-the host lacks (eager linking), or link it and fail when the import is
-called (lazy resolution). This host does the second, at least for WASI:
+The host links a module whose imports it lacks; the call traps.
 
-- **Device evidence (SR).** Releases v0.8.0 to v0.11.0 of this matcher
-  import `wasi_snapshot_preview1.random_get`, which the host does not
-  provide. They load on a device, and they trap when a request reaches the
-  call: the `zkp_req` planner builds a std `HashSet`, whose hasher reads
-  `random_get`.
-- **Google's matchers branch on the version inside one binary (GA, GC, GP,
-  MP).** `openid4vp1_0.wasm` imports `credman_v2` and `credman_v5`; on level
-  1 it uses `AddStringIdEntry`, below 5 it skips
-  `AddMetadataDisplayTextToEntrySet` (GC [lines 132–169][GC-v2]). `pnv.wasm`
-  imports `credman_v6` and `credman_v7` and checks level 7 before the v7 call.
-  These branches only work with lazy resolution, which matches the device
-  evidence for `credman` modules as well.
-- This repository's earlier `docs/abi.md` (lines 95–101) and `abi.rs` (lines
-  186–193) stated that a module declaring `credman_v2` fails to load on a host
-  without it. That was the WebAssembly default, stated without a device test;
-  the evidence above contradicts it for WASI.
+- SR: releases v0.8.0 to v0.11.0 import `random_get`, which the host lacks.
+  They load on a device and trap on a `zkp_req` request, whose planner
+  builds a std `HashSet`.
+- GA, GC, GP: Google's binaries import `credman_v5`, `credman_v6` and
+  `credman_v7` and check `GetWasmVersion` before calling them (GC
+  [lines 132–169][GC-v2]). That works only if a missing import is harmless
+  until called. MP does the same for `credman_v2`.
 
-The design follows from it, and holds under either model:
-
-- **A call is what fails.** Every call above the base level needs a token
-  that only the reported version hands out (`android-credman`), so a matcher
-  calls nothing above the level the host reported.
-- **The import table stays minimal.** Rust emits an import only for a
-  function the final binary references, and each level is behind an
-  `android-credman-sys` feature (`v2` … `v7`). The binary's highest import
-  level is what an eager host would need. `scripts/check_matcher_abi.py`
-  reports it.
-
-Device experiment 1 (§9) confirms the same for a `credman` module.
+`android-credman` gates every call above the base level on a token from the
+reported level. Each level is a feature of `android-credman-sys`, and
+`scripts/check_matcher_abi.py` reports the highest level a binary imports.
+Device experiment 1 confirms lazy resolution for a `credman` module.
 
 <a id="functions"></a>
 ## 4. Functions
 
-All 22 functions of the header at `abcf38a3`. The WebAssembly signature is
-what `scripts/check_matcher_abi.py` checks import tables against. Line numbers
-refer to [the header][H].
+Line numbers refer to [the header][H]. `scripts/check_matcher_abi.py`
+checks the same WebAssembly signatures.
 
 | # | Function | Module | Level | C signature | WebAssembly signature | Header lines |
 |---|---|---|---|---|---|---|
@@ -174,18 +136,12 @@ refer to [the header][H].
 | 21 | `AddMetadataDisplayTextToEntrySet` | `credman_v5` | 5 | `void (const char* cred_id, const char* metadata_display_text, const char* set_id, int set_index)` | `(i32 ×4) -> ()` | 123–126 |
 | 22 | `SetDelegationTypeForEntryInSet` | `credman_v7` | 7 | `void (const char* cred_id, int delegation_type, const char* set_id, int set_index)` | `(i32 ×4) -> ()` | 128–131 |
 
-Before [`da6282ca`][HH-const] (2025-11-06) the header declared `char*` where
-it now declares `const char*`. The WebAssembly signature is the same.
-
 <a id="parameters"></a>
 ## 5. Parameters
 
-**Rule** values: *required* means non-null and, for a string, valid
-NUL-terminated UTF-8; *nullable* means NULL is accepted and the element is
-absent. For images, *required* means a non-null pointer with length ≥ 1;
-*nullable* means absent as NULL with length 0. **Evidence** is the strongest
-source; "conservative" marks a rule no source settles, set to the stricter
-choice.
+*Required*: non-null; a string is NUL-terminated UTF-8, an image has length
+≥ 1. *Nullable*: NULL means absent, with length 0 for an image.
+*Conservative*: no source settles the rule; the stricter choice stands.
 
 ### Standalone entries (`credman`)
 
@@ -269,29 +225,21 @@ choice.
 <a id="sets"></a>
 ## 6. Entry sets
 
-A set is one option the user selects as a whole.
+The user selects a set as a whole, and one alternative per position.
 
-- `AddEntrySet(set_id, n)` declares positions `0 … n−1`. GC and GR compute `n`
-  as the number of credential queries in the chosen options (GC
-  [lines 35–49][GC-len], GR [`reporter.rs` lines 296–325][GR-reporter]).
-- Each position holds one or more alternatives, of which the user picks one.
-  GC and MP add every matching credential for a query at the same position
-  (GC [lines 52–56][GC-alt] loops over the matches; MP
-  [lines 393–452][MP]).
-- Every position needs at least one entry. GP's partial matching leaves
-  positions empty, and suppresses such options below level 7 and whenever an
-  entry is not fully delegated ([lines 117–129][GP-partial]): an unfilled
-  position is a level-7 feature tied to `DelegationType.FULL`.
-  `android-credman` builds full sets only; the sys layer can express the
-  partial form.
-- The host names an entry by `(set_id, set_index, cred_id)`. Fields,
-  metadata text, the level-6 link and the level-7 delegation address it the
-  same way (GT model; this repository's test host enforces it for fields).
-- A set id is declared once per invocation (SD). GR builds one id per
-  combination; GC repeats ids (§7).
-- Order: Google's matchers add an entry, then its delegation and link, then
-  its fields, then its metadata text (GP lines 244–272, GC lines 135–169).
-  No source shows that the host depends on this order beyond "entry first".
+- `AddEntrySet(set_id, n)` declares positions `0 … n−1`: one per credential
+  query of the chosen options (GC [lines 35–49][GC-len], GR
+  [`reporter.rs` lines 296–325][GR-reporter]).
+- The matches for a query are alternatives at the same position (GC
+  [lines 52–56][GC-alt], MP [lines 393–452][MP]).
+- Every position needs an entry. GP leaves positions empty only at level 7
+  with every entry fully delegated ([lines 117–129][GP-partial]).
+  `android-credman` builds full sets only.
+- The host names an entry by `(set_id, set_index, cred_id)`; fields, metadata
+  text, the level-6 link and the level-7 delegation use the same key (GT).
+- A set id is declared once per invocation (SD; GC repeats ids, §7).
+- Google's matchers send an entry, then its delegation and link, then its
+  fields, then its metadata text (GP lines 244–272, GC lines 135–169).
 
 <a id="conflicts"></a>
 ## 7. Conflicts between sources
@@ -310,7 +258,7 @@ A set is one option the user selects as a whole.
 <a id="conservative"></a>
 ## 8. Rules left conservative
 
-Unconfirmed by any source, and set to the stricter choice:
+Set to the stricter choice:
 
 - every pointer of `AddEntry`, `AddField`,
   `SetAdditionalDisclaimerAndUrlForVerificationEntry` and
@@ -328,14 +276,12 @@ Unconfirmed by any source, and set to the stricter choice:
 <a id="experiments"></a>
 ## 9. Device experiments
 
-Each settles one open question. Run on a current Pixel with
-`adb logcat | grep WasmRuntime` open, and register the matcher through the
-wallet.
+Run on a current Pixel with `adb logcat | grep WasmRuntime` open.
 
-1. **Linking of a `credman` module.** WASI imports are settled (SR). Build a
-   matcher that imports `credman_v99.Nope (i32) -> ()`, never calls it, and
-   emits one valid entry set: the entry should show. Then call it once after
-   emitting: does the trap discard the entries already emitted?
+1. **Lazy resolution for `credman`.** A matcher that imports
+   `credman_v99.Nope (i32) -> ()` emits one entry set without calling it:
+   does the entry show? Then call it after emitting: does the trap discard
+   the entries?
 2. **NULL icon on a standalone entry.** `AddStringIdEntry` with `icon = NULL,
    0` and with `icon = <blob>, 0`. Does the entry appear?
 3. **NULL title.** `AddEntryToSet` with `title = NULL`. Entry dropped, empty
@@ -370,7 +316,6 @@ wallet.
 [HH-v5]: https://github.com/digitalcredentialsdev/CMWallet/commit/72b265b7599fe1e5ae6f764e1b0599f7c0dc6f8e
 [HH-v6]: https://github.com/digitalcredentialsdev/CMWallet/commit/98e6c9c9848c77d3834bcd56dfa1b4bb146a65bb
 [HH-v7]: https://github.com/digitalcredentialsdev/CMWallet/commit/4230483c69707bfe0c1617653703d7e4274e0799
-[HH-const]: https://github.com/digitalcredentialsdev/CMWallet/commit/da6282ca297353268ffccb058521a129bf3861a9
 [GC]: https://github.com/digitalcredentialsdev/CMWallet/blob/abcf38a39cce77b656c7ffed1cffbbb9d58f75ac/matcher/openid4vp1_0.c
 [GC-in]: https://github.com/digitalcredentialsdev/CMWallet/blob/abcf38a39cce77b656c7ffed1cffbbb9d58f75ac/matcher/openid4vp1_0.c#L17-L33
 [GC-len]: https://github.com/digitalcredentialsdev/CMWallet/blob/abcf38a39cce77b656c7ffed1cffbbb9d58f75ac/matcher/openid4vp1_0.c#L35-L49
