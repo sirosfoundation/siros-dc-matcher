@@ -13,7 +13,13 @@ use serde_json::{json, Value};
 use siros_dc_matcher_core::db::CredentialDatabase;
 use siros_dc_matcher_core::fixtures;
 use siros_dc_matcher_core::profile::{Capability, MatchProfile};
-use siros_dc_matcher_testhost::{run, Captured, Invocation};
+use siros_dc_matcher_testhost::{run, Captured, CapturedEntry, Invocation};
+
+/// The matcher's own JSON: `data` in the standard metadata object.
+fn data(entry: &CapturedEntry) -> Value {
+    let object: Value = serde_json::from_str(&entry.metadata).expect("metadata is JSON");
+    object["data"].clone()
+}
 
 /// Build (if needed) and load the matcher binary under test.
 ///
@@ -167,7 +173,7 @@ fn the_chosen_zk_capability_is_carried_in_metadata() {
     let entry = captured
         .entry("siros-0", 0)
         .expect("the ZK request should match");
-    let meta: Value = serde_json::from_str(&entry.metadata).expect("metadata is JSON");
+    let meta = data(entry);
     assert_eq!(meta["capabilities"][0]["system"], "longfellow-libzk-v1");
     assert_eq!(meta["capabilities"][0]["params"]["num_attributes"], "4");
 }
@@ -184,7 +190,7 @@ fn a_non_zk_match_carries_no_capability() {
         ),
     );
     let entry = captured.entry("siros-0", 0).expect("one entry");
-    let meta: Value = serde_json::from_str(&entry.metadata).expect("metadata is JSON");
+    let meta = data(entry);
     assert_eq!(meta["capabilities"], json!([]));
 }
 
@@ -268,7 +274,10 @@ fn metadata_carries_the_matchers_decision() {
     );
 
     let entry = captured.entry("siros-0", 0).expect("one entry");
-    let meta: Value = serde_json::from_str(&entry.metadata).expect("metadata is JSON");
+    let object: Value = serde_json::from_str(&entry.metadata).expect("metadata is JSON");
+    assert_eq!(object["display_skipped"], false);
+    assert_eq!(object["host_level"], 2);
+    let meta = &object["data"];
     assert_eq!(meta["query_id"], "q1");
     assert_eq!(meta["credential_id"], "mdl-1");
     assert_eq!(meta["protocol"], "openid4vp-v1-unsigned");
@@ -517,7 +526,7 @@ fn dropped_combinations_are_reported_in_metadata() {
 
     assert_eq!(captured.sets.len(), 32, "capped at MAX_COMBINATIONS");
     let entry = captured.entry("siros-0", 0).expect("one entry");
-    let meta: Value = serde_json::from_str(&entry.metadata).expect("metadata is JSON");
+    let meta = data(entry);
     assert_eq!(meta["combinations_dropped"], 8);
 }
 
@@ -791,7 +800,7 @@ fn a_zkp_req_request_is_offered_with_rows_from_the_plan() {
     let entry = captured.entry("siros-0", 0).expect("zkp_req entry");
     assert_eq!(entry.credential_id, "nym-1");
 
-    let meta: Value = serde_json::from_str(&entry.metadata).expect("metadata is JSON");
+    let meta = data(entry);
     assert_eq!(
         meta["claims"],
         json!([]),
@@ -821,7 +830,7 @@ fn a_non_zkp_req_match_has_no_zkp_req_metadata() {
         ),
     );
     let entry = captured.entry("siros-0", 0).expect("entry");
-    let meta: Value = serde_json::from_str(&entry.metadata).expect("JSON");
+    let meta = data(entry);
     assert!(meta["zkp_req"].is_null());
 }
 

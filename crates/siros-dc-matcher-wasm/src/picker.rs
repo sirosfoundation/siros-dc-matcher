@@ -5,7 +5,9 @@
 //! strings and hands it to a [`SetSink`]: the host on a device, a stand-in in
 //! a test.
 
-use android_credman::{C8String, EntrySet, Field, SetEntry, SetSink, Slot, VerificationDisplay};
+use android_credman::{
+    C8String, C8StringExt, EntrySet, Field, SetEntry, SetSink, Slot, VerificationDisplay,
+};
 
 /// The entries this matcher emits: verification entries alone, so it links
 /// `AddEntryToSet` and none of the payment functions.
@@ -21,8 +23,9 @@ pub struct Member<'a> {
     pub title: &'a str,
     /// Secondary line, typically the issuer.
     pub subtitle: &'a str,
-    /// Opaque payload handed back to the wallet on selection.
-    pub metadata: String,
+    /// JSON handed back to the wallet on selection, as `data` in the
+    /// standard metadata object.
+    pub data: String,
     /// Image bytes. The host drops an entry without them.
     pub icon: &'a [u8],
     /// Why the verifier is asking, shown with the entry (§6.2 `purpose`).
@@ -42,7 +45,7 @@ struct HostStrings {
     credential_id: C8String,
     title: C8String,
     subtitle: C8String,
-    metadata: C8String,
+    data: C8String,
     disclaimer: Option<C8String>,
     fields: Vec<(C8String, C8String)>,
 }
@@ -53,7 +56,7 @@ impl HostStrings {
             credential_id: c(member.credential_id),
             title: c(member.title),
             subtitle: c(member.subtitle),
-            metadata: c(&member.metadata),
+            data: c(&member.data),
             disclaimer: member.disclaimer.map(c),
             fields: member
                 .fields
@@ -84,7 +87,7 @@ impl HostStrings {
             warning: None,
         };
         SetEntry::new(&self.credential_id, display)
-            .with_metadata(&self.metadata)
+            .with_data(&self.data)
             .with_fields(fields)
     }
 }
@@ -110,15 +113,11 @@ pub fn emit_set(sink: &mut impl SetSink, set_id: &str, members: &[Member<'_>]) {
     sink.add_entry_set(&EntrySet::new(&id, *first, others));
 }
 
-/// `text` up to its first NUL, as a host string.
+/// `text` as a host string, each NUL replaced by a space.
 ///
-/// An interior NUL ends the text early. A credential whose title contains a
-/// NUL is pathological, but dropping the whole picker entry over it would
-/// present as "no matching credential" with no way to tell why.
+/// A credential whose title contains a NUL is pathological, but dropping the
+/// whole picker entry over it would present as "no matching credential" with
+/// no way to tell why.
 fn c(text: &str) -> C8String {
-    let until_nul = text.find('\0').map_or(text, |end| text.split_at(end).0);
-    // `until_nul` holds no NUL and is UTF-8 (a NUL never sits inside a
-    // multi-byte sequence), the only two reasons `from_string` refuses, so
-    // the default is unreachable.
-    C8String::from_string(until_nul).unwrap_or_default()
+    C8String::from_str_lossy(text)
 }

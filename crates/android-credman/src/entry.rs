@@ -57,9 +57,11 @@ pub struct PaymentDisplay<'a> {
 }
 
 /// A second disclaimer and a link on a verification entry: `url_display_text`
-/// is the link's text and `url_value` its target. [`crate::WithLink`] adds it
-/// to a set entry, [`StringIdEntry::link`] to a standalone one. How the
-/// picker draws it is unconfirmed.
+/// is the link's text and `url_value` its target. Google's phone-number
+/// matcher puts an aggregator's consent text and policy link here.
+/// [`SetEntry::with_link`](crate::SetEntry::with_link) adds it to a set entry,
+/// [`StringIdEntry::link`] to a standalone one. How the picker draws it is
+/// unconfirmed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VerificationLink<'a> {
     pub secondary_disclaimer: &'a C8Str,
@@ -82,17 +84,27 @@ pub struct StringIdEntry<'a> {
 
 /// A standalone entry named by a number, with its fields. Google's header
 /// deprecates it for [`StringIdEntry`]. [`Host::add_legacy_entry`](crate::Host::add_legacy_entry) sends it.
-/// The display values mean what they mean in [`VerificationDisplay`]; every
-/// one is required, a conservative rule, since no known matcher calls it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LegacyEntry<'a> {
+    /// Comes back to the wallet when the user selects the entry; the fields
+    /// attach by it.
     pub cred_id: i64,
+    pub display: LegacyDisplay<'a>,
+    pub fields: &'a [LegacyField<'a>],
+}
+
+/// How the picker draws a [`LegacyEntry`]. The values mean what they mean in
+/// [`VerificationDisplay`]; every one is required, a conservative rule, since
+/// no known matcher calls [`AddEntry`].
+///
+/// [`AddEntry`]: android_credman_sys::credman::AddEntry
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LegacyDisplay<'a> {
     pub icon: &'a [u8],
     pub title: &'a C8Str,
     pub subtitle: &'a C8Str,
     pub disclaimer: &'a C8Str,
     pub warning: &'a C8Str,
-    pub fields: &'a [LegacyField<'a>],
 }
 
 /// A row on a [`LegacyEntry`], as [`Field`] is on the newer entries.
@@ -126,4 +138,29 @@ pub struct InlineIssuanceEntry<'a> {
     /// app's label.
     pub title: Option<&'a C8Str>,
     pub subtitle: Option<&'a C8Str>,
+}
+
+/// The wallet app's display name and icon, which
+/// [`SelfDeclarePackageInfo`](android_credman_sys::v4::SelfDeclarePackageInfo)
+/// declares to the host.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PackageInfo<'a> {
+    pub display_name: &'a C8Str,
+    /// At least one byte (conservative).
+    pub icon: &'a [u8],
+}
+
+/// How the wallet completes the request when the user picks a set entry
+/// (androidx `DelegationType`). A selected set whose entries mix types falls
+/// back to [`Self::NoDelegation`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DelegationType {
+    /// The host launches the wallet's activity, which handles any user
+    /// interaction (androidx `NONE`).
+    NoDelegation = 0,
+    /// Credential Manager keeps its own UI and calls the wallet's background
+    /// fulfilment service, which must answer within a timeout while a loading
+    /// indicator shows (androidx `FULL`). A wallet that uses it declares that
+    /// service.
+    Full = 1,
 }

@@ -67,6 +67,12 @@ pub struct CapturedEntry {
     pub warning: Option<String>,
     /// Display fields attached to this entry, in emission order.
     pub fields: Vec<(String, String)>,
+    /// The delegation type sent at level 7.
+    pub delegation: Option<i32>,
+    /// The second disclaimer, link text and link target sent at level 6.
+    pub link: Option<(String, String, String)>,
+    /// The display text sent at level 5.
+    pub metadata_display_text: Option<String>,
 }
 
 /// Everything a matcher emitted during one run.
@@ -124,10 +130,16 @@ pub fn run(wasm: &[u8], input: Invocation) -> Result<Captured> {
     preview1::add_to_linker_sync(&mut linker, |s: &mut State| &mut s.wasi)
         .context("linking WASI preview 1")?;
     add_credman(&mut linker)?;
+    // The real host links a module whose imports it lacks and traps when one
+    // is called (ABI.md §3). The calls this host does not record behave the
+    // same way.
+    linker
+        .define_unknown_imports_as_traps(&module)
+        .context("defining the unrecorded imports")?;
 
-    let instance = linker.instantiate(&mut store, &module).context(
-        "instantiating matcher — a missing import means the host lacks a function it needs",
-    )?;
+    let instance = linker
+        .instantiate(&mut store, &module)
+        .context("instantiating matcher")?;
 
     instance
         .get_typed_func::<(), ()>(&mut store, "_start")
@@ -171,7 +183,7 @@ fn compiled(wasm: &[u8]) -> Result<(Engine, Module)> {
     Ok((engine, module))
 }
 
-/// Register the `credman` and `credman_v2` imports the matcher links against.
+/// Register the `credman` to `credman_v7` imports a matcher links against.
 fn add_credman(linker: &mut Linker<State>) -> Result<()> {
     linker.func_wrap(
         "credman",
@@ -282,6 +294,9 @@ fn add_credman(linker: &mut Linker<State>) -> Result<()> {
                 disclaimer: read_cstr_opt(&mut c, disclaimer)?,
                 warning: read_cstr_opt(&mut c, warning)?,
                 fields: Vec::new(),
+                delegation: None,
+                link: None,
+                metadata_display_text: None,
             };
             c.data_mut().out.entries.push(entry);
             Ok(())
@@ -304,39 +319,120 @@ fn add_credman(linker: &mut Linker<State>) -> Result<()> {
                 read_cstr(&mut c, name)?,
                 read_cstr(&mut c, value)?,
             );
-            // A field for an entry that was never added is a matcher bug, and
-            // silently dropping it would hide exactly that bug.
-            let out = &mut c.data_mut().out;
-            let Some(entry) = out
-                .entries
-                .iter_mut()
-                .find(|e| e.set_id == set_id && e.index == index)
-            else {
-                return Err(anyhow::anyhow!(
-                    "field {name:?} added to unknown entry {set_id}[{index}]"
-                ));
-            };
-
-            // The credential id is checked, not ignored. The platform keys
-            // fields by credential id as well as set position, so a guest
-            // passing the wrong one — or an empty one — produces fields that
-            // never attach in a real picker. A host that accepted any id
-            // would let that ship while every test stayed green, which is the
-            // one failure mode a test host exists to prevent.
-            if cred_id != entry.credential_id {
-                return Err(anyhow::anyhow!(
-                    "field {name:?} for entry {set_id}[{index}] carries credential id {cred_id:?}, \
-                     but the entry was added as {:?}",
-                    entry.credential_id
-                ));
-            }
-
+            let entry = entry_at(&mut c.data_mut().out, &set_id, index, &cred_id)?;
             entry.fields.push((name, value));
             Ok(())
         },
     )?;
 
+    linker.func_wrap(
+        "credman_v5",
+        "AddMetadataDisplayTextToEntrySet",
+        |mut c: Caller<'_, State>,
+         cred_id: i32,
+         text: i32,
+         set_id: i32,
+         index: i32|
+         -> Result<()> {
+            reached(&c, 5, "AddMetadataDisplayTextToEntrySet")?;
+            let (cred_id, text, set_id) = (
+                read_cstr(&mut c, cred_id)?,
+                read_cstr(&mut c, text)?,
+                read_cstr(&mut c, set_id)?,
+            );
+            entry_at(&mut c.data_mut().out, &set_id, index, &cred_id)?.metadata_display_text =
+                Some(text);
+            Ok(())
+        },
+    )?;
+
+    linker.func_wrap(
+        "credman_v6",
+        "SetAdditionalDisclaimerAndUrlForVerificationEntryInCredentialSet",
+        |mut c: Caller<'_, State>,
+         cred_id: i32,
+         disclaimer: i32,
+         url_text: i32,
+         url: i32,
+         set_id: i32,
+         index: i32|
+         -> Result<()> {
+            reached(
+                &c,
+                6,
+                "SetAdditionalDisclaimerAndUrlForVerificationEntryInCredentialSet",
+            )?;
+            let (cred_id, link, set_id) = (
+                read_cstr(&mut c, cred_id)?,
+                (
+                    read_cstr(&mut c, disclaimer)?,
+                    read_cstr(&mut c, url_text)?,
+                    read_cstr(&mut c, url)?,
+                ),
+                read_cstr(&mut c, set_id)?,
+            );
+            entry_at(&mut c.data_mut().out, &set_id, index, &cred_id)?.link = Some(link);
+            Ok(())
+        },
+    )?;
+
+    linker.func_wrap(
+        "credman_v7",
+        "SetDelegationTypeForEntryInSet",
+        |mut c: Caller<'_, State>,
+         cred_id: i32,
+         delegation: i32,
+         set_id: i32,
+         index: i32|
+         -> Result<()> {
+            reached(&c, 7, "SetDelegationTypeForEntryInSet")?;
+            let (cred_id, set_id) = (read_cstr(&mut c, cred_id)?, read_cstr(&mut c, set_id)?);
+            entry_at(&mut c.data_mut().out, &set_id, index, &cred_id)?.delegation =
+                Some(delegation);
+            Ok(())
+        },
+    )?;
+
     Ok(())
+}
+
+/// A call above the reported level traps on a real host.
+fn reached(c: &Caller<'_, State>, level: u32, function: &str) -> Result<()> {
+    let reported = c.data().input.wasm_version;
+    if reported < level {
+        return Err(anyhow::anyhow!(
+            "{function} is level {level}, called on a level-{reported} host"
+        ));
+    }
+    Ok(())
+}
+
+/// The entry a field or a level-5 to level-7 call names.
+///
+/// A call for an entry that was never added is a matcher bug, and silently
+/// dropping it would hide exactly that bug. The credential id is checked as
+/// well: the platform keys these calls by credential id as well as set
+/// position, so a guest passing the wrong one produces calls that never
+/// attach in a real picker.
+fn entry_at<'o>(
+    out: &'o mut Captured,
+    set_id: &str,
+    index: i32,
+    cred_id: &str,
+) -> Result<&'o mut CapturedEntry> {
+    let entry = out
+        .entries
+        .iter_mut()
+        .find(|e| e.set_id == set_id && e.index == index)
+        .ok_or_else(|| anyhow::anyhow!("call for unknown entry {set_id}[{index}]"))?;
+    if cred_id != entry.credential_id {
+        return Err(anyhow::anyhow!(
+            "call for entry {set_id}[{index}] carries credential id {cred_id:?}, \
+             but the entry was added as {:?}",
+            entry.credential_id
+        ));
+    }
+    Ok(entry)
 }
 
 /// The guest's linear memory.

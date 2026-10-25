@@ -94,7 +94,6 @@ fn main() {
             .as_ref()
             .map(|app| app.origin().map_or("", android_credman::C8Str::as_str))
             .map_err(|error| *error),
-        host_abi: host.version().get(),
     };
     run(&input, &mut sets);
 }
@@ -113,8 +112,6 @@ struct Input<'a> {
     /// The caller's origin as the platform verified it, empty for an app;
     /// the error when the host's report could not be read.
     origin: Result<&'a str, CallingAppError>,
-    /// The level `GetWasmVersion` reported, recorded in entry metadata.
-    host_abi: u32,
 }
 
 /// One matcher invocation, from the host's inputs to emitted entries.
@@ -233,7 +230,7 @@ fn run(input: &Input<'_>, sets: &mut impl SetSink) {
                 .unwrap_or_default();
             let zk = resolved.as_ref().and_then(|r| r.zkp_req.as_ref());
 
-            let metadata = serde_json::json!({
+            let data = serde_json::json!({
                 "matcher": "siros-dc-matcher",
                 "protocol": protocol,
                 "query_id": query_id,
@@ -250,7 +247,6 @@ fn run(input: &Input<'_>, sets: &mut impl SetSink) {
                 // itself. The wallet is told it separately, so carrying it
                 // lets the wallet check the matcher was shown the same caller.
                 "verified_origin": origin,
-                "host_abi": input.host_abi,
                 // How many further options existed. A picker showing the first
                 // few of many is telling the user those are all they have.
                 //
@@ -273,7 +269,7 @@ fn run(input: &Input<'_>, sets: &mut impl SetSink) {
                 credential_id: &credential.id,
                 title: &credential.title,
                 subtitle: &credential.subtitle,
-                metadata,
+                data,
                 // A null icon costs the whole entry: the host drops it and
                 // logs `Null icon for icon` in its own process, so a
                 // credential registered without image bytes would silently
@@ -441,7 +437,7 @@ impl Diagnostics {
             // message is written terse and passed whole, so nothing important
             // silently falls off the end.
             subtitle: &message,
-            metadata: "{}".to_owned(),
+            data: "{}".to_owned(),
             icon: FALLBACK_ICON_PNG,
             // A diagnostic entry has no verifier reason to show; the whole
             // message is already in the subtitle.
@@ -502,7 +498,6 @@ mod tests {
             request,
             blob,
             origin,
-            host_abi: 0,
         };
         run(&input, &mut Discard);
     }

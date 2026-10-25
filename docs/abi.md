@@ -95,7 +95,7 @@ unsigned together and the readable one is answered.
 - **No v1 fallback.** Below host level 2 the matcher emits nothing. A missing
   import traps only when called (`ABI.md` §3), so a runtime branch on
   `GetWasmVersion` could serve a level-1 host.
-- **`GetWasmVersion` goes into entry metadata**, so a field report says which
-  host ABI produced the behaviour.
+- **`GetWasmVersion` goes into entry metadata** as `host_level`, so a field
+  report says which host ABI produced the behaviour.
 - **No network, no filesystem, hard time budget.** Everything the matcher needs
   arrives through the two buffers above.

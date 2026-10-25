@@ -213,6 +213,16 @@ const unstubbed = Object.entries(imports).flatMap(([mod, names]) =>
   names.filter((n) => stubbed[mod]?.[n] === undefined).map((n) => `${mod}.${n}`),
 );
 
+// The real host links a module whose imports it lacks and traps when one is
+// called (ABI.md §3). The functions this stub does not provide do the same.
+for (const name of unstubbed) {
+  const [mod, fn] = name.split('.');
+  stubbed[mod] ??= {};
+  stubbed[mod][fn] = () => {
+    throw new Error(`${name} is not provided by this stub host`);
+  };
+}
+
 // With a `Module` (rather than bytes) this resolves to the Instance itself,
 // not a `{ module, instance }` pair.
 const instance = await WebAssembly.instantiate(wasmModule, stubbed);

@@ -1,218 +1,60 @@
-use crate::entry::{PaymentDisplay, VerificationDisplay, VerificationLink};
-use crate::set::{DelegationType, EntryKind, EntrySet, PaymentWithInfo, SetEntry, SetSink};
-use crate::version::{V2, V7};
-use android_credman_sys::{v2, v3, v5, v6, v7};
-use c8str::C8Str;
-use core::ptr;
+use crate::entry::DelegationType;
+use crate::levels::{EntryKey, V2, V5, V6, V7};
+use crate::set::{EntryKind, EntrySet, SetEntry, SetSink};
 
-/// The host's entry sets, from [`Host::entry_sets`](crate::Host::entry_sets).
-/// Every entry they send carries the host's delegation setting.
-#[derive(Debug, Clone, Copy)]
-pub struct EntrySets {
-    delegation: Option<Delegation>,
+/// The host's entry sets, from [`Host::entry_sets`](crate::Host::entry_sets):
+/// the level-2 host and the host's default delegation.
+#[derive(Clone, Copy)]
+pub struct EntrySets<'h> {
+    host: &'h dyn V2,
+    delegation: Option<DelegationType>,
 }
 
-impl EntrySets {
-    pub(crate) fn new(_level: V2, delegation: Option<Delegation>) -> Self {
-        Self { delegation }
+impl<'h> EntrySets<'h> {
+    pub(crate) fn new(host: &'h dyn V2, delegation: Option<DelegationType>) -> Self {
+        Self { host, delegation }
     }
-}
 
-/// A level-7 host's delegation setting. Only `Host::connect_with` builds one,
-/// and the call goes through `send`, so a binary that never calls
-/// `connect_with` links no `credman_v7` import.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct Delegation {
-    level: V7,
-    kind: DelegationType,
-    send: fn(V7, &Address<'_>, DelegationType),
-}
-
-impl Delegation {
-    pub(crate) fn new(level: V7, kind: DelegationType) -> Self {
-        Self {
-            level,
-            kind,
-            send: delegation,
+    fn emit<K: EntryKind>(&self, entry: &SetEntry<'_, K>, key: &EntryKey<'_>) {
+        let metadata = entry.metadata(self.host.level());
+        entry.kind().add(self.host, key, &metadata);
+        if let (Some(delegation), Some(host)) = (
+            entry.delegation().or(self.delegation),
+            self.host.version::<dyn V7>(),
+        ) {
+            host.set_delegation_type_for_entry_in_set(key, delegation);
+        }
+        if let (Some(link), Some(host)) = (entry.link(), self.host.version::<dyn V6>()) {
+            host.set_additional_disclaimer_and_url_for_verification_entry_in_credential_set(
+                key, &link,
+            );
+        }
+        for field in entry.fields() {
+            self.host.add_field_to_entry_set(key, field);
+        }
+        if let (Some(text), Some(host)) =
+            (entry.metadata_display_text(), self.host.version::<dyn V5>())
+        {
+            host.add_metadata_display_text_to_entry_set(key, text);
         }
     }
-
-    fn send(&self, at: &Address<'_>) {
-        (self.send)(self.level, at, self.kind);
-    }
 }
 
-impl SetSink for EntrySets {
+impl SetSink for EntrySets<'_> {
     fn add_entry_set<K: EntryKind>(&mut self, set: &EntrySet<'_, K>) {
         // A slot occupies more than 4 bytes and wasm32 addresses 4 GiB, so
         // no set holds more slots than an i32 counts: the cast and the
         // position counter below are exact.
-        let length = set.slot_count() as i32;
-        // SAFETY: see the module documentation of `host`.
-        unsafe { v2::AddEntrySet(set.id().as_ptr(), length) };
-        for (index, slot) in (0_i32..).zip(set.slots()) {
+        self.host.add_entry_set(set.id(), set.slot_count() as i32);
+        for (set_index, slot) in (0_i32..).zip(set.slots()) {
             for entry in slot.alternatives() {
-                emit_entry(entry, set.id(), index, self.delegation);
+                let key = EntryKey {
+                    set_id: set.id(),
+                    set_index,
+                    cred_id: entry.cred_id(),
+                };
+                self.emit(entry, &key);
             }
         }
-    }
-}
-
-/// Public only to appear in the sealed trait.
-pub struct Address<'a> {
-    cred_id: &'a C8Str,
-    set_id: &'a C8Str,
-    index: i32,
-}
-
-/// The order Google's matchers use.
-fn emit_entry<K: EntryKind>(
-    entry: &SetEntry<'_, K>,
-    set_id: &C8Str,
-    index: i32,
-    delegation: Option<Delegation>,
-) {
-    let at = Address {
-        cred_id: entry.cred_id(),
-        set_id,
-        index,
-    };
-    entry.kind().add_entry(&at, entry.metadata());
-    if let Some(delegation) = delegation {
-        delegation.send(&at);
-    }
-    entry.kind().after_entry(&at);
-    for field in entry.fields() {
-        // SAFETY: see the module documentation of `host`.
-        unsafe {
-            v2::AddFieldToEntrySet(
-                at.cred_id.as_ptr(),
-                field.name.as_ptr(),
-                field.value.map_or(ptr::null(), C8Str::as_ptr),
-                at.set_id.as_ptr(),
-                at.index,
-            );
-        }
-    }
-    entry.kind().after_fields(&at);
-}
-
-pub(crate) fn verification(
-    at: &Address<'_>,
-    display: &VerificationDisplay<'_>,
-    metadata: Option<&C8Str>,
-) {
-    // SAFETY: see the module documentation of `host`.
-    unsafe {
-        v2::AddEntryToSet(
-            at.cred_id.as_ptr(),
-            display.icon.as_ptr().cast(),
-            display.icon.len(),
-            display.title.as_ptr(),
-            display.subtitle.map_or(ptr::null(), C8Str::as_ptr),
-            display.disclaimer.map_or(ptr::null(), C8Str::as_ptr),
-            display.warning.map_or(ptr::null(), C8Str::as_ptr),
-            metadata.map_or(ptr::null(), C8Str::as_ptr),
-            at.set_id.as_ptr(),
-            at.index,
-        );
-    }
-}
-
-pub(crate) fn payment(at: &Address<'_>, display: &PaymentDisplay<'_>, metadata: Option<&C8Str>) {
-    // SAFETY: see the module documentation of `host`.
-    unsafe {
-        v2::AddPaymentEntryToSet(
-            at.cred_id.as_ptr(),
-            display.merchant_name.as_ptr(),
-            display.payment_method_name.as_ptr(),
-            display
-                .payment_method_subtitle
-                .map_or(ptr::null(), C8Str::as_ptr),
-            display.payment_method_icon.as_ptr().cast(),
-            display.payment_method_icon.len(),
-            display.transaction_amount.as_ptr(),
-            display.bank_icon.map_or(ptr::null(), <[u8]>::as_ptr).cast(),
-            display.bank_icon.map_or(0, <[u8]>::len),
-            display
-                .payment_provider_icon
-                .map_or(ptr::null(), <[u8]>::as_ptr)
-                .cast(),
-            display.payment_provider_icon.map_or(0, <[u8]>::len),
-            metadata.map_or(ptr::null(), C8Str::as_ptr),
-            at.set_id.as_ptr(),
-            at.index,
-        );
-    }
-}
-
-pub(crate) fn payment_with_info(
-    at: &Address<'_>,
-    entry: &PaymentWithInfo<'_>,
-    metadata: Option<&C8Str>,
-) {
-    let display = &entry.display;
-    // SAFETY: see the module documentation of `host`.
-    unsafe {
-        v3::AddPaymentEntryToSetV2(
-            at.cred_id.as_ptr(),
-            display.merchant_name.as_ptr(),
-            display.payment_method_name.as_ptr(),
-            display
-                .payment_method_subtitle
-                .map_or(ptr::null(), C8Str::as_ptr),
-            display.payment_method_icon.as_ptr().cast(),
-            display.payment_method_icon.len(),
-            display.transaction_amount.as_ptr(),
-            display.bank_icon.map_or(ptr::null(), <[u8]>::as_ptr).cast(),
-            display.bank_icon.map_or(0, <[u8]>::len),
-            display
-                .payment_provider_icon
-                .map_or(ptr::null(), <[u8]>::as_ptr)
-                .cast(),
-            display.payment_provider_icon.map_or(0, <[u8]>::len),
-            entry.additional_info.map_or(ptr::null(), C8Str::as_ptr),
-            metadata.map_or(ptr::null(), C8Str::as_ptr),
-            at.set_id.as_ptr(),
-            at.index,
-        );
-    }
-}
-
-fn delegation(_level: V7, at: &Address<'_>, delegation: DelegationType) {
-    // SAFETY: see the module documentation of `host`.
-    unsafe {
-        v7::SetDelegationTypeForEntryInSet(
-            at.cred_id.as_ptr(),
-            delegation as i32,
-            at.set_id.as_ptr(),
-            at.index,
-        );
-    }
-}
-
-pub(crate) fn link(at: &Address<'_>, link: &VerificationLink<'_>) {
-    // SAFETY: see the module documentation of `host`.
-    unsafe {
-        v6::SetAdditionalDisclaimerAndUrlForVerificationEntryInCredentialSet(
-            at.cred_id.as_ptr(),
-            link.secondary_disclaimer.as_ptr(),
-            link.url_display_text.as_ptr(),
-            link.url_value.as_ptr(),
-            at.set_id.as_ptr(),
-            at.index,
-        );
-    }
-}
-
-pub(crate) fn metadata_display_text(at: &Address<'_>, text: &C8Str) {
-    // SAFETY: see the module documentation of `host`.
-    unsafe {
-        v5::AddMetadataDisplayTextToEntrySet(
-            at.cred_id.as_ptr(),
-            text.as_ptr(),
-            at.set_id.as_ptr(),
-            at.index,
-        );
     }
 }
