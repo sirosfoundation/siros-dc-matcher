@@ -41,6 +41,11 @@ mod sealed {
 }
 
 impl Credman {
+    /// Whether the reported level reaches `level`.
+    pub(crate) fn reaches(&self, level: u32) -> bool {
+        self.level >= level
+    }
+
     /// Reads the host level with [`GetWasmVersion`](credman::GetWasmVersion).
     pub(crate) fn connect() -> Self {
         let mut level = 0u32;
