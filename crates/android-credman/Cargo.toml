@@ -1,0 +1,14 @@
+[package]
+name = "android-credman"
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+edition = "2024"
+readme = "README.md"
+
+[dependencies]
+android-credman-sys = { workspace = true }
+c8str = { workspace = true }
+thiserror = { workspace = true }
+
+[features]
+test-shim = ["android-credman-sys/test-shim"]
