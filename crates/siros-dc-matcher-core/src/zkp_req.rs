@@ -38,7 +38,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 #![deny(missing_docs)]
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 use std::fmt;
 
 use serde::Serialize;
@@ -417,7 +417,7 @@ fn read_items(req: &Value) -> Result<Vec<PlannedFunction>, InvalidRequest> {
         _ => return Err(InvalidRequest::ReqMissingOrEmpty),
     };
 
-    let mut seen: HashSet<&str> = HashSet::new();
+    let mut seen: FxHashSet<&str> = FxHashSet::default();
     let mut functions = Vec::with_capacity(items.len());
     for (index, item) in items.iter().enumerate() {
         let function_id = item

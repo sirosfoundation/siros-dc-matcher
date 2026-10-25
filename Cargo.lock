@@ -1735,6 +1735,7 @@ name = "siros-dc-matcher-core"
 version = "0.11.0"
 dependencies = [
  "ciborium",
+ "rustc-hash",
  "serde",
  "serde_bytes",
  "serde_json",
@@ -1777,6 +1778,7 @@ dependencies = [
 name = "siros-dcql"
 version = "0.11.0"
 dependencies = [
+ "rustc-hash",
  "serde",
  "serde_json",
 ]

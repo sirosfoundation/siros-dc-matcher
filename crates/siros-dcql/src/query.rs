@@ -7,7 +7,7 @@
 //! recognise — a wallet that refuses tomorrow's extension is worse than one
 //! that ignores it.
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -219,7 +219,8 @@ impl DcqlQuery {
     /// [`QueryError`], excluding [`QueryError::Json`] which only parsing can
     /// produce.
     pub fn validate(&self) -> Result<(), QueryError> {
-        let mut seen: HashSet<&str> = HashSet::with_capacity(self.credentials.len());
+        let mut seen: FxHashSet<&str> =
+            FxHashSet::with_capacity_and_hasher(self.credentials.len(), Default::default());
         for credential in &self.credentials {
             if credential.id.is_empty() {
                 return Err(QueryError::EmptyCredentialId);
@@ -249,7 +250,8 @@ impl CredentialQuery {
 
     /// §6.3 claim id uniqueness, within this credential query's `claims`.
     fn validate_claim_ids(&self) -> Result<(), QueryError> {
-        let mut seen: HashSet<&str> = HashSet::with_capacity(self.claims.len());
+        let mut seen: FxHashSet<&str> =
+            FxHashSet::with_capacity_and_hasher(self.claims.len(), Default::default());
         for id in self.claims.iter().filter_map(|c| c.id.as_deref()) {
             if !seen.insert(id) {
                 return Err(QueryError::DuplicateClaimId {
