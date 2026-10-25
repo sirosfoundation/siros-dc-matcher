@@ -18,8 +18,8 @@ impl WasmVersion {
         self.0
     }
 
-    /// The level-2 token, for entry sets.
-    pub fn v2(self) -> Option<V2> {
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub(crate) fn v2(self) -> Option<V2> {
         (self.0 >= 2).then_some(V2(()))
     }
 
@@ -43,16 +43,15 @@ impl WasmVersion {
         (self.0 >= 6).then_some(V6(()))
     }
 
-    /// The level-7 token, for delegation on set entries.
-    pub fn v7(self) -> Option<V7> {
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub(crate) fn v7(self) -> Option<V7> {
         (self.0 >= 7).then_some(V7(()))
     }
 }
 
-/// Proof that the host reaches level 2. Sends entry sets through
-/// [`crate::SetSink`].
+/// Proof that the host reaches level 2, for `Host::entry_sets`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct V2(());
+pub(crate) struct V2(());
 
 /// Proof that the host reaches level 3. Unlocks [`crate::PaymentWithInfo`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,6 +71,7 @@ pub struct V5(());
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct V6(());
 
-/// Proof that the host reaches level 7. Unlocks [`crate::WithDelegation`].
+/// Proof that the host reaches level 7, for the delegation setting
+/// `Host::connect_with` applies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct V7(());
+pub(crate) struct V7(());

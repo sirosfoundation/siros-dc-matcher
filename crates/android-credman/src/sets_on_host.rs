@@ -1,11 +1,48 @@
 use crate::entry::{PaymentDisplay, VerificationDisplay, VerificationLink};
 use crate::set::{DelegationType, EntryKind, EntrySet, PaymentWithInfo, SetEntry, SetSink};
-use crate::version::V2;
+use crate::version::{V2, V7};
 use android_credman_sys::{v2, v3, v5, v6, v7};
 use c8str::C8Str;
 use core::ptr;
 
-impl SetSink for V2 {
+/// The host's entry sets, from [`Host::entry_sets`](crate::Host::entry_sets).
+/// Every entry they send carries the host's delegation setting.
+#[derive(Debug, Clone, Copy)]
+pub struct EntrySets {
+    delegation: Option<Delegation>,
+}
+
+impl EntrySets {
+    pub(crate) fn new(_level: V2, delegation: Option<Delegation>) -> Self {
+        Self { delegation }
+    }
+}
+
+/// A level-7 host's delegation setting. Only `Host::connect_with` builds one,
+/// and the call goes through `send`, so a binary that never calls
+/// `connect_with` links no `credman_v7` import.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Delegation {
+    level: V7,
+    kind: DelegationType,
+    send: fn(V7, &Address<'_>, DelegationType),
+}
+
+impl Delegation {
+    pub(crate) fn new(level: V7, kind: DelegationType) -> Self {
+        Self {
+            level,
+            kind,
+            send: delegation,
+        }
+    }
+
+    fn send(&self, at: &Address<'_>) {
+        (self.send)(self.level, at, self.kind);
+    }
+}
+
+impl SetSink for EntrySets {
     fn add_entry_set<K: EntryKind>(&mut self, set: &EntrySet<'_, K>) {
         // A slot occupies more than 4 bytes and wasm32 addresses 4 GiB, so
         // no set holds more slots than an i32 counts: the cast and the
@@ -15,7 +52,7 @@ impl SetSink for V2 {
         unsafe { v2::AddEntrySet(set.id().as_ptr(), length) };
         for (index, slot) in (0_i32..).zip(set.slots()) {
             for entry in slot.alternatives() {
-                emit_entry(entry, set.id(), index);
+                emit_entry(entry, set.id(), index, self.delegation);
             }
         }
     }
@@ -29,13 +66,22 @@ pub struct Address<'a> {
 }
 
 /// The order Google's matchers use.
-fn emit_entry<K: EntryKind>(entry: &SetEntry<'_, K>, set_id: &C8Str, index: i32) {
+fn emit_entry<K: EntryKind>(
+    entry: &SetEntry<'_, K>,
+    set_id: &C8Str,
+    index: i32,
+    delegation: Option<Delegation>,
+) {
     let at = Address {
         cred_id: entry.cred_id(),
         set_id,
         index,
     };
-    entry.kind().add_to_set(&at, entry.metadata());
+    entry.kind().add_entry(&at, entry.metadata());
+    if let Some(delegation) = delegation {
+        delegation.send(&at);
+    }
+    entry.kind().after_entry(&at);
     for field in entry.fields() {
         // SAFETY: see the module documentation of `host`.
         unsafe {
@@ -133,7 +179,7 @@ pub(crate) fn payment_with_info(
     }
 }
 
-pub(crate) fn delegation(at: &Address<'_>, delegation: DelegationType) {
+fn delegation(_level: V7, at: &Address<'_>, delegation: DelegationType) {
     // SAFETY: see the module documentation of `host`.
     unsafe {
         v7::SetDelegationTypeForEntryInSet(

@@ -78,7 +78,7 @@ fn main() {
     let host = android_credman::Host::connect();
     // Every entry this matcher offers is in a set. A host below level 2 has
     // no sets, so it gets nothing, and the inputs are not read.
-    let Some(mut sets) = host.version().v2() else {
+    let Some(mut sets) = host.entry_sets() else {
         return;
     };
     // Without both inputs there is nothing to offer, and no debug flag to

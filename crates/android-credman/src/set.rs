@@ -4,18 +4,20 @@
 //! parameter: a binary links the calls of the kinds it builds and no others.
 
 use crate::entry::{Field, PaymentDisplay, VerificationDisplay, VerificationLink};
-use crate::version::{V3, V5, V6, V7};
+use crate::version::{V3, V5, V6};
 use c8str::C8Str;
 
 pub(crate) mod sealed {
     pub trait Sealed {
+        /// The call that adds the entry.
         #[cfg(target_arch = "wasm32")]
-        fn add_to_set(
-            &self,
-            at: &crate::sets_on_host::Address<'_>,
-            metadata: Option<&c8str::C8Str>,
-        );
+        fn add_entry(&self, at: &crate::sets_on_host::Address<'_>, metadata: Option<&c8str::C8Str>);
 
+        /// The calls between the entry and its fields.
+        #[cfg(target_arch = "wasm32")]
+        fn after_entry(&self, _at: &crate::sets_on_host::Address<'_>) {}
+
+        /// The calls after the fields.
         #[cfg(target_arch = "wasm32")]
         fn after_fields(&self, _at: &crate::sets_on_host::Address<'_>) {}
     }
@@ -24,8 +26,8 @@ pub(crate) mod sealed {
 /// What a set entry shows, which selects the calls that add it:
 /// [`AddEntryToSet`] for [`VerificationDisplay`], [`AddPaymentEntryToSet`] for
 /// [`PaymentDisplay`], [`AddPaymentEntryToSetV2`] for [`PaymentWithInfo`].
-/// [`AnyEntry`] mixes them; [`WithDelegation`], [`WithLink`] and
-/// [`WithMetadataDisplayText`] add a level's call to any kind.
+/// [`AnyEntry`] mixes them; [`WithLink`] and [`WithMetadataDisplayText`] add a
+/// level's call to any kind.
 ///
 /// [`AddEntryToSet`]: android_credman_sys::v2::AddEntryToSet
 /// [`AddPaymentEntryToSet`]: android_credman_sys::v2::AddPaymentEntryToSet
@@ -36,59 +38,50 @@ impl EntryKind for VerificationDisplay<'_> {}
 impl EntryKind for PaymentDisplay<'_> {}
 impl EntryKind for PaymentWithInfo<'_> {}
 impl EntryKind for AnyEntry<'_> {}
-impl<K: EntryKind> EntryKind for WithDelegation<K> {}
 impl<K: EntryKind> EntryKind for WithLink<'_, K> {}
 impl<K: EntryKind> EntryKind for WithMetadataDisplayText<'_, K> {}
 
 impl sealed::Sealed for VerificationDisplay<'_> {
     #[cfg(target_arch = "wasm32")]
-    fn add_to_set(&self, at: &crate::sets_on_host::Address<'_>, metadata: Option<&C8Str>) {
+    fn add_entry(&self, at: &crate::sets_on_host::Address<'_>, metadata: Option<&C8Str>) {
         crate::sets_on_host::verification(at, self, metadata);
     }
 }
 
 impl sealed::Sealed for PaymentDisplay<'_> {
     #[cfg(target_arch = "wasm32")]
-    fn add_to_set(&self, at: &crate::sets_on_host::Address<'_>, metadata: Option<&C8Str>) {
+    fn add_entry(&self, at: &crate::sets_on_host::Address<'_>, metadata: Option<&C8Str>) {
         crate::sets_on_host::payment(at, self, metadata);
     }
 }
 
 impl sealed::Sealed for PaymentWithInfo<'_> {
     #[cfg(target_arch = "wasm32")]
-    fn add_to_set(&self, at: &crate::sets_on_host::Address<'_>, metadata: Option<&C8Str>) {
+    fn add_entry(&self, at: &crate::sets_on_host::Address<'_>, metadata: Option<&C8Str>) {
         crate::sets_on_host::payment_with_info(at, self, metadata);
     }
 }
 
 impl sealed::Sealed for AnyEntry<'_> {
     #[cfg(target_arch = "wasm32")]
-    fn add_to_set(&self, at: &crate::sets_on_host::Address<'_>, metadata: Option<&C8Str>) {
+    fn add_entry(&self, at: &crate::sets_on_host::Address<'_>, metadata: Option<&C8Str>) {
         match self {
-            Self::Verification(display) => display.add_to_set(at, metadata),
-            Self::Payment(display) => display.add_to_set(at, metadata),
-            Self::PaymentWithInfo(payment) => payment.add_to_set(at, metadata),
+            Self::Verification(display) => display.add_entry(at, metadata),
+            Self::Payment(display) => display.add_entry(at, metadata),
+            Self::PaymentWithInfo(payment) => payment.add_entry(at, metadata),
         }
-    }
-}
-
-impl<K: EntryKind> sealed::Sealed for WithDelegation<K> {
-    #[cfg(target_arch = "wasm32")]
-    fn add_to_set(&self, at: &crate::sets_on_host::Address<'_>, metadata: Option<&C8Str>) {
-        self.kind.add_to_set(at, metadata);
-        crate::sets_on_host::delegation(at, self.delegation);
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    fn after_fields(&self, at: &crate::sets_on_host::Address<'_>) {
-        self.kind.after_fields(at);
     }
 }
 
 impl<K: EntryKind> sealed::Sealed for WithLink<'_, K> {
     #[cfg(target_arch = "wasm32")]
-    fn add_to_set(&self, at: &crate::sets_on_host::Address<'_>, metadata: Option<&C8Str>) {
-        self.kind.add_to_set(at, metadata);
+    fn add_entry(&self, at: &crate::sets_on_host::Address<'_>, metadata: Option<&C8Str>) {
+        self.kind.add_entry(at, metadata);
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn after_entry(&self, at: &crate::sets_on_host::Address<'_>) {
+        self.kind.after_entry(at);
         crate::sets_on_host::link(at, &self.link);
     }
 
@@ -100,8 +93,13 @@ impl<K: EntryKind> sealed::Sealed for WithLink<'_, K> {
 
 impl<K: EntryKind> sealed::Sealed for WithMetadataDisplayText<'_, K> {
     #[cfg(target_arch = "wasm32")]
-    fn add_to_set(&self, at: &crate::sets_on_host::Address<'_>, metadata: Option<&C8Str>) {
-        self.kind.add_to_set(at, metadata);
+    fn add_entry(&self, at: &crate::sets_on_host::Address<'_>, metadata: Option<&C8Str>) {
+        self.kind.add_entry(at, metadata);
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn after_entry(&self, at: &crate::sets_on_host::Address<'_>) {
+        self.kind.after_entry(at);
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -133,21 +131,9 @@ pub enum AnyEntry<'a> {
     PaymentWithInfo(PaymentWithInfo<'a>),
 }
 
-/// An entry of kind `K` that sets how the wallet completes the request when
-/// the user picks it, with [`SetDelegationTypeForEntryInSet`] right after the
-/// entry. Level 7.
-///
-/// [`SetDelegationTypeForEntryInSet`]: android_credman_sys::v7::SetDelegationTypeForEntryInSet
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct WithDelegation<K> {
-    pub kind: K,
-    pub level: V7,
-    pub delegation: DelegationType,
-}
-
 /// An entry of kind `K` with a second disclaimer and a link, sent with
-/// [`SetAdditionalDisclaimerAndUrlForVerificationEntryInCredentialSet`] right
-/// after the entry. Level 6.
+/// [`SetAdditionalDisclaimerAndUrlForVerificationEntryInCredentialSet`] after
+/// the entry and before its fields. Level 6.
 ///
 /// [`SetAdditionalDisclaimerAndUrlForVerificationEntryInCredentialSet`]: android_credman_sys::v6::SetAdditionalDisclaimerAndUrlForVerificationEntryInCredentialSet
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -169,16 +155,21 @@ pub struct WithMetadataDisplayText<'a, K> {
     pub text: &'a C8Str,
 }
 
-/// How the wallet completes the request when the user picks the entry:
-/// androidx's `DelegationType` values.
+/// How the wallet completes the request when the user picks a set entry
+/// (androidx `DelegationType`). [`HostOptions::delegation`] sets it for every
+/// entry. A selected set whose entries mix types falls back to
+/// [`Self::NoDelegation`].
+///
+/// [`HostOptions::delegation`]: crate::HostOptions::delegation
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DelegationType {
     /// The host launches the wallet's activity, which handles any user
-    /// interaction.
+    /// interaction (androidx `NONE`).
     NoDelegation = 0,
-    /// The host calls the wallet's background fulfilment service and shows a
-    /// loading indicator meanwhile. A selected set falls back to
-    /// [`Self::NoDelegation`] unless all its entries are `Full`.
+    /// Credential Manager keeps its own UI and calls the wallet's background
+    /// fulfilment service, which must answer within a timeout while a loading
+    /// indicator shows (androidx `FULL`). A wallet that uses it declares that
+    /// service.
     Full = 1,
 }
 
@@ -304,12 +295,12 @@ impl<'a, K: EntryKind> EntrySet<'a, K> {
     }
 }
 
-/// Where a matcher sends its entry sets: [`crate::V2`] sends them to the host,
-/// and a test implements it to record them.
+/// Where a matcher sends its entry sets: [`crate::EntrySets`] sends them to
+/// the host, and a test implements it to record them.
 pub trait SetSink {
     /// Declares the set with [`AddEntrySet`], then sends each alternative:
-    /// its kind's calls up to the fields, the fields, then its kind's calls
-    /// after them.
+    /// the entry, the host's delegation setting, its kind's calls before the
+    /// fields, the fields, then its kind's calls after them.
     ///
     /// [`AddEntrySet`]: android_credman_sys::v2::AddEntrySet
     fn add_entry_set<K: EntryKind>(&mut self, set: &EntrySet<'_, K>);
