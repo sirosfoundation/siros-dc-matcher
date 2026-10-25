@@ -11,6 +11,63 @@ existed.
 
 ## Unreleased
 
+Adopts the `zkp_req` draft 0.1 and the nym_auth catalogue 0.5 (nym_auth rulebook repository,
+commit `e65861c`). **Breaking**: requests and presentations follow the draft, the FFI loses
+`zkp_req_plan`, and the vectors move to the crates that own their rules. Consumers that keep a
+copy of the vectors (siros-sdk-kotlin, siros-sdk-swift) must re-copy them from the new
+directories; the vector set digest below identifies them. `matcher.wasm` is 297,244 bytes
+against the 307,200-byte budget (303,914 before).
+
+### Changed
+
+- **BREAKING (request):** a query's options are its `_req_sets`, arrays of `_req` indexes;
+  without `_req_sets`, `_req` is the one option (`zkp_req`, Section 2.1). `return` is optional
+  except on `pseudonym`. `vp_formats_supported.zkp_req` requires both `proof_backend_values`
+  and `system_id_values` (Section 1.2), so a `zkp_req` query matches only with the request's
+  `client_metadata`; `proof_system_values` is gone. `age_check` takes `range` (`A-B`, `A+`,
+  `B-`), and the Wallet derives E and C at the proof date; `ge`, `le` and the 365-day rule are
+  gone.
+- **BREAKING (matcher):** a registered circuit is a system of Section 1.3: its `system_id`
+  param is the system and its `system` the proof backend, matched against
+  `proof_backend_values`. The matcher answers the first option a circuit serves, and the picker
+  rows name that option's functions. `FfiMatchedCredential.zkp_req` is
+  `{circuit, proof_backend, req_set?, items}`.
+- **BREAKING (presentation):** `ZkpPresentation {system_id, proof_backend, ? req_set, proof,
+  results}` (Section 4), where `proof` is the CBOR `Proof {inputs: {issuer_key_set,
+  proof_time}, zk_proof}` of the proof backends. The CBOR reader allows nesting depth 32
+  (16 before).
+- **BREAKING (FFI):** `zkp_req_plan` and `ZkpReqPlanError` are removed. Bindings are
+  regenerated.
+
+### Added
+
+- `siros-zkp-req`, the `zkp_req` protocol layer, and `siros-zkp-req-nym-auth`, the nym_auth
+  catalogue with the Longfellow and Vega systems, the session binding, the Wallet's credential
+  tests, a presenter in phases and the Verifier's checks. Proving runs in the host behind
+  `NymAuthProver` and `NymAuthProofVerifier`. Both crates hold Rust 1.82.
+- FFI module `zkp_req`: `zkp_req_match`, `zkp_req_session`, `zkp_req_jwk_thumbprint`,
+  `zkp_req_prepare` with `FfiPrepared`, `zkp_req_vp_token_json`, `zkp_req_vp_token_cbor`, and
+  `zkp_req_verify` with a host-implemented `FfiProofVerifier`.
+- `siros-zkp-req-wasm`, the presenter for the browser, built with `wasm-pack`; CI lints and
+  builds it for `wasm32-unknown-unknown` and checks its imports.
+- Vectors: 50 protocol request vectors (`crates/siros-zkp-req/tests/vectors/request`), 72
+  catalogue request vectors and 149 presentation vectors
+  (`crates/siros-zkp-req-nym-auth/tests/vectors/`, the latter from
+  `scripts/gen_zkp_req_presentation_vectors.py`), the `proof_time` vectors, the session and
+  pseudonym vectors of zk-cred-vega, and `readdit.json`, the values of readdit `1cf3f26` for a
+  differential test. Each changed expectation carries a `v0_4` note.
+- Docs: `docs/zkp_req_core.md` (crates, flow, prover interface, API); `docs/zkp_req_request.md`
+  and `docs/zkp_req_response.md` follow the draft.
+- Vector set digest (`scripts/vectors_digest.sh --digest`):
+  `4f0051624517ffb427af9c93de2d119f179304c6e218776f9a8e2b93a41b2a06`. The capability vectors
+  (`circuit_capabilities/match.json`) are unchanged.
+
+### Removed
+
+- From `siros-dc-matcher-core`: the v0.4 planner (`zkp_req`), the response validator
+  (`zkp_req_response`), `proof_time`, their vectors (`zkp_req`, `zkp_req_response`,
+  `zkp_req_unsat`, `proof_time`) and `scripts/gen_zkp_req_response_vectors.py`.
+
 ## v0.11.0 — 2026-10-20
 
 Adopts the `nym_auth` rulebook v0.4. **Breaking** (a minor bump, pre-1.0): the
