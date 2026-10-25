@@ -1,5 +1,5 @@
 //! Raw imports of the Android Credential Manager matcher host ABI, one module
-//! and Cargo feature per host level. [`ABI.md`](../ABI.md) gives each
+//! per host level. [`ABI.md`](../ABI.md) gives each
 //! parameter's rule and its evidence.
 //!
 //! - Call a level-N function only when `GetWasmVersion` reports N or more.
@@ -140,8 +140,8 @@ pub mod credman {
 /// Host level 2: entry sets. Every position from 0 to `set_length - 1` needs
 /// an entry, a set id is declared once per invocation, and the host names an
 /// entry by set, position and `cred_id`.
-#[cfg(all(target_arch = "wasm32", feature = "v2"))]
-pub mod credman_v2 {
+#[cfg(target_arch = "wasm32")]
+pub mod v2 {
     use super::c_char;
 
     #[link(wasm_import_module = "credman_v2")]
@@ -198,13 +198,13 @@ pub mod credman_v2 {
 
 /// Host level 3. Its one function is imported from `credman_v2`: Google's
 /// header declares it there.
-#[cfg(all(target_arch = "wasm32", feature = "v3"))]
-pub mod credman_v3 {
+#[cfg(target_arch = "wasm32")]
+pub mod v3 {
     use super::c_char;
 
     #[link(wasm_import_module = "credman_v2")]
     extern "C" {
-        /// [`crate::credman_v2::AddPaymentEntryToSet`] with a nullable
+        /// [`crate::v2::AddPaymentEntryToSet`] with a nullable
         /// `additional_info`.
         pub fn AddPaymentEntryToSetV2(
             cred_id: *const c_char,
@@ -227,8 +227,8 @@ pub mod credman_v3 {
 }
 
 /// Host level 4.
-#[cfg(all(target_arch = "wasm32", feature = "v4"))]
-pub mod credman_v4 {
+#[cfg(target_arch = "wasm32")]
+pub mod v4 {
     use super::c_char;
 
     #[link(wasm_import_module = "credman_v4")]
@@ -244,8 +244,8 @@ pub mod credman_v4 {
 }
 
 /// Host level 5.
-#[cfg(all(target_arch = "wasm32", feature = "v5"))]
-pub mod credman_v5 {
+#[cfg(target_arch = "wasm32")]
+pub mod v5 {
     use super::c_char;
 
     #[link(wasm_import_module = "credman_v5")]
@@ -261,8 +261,8 @@ pub mod credman_v5 {
 }
 
 /// Host level 6.
-#[cfg(all(target_arch = "wasm32", feature = "v6"))]
-pub mod credman_v6 {
+#[cfg(target_arch = "wasm32")]
+pub mod v6 {
     use super::c_char;
 
     #[link(wasm_import_module = "credman_v6")]
@@ -281,8 +281,8 @@ pub mod credman_v6 {
 }
 
 /// Host level 7.
-#[cfg(all(target_arch = "wasm32", feature = "v7"))]
-pub mod credman_v7 {
+#[cfg(target_arch = "wasm32")]
+pub mod v7 {
     use super::c_char;
 
     #[link(wasm_import_module = "credman_v7")]

@@ -24,20 +24,10 @@ sets.add_entry_set(&EntrySet::new(set_id, Slot::one(&entry), &[]));
 - `None` reaches the host as NULL and hides the element; `Some` of an empty
   string shows it blank.
 - A call above the base level needs its level's token from
-  `host.version()`.
+  `host.version()`. `WithDelegation`, `WithLink` and
+  `WithMetadataDisplayText` wrap an entry kind to add the level-7, 6 and 5
+  calls.
 - The caller keeps two set rules: declare a set id once per invocation, and
   give the alternatives of one slot distinct ids.
 - `Host` exists on `wasm32` only. Implement `SetSink` to test a matcher
   elsewhere.
-
-## Features
-
-| Feature | Default | Enables |
-|---|---|---|
-| `std` | yes | `CredentialReader` |
-| `v2` | | `V2`: entry sets |
-| `v3` | | `V3`: `PaymentWithInfo` |
-| `v4` | | `V4::self_declare_package_info` |
-| `v5` | | `SetEntry::with_metadata_display_text` |
-| `v6` | | `SetEntry::with_link` |
-| `v7` | | `SetEntry::with_delegation` |

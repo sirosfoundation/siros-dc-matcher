@@ -20,10 +20,9 @@
 //!
 //! # The host
 //!
-//! Every host call goes through `android-credman`, whose types carry the
-//! contract in `crates/android-credman-sys/ABI.md`. This binary needs host
-//! level 2 (entry sets) and enables that level alone, so its imports are the
-//! `credman` inputs and the three `credman_v2` set functions.
+//! Every host call goes through `android-credman`; its contract is
+//! `crates/android-credman-sys/ABI.md`. The binary calls nothing above host
+//! level 2.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 #![deny(clippy::indexing_slicing)]
@@ -36,19 +35,12 @@ mod picker;
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 mod simple_allocator;
 
-// Entry point for the `wasm32-unknown-unknown` target.
+// The host calls `_start`, which `wasm32-unknown-unknown` has no CRT to
+// export. The shipped build is `wasm32-wasip1` (see the Makefile); this
+// target is the WASI-free alternative and builds on the pinned toolchain:
 //
-// The Credential Manager host calls `_start`. On `wasm32-wasip1` wasi-libc's
-// CRT exports it; this target has no CRT, so nothing would. Same fix as
-// `digitalcredentialsdev/CMWallet`'s own matcher-rs. That target also needs
-// the allocator in `simple_allocator`, since there is no libc to supply one.
-//
-// The shipped build is `wasm32-wasip1` (see the Makefile). This target is
-// kept buildable as the WASI-free alternative should the host's WASI subset
-// ever turn out narrower than the two imports the shipped build still has:
-//
-//     cargo +nightly build -p siros-dc-matcher-wasm -Z build-std \
-//         --target wasm32-unknown-unknown --profile wasm-release
+//     cargo build -p siros-dc-matcher-wasm --target wasm32-unknown-unknown \
+//         --profile wasm-release
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 #[unsafe(no_mangle)]
 extern "C" fn _start() {

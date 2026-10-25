@@ -101,8 +101,8 @@ The host links a module whose imports it lacks; the call traps.
   until called. MP does the same for `credman_v2`.
 
 `android-credman` gates every call above the base level on a token from the
-reported level. Each level is a feature of `android-credman-sys`, and
-`scripts/check_matcher_abi.py` reports the highest level a binary imports.
+reported level. `scripts/check_matcher_abi.py` reports the highest level a
+binary imports.
 Device experiment 1 confirms lazy resolution for a `credman` module.
 
 <a id="functions"></a>
