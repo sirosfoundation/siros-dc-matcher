@@ -45,6 +45,20 @@ impl Member {
     pub fn candidates(&self) -> &[CandidateIndex] {
         &self.candidates
     }
+
+    /// The member of the candidates `keep` accepts, in the member's order.
+    #[cfg(feature = "wallet")]
+    pub(crate) fn keeping(&self, mut keep: impl FnMut(CandidateIndex) -> bool) -> Self {
+        Self {
+            query: self.query,
+            candidates: self
+                .candidates
+                .iter()
+                .copied()
+                .filter(|&c| keep(c))
+                .collect(),
+        }
+    }
 }
 
 /// A combination of credentials the user may present together.

@@ -238,6 +238,17 @@ pub(crate) struct Offered<'w, 'a> {
     pub(crate) candidates: Vec<(CandidateIndex, &'w Candidate<UsableCredential<'a>>)>,
 }
 
+impl Offered<'_, '_> {
+    /// Whether the entries of `bound` bind to the member's candidate `candidate`.
+    pub(crate) fn carries(
+        &self,
+        bound: &Bound,
+        candidate: &Candidate<UsableCredential<'_>>,
+    ) -> bool {
+        *bound == Bound::of(self.answers, candidate)
+    }
+}
+
 /// Each member of `members` as the matching answers it, in order.
 ///
 /// # Errors

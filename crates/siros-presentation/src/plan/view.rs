@@ -28,6 +28,7 @@ pub struct ConsentView<'a> {
 
 /// An offer as the user sees it.
 pub struct OfferView {
+    offer: Offer,
     purpose: Option<String>,
     members: Vec<MemberView>,
     additions: Vec<AdditionView>,
@@ -106,6 +107,11 @@ impl<'a> ConsentView<'a> {
 }
 
 impl OfferView {
+    /// The offer of the plan the view shows.
+    pub(crate) fn offer(&self) -> &Offer {
+        &self.offer
+    }
+
     /// The purposes of the credential sets the offer satisfies, as one line (Section 6.2).
     pub fn purpose(&self) -> Option<&str> {
         self.purpose.as_deref()
@@ -247,6 +253,7 @@ fn offer_view(
         },
     };
     Ok(Step::Done(OfferView {
+        offer: offer.clone(),
         purpose: purpose::line(offer.purposes()),
         members,
         additions,

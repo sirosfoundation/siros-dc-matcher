@@ -23,7 +23,47 @@ const DOMAIN: &str = "siros-presentation plan 2";
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PlanDigest([u8; 32]);
 
+/// Why a selection's plan digest does not read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DigestError {
+    /// The text is not unpadded base64url.
+    Encoding,
+    /// The text decodes to this many bytes; a digest has 32.
+    Length(usize),
+}
+
+impl DigestError {
+    /// A stable identifier.
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Encoding => "selection_digest_encoding",
+            Self::Length(_) => "selection_digest_length",
+        }
+    }
+}
+
+impl fmt::Display for DigestError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.code())
+    }
+}
+
+impl std::error::Error for DigestError {}
+
 impl PlanDigest {
+    /// The digest of the text `text`, as the view gave it.
+    ///
+    /// # Errors
+    ///
+    /// [`DigestError`]: text that is not unpadded base64url, or not of 32 bytes.
+    pub fn parse(text: &str) -> Result<Self, DigestError> {
+        let bytes = base64url::decode(text).map_err(|_| DigestError::Encoding)?;
+        let length = bytes.len();
+        <[u8; 32]>::try_from(bytes)
+            .map(Self)
+            .map_err(|_| DigestError::Length(length))
+    }
+
     /// The digest of the plan of `request`, whose nym_auth `verifier_id` is `verifier_id`, and
     /// whose offers the user sees as `views`.
     ///

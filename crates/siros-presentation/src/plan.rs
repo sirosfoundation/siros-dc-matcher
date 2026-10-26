@@ -21,12 +21,13 @@ mod seed;
 mod transactions;
 mod view;
 
+use rand_core::CryptoRngCore;
 use siros_codec::date::DateTime;
 use siros_credential::{Credential, UsableCredential};
 use siros_display::{DisplayCache, Locale};
-use siros_oid4vp::{Fetch, VerifiedRequest};
-use siros_transaction_data::{Step, TransactionDataError};
-use siros_wallet_state::{CredentialId, PresentationRecord};
+use siros_oid4vp::{ErrorCode, Fetch, Submission, VerifiedRequest};
+use siros_transaction_data::{Amr, Step, TransactionDataError};
+use siros_wallet_state::{CredentialId, KeyId, PresentationRecord};
 use siros_zkp_req_nym_auth::policy::RequestRefusal;
 use siros_zkp_req_nym_auth::request::NymAuthRequest;
 use siros_zkp_req_nym_auth::system::NymAuthSystem;
@@ -39,11 +40,13 @@ use crate::offers::{Offers, Refusal};
 use transactions::{Transactions, Wallet};
 use view::Sources;
 
-pub use digest::PlanDigest;
+pub use digest::{DigestError, PlanDigest};
 pub use fetches::Fetches;
+pub(crate) use proof::nym_answer;
 pub use proof::{OptionRefusal, Unproven};
 pub use seed::{JsonCause, NoSeed};
 pub use transactions::EntryPosition;
+pub(crate) use transactions::{offered, Bound, Offered};
 pub use view::{AdditionView, ConsentView, CredentialView, MemberView, OfferView, Shown};
 
 /// What a plan is made from. Phase 2 makes the plan again from the same input.
@@ -66,6 +69,8 @@ pub struct PlanInput<'a> {
     pub verifier_id: VerifierIdForm,
     /// The credentials the wallet declares presentable without its UI (A9).
     pub background: &'a [CredentialId],
+    /// The authentication factors of each signing key the host reported (H3).
+    pub key_factors: &'a [(KeyId, Amr)],
     /// The host's responses to the fetches the plan asked for.
     pub fetches: &'a Fetches,
     /// The time: the proof time of a nym_auth proof and the `iat` of a KB-JWT.
@@ -83,6 +88,10 @@ pub enum PlanStep<'a> {
 
 /// The plan of a request: its offers, and their consent view with its digest.
 pub struct Planned<'a> {
+    pub(crate) input: PlanInput<'a>,
+    pub(crate) nym_auth: Result<NymAuthRequest<'a>, RequestRefusal>,
+    pub(crate) answered: Wallet<'a>,
+    pub(crate) transactions: Transactions<'a>,
     pub(crate) view: ConsentView<'a>,
 }
 
@@ -139,7 +148,13 @@ fn planned<'a>(input: &PlanInput<'a>) -> Result<Step<Planned<'a>>, PresentationE
         .map(|nym_auth| &nym_auth.session().verifier_id);
     let digest = PlanDigest::of(request, verifier_id, &views);
     let view = ConsentView::new(request.verifier(), digest, views, offers.unexamined());
-    Ok(Step::Done(Planned { view }))
+    Ok(Step::Done(Planned {
+        input: *input,
+        nym_auth,
+        answered,
+        transactions,
+        view,
+    }))
 }
 
 /// The candidates of each Credential Query of `input`'s request, over the credentials usable at
@@ -204,4 +219,28 @@ impl<'a> Planned<'a> {
     pub fn view(&self) -> &ConsentView<'a> {
         &self.view
     }
+
+    /// The submission of the user's decline: `access_denied` (A8).
+    ///
+    /// # Errors
+    ///
+    /// [`PresentationError::Response`] when the error response cannot be encrypted.
+    pub fn decline(&self, rng: &mut impl CryptoRngCore) -> Result<Submission, PresentationError> {
+        refusal(self.input.request, ErrorCode::AccessDenied, rng)
+    }
+}
+
+/// The submission refusing `request` with `code`, an error's
+/// [`PresentationError::error_code`] (P5: the response target of a verified request is
+/// verified).
+///
+/// # Errors
+///
+/// [`PresentationError::Response`] when the error response cannot be encrypted.
+pub fn refusal(
+    request: &VerifiedRequest,
+    code: ErrorCode,
+    rng: &mut impl CryptoRngCore,
+) -> Result<Submission, PresentationError> {
+    Ok(request.error_submission(code, rng)?)
 }

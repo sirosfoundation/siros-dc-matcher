@@ -101,9 +101,18 @@ against the 307,200-byte budget (303,914 before).
   offer needs the wallet's display (A9). The plan asks the host for each type metadata fetch.
   A nym_auth request must be signed, trusted and encrypted, and its `verifier_id` comes from the
   authenticated certificate (N2). A `zkp_req` query that names `trusted_authorities` finds every
-  issuer untrusted until the wallet evaluates them. Positions and
-  identifiers are their own types (`QueryIndex`, `CandidateIndex`, `SetIndex`,
-  `EntryPosition`, `PlanDigest`, and DCQL's `QueryId`),
+  issuer untrusted until the wallet evaluates them. Phase 2 parses the selection against the
+  plan made again, with the non-empty subset of each `multiple` member by `credentialId`, kept
+  in the member's order. A selection that leaves out the credential an entry binds to is
+  refused, and phase 2 binds the entries to the credentials the view named. `Planned::picked`
+  makes the selection from the credential picker entries the user picked, each naming its
+  offer, query and `credentialId` (K3). Phase 2 gives a `Sign` effect per signing input,
+  verifies each signature under the instance's holder key (A5), and gives
+  one `vp_token` (A8), its submission for the request's Response Mode and the presentation
+  record. It proves `zkp_req` in-process through a `NymAuthProver`. A decline, and a background
+  fulfilment of an offer that needs the wallet's display, give `access_denied`. Positions and
+  identifiers are their own types (`QueryIndex`, `CandidateIndex`, `SetIndex`, `OfferIndex`,
+  `AdditionIndex`, `EntryPosition`, `PlanDigest`, `SignId`, and DCQL's `QueryId`),
   and so are A9's facts. `Fetches` is the one store of the host's responses, and a second
   answer to a URL is refused. A request without an offer gives its `Failure`: the refused query and why,
   the reasons each `zkp_req` candidate answers no option, or no combination. Without the
@@ -119,14 +128,14 @@ against the 307,200-byte budget (303,914 before).
   `VerifierIdRule::SemanticId` reason. **BREAKING (Rust API):** `VerifierId::semantic` takes a
   `SemanticIdentifier`, and `VerifierId::x509_san_dns` a `ClientId` and an `Intermediary`;
   `VerifierIdRule::DnsName` is gone. The FFI parses its host strings into them. `NymAuthQuery::options`, `UsablePair` with its
-  `ProofBackend`, `Answer` and `SecretSeed`; `UsableAttestation::of` an mdoc
+  `ProofBackend`, `Answer`, `SecretSeed` and `Prepared::new`; `UsableAttestation::of` an mdoc
   already parsed. `prepare` builds through them, and both test an option's items with one
   function.
 - `siros-dcql` 0.12.0: the Credential Query `id` is a `QueryId` (§6.1), which the query parse
   refuses outside its characters.
 - `siros-display`: `proof::verified_rows`, the proof statement rows of a verified request, each
   a `DisplayText` label and value held whole, without the "(unverified request)" marker.
-- `siros-oid4vp`: `VerifiedRequest::access_certificate` gives the
+- `siros-oid4vp`: `VpToken::json`. `VerifiedRequest::access_certificate` gives the
   `CertificateDer` and the `SemanticIdentifier`, or the `SemanticIdError`, of an
   `x509_san_dns` or `x509_hash` signer's certificate: the WRPAC policy (ETSI TS 119 411-8)
   says whether its subject is a natural person, identified by its `serialNumber`, or a legal
@@ -156,8 +165,11 @@ against the 307,200-byte budget (303,914 before).
   requests (unsigned, signed, multisigned) into a `VerifiedRequest`, with `Fetch` and `Trust`
   effects for the host; the Client Identifier Prefixes `x509_san_dns`, `x509_hash`,
   `decentralized_identifier`, `verifier_attestation`, `openid_federation` and `redirect_uri`;
-  ES256 Request Objects. Without `crypto` it holds the picker's request reading and builds
-  with Rust 1.82.
+  ES256 Request Objects; the `vp_token`, its submission per Response Mode, `ECDH-ES` response
+  encryption with `A128GCM` or `A256GCM`, error submissions, and the reply to a direct post.
+  `direct_post.cwt` (`zkp_req.md`, Section 6.2) posts the CBOR Authorization Response in a
+  `COSE_Encrypt` by ECDH-ES + HKDF-256 with `A128GCM`, `A192GCM` or `A256GCM`.
+  Without `crypto` it holds the picker's request reading and builds with Rust 1.82.
 - `siros-codec`'s `base64`: padded base64 (RFC 4648, Section 4), as `x5c` carries certificates.
 - `siros-zkp-req`, the `zkp_req` protocol layer, and `siros-zkp-req-nym-auth`, the nym_auth
   catalogue with the Longfellow and Vega systems, the session binding, the Wallet's credential

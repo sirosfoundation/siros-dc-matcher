@@ -11,6 +11,7 @@ use siros_zkp_req_nym_auth::outcome::CredentialCode;
 use siros_zkp_req_nym_auth::presenter::{Answer as NymAnswer, Unanswerable};
 
 use super::seed::{self, NoSeed};
+use crate::error::PresentationError;
 use crate::matching::{ChoiceError, ProofChoice, ZkpQuery};
 
 /// Why a nym_auth candidate answers no option of its query.
@@ -107,6 +108,23 @@ pub(super) fn first_answered(
         .into_iter()
         .next()
         .ok_or(Unproven::Options(refusals))
+}
+
+/// The answer of `choice` by `credential` at `now`, which opens the attestation's `ssc` again
+/// for this use.
+///
+/// # Errors
+///
+/// [`PresentationError`]: the credential's failed tests or seed, a choice that gives no usable
+/// pair, or an item of the option that fails.
+pub(crate) fn nym_answer<'z>(
+    credential: &UsableCredential<'_>,
+    zkp: &'z ZkpQuery,
+    choice: &ProofChoice,
+    now: DateTime,
+) -> Result<NymAnswer<'z>, PresentationError> {
+    let (attestation, seed) = tested(credential, zkp, now)?;
+    Ok(NymAnswer::new(zkp.pair(choice)?, attestation, &seed)?)
 }
 
 /// The usable attestation of `credential`'s mdoc for `zkp` at `now`, and the `secret_seed` its
