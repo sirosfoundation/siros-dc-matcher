@@ -2,7 +2,7 @@
 
 use serde_json::Value as JsonValue;
 use siros_codec::date::Date;
-use siros_display::{DisplayText, Locale};
+use siros_display::{preferred, DisplayText, Locale};
 
 use crate::error::TransactionDataError;
 use crate::json::{Json, Number};
@@ -179,7 +179,7 @@ pub(crate) fn view(
             .and_then(|c| c.level())
             .unwrap_or(Level::Supplementary);
         let level = leaf.floor.map_or(set, |floor| set.min(floor));
-        let Some(label) = claim.and_then(|c| localised(preferences, c.labels())) else {
+        let Some(label) = claim.and_then(|c| preferred(preferences, c.labels())) else {
             if claim.is_some() && level == Level::Omittable {
                 continue;
             }
@@ -190,7 +190,7 @@ pub(crate) fn view(
     rows.sort_by_key(Row::level);
     let ui = &metadata.ui_labels;
     let labels = Labels {
-        affirmative: localised(preferences, &ui.affirmative)
+        affirmative: preferred(preferences, &ui.affirmative)
             .ok_or(TransactionDataError::AffirmativeLabelMissing)
             .and_then(shown)?,
         denial: optional(preferences, &ui.denial)?,
@@ -200,31 +200,13 @@ pub(crate) fn view(
     Ok(TransactionView::new(transaction_type, labels, rows))
 }
 
-/// The localised label among `labels`, when there is one.
+/// The label of `labels` localised for the user's `preferences`, most preferred first (Section
+/// 3.3.1); `None` without one.
 fn optional(
     preferences: &[Locale],
     labels: &[Label],
 ) -> Result<Option<DisplayText>, TransactionDataError> {
-    localised(preferences, labels).map(shown).transpose()
-}
-
-/// The label localised for the user's `preferences`, most preferred first (Section 3.3.1): for
-/// each preference in order, the label of its exact tag, else a label of its primary language.
-/// Without one, the label is unavailable.
-fn localised<'a>(preferences: &[Locale], labels: &'a [Label]) -> Option<&'a Label> {
-    preferences.iter().find_map(|wanted| {
-        labels
-            .iter()
-            .find(|label| label.locale() == wanted)
-            .or_else(|| {
-                labels.iter().find(|label| {
-                    label
-                        .locale()
-                        .primary_language()
-                        .eq_ignore_ascii_case(wanted.primary_language())
-                })
-            })
-    })
+    preferred(preferences, labels).map(shown).transpose()
 }
 
 /// `label` as display text.

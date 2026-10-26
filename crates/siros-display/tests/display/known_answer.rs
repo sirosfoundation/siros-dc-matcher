@@ -183,7 +183,10 @@ fn the_card_and_the_labels_of_the_example() {
             "{preference}"
         );
         let logo = card.logo().unwrap();
-        assert_eq!(logo.uri(), "https://university.example.edu/public/logo.png");
+        assert_eq!(
+            logo.uri().as_str(),
+            "https://university.example.edu/public/logo.png"
+        );
         assert_eq!(
             logo.alt_text().map(|a| a.as_str()),
             Some("a square logo of a university")
