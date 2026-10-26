@@ -49,18 +49,26 @@ fn disclosure(name: &str, value: &Value) -> String {
 /// An SD-JWT VC of `vct` bound to the holder's key, with the selectively disclosable claims
 /// `claims`.
 pub fn sd_jwt(vct: &str, claims: &[(&str, Value)]) -> String {
+    sd_jwt_with(vct, claims, json!({}))
+}
+
+/// An SD-JWT VC as [`sd_jwt`] gives it, with the payload members of `extra`.
+pub fn sd_jwt_with(vct: &str, claims: &[(&str, Value)], extra: Value) -> String {
     let disclosures: Vec<String> = claims.iter().map(|(n, v)| disclosure(n, v)).collect();
     let digests: Vec<String> = disclosures
         .iter()
         .map(|d| b64(&Sha256::digest(d.as_bytes())))
         .collect();
-    let payload = json!({
+    let mut payload = json!({
         "iss": "https://issuer.example",
         "vct": vct,
         "cnf": {"jwk": holder_jwk()},
         "_sd": digests,
         "_sd_alg": "sha-256",
     });
+    for (name, value) in extra.as_object().unwrap() {
+        payload[name] = value.clone();
+    }
     let header = json!({"alg": "ES256", "typ": "dc+sd-jwt"});
     let input = format!(
         "{}.{}",
