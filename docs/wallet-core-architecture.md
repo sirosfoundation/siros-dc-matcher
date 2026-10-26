@@ -309,7 +309,11 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
   - Optional sets are additions the user may choose on top of an offer.
   - When every set is optional, each option is an offer.
   - Each member names its query, its instance (C5), its answer (SD-JWT pointers, mdoc elements, or the `zkp_req` system, backend and option) and the transaction entries bound to it (T4).
-- **A4. Plan binding.** A plan MUST carry a digest of its inputs. A selection MUST be parsed against the recomputed plan into a chosen-offer witness. A digest mismatch, an unknown offer, or an out-of-range optional choice is an error.
+- **A4. Plan binding.** A plan MUST carry a digest of what the user consents to:
+  - the request's response mode, client identifier, origin, response URI, `nonce`, `state`, `dcql_query` and `transaction_data`;
+  - for each offer: its members with their instances and answers, its additions, the transaction entries bound to each member, and its A9 outcome.
+
+  The time, the display metadata and the presentation records stay out of it, so phase 2 can run later on the same plan. A selection MUST be parsed against the recomputed plan into a chosen-offer witness. A digest mismatch, an unknown offer, or an out-of-range optional choice is an error.
 - **A5. Signatures.** Phase 2 MUST state every signing input as a `Sign` effect. The signatures returned MUST be parsed against those requests: none missing, none duplicated, none unknown.
 - **A6. Audience.** The SD-JWT `aud` is `prefix:value` of the client identifier for redirects. Over the DC API it is `origin:<origin>`, signed requests included (OpenID4VP A.4).
 - **A7. SessionTranscript.** The mdoc and nym_auth SessionTranscript uses `OpenID4VPHandover` (client id, nonce, encryption key thumbprint or null, response URI) for redirects. It uses `OpenID4VPDCAPIHandover` (origin, nonce, thumbprint or null) for the DC API.
