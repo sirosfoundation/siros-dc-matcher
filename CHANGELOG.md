@@ -82,6 +82,29 @@ against the 307,200-byte budget (303,914 before).
 
 ### Added
 
+- `siros-presentation`, the presentation component of the wallet core. Phase 1 plans a
+  verified request over the wallet's usable credentials: the format table, `meta`, holder
+  binding and no query but `zkp_req` on a nym_auth attestation (A1); `zkp_req` as one selection,
+  then the usable attestation and the seed delivered in the credential's auxiliary data (A2);
+  offers, optional additions, and an offer per option when every set is optional (A3); the
+  transaction entries each member authorizes (T4); the plan's digest (A4); and the consent view
+  with cards, claim rows, proof statement rows, additions, transactions and whether an offer
+  needs the wallet's display (A9). The plan asks the host for each type metadata fetch. Phase 2
+  parses the selection against the plan made again, gives a `Sign` effect per signing input,
+  parses the signatures against them (A5), and gives one `vp_token` (A8), its submission for the
+  request's Response Mode and the presentation record. It proves `zkp_req` in-process through a
+  `NymAuthProver`. A decline, and a background fulfilment of an offer that needs the wallet's
+  display, give `access_denied`. Without the default feature `wallet` it holds the matching the
+  picker runs, over `MatchCredential`, and builds with Rust 1.82.
+- `siros-zkp-req-nym-auth`: `NymAuthRequest` (feature `request`), the nym_auth request of a
+  verified request, signed and encrypted, with the session of its `Handover` and the
+  `verifier_id` of a `VerifierIdForm`; `NymAuthQuery::options`, `UsablePair`, `Answer` and
+  `Prepared::new`; `UsableAttestation::of` an mdoc already parsed. `prepare` builds through
+  them.
+- `siros-display`: `proof::verified_rows`, the picker's proof statement rows without the
+  "(unverified request)" marker. `matcher.wasm` is unchanged.
+- `siros-oid4vp`: `VpToken::json`.
+- `siros-credential`: `least_used` takes any `Instance`.
 - `siros-transaction-data`, the `transaction_data` request parameter (OpenID4VP 1.0, Section
   5.1) for the wallet core. It parses entries of the four EC TS12 v1.0.1 types into typed
   payloads, binds each entry to one credential of an offer, gives the KB-JWT claims
