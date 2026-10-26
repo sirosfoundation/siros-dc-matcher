@@ -73,7 +73,8 @@ impl Member {
         &self.candidates
     }
 
-    /// The member of the candidates at `positions` among [`Member::candidates`].
+    /// The member of the candidates at `positions` among [`Member::candidates`]: a set, whose
+    /// candidates keep the member's order whatever the order of `positions`.
     ///
     /// # Errors
     ///
@@ -90,15 +91,19 @@ impl Member {
         if let Some((_, &position)) = repeated {
             return Err(SubsetError::Repeated(position));
         }
-        let candidates = positions
+        if let Some(&beyond) = positions
             .iter()
-            .map(|&position| {
-                self.candidates
-                    .get(position.value())
-                    .copied()
-                    .ok_or(SubsetError::OutOfRange(position))
-            })
-            .try_collect()?;
+            .find(|position| position.value() >= self.candidates.len())
+        {
+            return Err(SubsetError::OutOfRange(beyond));
+        }
+        let candidates = self
+            .candidates
+            .iter()
+            .enumerate()
+            .filter(|(at, _)| positions.contains(&Position::new(*at)))
+            .map(|(_, &candidate)| candidate)
+            .collect();
         Ok(Self {
             query: self.query,
             candidates,

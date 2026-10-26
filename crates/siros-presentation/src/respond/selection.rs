@@ -64,7 +64,9 @@ pub enum Fulfilment {
 /// member.
 pub struct Chosen<'p, 'a> {
     pub(crate) planned: &'p Planned<'a>,
-    /// The offer's members, to which its transaction entries bind.
+    /// The plan's offer: its entries bind as the view showed them.
+    pub(crate) offer: &'p Offer,
+    /// The offer's members, in its order, each with the chosen candidates.
     pub(crate) members: Vec<Member>,
     /// The members of the chosen additions.
     pub(crate) added: Vec<Member>,
@@ -123,6 +125,7 @@ impl<'a> Planned<'a> {
         }
         Ok(Chosen {
             planned: self,
+            offer,
             members,
             added,
         })

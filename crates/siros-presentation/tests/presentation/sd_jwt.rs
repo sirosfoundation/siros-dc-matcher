@@ -12,7 +12,9 @@ use crate::verifier::{
     b64, client_metadata, dc_api_signed, decrypt_jwe, redirect_unsigned, NONCE, NOW, RESPONSE_URI,
     STATE,
 };
-use crate::wallet::{disclosed, holder_signed, ready, respond, sd_jwt, Held, Wallet, VCT};
+use crate::wallet::{
+    disclosed, holder_signed, ready, respond, respond_to, sd_jwt, Held, Wallet, VCT,
+};
 
 const PAYMENT: &str = "urn:eudi:sca:payment:1";
 
@@ -186,4 +188,62 @@ fn kb_jwt_aud_over_the_dc_api() {
     let body = sent.rsplit('~').next().unwrap().split('.').nth(1).unwrap();
     let claims: Value = serde_json::from_slice(&base64url::decode(body).unwrap()).unwrap();
     assert_eq!(claims["aud"], "origin:https://verifier.example");
+}
+
+/// T4 and A3: a subset of a `multiple` member is a set, and phase 2 binds the entries as the plan
+/// did: the payment stays on the credential the view showed it on, whatever order the subset
+/// lists.
+#[test]
+fn a_subset_keeps_the_plans_binding() {
+    let mut wallet = Wallet::new(vec![
+        Held::new(1, "dc+sd-jwt", sd_jwt(VCT, &[("given_name", json!("One"))])),
+        Held::new(2, "dc+sd-jwt", sd_jwt(VCT, &[("given_name", json!("Two"))])),
+    ]);
+    wallet.documents.push((VCT.to_owned(), type_metadata()));
+    let request = redirect_unsigned(&json!({
+        "response_type": "vp_token",
+        "response_mode": "direct_post.jwt",
+        "nonce": NONCE,
+        "state": STATE,
+        "client_metadata": client_metadata(),
+        "transaction_data": [payment()],
+        "dcql_query": {"credentials": [{"id": "pid", "format": "dc+sd-jwt", "multiple": true,
+            "meta": {"vct_values": [VCT]}, "claims": [{"path": ["given_name"]}]}]}
+    }));
+    let fetches = wallet.fetches(&request);
+    let input = wallet.input(&request, &fetches);
+    let planned = ready(&input).unwrap();
+    let shown: Vec<Vec<usize>> = planned.view().offers()[0].members()[0]
+        .credentials()
+        .iter()
+        .map(|c| c.entries().iter().map(|e| e.value()).collect())
+        .collect();
+    assert_eq!(
+        shown,
+        [vec![0], vec![]],
+        "the view binds the payment to One"
+    );
+
+    let response = respond_to(&input, 0, Vec::new(), vec![("pid".into(), vec![1, 0])]).unwrap();
+    let payload = decrypt_jwe(response.submission());
+    let bound: Vec<(String, bool)> = payload["vp_token"]["pid"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|sent| {
+            let sent = sent.as_str().unwrap();
+            let given = if sent.contains(&disclosed("given_name", &json!("One"))) {
+                "One"
+            } else {
+                "Two"
+            };
+            let body = sent.rsplit('~').next().unwrap().split('.').nth(1).unwrap();
+            let claims: Value = serde_json::from_slice(&base64url::decode(body).unwrap()).unwrap();
+            (
+                given.to_owned(),
+                claims.get("transaction_data_hashes").is_some(),
+            )
+        })
+        .collect();
+    assert_eq!(bound, [("One".to_owned(), true), ("Two".to_owned(), false)]);
 }

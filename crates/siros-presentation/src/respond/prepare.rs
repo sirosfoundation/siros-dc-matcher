@@ -88,9 +88,11 @@ impl<'p, 'a> Chosen<'p, 'a> {
         rng: &mut impl CryptoRngCore,
     ) -> Result<Prepared<'p, 'a>, PresentationError> {
         let planned = self.planned;
+        // The plan's bindings, which the view showed and the digest covers: the chosen members
+        // keep every candidate an entry is bound to.
         let bindings = planned
             .transactions
-            .bind(&planned.answered, &self.members)?;
+            .bind(&planned.answered, self.offer.members())?;
         let offer = crate::plan::offered(&planned.answered, &self.members)?;
         let added = crate::plan::offered(&planned.answered, &self.added)?;
         let mut signs = Vec::new();
