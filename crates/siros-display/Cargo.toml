@@ -1,0 +1,13 @@
+[package]
+name = "siros-display"
+version = "0.11.0"
+description = "Display for the SIROS wallet core: display metadata and its locale, credential cards, claim rows, purpose lines and proof statement rows"
+publish = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+unicode-general-category = "1.1.0"
