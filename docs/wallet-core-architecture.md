@@ -317,6 +317,13 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
   - One `vp_token` answers every member of the chosen offer and its chosen additions, keyed by query id, whatever the formats.
   - A user's decline gives `access_denied`.
   - The presentation record names exactly the instances used.
+- **A9. Wallet display.** An offer needs the wallet's display unless all of these hold:
+  - every member credential is registered as presentable without the wallet's UI (the wallet declares it per credential: its key signs without user interaction and its background service answers);
+  - the request carries no `transaction_data` (a type renders it in the wallet, T2);
+  - every disclosed claim and every proof statement of the offer has a display row, and no row is clipped;
+  - the offer has no optional additions to choose.
+
+  The picker applies the rule to choose delegation (K4). The wallet applies it to a background fulfilment: an offer that needs its display is refused there with `access_denied`.
 
 ### 4.14 Wallet, facades and the cloud engine module
 
@@ -340,6 +347,7 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
 - **K1.** The projection MUST hold, per credential: entry reference, format, type, the typed claim tree minus undisclosable attributes, card and labels. It also holds the available system ids, and is versioned. It MUST NOT hold delivered or derived secrets (R-G6).
 - **K2.** The picker MUST run the presentation component's matching over an `UnverifiedRequest`. For the same request and credentials, it MUST give the offers the wallet's plan gives.
 - **K3.** Each picker entry MUST carry the offer, query id and credential id, so that the wallet maps the pick to a selection after its own verified plan.
+- **K4. Delegation.** The picker MUST send `Full` delegation (Credential Manager keeps its UI and the wallet fulfils from its background service) for the entries of an offer that needs no wallet display, and no delegation otherwise. Every entry of one set gets the same type. The rule is A9's, applied with the host's display level: an offer that the host displayed only in part (`display_skipped`) needs the wallet's display.
 
 ### 4.16 Cloud engine (go-wallet-backend)
 
