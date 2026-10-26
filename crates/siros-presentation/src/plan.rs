@@ -182,27 +182,24 @@ impl<'a> Planned<'a> {
     ///
     /// [`PresentationError::Response`] when the error response cannot be encrypted.
     pub fn decline(&self, rng: &mut impl CryptoRngCore) -> Result<Submission, PresentationError> {
-        refusal(
-            self.input.request,
-            &PresentationError::NoOffer(ErrorCode::AccessDenied),
-            rng,
-        )
+        refusal(self.input.request, ErrorCode::AccessDenied, rng)
     }
 }
 
-/// The submission refusing `request` for `error`, with its Section 8.5 code (P5: the response
-/// target of a verified request is verified).
+/// The submission refusing `request` with `code`, an error's
+/// [`PresentationError::error_code`] (P5: the response target of a verified request is
+/// verified).
 ///
 /// # Errors
 ///
 /// [`PresentationError::Response`] when the error response cannot be encrypted.
 pub fn refusal(
     request: &VerifiedRequest,
-    error: &PresentationError,
+    code: ErrorCode,
     rng: &mut impl CryptoRngCore,
 ) -> Result<Submission, PresentationError> {
     request
-        .error_submission(error.error_code(), rng)
+        .error_submission(code, rng)
         .map_err(PresentationError::Response)
 }
 

@@ -152,7 +152,8 @@ fn an_offer_needs_the_wallet_display_unless_a9_holds() {
             WalletDisplay::Needed => {
                 let error = background.err().unwrap();
                 assert_eq!(error, PresentationError::WalletDisplayNeeded, "{case}");
-                let refusal = siros_presentation::refusal(&request, &error, &mut Rng(1)).unwrap();
+                let refusal =
+                    siros_presentation::refusal(&request, error.error_code(), &mut Rng(1)).unwrap();
                 assert_eq!(error_of(&request, &refusal), "access_denied", "{case}");
             }
         }
