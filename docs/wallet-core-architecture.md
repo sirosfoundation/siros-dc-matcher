@@ -19,6 +19,8 @@ It covers two functions:
 
 Other bricks own issuance (OpenID4VCI), proximity presentation, the private data container's crypto and sync, and credential status checking.
 
+The Longfellow mdoc ZK path is retired everywhere: the `mso_mdoc_zk` format, the `meta` members `zk_system_type`, `zk_required` and `ppid_context`, and the PPID `verifier_context` binding. `zkp_req` is the only proof presentation.
+
 Key words: MUST, MUST NOT, SHOULD and MAY as in RFC 2119.
 
 ## 2. Normative references
@@ -293,6 +295,8 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
   - Holder binding holds when the credential has a key.
   - Only usable credentials are offered (C4).
   - No query other than `zkp_req` may disclose a nym_auth undisclosable attribute.
+  - Any other format, `mso_mdoc_zk` included, matches no credential.
+  - `zk_system_type`, `zk_required` and `ppid_context` are unknown `meta` properties. They are ignored, as OpenID4VP §6 requires for unknown properties.
 - **A2. `zkp_req` matching** MUST be one selection. It takes the options in the verifier's order and, for each, the first available system whose usable pair the verifier accepts. It then requires a usable-attestation witness and an `OpenedSeed` for the credential (N3, N4).
 - **A3. Offers.**
   - Each combination of the required credential sets is an offer.
@@ -380,6 +384,7 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
 | `siros-dc-matcher-core` `db.rs`, `sink.rs` | picker | registration projection (K1) |
 | `siros-dc-matcher-core` `base64url.rs`, `siros-zkp-req` `cbor.rs`, `base64url.rs` | codec | one implementation |
 | `siros-dc-matcher-core` `circuit_capabilities.rs` | removed | systems in code (N5) |
+| `siros-dc-matcher-core` `profile.rs` `mso_mdoc_zk` rule, `MetaTrigger`, `zk_system` capability; FFI `add_zk_system`; picker metadata `capabilities` | removed | the mdoc ZK path is retired |
 | `siros-dc-matcher-core` `zkp_req.rs`, `zkp_req_response.rs`, `proof_time.rs` (main) | removed | superseded by `zkp_req` and nym_auth |
 | nym_auth `session.rs` (handover, transcript, device message, thumbprint) | OpenID4VP and mdoc | the thumbprint may be null |
 | nym_auth `mdoc.rs`, `x509.rs`, `es256_verifies` (generic parts) | mdoc | |
@@ -393,14 +398,15 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
 
 ## 8. What each platform keeps
 
-| Platform | Keeps | Its copies the core replaces |
-|---|---|---|
-| siros-sdk-kotlin | host (§4.1), UI, Credential Manager registration, wscd | built-in matcher and engine narrowing; claim and disclosure derivation; ZK registry and circuit catalog client; `zkp_req` validators, response validator, `proof_time`; DC API request parsing and rules; response encryption; transaction data pipeline; registration blob builders |
-| siros-sdk-swift | host, UI, wscd | the same, plus the `ZkpReq` and `CircuitZk` ports |
-| siros-wallet-frontend | UI, transport to the engine, DC API transport, wscd host | `dcql` matching, consent field model, SD-JWT and mdoc builders, DC API request reading and encryption |
-| go-wallet-backend | network legs, trust evaluation, storage | OpenID4VP parsing in the engine, consent vetting, `vp_token` assembly, `match_request` |
-| wallet-android-wrapper | WebView host, Credential Manager registration | the stock-matcher entry builder |
-| wallet-ios-wrapper | WebView host | none |
+| Platform | Keeps | Its copies the core replaces | Retired with the mdoc ZK path |
+|---|---|---|---|
+| siros-sdk-kotlin | host (§4.1), UI, Credential Manager registration, wscd | built-in matcher and engine narrowing; claim and disclosure derivation; ZK registry and circuit catalog client; `zkp_req` validators, response validator, `proof_time`; DC API request parsing and rules; response encryption; transaction data pipeline; registration blob builders | `ZkMdocPresentation`, `LongfellowZkProofSystem`, `VegaProofSystem`, `LegacyZkCircuitZkAdapter`, `CircuitZkLegacyDisclosure`, the PPID context |
+| siros-sdk-swift | host, UI, wscd | the same, plus the `ZkpReq` and `CircuitZk` ports | `ZkProofSystem`, `LongfellowZkProofSystem`, `VegaProofSystem`, the PPID `verifier_context` |
+| siros-wallet-frontend | UI, transport to the engine, DC API transport, wscd host | `dcql` matching, consent field model, SD-JWT and mdoc builders, DC API request reading and encryption | on the ZK branch, `restoreZkFormat`, the `mso_mdoc_zk` route and `NativeBridgeZkDeviceResponse` |
+| go-wallet-backend | network legs, trust evaluation, storage | OpenID4VP parsing in the engine, consent vetting, `vp_token` assembly, `match_request` | `verifier_session_id` forwarding |
+| wallet-android-wrapper | WebView host, Credential Manager registration | the stock-matcher entry builder | none |
+| wallet-ios-wrapper | WebView host | none | none |
+| vc (SUNET, through a PR) | its verifier and issuer | none | the parts its `zkp_req` stack does not use: `mso_mdoc_zk` and `zk_system_type` in DCQL handling (`pkg/openid4vp/dcql_zk.go`, `dcql.go`, `pkg/helpers/validate.go`, the verifier UI), the mdoc ZK verifier and PPID `verifier_context` (`pkg/mdoc/zk_verifier.go`, `zk.go`), the circuit catalog client (`pkg/mdoc/zkcircuit`), the issuer ZK salt (`internal/issuer/apiv1/zk_salt.go`), and `developer_tools/scripts/vendor_zk_circuits` |
 
 ## 9. Acceptance requirements
 
@@ -413,6 +419,7 @@ The core meets this document when all of the following hold:
 5. **No secrets.** No view, projection or error of the vectors contains a delivered seed, a derived secret or an undisclosable attribute.
 6. **No copies.** No platform in §8 keeps DCQL evaluation, claims path resolution, disclosure selection, proof system choice or response assembly (a grep per repository).
 7. **Picker size.** `matcher.wasm` ≤ 307,200 bytes.
+8. **mdoc ZK retired.** `mso_mdoc_zk`, `zk_system_type`, `zk_required` and `ppid_context` have no reference left in the core, the platforms of §8 or vc, outside changelogs.
 
 ## 10. Decisions
 
@@ -428,5 +435,6 @@ The core meets this document when all of the following hold:
 | Wallet state input is the decrypted `S` | The container is the next brick |
 | All-optional `credential_sets` offer each option | Today such a request offers nothing (vc's issuance-auth query has this shape) |
 | Transaction data types own their bindings | OpenID4VP §8.4; Appendix B is a set of recommendations to type authors |
+| The mdoc ZK path (`mso_mdoc_zk`, `zk_system_type`) is retired everywhere | Owner's decision, 2026-10-26; `zkp_req` covers proof presentations |
 
-**Open:** O1. `mso_mdoc_zk` / `zk_system_type`. Either retire it from the platforms and vc, or carry its matching and Longfellow mdoc proving into the core. This document covers SD-JWT, mdoc and `zkp_req`. The platforms' current `mso_mdoc_zk` path depends on this decision before their matchers are removed.
+**Open:** none.
