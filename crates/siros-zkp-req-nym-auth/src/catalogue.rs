@@ -5,9 +5,10 @@
 use std::fmt;
 
 use serde_json::{Map, Value};
+use siros_codec::date::Date;
 use siros_zkp_req::{CredentialType, QueryOption, ReturnHandle, ZkpReqQuery};
 
-use crate::age::{AgeRange, RangeError};
+use crate::age::{AgeRange, Bounds, RangeError};
 
 /// The `docType` and namespace of the ISO/IEC 18013-5 form.
 pub const MDOC_DOCTYPE: &str = "eu.europa.ec.eudi.nym_auth.1";
@@ -213,26 +214,78 @@ impl fmt::Display for CatalogueRule {
 
 impl std::error::Error for CatalogueRule {}
 
-/// A nym_auth Credential Query, validated against the catalogue.
+/// A nym_auth Credential Query: a `zkp_req` query that follows the catalogue's rules.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NymAuthQuery {
+    query: ZkpReqQuery,
+    form: Form,
+    items: Vec<Item>,
+}
+
+/// A `zkp_req` query sorted by the catalogue.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Catalogued {
+    /// A query for a nym_auth attestation.
+    NymAuth(NymAuthQuery),
+    /// A query for another credential type. The catalogue does not apply to it.
+    OtherType(ZkpReqQuery),
+}
+
+impl Catalogued {
     /// The query as `zkp_req` reads it.
-    pub query: ZkpReqQuery,
-    /// The attestation form it asks for.
-    pub form: Form,
-    /// `_req`, typed, in order.
-    pub items: Vec<Item>,
+    pub fn into_query(self) -> ZkpReqQuery {
+        match self {
+            Self::NymAuth(query) => query.query,
+            Self::OtherType(query) => query,
+        }
+    }
+
+    /// The nym_auth query; `None` for a query for another credential type.
+    pub fn nym_auth(self) -> Option<NymAuthQuery> {
+        match self {
+            Self::NymAuth(query) => Some(query),
+            Self::OtherType(_) => None,
+        }
+    }
 }
 
 impl NymAuthQuery {
-    /// Validates `query` against the catalogue. `None` when `meta` asks for another credential
-    /// type: this catalogue does not apply to it.
+    /// Reads `query` against the catalogue. A query for another credential type comes back as
+    /// [`Catalogued::OtherType`].
     ///
     /// # Errors
     ///
     /// [`CatalogueRule`]: the first rule the query breaks.
-    pub fn from_query(query: ZkpReqQuery) -> Result<Option<Self>, CatalogueRule> {
-        Ok(validate(&query)?.map(|(form, items)| Self { query, form, items }))
+    pub fn from_query(query: ZkpReqQuery) -> Result<Catalogued, CatalogueRule> {
+        let Some(form) = form_of(&query.credential_type)? else {
+            return Ok(Catalogued::OtherType(query));
+        };
+        if !query.require_holder_binding {
+            return Err(CatalogueRule::HolderBindingWaived);
+        }
+        let mut items = Vec::with_capacity(query.items.len());
+        for (index, item) in query.items.iter().enumerate() {
+            items.push(read_item(index, item, form)?);
+        }
+        for option in &query.options {
+            check_option(option, &items)?;
+        }
+        Ok(Catalogued::NymAuth(Self { query, form, items }))
+    }
+
+    /// The query as `zkp_req` reads it.
+    pub fn query(&self) -> &ZkpReqQuery {
+        &self.query
+    }
+
+    /// The attestation form it asks for.
+    pub fn form(&self) -> Form {
+        self.form
+    }
+
+    /// `_req`, typed, in order.
+    pub fn items(&self) -> &[Item] {
+        &self.items
     }
 
     /// The typed items of `option`, with their `_req` indexes.
@@ -245,31 +298,16 @@ impl NymAuthQuery {
             .iter()
             .filter_map(move |&index| self.items.get(index).map(|item| (index, item)))
     }
-}
 
-/// The catalogue's rules for `query`: its form and typed items, or `None` when `meta` asks for
-/// another credential type and the catalogue does not apply.
-///
-/// # Errors
-///
-/// [`CatalogueRule`]: the first rule the query breaks.
-pub fn validate(query: &ZkpReqQuery) -> Result<Option<(Form, Vec<Item>)>, CatalogueRule> {
-    let Some(form) = form_of(&query.credential_type)? else {
-        return Ok(None);
-    };
-    if !query.require_holder_binding {
-        return Err(CatalogueRule::HolderBindingWaived);
+    /// The bounds of `option` at the date `d`: those of its `age_check`, or the widest.
+    pub fn option_bounds(&self, option: &QueryOption, d: Date) -> Bounds {
+        self.option_items(option)
+            .find_map(|(_, item)| match &item.function {
+                Function::AgeCheck(age) => Some(age.range.bounds(d)),
+                Function::Pseudonym(_) => None,
+            })
+            .unwrap_or(Bounds::WIDEST)
     }
-    let items = query
-        .items
-        .iter()
-        .enumerate()
-        .map(|(index, item)| read_item(index, item, form))
-        .collect::<Result<Vec<_>, _>>()?;
-    for option in &query.options {
-        check_option(option, &items)?;
-    }
-    Ok(Some((form, items)))
 }
 
 fn form_of(credential_type: &CredentialType) -> Result<Option<Form>, CatalogueRule> {

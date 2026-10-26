@@ -568,7 +568,7 @@ impl ZkpProvers {
 
 impl NymAuthProver for ZkpProvers {
     fn prove(&self, job: &ProofJob) -> Result<ProofOutput, ProverFailure> {
-        match job.statement.system {
+        match job.statement().system {
             NymAuthSystem::LongfellowV1 => self.longfellow.as_ref().map(|p| p.prove(job)),
             NymAuthSystem::VegaV1 => self.vega.as_ref().map(|p| p.prove(job)),
         }

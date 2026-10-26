@@ -20,9 +20,8 @@ use siros_codec::date::DateTime;
 use siros_mdoc::P256Key;
 use siros_oid4vp::ec_jwk_thumbprint;
 use siros_zkp_req::Match;
+use siros_zkp_req_nym_auth::attestation::UsableAttestation;
 use siros_zkp_req_nym_auth::catalogue::MDOC_DOCTYPE;
-use siros_zkp_req_nym_auth::checks::{check, Checked};
-use siros_zkp_req_nym_auth::outcome::CredentialCode;
 use siros_zkp_req_nym_auth::presenter::{match_query, prepare, MatchInput, Prepared, ProveInput};
 use siros_zkp_req_nym_auth::prover::ProofOutput;
 use siros_zkp_req_nym_auth::system::NymAuthSystem;
@@ -67,25 +66,26 @@ fn assert_agrees(reference: &str, theirs: &Value, ours: &Value, elsewhere: &[&st
 /// The credential as this crate reads it, under readdit's names.
 fn our_credential(facts: &Value) -> Value {
     let data = facts["inputs"]["credential"].as_str().unwrap();
-    let Checked::Read(credential, failures) = check(data, None, proof_time(facts)) else {
-        panic!("the credential does not read");
+    let attestation = match UsableAttestation::new(data, None, proof_time(facts)) {
+        Ok(attestation) => attestation,
+        Err(unusable) => panic!("the credential is not usable: {unusable:?}"),
     };
-    assert!(failures.is_empty(), "{failures:?}");
-    let mdoc = &credential.mdoc;
+    let credential = attestation.credential();
+    let mdoc = credential.mdoc();
     json!({
-        "sig_structure": hex(&mdoc.sig_structure),
-        "issuer_signature": hex(&mdoc.issuer_signature),
-        "birth_date_item": hex(&mdoc.birth_date.bytes),
-        "ssc_item": hex(&mdoc.ssc.bytes),
-        "document_signer": hex(&mdoc.document_signer),
+        "sig_structure": hex(mdoc.sig_structure()),
+        "issuer_signature": hex(mdoc.issuer_signature()),
+        "birth_date_item": hex(mdoc.birth_date().bytes()),
+        "ssc_item": hex(mdoc.ssc().bytes()),
+        "document_signer": hex(mdoc.document_signer()),
         "doc_type": MDOC_DOCTYPE,
-        "device_key": key(&mdoc.device_key),
-        "valid_from": mdoc.valid_from.to_string(),
-        "valid_until": mdoc.valid_until.to_string(),
-        "birth_date": mdoc.birth_date.value.to_string(),
-        "ssc": hex(&mdoc.ssc.value),
-        "digests_listed": !failures.contains(&CredentialCode::IssuerSignature),
-        "issuer_key": key(credential.certificate.key()),
+        "device_key": key(mdoc.device_key()),
+        "valid_from": mdoc.valid_from().to_string(),
+        "valid_until": mdoc.valid_until().to_string(),
+        "birth_date": mdoc.birth_date().value().to_string(),
+        "ssc": hex(mdoc.ssc().value()),
+        "digests_listed": true,
+        "issuer_key": key(credential.certificate().key()),
     })
 }
 

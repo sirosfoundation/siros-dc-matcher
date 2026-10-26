@@ -151,15 +151,15 @@ impl Dates {
 
 impl NymAuthProver for LongfellowProver {
     fn prove(&self, job: &ProofJob) -> Result<ProofOutput, ProverFailure> {
-        let statement = &job.statement;
+        let statement = job.statement();
         if !serves(statement) {
             return Err(ProverFailure::Unavailable);
         }
         let dates = Dates::of(statement).ok_or(ProverFailure::Failed)?;
         let witness = NymAuthWitnessInput {
-            issuer_signed: &job.issuer_signed,
-            secret_seed: &job.secret_seed[..],
-            device_signature: &job.device_signature,
+            issuer_signed: job.issuer_signed(),
+            secret_seed: job.secret_seed(),
+            device_signature: job.device_signature(),
         };
         let proved = self
             .0

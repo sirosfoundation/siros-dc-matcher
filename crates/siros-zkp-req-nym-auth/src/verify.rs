@@ -170,7 +170,7 @@ pub fn check_presentation(
     let (query, formats) = own_query(query, client_metadata)?;
     let presentation = ZkpPresentation::decode(presentation).map_err(Rejection::Presentation)?;
     let option = answered_option(
-        &query.query,
+        query.query(),
         &formats,
         &presentation,
         |system, backend| {
@@ -278,6 +278,7 @@ fn own_query(
         ZkpFormats::from_client_metadata(client_metadata).map_err(|r| invalid(r.into()))?;
     let query = NymAuthQuery::from_query(parsed)
         .map_err(|r| invalid(r.into()))?
+        .nym_auth()
         .ok_or(Rejection::Request(None))?;
     Ok((query, formats))
 }
@@ -325,13 +326,7 @@ fn own_bounds(
     system: NymAuthSystem,
     d: Date,
 ) -> Result<Bounds, Rejection> {
-    let bounds = query
-        .option_items(option)
-        .find_map(|(_, item)| match &item.function {
-            Function::AgeCheck(age) => Some(age.range.bounds(d)),
-            Function::Pseudonym(_) => None,
-        })
-        .unwrap_or(Bounds::WIDEST);
+    let bounds = query.option_bounds(option, d);
     system
         .supports(query.option_items(option).map(|(_, i)| i), &bounds)
         .map_err(Rejection::Unsupported)?;
