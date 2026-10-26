@@ -15,7 +15,9 @@ use siros_codec::base64url;
 use siros_codec::date::DateTime;
 use siros_dcql::DcqlQuery;
 use siros_mdoc::{Mdoc, MdocError};
-use siros_oid4vp::{Effect, EffectResult, IntakeState, Step, TrustAnswer, VerifiedRequest};
+use siros_oid4vp::{
+    Effect, EffectResult, IntakeState, Step, TrustAnswer, Verdict, VerifiedRequest,
+};
 use siros_trust::{
     AdmittedIssuer, ChainRefusal, IssuerChain, QueryAuthorities, TrustStore, Unadmitted,
 };
@@ -121,7 +123,10 @@ fn verifier() -> (SigningKey, Vec<u8>) {
 /// over redirects, through intake with a positive trust verdict.
 pub fn verified_request(query: &Value, nonce: &str) -> VerifiedRequest {
     let (key, der) = verifier();
-    let mut x5c = base64url::encode(&der).replace('-', "+").replace('_', "/");
+    let mut x5c = base64url::encode(&der)
+        .as_str()
+        .replace('-', "+")
+        .replace('_', "/");
     while x5c.len() % 4 != 0 {
         x5c.push('=');
     }
@@ -134,12 +139,17 @@ pub fn verified_request(query: &Value, nonce: &str) -> VerifiedRequest {
     let signature: Signature = key.sign(input.as_bytes());
     let jws = format!("{input}.{}", base64url::encode(&signature.to_bytes()));
     let uri = format!("openid4vp://?client_id={CLIENT_ID}&request={jws}");
-    let mut state = IntakeState::redirect(&uri, Map::new(), NOW as u64, &mut Counter(9));
+    let now = DateTime::from_unix(NOW).unwrap();
+    let mut state = IntakeState::redirect(&uri, Map::new(), now, &mut Counter(9));
     loop {
         match state.step().unwrap() {
             Step::Verified(request) => return *request,
             Step::Effect(Effect::Trust(_)) => {
-                state.answer(EffectResult::Trusted(TrustAnswer::new(true, None, None)));
+                state.answer(EffectResult::Trusted(TrustAnswer::new(
+                    Verdict::Trusted,
+                    None,
+                    None,
+                )));
             }
             Step::Effect(other) => panic!("no fetch expected: {other:?}"),
         }

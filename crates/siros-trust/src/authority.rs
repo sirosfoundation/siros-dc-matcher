@@ -3,7 +3,7 @@
 
 use std::fmt;
 
-use siros_codec::base64url;
+use siros_codec::{base64url, Base64Error};
 use siros_dcql::{AuthorityType, AuthorityValue, CredentialQuery, QueryId};
 
 /// The keyIdentifier of an AuthorityKeyIdentifier extension (RFC 5280, Section 4.2.1.1): the
@@ -55,7 +55,7 @@ impl KeyIdentifier {
     ///
     /// [`AkiError`]: a value that is not base64url without padding, or that encodes no byte.
     pub fn from_aki(value: &AuthorityValue) -> Result<Self, AkiError> {
-        let bytes = base64url::decode(value.as_str()).ok_or(AkiError::NotBase64url)?;
+        let bytes = base64url::decode(value.as_str()).map_err(AkiError::Base64url)?;
         Self::new(&bytes).map_err(AkiError::KeyIdentifier)
     }
 
@@ -155,7 +155,7 @@ pub struct QueryAuthorities {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AkiError {
     /// The value is not base64url without padding.
-    NotBase64url,
+    Base64url(Base64Error),
     /// The bytes are no keyIdentifier.
     KeyIdentifier(KeyIdentifierError),
 }
@@ -165,7 +165,7 @@ impl AkiError {
     #[must_use]
     pub fn code(self) -> &'static str {
         match self {
-            Self::NotBase64url => "aki_not_base64url",
+            Self::Base64url(_) => "aki_not_base64url",
             Self::KeyIdentifier(error) => error.code(),
         }
     }

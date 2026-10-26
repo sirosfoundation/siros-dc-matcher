@@ -11,7 +11,7 @@ use siros_codec::date::DateTime;
 use siros_credential::Credential;
 use siros_dcql::QueryId;
 use siros_display::{DisplayCache, Locale};
-use siros_oid4vp::{FetchResponse, VerifiedRequest};
+use siros_oid4vp::{FetchResponse, HttpStatus, VerifiedRequest};
 use siros_presentation::{
     plan, AdditionIndex, Fetches, Fulfilment, OfferIndex, PlanInput, PlanStep, Planned,
     PresentationError, Response, Selection, SignId, Subset,
@@ -216,7 +216,7 @@ pub fn mdoc_by(
             ]),
         ),
     ]);
-    base64url::encode(&issuer_signed.encode())
+    base64url::encode(&issuer_signed.encode()).into_string()
 }
 
 /// A nym_auth attestation of nym_auth's test issuer, with its seed delivered.
@@ -396,7 +396,7 @@ impl Wallet {
                 .iter()
                 .find(|(url, _)| url == fetch.url().as_str())
                 .map(|(_, r)| r.clone())
-                .unwrap_or_else(|| FetchResponse::new(404, None, Vec::new()));
+                .unwrap_or_else(|| FetchResponse::new(HttpStatus::new(404), None, Vec::new()));
             fetches.answer(&fetch, response).unwrap();
         }
     }
@@ -534,7 +534,7 @@ pub fn view_texts(view: &siros_presentation::ConsentView<'_>) -> Vec<String> {
                     out.push(row.label().as_str().to_owned());
                     match row.value() {
                         RowValue::Text(t) | RowValue::Number(t) => out.push(t.as_str().to_owned()),
-                        RowValue::Image(url) => out.push(url.clone()),
+                        RowValue::Image(url) => out.push(url.as_str().to_owned()),
                         _ => {}
                     }
                 }

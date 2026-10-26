@@ -1,8 +1,12 @@
 //! Display entries: how a credential type shows in one locale.
 
+use serde_json::{Map, Value};
+
 use crate::colour::Colour;
+use crate::error::DisplayError;
+use crate::json;
 use crate::locale::{Locale, Localized};
-use crate::logo::Logo;
+use crate::logo::{self, Logo};
 use crate::text::DisplayText;
 
 /// A `display` entry of OpenID4VCI `credential_metadata` (OpenID4VCI 1.0, Section 12.2.4) or of
@@ -14,6 +18,24 @@ pub(crate) struct DisplayEntry {
     pub(crate) logo: Option<Logo>,
     pub(crate) background: Option<Colour>,
     pub(crate) text: Option<Colour>,
+}
+
+impl DisplayEntry {
+    /// The entry named `name` in `locale`, with the `logo`, `background_color` and `text_color`
+    /// of `rendering`.
+    pub(crate) fn read(
+        locale: Option<Locale>,
+        name: DisplayText,
+        rendering: &Map<String, Value>,
+    ) -> Result<Self, DisplayError> {
+        Ok(Self {
+            locale,
+            name,
+            logo: logo::optional(rendering)?,
+            background: json::colour(rendering, "background_color")?,
+            text: json::colour(rendering, "text_color")?,
+        })
+    }
 }
 
 impl Localized for DisplayEntry {

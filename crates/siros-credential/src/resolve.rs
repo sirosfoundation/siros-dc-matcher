@@ -134,7 +134,7 @@ fn json(value: TypedValue<'_>) -> Json {
         TypedValue::Integer(i) => integer(i),
         TypedValue::Number(n) => Json::Number(n.clone()),
         TypedValue::Text(t) => Json::String(t.to_owned()),
-        TypedValue::Bytes(b) => Json::String(base64url::encode(b)),
+        TypedValue::Bytes(b) => Json::String(base64url::encode(b).into()),
         TypedValue::FullDate(d) => Json::String(d.to_string()),
         TypedValue::DateTime(t) => Json::String(t.to_string()),
         TypedValue::Array(a) => Json::Array(a.elements().map(json).collect()),

@@ -1,6 +1,7 @@
 //! TR1: the trust store record, one refusal per rule, each by its reason.
 
 use serde_json::json;
+use siros_codec::Base64Error;
 use siros_trust::{CertificateError, CertificateIndex, EntryError, StoreError, TrustStore};
 
 use crate::support::{base64, record, Cert, Key};
@@ -34,6 +35,7 @@ fn each_rule_of_tr1() {
         json!([entry]).to_string()
     };
     let first = CertificateIndex::new(0);
+    let base64url_text = certificate.replace('+', "-").replace('/', "_");
     let cases = [
         ("an honest record", entry(&|_| {}), Verdict::Parsed),
         (
@@ -77,11 +79,20 @@ fn each_rule_of_tr1() {
             Verdict::Entry(0, EntryError::Certificates),
         ),
         (
+            "a certificate that is not a string",
+            entry(&|e| e["certificates"] = json!([1])),
+            Verdict::Entry(0, EntryError::CertificateNotString(first)),
+        ),
+        (
             "a certificate in base64url",
-            entry(&|e| {
-                e["certificates"] = json!([certificate.replace('+', "-").replace('/', "_")])
-            }),
-            Verdict::Entry(0, EntryError::Encoding(first)),
+            entry(&|e| e["certificates"] = json!([base64url_text])),
+            Verdict::Entry(
+                0,
+                EntryError::Encoding {
+                    certificate: first,
+                    error: Base64Error::Alphabet(base64url_text.find(['-', '_']).unwrap()),
+                },
+            ),
         ),
         (
             "a certificate that does not parse",

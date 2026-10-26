@@ -213,8 +213,12 @@ impl<'p, 'a> Chosen<'p, 'a> {
         let input = self.planned.input;
         let iat = u64::try_from(input.now.unix()).map_err(|_| PresentationError::Time)?;
         let audience = Audience::of(input.request)?;
-        let binding =
-            presentation.key_binding(iat, audience.as_str(), input.request.nonce(), extra)?;
+        let binding = presentation.key_binding(
+            iat,
+            audience.as_str(),
+            input.request.nonce().as_str(),
+            extra,
+        )?;
         Ok(Form::unsigned(binding, id))
     }
 

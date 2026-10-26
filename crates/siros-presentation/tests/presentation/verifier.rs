@@ -15,9 +15,10 @@ use rand_core::{CryptoRng, RngCore};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use siros_codec::base64url;
+use siros_codec::date::DateTime;
 use siros_oid4vp::{
     concat_kdf, cose_kdf, ContentEncryption, Effect, EffectResult, IntakeError, IntakeState,
-    Method, Step, Submission, TrustAnswer, VerifiedRequest,
+    Method, Origin, Step, Submission, TrustAnswer, VerifiedRequest,
 };
 use x509_cert::builder::{Builder, CertificateBuilder, Profile};
 use x509_cert::der::asn1::ObjectIdentifier;
@@ -73,7 +74,7 @@ impl RngCore for Rng {
 impl CryptoRng for Rng {}
 
 pub fn b64(bytes: &[u8]) -> String {
-    base64url::encode(bytes)
+    base64url::encode(bytes).into_string()
 }
 
 /// The verifier's response encryption key.
@@ -120,9 +121,9 @@ pub fn intake_with(mut state: IntakeState, trusted: bool) -> Result<VerifiedRequ
     loop {
         match state.step()? {
             Step::Verified(request) => return Ok(*request),
-            Step::Effect(Effect::Trust(_)) => {
-                state.answer(EffectResult::Trusted(TrustAnswer::new(trusted, None, None)))
-            }
+            Step::Effect(Effect::Trust(_)) => state.answer(EffectResult::Trusted(
+                TrustAnswer::new(trusted.into(), None, None),
+            )),
             Step::Effect(other) => panic!("no fetch expected: {other:?}"),
         }
     }
@@ -163,7 +164,7 @@ pub fn redirect_unsigned(params: &Value) -> VerifiedRequest {
     intake(IntakeState::redirect(
         &uri,
         wallet_formats(),
-        NOW as u64,
+        DateTime::from_unix(NOW).unwrap(),
         &mut Rng(7),
     ))
 }
@@ -253,7 +254,10 @@ impl Signer {
     /// The protected header of a Request Object, with `x5c`.
     fn header(self) -> Value {
         let (_, der) = certificate(self);
-        let mut x5c = base64url::encode(&der).replace('-', "+").replace('_', "/");
+        let mut x5c = base64url::encode(&der)
+            .into_string()
+            .replace('-', "+")
+            .replace('_', "/");
         while x5c.len() % 4 != 0 {
             x5c.push('=');
         }
@@ -294,13 +298,22 @@ pub fn redirect_signed_state(params: &Value, signer: Signer) -> IntakeState {
         "openid4vp://?client_id={}&request={jws}",
         signer.client_id()
     );
-    IntakeState::redirect(&uri, wallet_formats(), NOW as u64, &mut Rng(9))
+    IntakeState::redirect(
+        &uri,
+        wallet_formats(),
+        DateTime::from_unix(NOW).unwrap(),
+        &mut Rng(9),
+    )
 }
 
 /// The intake of a DC API request of one entry from [`ORIGIN`].
 fn dc_api_state(protocol: &str, data: Value) -> IntakeState {
     let request = json!({"requests": [{"protocol": protocol, "data": data}]});
-    IntakeState::dc_api(request.to_string().as_bytes(), ORIGIN, NOW as u64)
+    IntakeState::dc_api(
+        request.to_string().as_bytes(),
+        Origin::new(ORIGIN),
+        DateTime::from_unix(NOW).unwrap(),
+    )
 }
 
 /// An unsigned DC API request of `params`.
@@ -384,7 +397,7 @@ pub fn decrypt_jwe(submission: &Submission) -> Value {
         base64url::decode(tag).unwrap(),
     ]
     .concat();
-    let plaintext = Aes128Gcm::new_from_slice(&cek)
+    let plaintext = Aes128Gcm::new_from_slice(cek.as_bytes())
         .unwrap()
         .decrypt(
             &Nonce::from(iv),
@@ -426,7 +439,7 @@ pub fn decrypt_cwt(submission: &Submission) -> Cbor {
     let Method::Post { content_type, body } = post.method() else {
         panic!("a POST")
     };
-    assert_eq!(*content_type, "application/cwt");
+    assert_eq!(content_type.as_str(), "application/cwt");
     let message: Cbor = ciborium::from_reader(&body[..]).unwrap();
     let Cbor::Tag(96, message) = message else {
         panic!("COSE_Encrypt")
@@ -458,7 +471,7 @@ pub fn decrypt_cwt(submission: &Submission) -> Cbor {
         Cbor::Bytes(protected.clone()),
         Cbor::Bytes(Vec::new()),
     ]));
-    let plaintext = Aes128Gcm::new_from_slice(&cek)
+    let plaintext = Aes128Gcm::new_from_slice(cek.as_bytes())
         .unwrap()
         .decrypt(
             &Nonce::from(iv),

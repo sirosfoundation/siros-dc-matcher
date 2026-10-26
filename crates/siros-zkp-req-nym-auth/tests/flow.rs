@@ -62,7 +62,7 @@ fn verify_with(
             presentation: bytes,
             now: NOW + 5,
             tolerance: TOLERANCE,
-            trust_anchors: trust_anchors,
+            trust_anchors,
         },
         &TestVerifier,
     )

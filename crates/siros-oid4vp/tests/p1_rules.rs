@@ -13,7 +13,9 @@ mod support;
 use p256::ecdsa::SigningKey;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use siros_oid4vp::{Effect, EffectResult, FetchResponse, IntakeError, IntakeState, TrustSubject};
+use siros_oid4vp::{
+    Effect, EffectResult, FetchResponse, IntakeError, IntakeState, Origin, TrustSubject,
+};
 use support::*;
 
 const ORIGIN: &str = "https://verifier.example";
@@ -70,7 +72,7 @@ fn dc_api_payload(client_id: &str) -> Value {
 /// A Request Object by value under the `client_id` parameter `outer`.
 fn by_value(outer: &str, jws: &str) -> IntakeState {
     let uri = authorization_uri(&[("client_id", outer), ("request", jws)]);
-    IntakeState::redirect(&uri, formats(), NOW, &mut Rng(1))
+    IntakeState::redirect(&uri, formats(), now(), &mut Rng(1))
 }
 
 /// An `x509_san_dns` request by value: `x5c` holds a certificate of `certified` naming
@@ -98,8 +100,8 @@ fn signed_dc_api(payload: Value, origin: &str) -> IntakeState {
     let jws = sign(&x5c_header(&certificate(&key, &[DNS])), &payload, &key);
     IntakeState::dc_api(
         &dc_api("openid4vp-v1-signed", json!({"request": jws})),
-        origin,
-        NOW,
+        Origin::new(origin),
+        now(),
     )
 }
 
@@ -111,7 +113,11 @@ fn unsigned_dc_api(change: impl Fn(&mut Value)) -> IntakeState {
         "dcql_query": query(),
     });
     change(&mut data);
-    IntakeState::dc_api(&dc_api("openid4vp-v1-unsigned", data), ORIGIN, NOW)
+    IntakeState::dc_api(
+        &dc_api("openid4vp-v1-unsigned", data),
+        Origin::new(ORIGIN),
+        now(),
+    )
 }
 
 /// A `decentralized_identifier` request by value whose `kid` is `kid`, signed by `signer`;
@@ -173,7 +179,11 @@ fn multisigned(signers: &[(&str, &SigningKey, &SigningKey)], payload: Value) -> 
         })
         .collect();
     let data = json!({"request": {"payload": payload_b64, "signatures": signatures}});
-    IntakeState::dc_api(&dc_api("openid4vp-v1-multisigned", data), ORIGIN, NOW)
+    IntakeState::dc_api(
+        &dc_api("openid4vp-v1-multisigned", data),
+        Origin::new(ORIGIN),
+        now(),
+    )
 }
 
 fn multisigned_payload() -> Value {
@@ -187,7 +197,7 @@ fn trusting_only(trusted: &'static str) -> Answer {
     Box::new(move |effect| match effect {
         Effect::Trust(trust) => {
             let yes = matches!(trust.subject(), TrustSubject::Client(c) if c.as_str() == trusted);
-            EffectResult::Trusted(siros_oid4vp::TrustAnswer::new(yes, None, None))
+            EffectResult::Trusted(siros_oid4vp::TrustAnswer::new(yes.into(), None, None))
         }
         Effect::Fetch(_) => panic!("no fetch"),
     })
@@ -293,7 +303,7 @@ fn fixtures() -> Vec<Fixture> {
                     ("nonce", "n-0S6_WzA2Mj"),
                     ("dcql_query", &query),
                 ]);
-                IntakeState::redirect(&uri, formats(), NOW, &mut Rng(1))
+                IntakeState::redirect(&uri, formats(), now(), &mut Rng(1))
             },
             answer: honest(Host::trusting()),
             expect: Expect::Refused(IntakeError::UnsignedNeedsRedirectUri),
@@ -336,7 +346,9 @@ fn fixtures() -> Vec<Fixture> {
         Fixture {
             rule: "the trust effect is answered by a trust verdict",
             state: x509_san_dns(DNS, &a, &a, redirect_payload(&x509)),
-            answer: Box::new(|_| EffectResult::Fetched(FetchResponse::new(200, None, Vec::new()))),
+            answer: Box::new(|_| {
+                EffectResult::Fetched(FetchResponse::new(HttpStatus::OK, None, Vec::new()))
+            }),
             expect: Expect::Refused(IntakeError::AnswerMismatch),
         },
         Fixture {
@@ -569,7 +581,7 @@ fn each_construction_rule_of_verified_request() {
                     fixture.rule,
                     verifier.client_id()
                 );
-                assert_eq!(verifier.trusted(), trusted, "{}", fixture.rule);
+                assert_eq!(verifier.verdict(), trusted.into(), "{}", fixture.rule);
             }
             (Expect::Refused(expected), Ok(_)) => {
                 panic!("{}: verified, expected {expected:?}", fixture.rule)

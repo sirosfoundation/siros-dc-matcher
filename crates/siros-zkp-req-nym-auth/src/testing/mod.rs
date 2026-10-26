@@ -265,7 +265,7 @@ pub fn issue(issuer: &Issuer, spec: &Spec) -> String {
             ]),
         ),
     ]);
-    base64url::encode(&issuer_signed.encode())
+    base64url::encode(&issuer_signed.encode()).into()
 }
 
 /// A pseudonym item and, unless `range` is `None`, an age_check item.
@@ -317,7 +317,7 @@ pub fn session(query: &Value, nonce: &str) -> Session {
     let checked = check_request(&request_object(query, nonce), true, Channel::Redirect).unwrap();
     let thumbprint = ec_jwk_thumbprint(&encryption_jwk()).unwrap();
     Session {
-        handover: checked.handover(&thumbprint).unwrap(),
+        handover: checked.handover(thumbprint.as_bytes()).unwrap(),
         verifier_id: VerifierId::x509_san_dns(
             &ClientId::parse(&checked.client_id).unwrap(),
             Intermediary::Absent,

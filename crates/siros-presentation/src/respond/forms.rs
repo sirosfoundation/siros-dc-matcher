@@ -95,7 +95,7 @@ impl Unsigned for DeviceResponse<'_> {
         _prover: &dyn NymAuthProver,
     ) -> Result<Presentation, PresentationError> {
         let response = self.disclosure.device_response(signature.bytes());
-        Ok(Presentation::text(base64url::encode(&response)))
+        Ok(Presentation::text(base64url::encode(&response).into()))
     }
 }
 

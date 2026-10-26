@@ -103,11 +103,17 @@ fn holds(label: &str, text: &str, state: &WalletState, json: &Value) {
             entry.credential_id().to_string(),
             stored["credentialId"].to_string()
         );
-        assert_eq!(entry.format(), stored["format"]);
-        assert_eq!(entry.data(), stored["data"]);
+        assert_eq!(entry.format().as_str(), stored["format"]);
+        assert_eq!(entry.data().as_str(), stored["data"]);
         assert_eq!(entry.key_id().map(|k| k.as_str()), known("kid"));
-        assert_eq!(entry.issuer(), known("credentialIssuerIdentifier"));
-        assert_eq!(entry.configuration_id(), known("credentialConfigurationId"));
+        assert_eq!(
+            entry.issuer().map(|i| i.as_str()),
+            known("credentialIssuerIdentifier")
+        );
+        assert_eq!(
+            entry.configuration_id().map(|c| c.as_str()),
+            known("credentialConfigurationId")
+        );
         assert_eq!(
             format!("{:?} {:?}", entry.instance_id(), entry.batch_id()),
             format!(
@@ -118,7 +124,7 @@ fn holds(label: &str, text: &str, state: &WalletState, json: &Value) {
         let metadata = stored["metadata"].as_array().cloned().unwrap_or_default();
         assert_eq!(entry.metadata().len(), metadata.len(), "{label}");
         for (m, stored) in entry.metadata().iter().zip(&metadata) {
-            assert_eq!(m.kind(), stored["type"], "{label}");
+            assert_eq!(m.kind().as_str(), stored["type"], "{label}");
             let value: Value = serde_json::from_str(m.value().json()).unwrap();
             assert_eq!(value, stored["value"], "{label}");
             assert!(text.contains(m.value().json()), "{label}: not verbatim");

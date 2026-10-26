@@ -7,7 +7,8 @@ use p256::PublicKey;
 use serde_json::{Map, Value};
 use siros_codec::base64url;
 
-use crate::intake::IntakeError;
+use crate::intake::{IntakeError, JwsError, JwsFault};
+use crate::values::Kid;
 
 /// One signature over a payload: its JOSE Header and what it signs.
 ///
@@ -20,7 +21,7 @@ pub(crate) struct Signed {
 }
 
 /// A JWS Compact Serialization: the signature and the decoded payload.
-pub(crate) fn compact(jws: &str) -> Result<(Signed, Vec<u8>), IntakeError> {
+pub(crate) fn compact(jws: &str) -> Result<(Signed, Vec<u8>), JwsError> {
     let mut segments = jws.splitn(4, '.');
     let (Some(header), Some(payload), Some(signature), None) = (
         segments.next(),
@@ -28,10 +29,10 @@ pub(crate) fn compact(jws: &str) -> Result<(Signed, Vec<u8>), IntakeError> {
         segments.next(),
         segments.next(),
     ) else {
-        return Err(IntakeError::JwsMalformed);
+        return Err(JwsError::Malformed(JwsFault::Segments));
     };
     let signed = Signed::parse(header, payload, signature)?;
-    Ok((signed, decode(payload)?))
+    Ok((signed, segment(payload)?))
 }
 
 impl Signed {
@@ -41,19 +42,20 @@ impl Signed {
         protected_b64: &str,
         payload_b64: &str,
         signature_b64: &str,
-    ) -> Result<Self, IntakeError> {
-        let header = match serde_json::from_slice(&decode(protected_b64)?) {
+    ) -> Result<Self, JwsError> {
+        let malformed = JwsError::Malformed;
+        let header = match serde_json::from_slice(&segment(protected_b64)?) {
             Ok(Value::Object(header)) => header,
-            _ => return Err(IntakeError::JwsMalformed),
+            _ => return Err(malformed(JwsFault::Header)),
         };
-        let signature = Signature::from_slice(&decode(signature_b64)?)
-            .map_err(|_| IntakeError::JwsMalformed)?;
+        let signature = Signature::from_slice(&segment(signature_b64)?)
+            .map_err(|_| malformed(JwsFault::Signature))?;
         if header.get("alg").and_then(Value::as_str) != Some("ES256") {
-            return Err(IntakeError::AlgorithmUnsupported);
+            return Err(JwsError::AlgorithmUnsupported);
         }
         // RFC 7515, Section 4.1.11: no extension is understood here.
         if header.contains_key("crit") {
-            return Err(IntakeError::CriticalHeader);
+            return Err(JwsError::CriticalHeader);
         }
         Ok(Self {
             header,
@@ -72,6 +74,11 @@ impl Signed {
         self.header.get(name).and_then(Value::as_str)
     }
 
+    /// The `kid` Header Parameter.
+    pub(crate) fn kid(&self) -> Option<Kid> {
+        self.text("kid").map(Kid::new)
+    }
+
     /// Verifies the ES256 signature under `key`.
     pub(crate) fn verify(&self, key: &PublicKey) -> Result<(), IntakeError> {
         VerifyingKey::from(key)
@@ -80,8 +87,9 @@ impl Signed {
     }
 }
 
-fn decode(segment: &str) -> Result<Vec<u8>, IntakeError> {
-    base64url::decode(segment).ok_or(IntakeError::JwsMalformed)
+/// The bytes of the base64url segment `text` of a JWS.
+pub(crate) fn segment(text: &str) -> Result<Vec<u8>, JwsError> {
+    base64url::decode(text).map_err(|e| JwsError::Malformed(JwsFault::Encoding(e)))
 }
 
 /// The key of a public JWK with `kty` `EC` and `crv` `P-256`, its coordinates 32 bytes each.
@@ -90,7 +98,11 @@ pub(crate) fn p256_key(jwk: &Value) -> Option<PublicKey> {
     if text("kty")? != "EC" || text("crv")? != "P-256" {
         return None;
     }
-    let coordinate = |name: &str| base64url::decode(text(name)?).filter(|c| c.len() == 32);
+    let coordinate = |name: &str| {
+        base64url::decode(text(name)?)
+            .ok()
+            .filter(|c| c.len() == 32)
+    };
     let point = [vec![0x04], coordinate("x")?, coordinate("y")?].concat();
     PublicKey::from_sec1_bytes(&point).ok()
 }

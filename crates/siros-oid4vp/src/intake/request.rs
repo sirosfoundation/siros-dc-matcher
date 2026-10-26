@@ -5,12 +5,14 @@ use serde_json::{Map, Value};
 use siros_dcql::DcqlQuery;
 
 use super::signature::{strings, Metadata, UriRule, Verifier};
+use super::trust::Verdict;
 use super::{IntakeError, VerifierInfoRule};
 use crate::client_id::ClientId;
 use crate::fetch::HttpsUrl;
 use crate::handover::ec_jwk_thumbprint;
 use crate::jose;
 use crate::protocol::Protocol;
+use crate::values::{Kid, Nonce, Origin, State, TransactionDataItem};
 use crate::verified::{
     AttestationFormat, Channel, ContentEncryption, Encryption, PostEncoding, VerifiedRequest,
 };
@@ -21,12 +23,15 @@ pub(super) enum Arrival<'a> {
     Redirect(Verifier),
     /// A DC API request from `origin`, signed under `protocol`.
     DcApiSigned {
-        origin: &'a str,
+        origin: &'a Origin,
         protocol: Protocol,
         verifier: Verifier,
     },
     /// An unsigned DC API request from `origin`, with the host's verdict on the origin.
-    DcApiUnsigned { origin: &'a str, trusted: bool },
+    DcApiUnsigned {
+        origin: &'a Origin,
+        trusted: Verdict,
+    },
 }
 
 /// The verified request that arrived as `arrival`, from its request parameters `params`.
@@ -43,30 +48,23 @@ pub(super) fn verified(
         return Err(IntakeError::ResponseTypeUnsupported);
     }
     let nonce = text("nonce")
-        .filter(|n| url_safe(n))
-        .ok_or(IntakeError::NonceInvalid)?
-        .to_owned();
-    let state = match params.get("state") {
-        None => None,
-        Some(state) => Some(
+        .and_then(Nonce::parse)
+        .ok_or(IntakeError::NonceInvalid)?;
+    let state = params
+        .get("state")
+        .map(|state| {
             state
                 .as_str()
-                .filter(|s| url_safe(s))
-                .ok_or(IntakeError::StateInvalid)?
-                .to_owned(),
-        ),
-    };
+                .and_then(State::parse)
+                .ok_or(IntakeError::StateInvalid)
+        })
+        .transpose()?;
     let mode = text("response_mode");
     let (target, trusted, certificate, metadata) = match arrival {
         Arrival::Redirect(verifier) => {
-            let encoding = match mode {
-                Some("direct_post") => Encoding::Form,
-                Some("direct_post.jwt") => Encoding::Jwe,
-                Some("direct_post.cwt") => Encoding::Cose,
-                _ => return Err(IntakeError::ResponseModeUnsupported),
-            };
+            let encoding = Encoding::of(mode)?;
             let target = Target::Redirect {
-                response_uri: response_uri(params, &verifier.response_uri)?,
+                response_uri: response_uri(params, &verifier)?,
                 client_id: verifier.client_id,
                 encoding,
             };
@@ -82,20 +80,20 @@ pub(super) fn verified(
             protocol,
             verifier,
         } => {
-            let encrypted = dc_api_encrypted(mode)?;
+            let encoding = DcApiEncoding::of(mode)?;
             let expected = params
                 .get("expected_origins")
                 .and_then(strings)
                 .filter(|origins| !origins.is_empty())
                 .ok_or(IntakeError::ExpectedOriginsMissing)?;
-            if !expected.iter().any(|o| o == origin) {
+            if !expected.iter().any(|o| o == origin.as_str()) {
                 return Err(IntakeError::OriginNotExpected);
             }
             let target = Target::DcApi {
                 protocol,
                 client_id: Some(verifier.client_id),
                 origin,
-                encrypted,
+                encoding,
             };
             (
                 target,
@@ -110,7 +108,7 @@ pub(super) fn verified(
                 protocol: Protocol::Unsigned,
                 client_id: None,
                 origin,
-                encrypted: dc_api_encrypted(mode)?,
+                encoding: DcApiEncoding::of(mode)?,
             };
             (target, trusted, None, Metadata::Request)
         }
@@ -129,7 +127,10 @@ pub(super) fn verified(
         None => Vec::new(),
         Some(entries) => strings(entries)
             .filter(|e| !e.is_empty())
-            .ok_or(IntakeError::TransactionDataInvalid)?,
+            .ok_or(IntakeError::TransactionDataInvalid)?
+            .into_iter()
+            .map(TransactionDataItem::new)
+            .collect(),
     };
     let metadata = client_metadata.as_ref();
     let channel = match target {
@@ -152,14 +153,14 @@ pub(super) fn verified(
             protocol,
             client_id,
             origin,
-            encrypted,
+            encoding,
         } => Channel::DcApi {
             protocol,
             client_id,
-            origin: origin.to_owned(),
-            encryption: match encrypted {
-                false => None,
-                true => Some(encryption(metadata, &ContentEncryption::JWE)?),
+            origin: origin.clone(),
+            encryption: match encoding {
+                DcApiEncoding::Json => None,
+                DcApiEncoding::Jwe => Some(encryption(metadata, &ContentEncryption::JWE)?),
             },
         },
     };
@@ -187,8 +188,8 @@ enum Target<'a> {
     DcApi {
         protocol: Protocol,
         client_id: Option<ClientId>,
-        origin: &'a str,
-        encrypted: bool,
+        origin: &'a Origin,
+        encoding: DcApiEncoding,
     },
 }
 
@@ -199,50 +200,62 @@ enum Encoding {
     Cose,
 }
 
-/// Whether a DC API Response Mode encrypts: `dc_api.jwt` does, `dc_api` does not (A.2).
-fn dc_api_encrypted(mode: Option<&str>) -> Result<bool, IntakeError> {
-    match mode {
-        Some("dc_api") => Ok(false),
-        Some("dc_api.jwt") => Ok(true),
-        _ => Err(IntakeError::ResponseModeUnsupported),
+impl Encoding {
+    /// The body of the Response Mode `mode`: `direct_post`, `direct_post.jwt` or
+    /// `direct_post.cwt` (Section 8.2; `zkp_req.md`, Section 6.2).
+    fn of(mode: Option<&str>) -> Result<Self, IntakeError> {
+        match mode {
+            Some("direct_post") => Ok(Self::Form),
+            Some("direct_post.jwt") => Ok(Self::Jwe),
+            Some("direct_post.cwt") => Ok(Self::Cose),
+            _ => Err(IntakeError::ResponseModeUnsupported),
+        }
     }
 }
 
-/// ASCII URL-safe characters only, at least one (Section 5.2).
-fn url_safe(text: &str) -> bool {
-    !text.is_empty()
-        && text
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~'))
+/// The `data` a DC API Response Mode names (A.2).
+enum DcApiEncoding {
+    /// `dc_api`: the response parameters.
+    Json,
+    /// `dc_api.jwt`: their JWE.
+    Jwe,
 }
 
-/// The `response_uri` of a redirect request under `rule` (Section 8.2).
-fn response_uri(params: &Map<String, Value>, rule: &UriRule) -> Result<HttpsUrl, IntakeError> {
+impl DcApiEncoding {
+    /// The `data` of the Response Mode `mode`: `dc_api` or `dc_api.jwt`.
+    fn of(mode: Option<&str>) -> Result<Self, IntakeError> {
+        match mode {
+            Some("dc_api") => Ok(Self::Json),
+            Some("dc_api.jwt") => Ok(Self::Jwe),
+            _ => Err(IntakeError::ResponseModeUnsupported),
+        }
+    }
+}
+
+/// The `response_uri` of a redirect request of `verifier` (Section 8.2).
+fn response_uri(params: &Map<String, Value>, verifier: &Verifier) -> Result<HttpsUrl, IntakeError> {
     if params.contains_key("redirect_uri") {
         return Err(IntakeError::RedirectUriWithDirectPost);
     }
+    let value = verifier.client_id.value();
     let given = params.get("response_uri").and_then(Value::as_str);
-    let uri = match (rule, given) {
+    let uri = match (&verifier.response_uri, given) {
         // Section 5.9.3: a `redirect_uri` client may omit the Response URI it is.
-        (UriRule::Equals(value), None) => value.as_str(),
+        (UriRule::IsClientIdValue, None) => value,
         (_, Some(uri)) => uri,
         (_, None) => return Err(IntakeError::ResponseUriMissing),
     };
     let url = HttpsUrl::parse(uri).ok_or(IntakeError::ResponseUriNotHttps)?;
-    match rule {
-        UriRule::Any => {}
-        UriRule::Equals(value) if uri != value => return Err(IntakeError::ResponseUriNotClientId),
-        UriRule::Equals(_) => {}
-        UriRule::Host(dns) if !url.host().eq_ignore_ascii_case(dns) => {
-            return Err(IntakeError::ResponseUriHostMismatch)
+    let refusal = match &verifier.response_uri {
+        UriRule::Any => None,
+        UriRule::IsClientIdValue => (uri != value).then_some(IntakeError::ResponseUriNotClientId),
+        UriRule::HostIsClientIdValue => (!url.host().eq_ignore_ascii_case(value))
+            .then_some(IntakeError::ResponseUriHostMismatch),
+        UriRule::OneOf(uris) => {
+            (!uris.iter().any(|u| u == uri)).then_some(IntakeError::RedirectUriNotAttested)
         }
-        UriRule::Host(_) => {}
-        UriRule::OneOf(uris) if !uris.iter().any(|u| u == uri) => {
-            return Err(IntakeError::RedirectUriNotAttested)
-        }
-        UriRule::OneOf(_) => {}
-    }
-    Ok(url)
+    };
+    refusal.map_or(Ok(url), Err)
 }
 
 /// `dcql_query`, parsed by `siros-dcql`, and as sent (Section 5.1).
@@ -345,7 +358,7 @@ fn encryption(
     };
     Ok(Encryption {
         key,
-        kid: jwk.get("kid").and_then(Value::as_str).map(str::to_owned),
+        kid: jwk.get("kid").and_then(Value::as_str).map(Kid::new),
         enc,
         thumbprint,
     })

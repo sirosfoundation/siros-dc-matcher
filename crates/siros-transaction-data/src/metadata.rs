@@ -6,26 +6,33 @@ use std::collections::hash_map::Entry;
 use rustc_hash::FxHashMap;
 use siros_credential::{ClaimPointer, Credential, Format, TypedValue};
 use siros_dcql::{PathComponent, PathError};
-use siros_oid4vp::{Fetch, FetchResponse, HttpsUrl};
+use siros_oid4vp::{BodyLimit, Fetch, FetchResponse, HttpStatus, HttpsUrl, MediaType};
 
-use crate::error::TransactionDataError;
+use crate::error::{MetadataPart, TransactionDataError};
 use crate::integrity::Integrity;
 use crate::json::{Fields, Json};
-use crate::kind;
+use crate::kind::SupportedType;
 use crate::labels::{ClaimMetadata, DisplayMetadata, UiLabels};
 
-/// The largest metadata document read, in bytes.
-const MAX_DOCUMENT: usize = 256 * 1024;
-
-/// The media type a metadata fetch accepts.
-const JSON: &str = "application/json";
+/// The largest metadata document read.
+const MAX_DOCUMENT: BodyLimit = BodyLimit::bytes(256 * 1024);
 
 /// The SCA Attestation metadata of a credential: the `category` and `transaction_data_types`
 /// of its SD-JWT VC Type Metadata (SD-JWT VC, Section 6; EC TS12 v1.0.1, Sections 2.3 and 4.1).
 pub struct ScaMetadata<'c> {
     credential: &'c Credential,
-    category: Option<String>,
-    types: Vec<(&'static str, TypeDisplay)>,
+    category: Option<Category>,
+    types: Vec<(SupportedType, TypeDisplay)>,
+}
+
+/// The `category` of Type Metadata (EC TS12 v1.0.1, Section 2.3).
+pub(crate) struct Category(String);
+
+impl Category {
+    /// The category.
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 /// Where the display metadata of one transaction data type is: inline or referenced
@@ -104,7 +111,7 @@ impl<'c> ScaMetadata<'c> {
         }
         let url = HttpsUrl::parse(credential.credential_type())
             .ok_or(TransactionDataError::VctNotHttps)?;
-        Ok(Fetch::get(url, JSON, MAX_DOCUMENT))
+        Ok(Fetch::get(url, MediaType::JSON, MAX_DOCUMENT))
     }
 
     /// The SCA Attestation metadata of `credential` in `response`, the response to
@@ -127,29 +134,26 @@ impl<'c> ScaMetadata<'c> {
         if credential.format() != Format::SdJwtVc {
             return Err(TransactionDataError::NotSdJwtVc);
         }
+        let malformed = |part| TransactionDataError::MetadataMalformed(MetadataPart::new(part));
         let document = read(response, pin(credential, "vct#integrity")?.as_ref())?;
         let Json::Object(object) = document else {
-            return Err(TransactionDataError::MetadataMalformed("type metadata"));
+            return Err(malformed("type metadata"));
         };
         let mut fields = object.into_fields();
         match fields.take("vct") {
             Some(Json::String(vct)) if vct == credential.credential_type() => {}
             Some(Json::String(_)) => return Err(TransactionDataError::VctMismatch),
-            _ => return Err(TransactionDataError::MetadataMalformed("vct")),
+            _ => return Err(malformed("vct")),
         }
         let category = match fields.take("category") {
             None => None,
-            Some(Json::String(category)) => Some(category),
-            Some(_) => return Err(TransactionDataError::MetadataMalformed("category")),
+            Some(Json::String(category)) => Some(Category(category)),
+            Some(_) => return Err(malformed("category")),
         };
         let types = match fields.take("transaction_data_types") {
             None => Vec::new(),
             Some(Json::Object(types)) => transaction_data_types(credential, types.into_fields())?,
-            Some(_) => {
-                return Err(TransactionDataError::MetadataMalformed(
-                    "transaction_data_types",
-                ))
-            }
+            Some(_) => return Err(malformed(TRANSACTION_DATA_TYPES)),
         };
         Ok(Self {
             credential,
@@ -165,61 +169,66 @@ impl<'c> ScaMetadata<'c> {
     }
 
     /// `category`.
-    pub(crate) fn category(&self) -> Option<&str> {
-        self.category.as_deref()
+    pub(crate) fn category(&self) -> Option<&Category> {
+        self.category.as_ref()
     }
 
-    /// Where the display metadata of the type `identifier` is, when `transaction_data_types`
+    /// Where the display metadata of the type `supported` is, when `transaction_data_types`
     /// lists it.
-    pub(crate) fn display_metadata(&self, identifier: &str) -> Option<&TypeDisplay> {
+    pub(crate) fn display_metadata(&self, supported: SupportedType) -> Option<&TypeDisplay> {
         self.types
             .iter()
-            .find(|(listed, _)| *listed == identifier)
+            .find(|(listed, _)| *listed == supported)
             .map(|(_, display)| display)
     }
 }
+
+/// The member of Type Metadata that lists the transaction data types (EC TS12 v1.0.1, Section
+/// 4.1).
+const TRANSACTION_DATA_TYPES: &str = "transaction_data_types";
 
 /// The entries of `types` for the supported types.
 fn transaction_data_types(
     credential: &Credential,
     types: Fields,
-) -> Result<Vec<(&'static str, TypeDisplay)>, TransactionDataError> {
-    const PATH: &str = "transaction_data_types";
-    let mut supported = Vec::new();
-    for (name, value) in types.rest() {
-        let Some(identifier) = kind::supported(&name) else {
-            continue;
-        };
-        let Json::Object(entry) = value else {
-            return Err(TransactionDataError::MetadataMalformed(PATH));
-        };
-        let mut entry = entry.into_fields();
-        let display = TypeDisplay {
-            claims: source(
-                credential,
-                identifier,
-                &mut entry,
-                "claims",
-                ClaimMetadata::parse,
-            )?,
-            ui_labels: source(
-                credential,
-                identifier,
-                &mut entry,
-                "ui_labels",
-                UiLabels::parse,
-            )?,
-        };
-        supported.push((identifier, display));
-    }
-    Ok(supported)
+) -> Result<Vec<(SupportedType, TypeDisplay)>, TransactionDataError> {
+    types
+        .rest()
+        .into_iter()
+        .filter_map(|(name, value)| SupportedType::named(&name).map(|supported| (supported, value)))
+        .map(|(supported, value)| {
+            let Json::Object(entry) = value else {
+                return Err(TransactionDataError::MetadataMalformed(MetadataPart::new(
+                    TRANSACTION_DATA_TYPES,
+                )));
+            };
+            let mut entry = entry.into_fields();
+            let display = TypeDisplay {
+                claims: source(
+                    credential,
+                    supported,
+                    &mut entry,
+                    "claims",
+                    ClaimMetadata::parse,
+                )?,
+                ui_labels: source(
+                    credential,
+                    supported,
+                    &mut entry,
+                    "ui_labels",
+                    UiLabels::parse,
+                )?,
+            };
+            Ok((supported, display))
+        })
+        .collect()
 }
 
-/// The document of member `name` of the entry of type `identifier`: inline in `name`, or
+/// The document of member `name` of the entry of type `supported`: inline in `name`, or
 /// referenced by `<name>_uri`, exactly one of them.
 fn source<T>(
     credential: &Credential,
-    identifier: &str,
+    supported: SupportedType,
     entry: &mut Fields,
     name: &'static str,
     parse: fn(Json) -> Result<T, TransactionDataError>,
@@ -231,10 +240,15 @@ fn source<T>(
             url: HttpsUrl::parse(&url).ok_or(TransactionDataError::DocumentNotHttps)?,
             integrity: pin(
                 credential,
-                &format!("transaction_data_types['{identifier}'].{uri}#integrity"),
+                &format!(
+                    "transaction_data_types['{}'].{uri}#integrity",
+                    supported.identifier()
+                ),
             )?,
         })),
-        _ => Err(TransactionDataError::MetadataMalformed(name)),
+        _ => Err(TransactionDataError::MetadataMalformed(MetadataPart::new(
+            name,
+        ))),
     }
 }
 
@@ -271,7 +285,7 @@ fn resolve<T: Clone>(
         Source::Referenced(reference) => match fetched.0.get(&reference.url) {
             None => Ok(Step::Fetch(Fetch::get(
                 reference.url.clone(),
-                JSON,
+                MediaType::JSON,
                 MAX_DOCUMENT,
             ))),
             Some(response) => Ok(Step::Done(parse(read(
@@ -287,17 +301,17 @@ fn read(
     response: &FetchResponse,
     integrity: Option<&Integrity>,
 ) -> Result<Json, TransactionDataError> {
-    if response.status() != 200 {
+    if response.status() != HttpStatus::OK {
         return Err(TransactionDataError::FetchStatus);
     }
     let body = response.body();
-    if body.len() > MAX_DOCUMENT {
+    if !MAX_DOCUMENT.admits(body) {
         return Err(TransactionDataError::FetchTooLarge);
     }
     if let Some(integrity) = integrity {
         integrity.check(body)?;
     }
-    let malformed = TransactionDataError::MetadataMalformed("document");
+    let malformed = TransactionDataError::MetadataMalformed(MetadataPart::new("document"));
     let text = std::str::from_utf8(body).map_err(|_| malformed)?;
     Json::parse(text).map_err(|_| malformed)
 }

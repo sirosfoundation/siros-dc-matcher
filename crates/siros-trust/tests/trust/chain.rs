@@ -85,7 +85,7 @@ fn cases() -> Vec<Case> {
         case(
             "an aki value a chain certificate's AuthorityKeyIdentifier names",
             signed_by(&iaca, |ds| ds.aki(&named_key)),
-            json!([{"type": "aki", "values": [base64url::encode(&named_key)]}]),
+            json!([{"type": "aki", "values": [base64url::encode(&named_key).as_str()]}]),
             Ok(Ground::KeyIdentifier(
                 KeyIdentifier::new(&named_key).unwrap(),
             )),

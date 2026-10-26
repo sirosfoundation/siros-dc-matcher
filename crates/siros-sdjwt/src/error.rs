@@ -2,6 +2,8 @@
 
 use std::fmt;
 
+use siros_codec::Base64Error;
+
 /// Why text is not a stored SD-JWT (RFC 9901, Sections 4 and 7.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ParseError {
@@ -30,9 +32,21 @@ pub enum ParseError {
     UnreferencedDisclosure,
     /// The claims nest deeper than [`MAX_DEPTH`](crate::MAX_DEPTH), disclosures included.
     TooDeep,
-    /// The issuer JWT's `x5c` header parameter is not a non-empty array of base64 strings with
-    /// padding (RFC 7515, Section 4.1.6).
-    X5c,
+    /// The issuer JWT's `x5c` header parameter breaks RFC 7515, Section 4.1.6.
+    X5c(X5cError),
+}
+
+/// Why an `x5c` header parameter is no chain of certificates (RFC 7515, Section 4.1.6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum X5cError {
+    /// It is not an array.
+    NotArray,
+    /// The array is empty.
+    Empty,
+    /// A certificate is not a string.
+    NotString,
+    /// A certificate is not base64 with padding.
+    Base64(Base64Error),
 }
 
 impl ParseError {
@@ -48,7 +62,7 @@ impl ParseError {
             Self::ClaimNameExists => "claim_name_exists",
             Self::UnreferencedDisclosure => "disclosure_unreferenced",
             Self::TooDeep => "claims_too_deep",
-            Self::X5c => "issuer_jwt_x5c_malformed",
+            Self::X5c(_) => "issuer_jwt_x5c_malformed",
         }
     }
 }

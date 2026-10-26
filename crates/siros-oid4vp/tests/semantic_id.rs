@@ -35,7 +35,7 @@ fn semantic_id(subject: &str, policies: Policies) -> Result<String, SemanticIdEr
     });
     let jws = sign(&x5c_header(&certificate), &payload, &key);
     let uri = authorization_uri(&[("client_id", &client_id), ("request", &jws)]);
-    let state = IntakeState::redirect(&uri, formats(), NOW, &mut Rng(1));
+    let state = IntakeState::redirect(&uri, formats(), now(), &mut Rng(1));
     let host = Host::trusting();
     let (request, _) = run(state, |effect| host.answer(effect)).unwrap();
     let certificate = request.access_certificate().unwrap();

@@ -4,7 +4,7 @@
 use std::fmt;
 
 use serde_json::{Map, Value};
-use siros_codec::base64;
+use siros_codec::{base64, Base64Error};
 use siros_dcql::{AuthorityType, AuthorityValue};
 
 use crate::authority::{StoreAuthority, StoreType};
@@ -57,9 +57,15 @@ pub enum EntryError {
     Value,
     /// `certificates` is missing, not an array, or empty.
     Certificates,
-    /// A certificate is not a string of base64 with padding (the `x5c` encoding, RFC 7515,
-    /// Section 4.1.6).
-    Encoding(CertificateIndex),
+    /// A certificate is not a string.
+    CertificateNotString(CertificateIndex),
+    /// A certificate is not base64 with padding (the `x5c` encoding, RFC 7515, Section 4.1.6).
+    Encoding {
+        /// Its position in `certificates`.
+        certificate: CertificateIndex,
+        /// Why.
+        error: Base64Error,
+    },
     /// A certificate does not parse.
     Certificate {
         /// Its position in `certificates`.
@@ -115,7 +121,8 @@ impl EntryError {
             Self::UnknownType => "trust_store_entry_type_unknown",
             Self::Value => "trust_store_entry_value",
             Self::Certificates => "trust_store_entry_certificates",
-            Self::Encoding(_) => "trust_store_certificate_encoding",
+            Self::CertificateNotString(_) => "trust_store_certificate_not_string",
+            Self::Encoding { .. } => "trust_store_certificate_encoding",
             Self::Certificate { error, .. } => error.code(),
         }
     }
@@ -223,10 +230,13 @@ fn text<'e>(entry: &'e Map<String, Value>, name: &str) -> Option<&'e str> {
 /// The certificate at `position` of an entry's `certificates`: base64 with padding of a DER
 /// certificate.
 fn certificate_of(value: &Value, position: CertificateIndex) -> Result<Certificate, EntryError> {
-    let der = value
+    let text = value
         .as_str()
-        .and_then(base64::decode)
-        .ok_or(EntryError::Encoding(position))?;
+        .ok_or(EntryError::CertificateNotString(position))?;
+    let der = base64::decode(text).map_err(|error| EntryError::Encoding {
+        certificate: position,
+        error,
+    })?;
     Certificate::parse(&der).map_err(|error| EntryError::Certificate {
         certificate: position,
         error,

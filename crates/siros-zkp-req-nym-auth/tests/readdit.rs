@@ -99,7 +99,7 @@ fn prepared_for(facts: &Value, system: NymAuthSystem) -> Prepared {
     assert_eq!(proof_time(facts).unix(), NOW);
     assert_eq!(
         unhex(&inputs["jwk_thumbprint"]),
-        ec_jwk_thumbprint(&encryption_jwk()).unwrap()
+        ec_jwk_thumbprint(&encryption_jwk()).unwrap().as_bytes()
     );
     let query = query(Some("18+"), true);
     let request = verified_request(&query, NONCE);

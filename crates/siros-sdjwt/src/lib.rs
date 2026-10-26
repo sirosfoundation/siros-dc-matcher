@@ -42,7 +42,7 @@ mod sd_jwt;
 mod select;
 mod tree;
 
-pub use error::{KeyBindingError, ParseError};
+pub use error::{KeyBindingError, ParseError, X5cError};
 pub use key_binding::{KeyBinding, Presentation};
 pub use node::{Children, Node, NodeValue};
 pub use process::MAX_DEPTH;

@@ -2,7 +2,7 @@
 //! (T7).
 
 use serde_json::{json, Value};
-use siros_oid4vp::FetchResponse;
+use siros_oid4vp::{FetchResponse, HttpStatus};
 use siros_transaction_data::{Factor, Inherence, Knowledge, Possession};
 
 use super::{claims, display, display_of, listing, metadata, Input, Row};
@@ -289,7 +289,11 @@ pub(super) fn rows() -> Vec<Row> {
             "a status other than 200",
             Input::Metadata(
                 card(json!({})),
-                FetchResponse::new(404, None, honest_metadata.to_string().into_bytes()),
+                FetchResponse::new(
+                    HttpStatus::new(404),
+                    None,
+                    honest_metadata.to_string().into_bytes(),
+                ),
             ),
             Err("metadata_fetch_status"),
         ),
@@ -308,7 +312,7 @@ pub(super) fn rows() -> Vec<Row> {
             "a body that is not JSON",
             Input::Metadata(
                 card(json!({})),
-                FetchResponse::new(200, None, b"<html>".to_vec()),
+                FetchResponse::new(HttpStatus::OK, None, b"<html>".to_vec()),
             ),
             Err("metadata_malformed"),
         ),

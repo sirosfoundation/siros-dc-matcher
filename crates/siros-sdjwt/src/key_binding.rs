@@ -103,7 +103,7 @@ impl KeyBinding {
         let mut sd_jwt_kb = self.presentation;
         sd_jwt_kb.push_str(&self.signing_input);
         sd_jwt_kb.push('.');
-        sd_jwt_kb.push_str(&base64url::encode(signature));
+        sd_jwt_kb.push_str(base64url::encode(signature).as_str());
         sd_jwt_kb
     }
 }

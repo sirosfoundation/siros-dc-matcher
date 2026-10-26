@@ -63,8 +63,8 @@ pub fn credential(format: &str, data: &str) -> Credential {
 
 /// The disclosure of `array` and its SHA-256 digest.
 pub fn disclosure(array: &Value) -> (String, String) {
-    let encoded = base64url::encode(array.to_string().as_bytes());
-    let digest = base64url::encode(&Sha256::digest(encoded.as_bytes()));
+    let encoded = base64url::encode(array.to_string().as_bytes()).into_string();
+    let digest = base64url::encode(&Sha256::digest(encoded.as_bytes())).into_string();
     (encoded, digest)
 }
 
@@ -77,9 +77,9 @@ pub fn sd_jwt(payload: &Value, disclosures: &[&str]) -> String {
 pub fn sd_jwt_text(payload: &str, disclosures: &[&str]) -> String {
     let mut out = format!(
         "{}.{}.{}~",
-        base64url::encode(br#"{"alg":"ES256","typ":"dc+sd-jwt"}"#),
-        base64url::encode(payload.as_bytes()),
-        base64url::encode(&[7; 64]),
+        base64url::encode(br#"{"alg":"ES256","typ":"dc+sd-jwt"}"#).into_string(),
+        base64url::encode(payload.as_bytes()).into_string(),
+        base64url::encode(&[7; 64]).into_string(),
     );
     for d in disclosures {
         out.push_str(d);
@@ -171,7 +171,7 @@ pub fn mdoc(elements: Vec<(&str, Cbor)>, valid_from: &str, valid_until: &str) ->
         ),
         ("issuerAuth", issuer_auth),
     ]);
-    base64url::encode(&issuer_signed.encode())
+    base64url::encode(&issuer_signed.encode()).into_string()
 }
 
 /// `value` as JSON, each type distinct: bytes, full-dates and date-times as one-member
@@ -183,7 +183,7 @@ pub fn json(value: TypedValue<'_>) -> Value {
         TypedValue::Integer(i) => json!(i64::try_from(i).unwrap()),
         TypedValue::Number(n) => Value::Number(n.clone()),
         TypedValue::Text(t) => json!(t),
-        TypedValue::Bytes(b) => json!({"bytes": base64url::encode(b)}),
+        TypedValue::Bytes(b) => json!({"bytes": base64url::encode(b).into_string()}),
         TypedValue::FullDate(d) => json!({"full-date": d.to_string()}),
         TypedValue::DateTime(t) => json!({"date-time": t.to_string()}),
         TypedValue::Array(a) => a.elements().map(json).collect(),

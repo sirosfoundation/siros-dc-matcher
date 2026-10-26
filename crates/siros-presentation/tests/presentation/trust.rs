@@ -35,7 +35,7 @@ fn the_plan_offers_only_the_credentials_whose_issuer_the_query_admits() {
     let aki = Certificate::parse(&admitted.der)
         .unwrap()
         .authority_key_identifier()
-        .map(|key| base64url::encode(key.as_bytes()))
+        .map(|key| base64url::encode(key.as_bytes()).into_string())
         .unwrap();
     let request = redirect_unsigned(&json!({
         "response_type": "vp_token", "response_mode": "direct_post", "nonce": NONCE,

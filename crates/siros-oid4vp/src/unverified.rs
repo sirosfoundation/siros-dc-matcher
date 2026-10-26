@@ -14,6 +14,7 @@ mod shape;
 
 use serde::Deserialize;
 use serde_json::Value;
+use siros_codec::Base64Error;
 use siros_dcql::DcqlQuery;
 
 pub use query::UnverifiedQuery;
@@ -37,10 +38,10 @@ pub enum NoQuery {
     /// The data carries a `request` under the unsigned protocol, or an inline query under a
     /// signed one: the label and the shape disagree.
     ShapeDoesNotMatchProtocol,
-    /// `data.request` is a string but not a compact JWS.
-    NotACompactJws,
-    /// The payload segment is not unpadded base64url.
-    PayloadNotBase64url,
+    /// `data.request` of a signed request is no compact JWS.
+    NotACompactJws(CompactFault),
+    /// The payload segment is no unpadded base64url the picker decodes.
+    PayloadNotBase64url(PayloadFault),
     /// The payload decoded, but is not JSON.
     PayloadNotJson,
     /// The payload is JSON but carries no `dcql_query`.
@@ -61,8 +62,8 @@ impl NoQuery {
             Self::RequestNotAJwsOrObject => "request_not_a_jws_or_object",
             Self::JwsObjectHasNoPayload => "jws_object_has_no_payload",
             Self::ShapeDoesNotMatchProtocol => "shape_does_not_match_protocol",
-            Self::NotACompactJws => "not_a_compact_jws",
-            Self::PayloadNotBase64url => "payload_not_base64url",
+            Self::NotACompactJws(_) => "not_a_compact_jws",
+            Self::PayloadNotBase64url(_) => "payload_not_base64url",
             Self::PayloadNotJson => "payload_not_json",
             Self::PayloadHasNoDcqlQuery => "payload_has_no_dcql_query",
             Self::Malformed(_) => "dcql_query_malformed",
@@ -87,14 +88,36 @@ impl NoQuery {
             Self::ShapeDoesNotMatchProtocol => {
                 "the request shape does not match the protocol it is labelled with".into()
             }
-            Self::NotACompactJws => "data.request is not a compact JWS".into(),
-            Self::PayloadNotBase64url => "JWS payload is not unpadded base64url".into(),
+            Self::NotACompactJws(_) => "data.request is not a compact JWS".into(),
+            Self::PayloadNotBase64url(_) => "JWS payload is not unpadded base64url".into(),
             Self::PayloadNotJson => "JWS payload is not JSON".into(),
             Self::PayloadHasNoDcqlQuery => "JWS payload has no `dcql_query`".into(),
             Self::Malformed(e) => format!("dcql_query failed to parse: {e}"),
             Self::NoParser => "no parser for this protocol in this build".into(),
         }
     }
+}
+
+/// How `data.request` of an `openid4vp-v1-signed` request fails to be a compact JWS.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompactFault {
+    /// `request` is absent or not a string.
+    NotString,
+    /// The string has other than three segments (RFC 7515, Section 7.1).
+    Segments,
+    /// The header segment is empty.
+    EmptyHeader,
+    /// The payload segment is empty.
+    EmptyPayload,
+}
+
+/// Why a JWS payload segment yields no bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PayloadFault {
+    /// The segment is longer than the picker decodes.
+    TooLong,
+    /// The segment is not unpadded base64url.
+    Encoding(Base64Error),
 }
 
 /// One DC API request entry, read without verification (OpenID4VP 1.0, Appendix A).
@@ -205,30 +228,32 @@ pub fn diagnose(request: &[u8], registered: &dyn Fn(&str) -> bool) -> String {
     if requests.is_empty() {
         return "`requests` array is empty".to_string();
     }
+    requests
+        .iter()
+        .map(|entry| entry_diagnosis(entry, registered))
+        .collect::<Vec<_>>()
+        .join(" | ")
+}
 
-    let mut parts = Vec::new();
-    for entry in requests {
-        let protocol = entry
-            .get("protocol")
-            .and_then(|p| p.as_str())
-            .unwrap_or("<missing protocol>");
-        if !registered(protocol) {
-            parts.push(format!("{protocol}: not in registered profile"));
-            continue;
-        }
-        let Some(data) = entry.get("data") else {
-            parts.push(format!("{protocol}: {}", NoQuery::NoData.reason()));
-            continue;
-        };
-        match strict_query(protocol, data) {
-            Ok(q) => parts.push(format!(
-                "{protocol}: dcql_query parsed ({} credential queries) - should not have reached here",
-                q.credentials().len()
-            )),
-            Err(e) => parts.push(format!("{protocol}: {}", e.reason())),
-        }
+/// Why the request entry `entry` does not read, as one clause.
+fn entry_diagnosis(entry: &Value, registered: &dyn Fn(&str) -> bool) -> String {
+    let protocol = entry
+        .get("protocol")
+        .and_then(|p| p.as_str())
+        .unwrap_or("<missing protocol>");
+    if !registered(protocol) {
+        return format!("{protocol}: not in registered profile");
     }
-    parts.join(" | ")
+    let Some(data) = entry.get("data") else {
+        return format!("{protocol}: {}", NoQuery::NoData.reason());
+    };
+    match strict_query(protocol, data) {
+        Ok(q) => format!(
+            "{protocol}: dcql_query parsed ({} credential queries) - should not have reached here",
+            q.credentials().len()
+        ),
+        Err(e) => format!("{protocol}: {}", e.reason()),
+    }
 }
 
 /// The entry's `dcql_query` as DCQL proper: what the diagnostic names, since a query the

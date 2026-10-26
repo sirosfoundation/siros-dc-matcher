@@ -43,30 +43,40 @@ mod jose;
 #[cfg(feature = "crypto")]
 pub mod response;
 #[cfg(feature = "crypto")]
+mod values;
+#[cfg(feature = "crypto")]
 pub mod verified;
 #[cfg(feature = "crypto")]
 mod x509;
 
 pub use client_id::{ClientId, ClientIdError, ClientIdPrefix};
 pub use error_code::ErrorCode;
-pub use handover::{ec_jwk_thumbprint, Handover, HandoverInvalid};
+pub use handover::{ec_jwk_thumbprint, Handover, HandoverInvalid, JwkThumbprint};
 pub use protocol::Protocol;
 pub use semantic::{Person, SemanticIdError, SemanticIdentifier};
-pub use unverified::{diagnose, NoQuery, UnverifiedQuery, UnverifiedRequest};
+pub use unverified::{
+    diagnose, CompactFault, NoQuery, PayloadFault, UnverifiedQuery, UnverifiedRequest,
+};
 
 #[cfg(feature = "crypto")]
-pub use fetch::{Fetch, FetchResponse, HttpsUrl, Method};
+pub use fetch::{BodyLimit, Fetch, FetchResponse, HttpStatus, HttpsUrl, MediaType, Method};
 #[cfg(feature = "crypto")]
 pub use intake::{
-    Effect, EffectResult, IntakeError, IntakeState, KeyMaterial, Step, Trust, TrustAnswer,
-    TrustSubject, VerifierInfoRule,
+    AttestationFault, ChainFault, Effect, EffectResult, FormFault, IntakeError, IntakeState,
+    JwsError, JwsFault, KeyMaterial, Step, Trust, TrustAnswer, TrustSubject, Verdict,
+    VerifierInfoRule,
 };
 #[cfg(feature = "crypto")]
 pub use response::{
-    concat_kdf, cose_kdf, read_reply, Presentation, ResponseError, Submission, VpToken,
+    concat_kdf, cose_kdf, read_reply, ContentKey, EncryptionFault, Presentation, RedirectUri,
+    ReplyFault, ResponseError, Submission, VpToken,
 };
+#[cfg(feature = "crypto")]
+pub use values::{AttestationIssuer, Kid, Nonce, Origin, State, TransactionDataItem, TrustChain};
 #[cfg(feature = "crypto")]
 pub use verified::{
     AccessCertificate, AttestationFormat, CertificateDer, ContentEncryption, Encryption,
     ResponseMode, VerifiedRequest, VerifierView,
 };
+#[cfg(feature = "crypto")]
+pub use x509::X509Chain;

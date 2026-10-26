@@ -4,6 +4,8 @@
 use rustc_hash::FxHashMap;
 use siros_codec::{base64, base64url};
 
+use crate::error::X5cError;
+
 use crate::alg::HashAlg;
 use crate::error::ParseError;
 use crate::json::Json;
@@ -32,15 +34,15 @@ pub struct X5c {
 
 impl X5c {
     /// `x5c`: a non-empty array of base64 strings with padding, each one DER certificate.
-    fn read(value: &Json) -> Result<Self, ParseError> {
+    fn read(value: &Json) -> Result<Self, X5cError> {
         let Json::Array(certificates) = value else {
-            return Err(ParseError::X5c);
+            return Err(X5cError::NotArray);
         };
         let mut ders = certificates.iter().map(|certificate| match certificate {
-            Json::String(text) => base64::decode(text).ok_or(ParseError::X5c),
-            _ => Err(ParseError::X5c),
+            Json::String(text) => base64::decode(text).map_err(X5cError::Base64),
+            _ => Err(X5cError::NotString),
         });
-        let signer = ders.next().ok_or(ParseError::X5c)??;
+        let signer = ders.next().ok_or(X5cError::Empty)??;
         Ok(Self {
             signer,
             issuers: ders.collect::<Result<_, _>>()?,
@@ -67,7 +69,8 @@ impl SdJwt {
             .iter()
             .find(|(name, _)| name == "x5c")
             .map(|(_, value)| X5c::read(value))
-            .transpose()?;
+            .transpose()
+            .map_err(ParseError::X5c)?;
         let alg = sd_alg(&payload)?;
         let mut pending = FxHashMap::default();
         for (position, encoded) in disclosures.into_iter().enumerate() {
@@ -129,7 +132,7 @@ fn issuer_header_and_payload(issuer_jwt: &str) -> Result<(Members, Members), Par
     ) else {
         return Err(ParseError::IssuerJwt);
     };
-    if signature.is_empty() || base64url::decode(signature).is_none() {
+    if signature.is_empty() || base64url::decode(signature).is_err() {
         return Err(ParseError::IssuerJwt);
     }
     let header = segment_object(header).ok_or(ParseError::IssuerJwt)?;
@@ -142,7 +145,7 @@ type Members = Vec<(String, Json)>;
 
 /// The members of the JSON object the base64url `segment` encodes.
 fn segment_object(segment: &str) -> Option<Members> {
-    match Json::parse(&base64url::decode(segment)?)? {
+    match Json::parse(&base64url::decode(segment).ok()?)? {
         Json::Object(members) => Some(members),
         _ => None,
     }
@@ -161,7 +164,10 @@ fn sd_alg(payload: &[(String, Json)]) -> Result<HashAlg, ParseError> {
 
 /// What the disclosure `encoded` reveals (Sections 4.2.1 and 4.2.2).
 fn disclosure_content(encoded: &str) -> Result<Content, ParseError> {
-    let Some(Json::Array(items)) = base64url::decode(encoded).and_then(|b| Json::parse(&b)) else {
+    let Some(Json::Array(items)) = base64url::decode(encoded)
+        .ok()
+        .and_then(|b| Json::parse(&b))
+    else {
         return Err(ParseError::Disclosure);
     };
     let mut items = items.into_iter();

@@ -14,7 +14,7 @@ use x509_cert::ext::pkix::{CertificatePolicies, SubjectAltName};
 use x509_cert::name::Name;
 use x509_cert::{Certificate, TbsCertificate};
 
-use crate::intake::IntakeError;
+use crate::intake::{ChainFault, IntakeError};
 use crate::semantic::{Person, SemanticIdError, SemanticIdentifier};
 use crate::verified::{AccessCertificate, CertificateDer};
 
@@ -39,10 +39,23 @@ const LEGAL_POLICIES: [ObjectIdentifier; 2] = [
     ObjectIdentifier::new_unwrap("0.4.0.194118.1.4"),
 ];
 
-/// An `x5c` chain whose leaf has a P-256 key.
+/// The certificates of an `x5c` Header Parameter, DER, leaf first: at least one, the leaf an
+/// X.509 certificate with a P-256 key.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct X509Chain(Vec<Vec<u8>>);
+
+impl X509Chain {
+    /// The certificates, DER, leaf first.
+    pub fn certificates(&self) -> impl Iterator<Item = &[u8]> {
+        self.0.iter().map(Vec::as_slice)
+    }
+}
+
+/// An `x5c` chain and what the wallet reads from its leaf.
 #[derive(Debug, Clone)]
 pub(crate) struct Chain {
-    der: Vec<Vec<u8>>,
+    chain: X509Chain,
+    leaf: CertificateDer,
     key: PublicKey,
     dns_names: Vec<String>,
     semantic_identifier: Result<SemanticIdentifier, SemanticIdError>,
@@ -52,33 +65,22 @@ impl Chain {
     /// The chain of the Header Parameter value `x5c`: a non-empty array of base64 DER
     /// certificates, leaf first.
     pub(crate) fn parse(x5c: Option<&Value>) -> Result<Self, IntakeError> {
+        let invalid = IntakeError::CertificateChainInvalid;
         let der = x5c
             .and_then(Value::as_array)
             .filter(|chain| !chain.is_empty())
-            .ok_or(IntakeError::CertificateChainInvalid)?
+            .ok_or(invalid(ChainFault::Absent))?
             .iter()
-            .map(|c| c.as_str().and_then(base64::decode))
-            .collect::<Option<Vec<_>>>()
-            .ok_or(IntakeError::CertificateChainInvalid)?;
-        let leaf = der
-            .first()
-            .and_then(|leaf| Certificate::from_der(leaf).ok())
-            .ok_or(IntakeError::CertificateChainInvalid)?;
+            .map(|c| {
+                let text = c.as_str().ok_or(invalid(ChainFault::NotString))?;
+                base64::decode(text).map_err(|e| invalid(ChainFault::Encoding(e)))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let leaf_der = der.first().ok_or(invalid(ChainFault::Absent))?;
+        let leaf =
+            Certificate::from_der(leaf_der).map_err(|_| invalid(ChainFault::LeafNotCertificate))?;
         let tbs = &leaf.tbs_certificate;
-        let spki = &tbs.subject_public_key_info;
-        let curve = spki
-            .algorithm
-            .parameters
-            .as_ref()
-            .and_then(|p| p.decode_as::<ObjectIdentifier>().ok());
-        if spki.algorithm.oid != EC_PUBLIC_KEY || curve != Some(PRIME256V1) {
-            return Err(IntakeError::CertificateChainInvalid);
-        }
-        let key = spki
-            .subject_public_key
-            .as_bytes()
-            .and_then(|point| PublicKey::from_sec1_bytes(point).ok())
-            .ok_or(IntakeError::CertificateChainInvalid)?;
+        let key = p256_key(tbs).ok_or(invalid(ChainFault::LeafKey))?;
         let dns_names = match tbs.get::<SubjectAltName>() {
             Ok(Some((_, san))) => san
                 .0
@@ -89,21 +91,21 @@ impl Chain {
                 })
                 .collect(),
             Ok(None) => Vec::new(),
-            Err(_) => return Err(IntakeError::CertificateChainInvalid),
+            Err(_) => return Err(invalid(ChainFault::SubjectAltName)),
         };
-        let semantic_identifier = semantic_identifier(tbs);
         Ok(Self {
-            der,
+            leaf: CertificateDer(leaf_der.clone()),
             key,
             dns_names,
-            semantic_identifier,
+            semantic_identifier: semantic_identifier(tbs),
+            chain: X509Chain(der),
         })
     }
 
     /// The leaf as the Wallet-Relying Party's access certificate.
     pub(crate) fn access_certificate(&self) -> AccessCertificate {
         AccessCertificate {
-            der: CertificateDer(self.leaf().to_vec()),
+            der: self.leaf.clone(),
             semantic_identifier: self.semantic_identifier.clone(),
         }
     }
@@ -113,9 +115,9 @@ impl Chain {
         &self.key
     }
 
-    /// The leaf certificate, DER.
-    pub(crate) fn leaf(&self) -> &[u8] {
-        self.der.first().map(Vec::as_slice).unwrap_or_default()
+    /// The leaf certificate.
+    pub(crate) fn leaf(&self) -> &CertificateDer {
+        &self.leaf
     }
 
     /// Whether a dNSName SAN of the leaf is `name`, in ASCII case-insensitive comparison
@@ -126,10 +128,26 @@ impl Chain {
             .any(|dns| dns.eq_ignore_ascii_case(name))
     }
 
-    /// The chain, DER, leaf first.
-    pub(crate) fn into_der(self) -> Vec<Vec<u8>> {
-        self.der
+    /// The certificates.
+    pub(crate) fn into_x509(self) -> X509Chain {
+        self.chain
     }
+}
+
+/// The P-256 key of the certificate of `tbs`.
+fn p256_key(tbs: &TbsCertificate) -> Option<PublicKey> {
+    let spki = &tbs.subject_public_key_info;
+    let curve = spki
+        .algorithm
+        .parameters
+        .as_ref()
+        .and_then(|p| p.decode_as::<ObjectIdentifier>().ok());
+    if spki.algorithm.oid != EC_PUBLIC_KEY || curve != Some(PRIME256V1) {
+        return None;
+    }
+    spki.subject_public_key
+        .as_bytes()
+        .and_then(|point| PublicKey::from_sec1_bytes(point).ok())
 }
 
 /// The semantics identifier of the subject of `tbs`: under a natural-person policy its one
