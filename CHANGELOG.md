@@ -87,23 +87,24 @@ against the 307,200-byte budget (303,914 before).
   `meta`, holder binding and no query but `zkp_req` on a nym_auth attestation (A1); `zkp_req` as
   one selection, then the usable attestation and the seed delivered in the credential's
   auxiliary data (A2); offers, optional additions, an offer per option when every set is
-  optional, a `multiple` member holding every candidate, and an optional set joined when it
-  alone carries a transaction entry (A3); the transaction entries each credential authorizes
-  (T4); the plan's digest over the request, its trust verdict, the nym_auth `verifier_id` and
+  optional, a `multiple` member holding every candidate, and each optional set that can carry
+  a transaction entry joined, in an offer of its own, to an offer whose members carry none
+  (A3); the transaction entries each credential authorizes (T4); the plan's digest over the request, its trust verdict, the nym_auth `verifier_id` and
   every offer's instances, answers, bound entries, additions and display (A4); and the consent
   view with cards, claim rows, proof statement rows, additions, transactions and whether an
   offer needs the wallet's display (A9). The plan asks the host for each type metadata fetch.
   A nym_auth request must be signed, trusted and encrypted, and its `verifier_id` comes from the
   authenticated certificate (N2). A `zkp_req` query that names `trusted_authorities` finds every
   issuer untrusted until the wallet evaluates them. Phase 2 parses the selection against the
-  plan made again, with the non-empty subset of each `multiple` member, gives a `Sign` effect
-  per signing input, verifies each signature under the instance's holder key (A5), and gives
+  plan made again, with the non-empty subset of each `multiple` member, a set in the member's
+  order, binds the entries as the plan did, gives a `Sign` effect per signing input, verifies each signature under the instance's holder key (A5), and gives
   one `vp_token` (A8), its submission for the request's Response Mode and the presentation
   record. It proves `zkp_req` in-process through a `NymAuthProver`. A decline, and a background
   fulfilment of an offer that needs the wallet's display, give `access_denied`. Positions and
-  identifiers are their own types (`QueryId`, `QueryIndex`, `CandidateIndex`, `SetIndex`,
-  `OfferIndex`, `AdditionIndex`, `Position`, `EntryPosition`, `PlanDigest`, `SignId`), and so
-  are A9's facts. A request without an offer gives its `Failure`: the refused query and why,
+  identifiers are their own types (`QueryIndex`, `CandidateIndex`, `SetIndex`, `OfferIndex`,
+  `AdditionIndex`, `Position`, `EntryPosition`, `PlanDigest`, `SignId`, and DCQL's `QueryId`),
+  and so are A9's facts. `Fetches` is the one store of the host's responses, and a second
+  answer to a URL is refused. A request without an offer gives its `Failure`: the refused query and why,
   the reasons each `zkp_req` candidate answers no option, or no combination. Without the
   default feature `wallet` it holds the matching the picker runs, over `MatchCredential`, and
   builds with Rust 1.82.
@@ -112,23 +113,33 @@ against the 307,200-byte budget (303,914 before).
   Object or under `openid4vp-v1-signed`, trusted, encrypted, and carries no registration
   certificate (`unsigned`, `multisigned`, `untrusted`, `response_mode`,
   `registration_certificate`). Its `verifier_id` takes the `VerifierIdForm` of the trust
-  framework: `semantic_id:` and the access certificate's semantic identifier, or
-  `x509_san_dns:` and the Client Identifier; a subject without one is refused with its
-  `VerifierIdRule::SemanticId` reason. `NymAuthQuery::options`, `UsablePair` with its
+  framework: `semantic_id:` and the access certificate's semantics identifier, or
+  `x509_san_dns:` and the Client Identifier; a certificate without one is refused with its
+  `VerifierIdRule::SemanticId` reason. **BREAKING (Rust API):** `VerifierId::semantic` takes a
+  `SemanticIdentifier`, and `VerifierId::x509_san_dns` a `ClientId` and an `Intermediary`;
+  `VerifierIdRule::DnsName` is gone. The FFI parses its host strings into them. `NymAuthQuery::options`, `UsablePair` with its
   `ProofBackend`, `Answer`, `SecretSeed` and `Prepared::new`; `UsableAttestation::of` an mdoc
   already parsed. `prepare` builds through them, and both test an option's items with one
   function.
+- `siros-dcql` 0.12.0: the Credential Query `id` is a `QueryId` (§6.1), which the query parse
+  refuses outside its characters.
 - `siros-display`: `proof::verified_rows`, the proof statement rows of a verified request, each
   a `DisplayText` label and value held whole, without the "(unverified request)" marker.
 - `siros-oid4vp`: `VpToken::json`. `VerifiedRequest::access_certificate` gives the
-  `CertificateDer` and the `SemanticIdentifier` (ETSI EN 319 412-1, Sections 5.1.3 and 5.1.4),
-  or the `SemanticIdError`, of an `x509_san_dns` or `x509_hash` signer's certificate;
+  `CertificateDer` and the `SemanticIdentifier`, or the `SemanticIdError`, of an
+  `x509_san_dns` or `x509_hash` signer's certificate: the WRPAC policy (ETSI TS 119 411-8)
+  says whether its subject is a natural person, identified by its `serialNumber`, or a legal
+  person, identified by its `organizationIdentifier` (ETSI TS 119 475, Clauses 5.1.3 and 5.1.5);
+  `ClientId` builds without `crypto`, and its parse refuses with a `ClientIdError`, an
+  `x509_san_dns` value that is not ASCII included;
   `dc_api_protocol` the DC API protocol; and `verifier_info_formats` the `AttestationFormat` of
   each `verifier_info` attestation (OpenID4VP 1.0, Section 5.1). Intake refuses a malformed
   `verifier_info` with the `VerifierInfoRule` it breaks.
 - `siros-credential`: `least_used` takes any `Instance`. `Credential::holder_key` gives the
-  holder's P-256 key, an SD-JWT VC's `cnf.jwk` or an mdoc's `deviceKey`, or the
-  `HolderKeyError`. `siros-mdoc` gains `P256Key::new`.
+  holder's P-256 key, an SD-JWT VC's `cnf.jwk` or an mdoc's `deviceKey`; an SD-JWT VC whose
+  `cnf` holds no P-256 `jwk` does not parse (`CredentialError::HolderKey`). `siros-mdoc` gains
+  `P256Key::new`. `siros-transaction-data` gains `Entry::carried_by`, `Fetched::insert_first`
+  and `Fetched::response`.
 - `siros-transaction-data`, the `transaction_data` request parameter (OpenID4VP 1.0, Section
   5.1) for the wallet core. It parses entries of the four EC TS12 v1.0.1 types into typed
   payloads, binds each entry to one credential of an offer, gives the KB-JWT claims

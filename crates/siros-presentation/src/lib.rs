@@ -6,7 +6,7 @@
 //! | --- | --- |
 //! | A1: the format table, `meta`, holder binding, usable credentials, no undisclosable nym_auth attribute; why a request has no offer | [`Matching::new`] over [`MatchCredential`]s, [`Failure`] |
 //! | A2: `zkp_req` matching as one selection, then the usable attestation and the opened seed | [`ZkpQuery`], [`Matching::answer`]; the wallet's tests in [`plan`] |
-//! | A3: offers, optional additions (one option per set), optional sets joined for a transaction entry, all-optional sets, the subset of a `multiple` member | [`Offers::of`], [`Selection`] |
+//! | A3: offers, optional additions (one option per set), an optional set joined to an offer that carries no transaction entry, all-optional sets, the subset of a `multiple` member | [`Offers::of`] over [`EntryCarriers`], [`Selection`] with [`Subset`] |
 //! | A4: the digest of what the user consents to; the selection parsed against the recomputed plan | [`ConsentView::digest`], [`PlanDigest::parse`], [`Selection`], [`Planned::choose`] gives a [`Chosen`] |
 //! | A5: every signing input a `Sign` effect; the signatures parsed against them, each verifying under its key | [`Chosen::prepare`] gives [`Sign`]s, [`Prepared::finish`] |
 //! | A6: the SD-JWT `aud` | [`Chosen::prepare`] |

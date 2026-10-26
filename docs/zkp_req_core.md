@@ -133,15 +133,18 @@ artifacts from their reference copies.
   `CatalogueRule` it breaks.
 * `attestation::UsableAttestation::new(data, anchors, proof_time)` reads a stored credential and
   runs the tests of system rulebooks Section 7, step 1. `Unusable` carries the Section 9 codes of
-  the failed tests. `attestation::OpenedSeed::open(credential, secret_seed)` requires
+  the failed tests. `attestation::OpenedSeed::open(credential, &SecretSeed)` requires
   `SHA-256(secret_seed) = ssc`; `prepare` opens it again for each presentation.
 * `policy::check_request(request_object, signed, channel)` and `CheckedRequest::handover(jwk
-  thumbprint)`, with `VerifierId::x509_san_dns` or `VerifierId::semantic`, give the `Session`.
+  thumbprint)`, with `VerifierId::x509_san_dns(&ClientId, Intermediary)` or
+  `VerifierId::semantic(&SemanticIdentifier)`, give the `Session`.
 * `request::NymAuthRequest::new(&VerifiedRequest, VerifierIdForm)` (feature `request`) gives the
   `Session` of a verified request that is signed (`openid4vp-v1-signed` over the DC API),
   trusted, asks for an encrypted response and carries no registration certificate, or the
   `RequestRefusal`. Its `verifier_id` is the Client Identifier, or `semantic_id:` and the
-  access certificate's semantic identifier.
+  access certificate's semantics identifier: under a WRPAC natural-person policy its
+  `serialNumber`, under a legal-person policy its `organizationIdentifier` (ETSI TS 119 475,
+  Clauses 5.1.3 and 5.1.5; TS 119 411-8).
 * `NymAuthQuery::options()` gives each option; `NymAuthOption::pair(formats, system, date)` gives
   its `UsablePair` or the `PairRefusal` of Section 1.3.
 * `attestation::UsableAttestation::of(mdoc, anchors, proof_time)` tests an mdoc `siros-mdoc`
