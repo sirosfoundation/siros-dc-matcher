@@ -114,7 +114,7 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
 
 ### 4.3 DCQL
 
-**Responsibility:** the DCQL query model (OpenID4VP §6.1–6.3) and its evaluation over any credential that resolves claims path pointers (§6.4, §7).
+**Responsibility:** the DCQL query model (OpenID4VP §6.1–6.3), claims path pointer resolution (§7.1), and evaluation over any credential (§6.4).
 
 **Requirements:**
 - **Q1.** `DcqlQuery` MUST be constructible only by parsing.
@@ -122,6 +122,7 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
   - Today's public `validate()` and public fields go; the change is a breaking version of the crate.
 - **Q2.** Evaluation MUST implement §6.4: claim presence, `claim_sets` (first satisfiable), `values`, `credential_sets` (`required`) and `multiple`.
 - **Q3.** `meta` and `format` are judged by a policy the presentation component supplies.
+- **Q4.** §7.1 resolution MUST have its only implementation here. It is generic over a claim tree node: an object member by key, an array element by issued position (which may be withheld), and the present elements of an array. An index on a withheld position selects nothing; `null` takes the present elements. Every format tree uses it.
 
 ### 4.4 SD-JWT
 
@@ -134,7 +135,7 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
   - no reserved claim name is used;
   - `sd_alg` is supported.
 - **S2.** The claim tree MUST keep issued array positions. An array digest without a disclosure, a decoy among them, is a withheld element at its position (SD-JWT VC §5.6).
-- **S3.** For a set of pointers, selection MUST include the disclosure of every selectively disclosed node on each path, parents included, each once. An empty pointer set selects no disclosure.
+- **S3.** For a set of pointers, selection MUST include the disclosure of every selectively disclosed node on each path, its parents and its descendants (a claim is selected with its sub-claims, §7.3), each once, resolving pointers through Q4. An empty pointer set selects no disclosure.
 - **S4.** The KB-JWT payload MUST be:
   - `iat`, `aud`, `nonce`;
   - `sd_hash`, computed over the presentation exactly as sent;
@@ -234,8 +235,8 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
 
 **Requirements:**
 - **C1.** A credential MUST be constructible only by parsing a wallet state entry through the format components. An unsupported format is an error.
-- **C2.** Claim values MUST keep their type: null, boolean, integer, number, text, bytes, full-date, date-time, array, object.
-- **C3.** Pointer resolution MUST follow §7.1. `null` yields the present elements; an index counts issued positions, withheld ones included. A pointer MUST be constructible only by parsing, and is never empty.
+- **C2.** Claim values MUST keep their type: null, boolean, integer, number, text, bytes, full-date, date-time, array, object. The credential reads them from the format's own tree; it keeps no copy of the claims.
+- **C3.** Pointer resolution goes through Q4 for JSON-based formats, and through §7.2 (`[namespace, element]`) for mdoc. A pointer MUST be constructible only by parsing, and is never empty.
 - **C4.** `UsableCredential` MUST be the witness of validity at a given time: `not_before ≤ now < not_after`, from the MSO or from `nbf`/`exp`.
 - **C5.** The instance used for a batch MUST be the instance named least often in the wallet's presentation records, the lowest `instanceId` on a tie.
 
