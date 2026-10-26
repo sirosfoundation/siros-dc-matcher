@@ -18,3 +18,6 @@ pub mod base64;
 pub mod base64url;
 pub mod cbor;
 pub mod date;
+mod sextets;
+
+pub use sextets::Base64Error;

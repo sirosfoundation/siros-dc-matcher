@@ -7,7 +7,7 @@ use rustc_hash::FxHashSet;
 use serde::de::{Deserialize, Deserializer, MapAccess, Visitor};
 use serde_json::value::RawValue;
 
-use crate::error::TransactionDataError;
+use crate::error::{MemberPath, TransactionDataError};
 
 /// The deepest nesting of objects and arrays a document may have.
 pub const MAX_DEPTH: usize = 64;
@@ -75,7 +75,7 @@ impl Fields {
     pub(crate) fn require(
         &mut self,
         name: &str,
-        path: &'static str,
+        path: MemberPath,
     ) -> Result<Json, TransactionDataError> {
         self.take(name)
             .ok_or(TransactionDataError::MissingMember(path))
@@ -180,16 +180,14 @@ impl<'de> Visitor<'de> for MembersVisitor {
     }
 
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
-        let mut members = Vec::new();
-        while let Some(member) = map.next_entry::<String, &'de RawValue>()? {
-            members.push(member);
-        }
-        Ok(Members(members))
+        std::iter::from_fn(|| map.next_entry::<String, &'de RawValue>().transpose())
+            .collect::<Result<_, _>>()
+            .map(Members)
     }
 }
 
 /// `value` as a string.
-pub(crate) fn text(value: Json, path: &'static str) -> Result<String, TransactionDataError> {
+pub(crate) fn text(value: Json, path: MemberPath) -> Result<String, TransactionDataError> {
     match value {
         Json::String(text) => Ok(text),
         _ => Err(TransactionDataError::WrongType(path)),
@@ -197,7 +195,7 @@ pub(crate) fn text(value: Json, path: &'static str) -> Result<String, Transactio
 }
 
 /// `value` as a boolean.
-pub(crate) fn boolean(value: Json, path: &'static str) -> Result<bool, TransactionDataError> {
+pub(crate) fn boolean(value: Json, path: MemberPath) -> Result<bool, TransactionDataError> {
     match value {
         Json::Bool(b) => Ok(b),
         _ => Err(TransactionDataError::WrongType(path)),
@@ -205,7 +203,7 @@ pub(crate) fn boolean(value: Json, path: &'static str) -> Result<bool, Transacti
 }
 
 /// `value` as a number.
-pub(crate) fn number(value: Json, path: &'static str) -> Result<Number, TransactionDataError> {
+pub(crate) fn number(value: Json, path: MemberPath) -> Result<Number, TransactionDataError> {
     match value {
         Json::Number(number) => Ok(number),
         _ => Err(TransactionDataError::WrongType(path)),
@@ -213,7 +211,7 @@ pub(crate) fn number(value: Json, path: &'static str) -> Result<Number, Transact
 }
 
 /// `value` as a JSON Schema `integer`: a number without a fractional part.
-pub(crate) fn integer(value: Json, path: &'static str) -> Result<Number, TransactionDataError> {
+pub(crate) fn integer(value: Json, path: MemberPath) -> Result<Number, TransactionDataError> {
     match value {
         Json::Number(number) if number.is_integer() => Ok(number),
         _ => Err(TransactionDataError::WrongType(path)),
@@ -221,7 +219,7 @@ pub(crate) fn integer(value: Json, path: &'static str) -> Result<Number, Transac
 }
 
 /// `value` as the members of an object.
-pub(crate) fn object(value: Json, path: &'static str) -> Result<Fields, TransactionDataError> {
+pub(crate) fn object(value: Json, path: MemberPath) -> Result<Fields, TransactionDataError> {
     match value {
         Json::Object(object) => Ok(object.into_fields()),
         _ => Err(TransactionDataError::WrongType(path)),
@@ -229,7 +227,7 @@ pub(crate) fn object(value: Json, path: &'static str) -> Result<Fields, Transact
 }
 
 /// `value` as the elements of an array.
-pub(crate) fn array(value: Json, path: &'static str) -> Result<Vec<Json>, TransactionDataError> {
+pub(crate) fn array(value: Json, path: MemberPath) -> Result<Vec<Json>, TransactionDataError> {
     match value {
         Json::Array(items) => Ok(items),
         _ => Err(TransactionDataError::WrongType(path)),
@@ -240,8 +238,8 @@ pub(crate) fn array(value: Json, path: &'static str) -> Result<Vec<Json>, Transa
 pub(crate) fn optional<T>(
     fields: &mut Fields,
     name: &str,
-    path: &'static str,
-    read: impl FnOnce(Json, &'static str) -> Result<T, TransactionDataError>,
+    path: MemberPath,
+    read: impl FnOnce(Json, MemberPath) -> Result<T, TransactionDataError>,
 ) -> Result<Option<T>, TransactionDataError> {
     fields.take(name).map(|value| read(value, path)).transpose()
 }

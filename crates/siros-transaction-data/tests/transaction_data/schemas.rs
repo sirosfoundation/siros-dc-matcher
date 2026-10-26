@@ -7,7 +7,7 @@ use jsonschema::{Resource, Validator};
 use serde_json::Value;
 use siros_transaction_data::Entry;
 
-use crate::common::{encode_payload, now, query, ACCESS, LOGIN, MANDATE, PAYMENT};
+use crate::common::{encode_payload, item, now, query, ACCESS, LOGIN, MANDATE, PAYMENT};
 use crate::fixtures::payloads;
 
 const PAYMENT_SCHEMA: &str =
@@ -59,7 +59,7 @@ fn the_parsers_accept_only_what_the_schemas_accept() {
         let payload: Value = serde_json::from_str(&fixture.payload).unwrap();
         let schema_accepts = schema.is_valid(&payload);
         let raw = encode_payload(fixture.transaction_type, &fixture.payload);
-        let parser_accepts = Entry::parse(&raw, &query(), now()).is_ok();
+        let parser_accepts = Entry::parse(&item(&raw), &query(), now()).is_ok();
         let case = fixture.case;
         assert!(
             schema_accepts || !parser_accepts,

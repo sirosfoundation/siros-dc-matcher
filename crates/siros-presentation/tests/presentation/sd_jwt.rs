@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use siros_codec::base64url;
 use siros_dcql::QueryId;
-use siros_oid4vp::FetchResponse;
+use siros_oid4vp::{FetchResponse, HttpStatus};
 use siros_presentation::{plan, OfferIndex, Pick, PlanStep, PresentationError, WalletDisplay};
 use siros_wallet_state::CredentialId;
 
@@ -76,7 +76,7 @@ pub fn type_metadata_of(vct: &str) -> FetchResponse {
         }}
     });
     FetchResponse::new(
-        200,
+        HttpStatus::OK,
         Some("application/json".into()),
         document.to_string().into_bytes(),
     )

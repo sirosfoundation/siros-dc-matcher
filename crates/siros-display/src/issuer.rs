@@ -2,13 +2,12 @@
 
 use serde_json::{Map, Value};
 
-use crate::claims::{self, ClaimDescription};
+use crate::claims::{self, ClaimDescription, Label};
 use crate::entry::DisplayEntry;
-use crate::error::DisplayError;
-use crate::json;
-use crate::locale::{Locale, Localized};
-use crate::logo;
-use crate::text::DisplayText;
+use crate::error::{DisplayError, EntryFault};
+use crate::ids::{ConfigurationId, IssuerIdentifier};
+use crate::json::{self, Entries};
+use crate::locale::Localized;
 
 /// The Credential Response member that carries delivered secrets (privatedata 3.1, Section
 /// 5A.1).
@@ -34,24 +33,11 @@ const AUXILIARY_DATA: &str = "auxiliary_data";
 #[derive(Debug, Clone)]
 pub struct IssuerMetadata {
     record: Value,
-    issuer: String,
-    configuration_id: String,
-    issuer_display: Vec<IssuerDisplay>,
+    issuer: IssuerIdentifier,
+    configuration_id: ConfigurationId,
+    issuer_display: Vec<Label>,
     display: Vec<DisplayEntry>,
     claims: Vec<ClaimDescription>,
-}
-
-/// An issuer `display` entry with a `name`.
-#[derive(Debug, Clone)]
-pub(crate) struct IssuerDisplay {
-    locale: Option<Locale>,
-    pub(crate) name: DisplayText,
-}
-
-impl Localized for IssuerDisplay {
-    fn locale(&self) -> Option<&Locale> {
-        self.locale.as_ref()
-    }
 }
 
 impl IssuerMetadata {
@@ -155,15 +141,20 @@ impl IssuerMetadata {
         if metadata.contains_key(AUXILIARY_DATA) {
             return Err(DisplayError::AuxiliaryDataPublished);
         }
-        let claims = match json::array(metadata, "claims", true, DisplayError::Claims)? {
+        let claims = match json::array(
+            metadata,
+            "claims",
+            Entries::AtLeastOne,
+            DisplayError::Claims,
+        )? {
             None => Vec::new(),
             Some(claims) => claims::issuer_claims(claims)?,
         };
         Ok(Self {
             record: record.clone(),
-            issuer: issuer.to_owned(),
-            configuration_id: configuration_id.to_owned(),
-            issuer_display: issuer_display(object)?,
+            issuer: IssuerIdentifier::new(issuer),
+            configuration_id: ConfigurationId::new(configuration_id),
+            issuer_display: claims::named_labels(object, DisplayError::Display)?,
             display: credential_display(metadata)?,
             claims,
         })
@@ -175,17 +166,17 @@ impl IssuerMetadata {
     }
 
     /// The Credential Issuer Identifier.
-    pub fn credential_issuer(&self) -> &str {
+    pub fn credential_issuer(&self) -> &IssuerIdentifier {
         &self.issuer
     }
 
     /// The credential configuration identifier.
-    pub fn configuration_id(&self) -> &str {
+    pub fn configuration_id(&self) -> &ConfigurationId {
         &self.configuration_id
     }
 
-    /// The issuer `display` entries that have a name.
-    pub(crate) fn issuer_display(&self) -> &[IssuerDisplay] {
+    /// The names of the issuer `display` entries that have one.
+    pub(crate) fn issuer_display(&self) -> &[Label] {
         &self.issuer_display
     }
 
@@ -200,39 +191,19 @@ impl IssuerMetadata {
     }
 }
 
-/// The issuer `display` entries that have a `name`.
-fn issuer_display(object: &Map<String, Value>) -> Result<Vec<IssuerDisplay>, DisplayError> {
-    let entries = json::array(object, "display", true, DisplayError::Display)?;
-    let mut named = Vec::new();
-    let mut locales = Vec::new();
-    for entry in entries.unwrap_or_default() {
-        let entry = entry.as_object().ok_or(DisplayError::Display)?;
-        let locale = json::locale(entry, DisplayError::Display)?;
-        locales.push(locale.clone());
-        if let Some(name) = json::label(entry, "name", DisplayError::Display)? {
-            named.push(IssuerDisplay { locale, name });
-        }
-    }
-    json::distinct_locales(locales.iter().map(Option::as_ref))?;
-    Ok(named)
-}
-
 /// The `display` entries of `credential_metadata`.
 fn credential_display(metadata: &Map<String, Value>) -> Result<Vec<DisplayEntry>, DisplayError> {
-    let entries = json::array(metadata, "display", true, DisplayError::Display)?;
+    let malformed = DisplayError::Display;
+    let entries = json::array(metadata, "display", Entries::AtLeastOne, malformed)?;
     let display = entries
         .unwrap_or_default()
         .iter()
         .map(|entry| {
-            let entry = entry.as_object().ok_or(DisplayError::Display)?;
-            Ok(DisplayEntry {
-                locale: json::locale(entry, DisplayError::Display)?,
-                name: json::label(entry, "name", DisplayError::Display)?
-                    .ok_or(DisplayError::Display)?,
-                logo: logo::optional(entry)?,
-                background: json::colour(entry, "background_color")?,
-                text: json::colour(entry, "text_color")?,
-            })
+            let entry = json::entry(entry, malformed)?;
+            let locale = json::locale(entry, malformed(EntryFault::MemberType))?;
+            let name = json::label(entry, "name", malformed(EntryFault::MemberType))?
+                .ok_or(malformed(EntryFault::MemberMissing))?;
+            DisplayEntry::read(locale, name, entry)
         })
         .collect::<Result<Vec<_>, DisplayError>>()?;
     json::distinct_locales(display.iter().map(Localized::locale))?;

@@ -210,21 +210,22 @@ impl<T: Localized + ?Sized> Localized for &T {
     }
 }
 
-/// The entry to show for the user's `preferences`, most preferred first (D2).
-///
-/// For each preference in order: the first entry with its exact tag, else the first entry with
-/// its primary language. Without either for any preference: the first entry. `None` only for no
-/// entry.
+/// The entry of the user's `preferences`, most preferred first: for each preference in order,
+/// the first entry with its exact tag, else the first entry with its primary language. `None`
+/// when no entry has the language of a preference.
+pub fn preferred<'a, T: Localized>(preferences: &[Locale], entries: &'a [T]) -> Option<&'a T> {
+    preferences.iter().find_map(|wanted| {
+        let tagged = |matches: &dyn Fn(&Locale) -> bool| {
+            entries
+                .iter()
+                .find(|entry| entry.locale().is_some_and(matches))
+        };
+        tagged(&|tag| tag == wanted).or_else(|| tagged(&|tag| tag.same_language(wanted)))
+    })
+}
+
+/// The entry to show for the user's `preferences`, most preferred first (D2): the
+/// [`preferred`] entry, else the first entry. `None` only for no entry.
 pub fn choose<'a, T: Localized>(preferences: &[Locale], entries: &'a [T]) -> Option<&'a T> {
-    preferences
-        .iter()
-        .find_map(|wanted| {
-            let tagged = |matches: &dyn Fn(&Locale) -> bool| {
-                entries
-                    .iter()
-                    .find(|entry| entry.locale().is_some_and(matches))
-            };
-            tagged(&|tag| tag == wanted).or_else(|| tagged(&|tag| tag.same_language(wanted)))
-        })
-        .or_else(|| entries.first())
+    preferred(preferences, entries).or_else(|| entries.first())
 }

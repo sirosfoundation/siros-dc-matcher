@@ -7,38 +7,108 @@
 use siros_codec::base64;
 use siros_codec::date::Date;
 
-use crate::error::TransactionDataError;
+use crate::error::{MemberPath, TransactionDataError};
 use crate::json::{self, Json, Number};
-use crate::ts12::currency::{minor_unit, Minor};
+use crate::ts12::currency::{CurrencyCode, Minor};
+
+/// A string of `MIN` to `MAX` characters (JSON Schema `minLength`, `maxLength`).
+pub(crate) struct Text<const MIN: usize, const MAX: usize>(String);
+
+impl<const MIN: usize, const MAX: usize> Text<MIN, MAX> {
+    /// `value` as a string of `MIN` to `MAX` characters.
+    pub(crate) fn parse(value: Json, path: MemberPath) -> Result<Self, TransactionDataError> {
+        let text = json::text(value, path)?;
+        checked((MIN..=MAX).contains(&text.chars().count()), text, path).map(Self)
+    }
+}
+
+/// An ISO 8601 date and time as written: RFC 3339 `date-time`.
+pub(crate) struct DateTimeText(String);
+
+/// An ISO 8601 date, or date and time, as written.
+pub(crate) struct DateOrDateTime(String);
+
+/// A domain name: dot-separated labels of 1 to 63 letters, digits and hyphens, no label
+/// starting or ending with a hyphen, at most 253 characters (RFC 1123, Section 2.1).
+pub(crate) struct DomainName(String);
+
+/// A resolvable URL: `http` or `https`, with an authority, of visible ASCII characters.
+pub(crate) struct WebUrl(String);
+
+/// The URL of an image, for the UI to show: a resolvable `http` or `https` URL, or a `data`
+/// URL (RFC 2397).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ImageUrl(String);
+
+impl ImageUrl {
+    /// The URL.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+macro_rules! shown_as_text {
+    ($($name:ty),*) => {$(
+        impl AsRef<str> for $name {
+            fn as_ref(&self) -> &str {
+                &self.0
+            }
+        }
+    )*};
+}
+
+shown_as_text!(DateTimeText, DateOrDateTime, DomainName, WebUrl);
+
+impl<const MIN: usize, const MAX: usize> AsRef<str> for Text<MIN, MAX> {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+/// An amount of a currency, with the text the verifier wrote (Section 4.3.1, `amount`).
+pub(crate) struct Amount(Number);
+
+impl Amount {
+    /// The number.
+    pub(crate) fn number(&self) -> &Number {
+        &self.0
+    }
+}
 
 /// `value` as an ISO 8601 date (RFC 3339 `full-date`).
-pub(crate) fn date(value: Json, path: &'static str) -> Result<Date, TransactionDataError> {
+pub(crate) fn date(value: Json, path: MemberPath) -> Result<Date, TransactionDataError> {
     Date::parse(&json::text(value, path)?).ok_or(TransactionDataError::InvalidValue(path))
 }
 
 /// `value` as an ISO 8601 date and time (RFC 3339 `date-time`).
-pub(crate) fn date_time(value: Json, path: &'static str) -> Result<String, TransactionDataError> {
+pub(crate) fn date_time(
+    value: Json,
+    path: MemberPath,
+) -> Result<DateTimeText, TransactionDataError> {
     let text = json::text(value, path)?;
-    checked(is_date_time(&text), text, path)
+    checked(is_date_time(&text), text, path).map(DateTimeText)
 }
 
 /// `value` as an ISO 8601 date, or date and time.
 pub(crate) fn date_or_date_time(
     value: Json,
-    path: &'static str,
-) -> Result<String, TransactionDataError> {
+    path: MemberPath,
+) -> Result<DateOrDateTime, TransactionDataError> {
     let text = json::text(value, path)?;
     checked(
         Date::parse(&text).is_some() || is_date_time(&text),
         text,
         path,
     )
+    .map(DateOrDateTime)
 }
 
-/// `value` as a domain name: dot-separated labels of 1 to 63 letters, digits and hyphens, no
-/// label starting or ending with a hyphen, at most 253 characters (RFC 1123, Section 2.1). A
-/// QWAC names its domain in a `dNSName`, of these characters only.
-pub(crate) fn domain_name(value: Json, path: &'static str) -> Result<String, TransactionDataError> {
+/// `value` as a domain name. A QWAC names its domain in a `dNSName`, of these characters only.
+pub(crate) fn domain_name(
+    value: Json,
+    path: MemberPath,
+) -> Result<DomainName, TransactionDataError> {
     let text = json::text(value, path)?;
     let label = |label: &str| {
         (1..=63).contains(&label.len())
@@ -49,40 +119,37 @@ pub(crate) fn domain_name(value: Json, path: &'static str) -> Result<String, Tra
             && !label.ends_with('-')
     };
     let valid = text.len() <= 253 && text.split('.').all(label);
-    checked(valid, text, path)
+    checked(valid, text, path).map(DomainName)
 }
 
-/// `value` as a resolvable URL: `http` or `https`, with an authority, of visible ASCII
-/// characters.
-pub(crate) fn url(value: Json, path: &'static str) -> Result<String, TransactionDataError> {
+/// `value` as a resolvable URL.
+pub(crate) fn url(value: Json, path: MemberPath) -> Result<WebUrl, TransactionDataError> {
     let text = json::text(value, path)?;
-    checked(is_url(&text), text, path)
+    checked(is_url(&text), text, path).map(WebUrl)
 }
 
 /// `value` as a resolvable URL or a `data` URL (RFC 2397).
-pub(crate) fn image(value: Json, path: &'static str) -> Result<String, TransactionDataError> {
+pub(crate) fn image(value: Json, path: MemberPath) -> Result<ImageUrl, TransactionDataError> {
     let text = json::text(value, path)?;
-    checked(is_url(&text) || is_data_url(&text), text, path)
+    checked(is_url(&text) || is_data_url(&text), text, path).map(ImageUrl)
 }
 
 /// `value` as an ISO 4217 alphabetic code.
 pub(crate) fn currency(
     value: Json,
-    path: &'static str,
-) -> Result<(String, Minor), TransactionDataError> {
-    let code = json::text(value, path)?;
-    let minor = minor_unit(&code).ok_or(TransactionDataError::InvalidValue(path))?;
-    Ok((code, minor))
+    path: MemberPath,
+) -> Result<CurrencyCode, TransactionDataError> {
+    CurrencyCode::of(&json::text(value, path)?).ok_or(TransactionDataError::InvalidValue(path))
 }
 
-/// `value` as an amount of a currency of minor unit `minor`: an optional minus, the major units,
-/// and an optional decimal point with exactly the digits of the minor unit (Section 4.3.1,
-/// `amount`). A currency without a minor unit takes no fraction.
+/// `value` as an amount of `currency`: an optional minus, the major units, and an optional
+/// decimal point with exactly the digits of the minor unit (Section 4.3.1, `amount`). A
+/// currency without a minor unit takes no fraction.
 pub(crate) fn amount(
     value: Json,
-    path: &'static str,
-    minor: Minor,
-) -> Result<Number, TransactionDataError> {
+    path: MemberPath,
+    currency: CurrencyCode,
+) -> Result<Amount, TransactionDataError> {
     let number = json::number(value, path)?;
     let text = number.text();
     let unsigned = text.strip_prefix('-').unwrap_or(text);
@@ -91,7 +158,7 @@ pub(crate) fn amount(
         None => (unsigned, None),
     };
     let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
-    let fraction_fits = match (fraction, minor) {
+    let fraction_fits = match (fraction, currency.minor()) {
         (None, _) => true,
         (Some(fraction), Minor::Digits(n)) => {
             n > 0 && digits(fraction) && fraction.len() == usize::from(n)
@@ -99,14 +166,14 @@ pub(crate) fn amount(
         (Some(_), Minor::Undefined) => false,
     };
     if digits(major) && fraction_fits {
-        Ok(number)
+        Ok(Amount(number))
     } else {
         Err(TransactionDataError::InvalidValue(path))
     }
 }
 
 /// `text` when `valid`.
-fn checked(valid: bool, text: String, path: &'static str) -> Result<String, TransactionDataError> {
+fn checked(valid: bool, text: String, path: MemberPath) -> Result<String, TransactionDataError> {
     if valid {
         Ok(text)
     } else {
@@ -216,7 +283,7 @@ fn is_data_url(text: &str) -> bool {
         None => true,
     };
     let data_fits = if base64 {
-        base64::decode(data).is_some()
+        base64::decode(data).is_ok()
     } else {
         data.bytes().all(|b| b.is_ascii_graphic())
     };

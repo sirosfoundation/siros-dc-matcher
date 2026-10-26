@@ -4,7 +4,8 @@
 //! verifier belongs in the device pass.
 
 use siros_codec::base64url::encode as b64;
-use siros_oid4vp::{diagnose, NoQuery, UnverifiedRequest};
+use siros_codec::Base64Error;
+use siros_oid4vp::{diagnose, CompactFault, NoQuery, PayloadFault, UnverifiedRequest};
 
 /// The protocols SIROS wallets register: the three of OpenID4VP 1.0, A.1.
 fn siros_default(label: &str) -> bool {
@@ -96,8 +97,8 @@ fn a_signed_request_is_read_from_the_jws_payload() {
 fn a_multisigned_request_is_read_from_the_payload_member() {
     let data = serde_json::json!({
         "request": {
-            "payload": b64(request_object().as_bytes()),
-            "signatures": [{"protected": b64(br#"{"alg":"ES256"}"#), "signature": b64(b"sig")}]
+            "payload": b64(request_object().as_bytes()).to_string(),
+            "signatures": [{"protected": b64(br#"{"alg":"ES256"}"#).to_string(), "signature": b64(b"sig").to_string()}]
         }
     });
     let found =
@@ -112,8 +113,8 @@ fn a_multisigned_request_is_read_from_the_payload_member() {
 #[test]
 fn a_multisigned_payload_at_the_top_level_of_data_is_accepted_too() {
     let data = serde_json::json!({
-        "payload": b64(request_object().as_bytes()),
-        "signatures": [{"signature": b64(b"sig")}]
+        "payload": b64(request_object().as_bytes()).to_string(),
+        "signatures": [{"signature": b64(b"sig").to_string()}]
     });
     let found =
         first_supported_request(&envelope("openid4vp-v1-multisigned", data), &siros_default);
@@ -180,24 +181,24 @@ fn each_failure_is_named_separately() {
         (
             "openid4vp-v1-signed",
             serde_json::json!({"request": "no-dots"}),
-            NoQuery::NotACompactJws,
+            NoQuery::NotACompactJws(CompactFault::Segments),
         ),
         (
             "openid4vp-v1-signed",
             serde_json::json!({"request": "aGVhZGVy."}),
-            NoQuery::NotACompactJws,
+            NoQuery::NotACompactJws(CompactFault::Segments),
         ),
         // An empty header segment is malformed.
         (
             "openid4vp-v1-signed",
             serde_json::json!({"request": ".aGk.c2ln"}),
-            NoQuery::NotACompactJws,
+            NoQuery::NotACompactJws(CompactFault::EmptyHeader),
         ),
         // The compact serialization has three segments (RFC 7515 §7.1).
         (
             "openid4vp-v1-signed",
             serde_json::json!({"request": format!("aGVhZGVy.{}", b64(request_object().as_bytes()))}),
-            NoQuery::NotACompactJws,
+            NoQuery::NotACompactJws(CompactFault::Segments),
         ),
         // An inline query under the multisigned label is a mismatch.
         (
@@ -208,7 +209,7 @@ fn each_failure_is_named_separately() {
         (
             "openid4vp-v1-signed",
             serde_json::json!({"request": "aGVhZGVy.@@@@.c2ln"}),
-            NoQuery::PayloadNotBase64url,
+            NoQuery::PayloadNotBase64url(PayloadFault::Encoding(Base64Error::Alphabet(0))),
         ),
         (
             "openid4vp-v1-signed",
@@ -224,12 +225,12 @@ fn each_failure_is_named_separately() {
         (
             "openid4vp-v1-signed",
             serde_json::json!({"request": {"payload": "aGk"}}),
-            NoQuery::NotACompactJws,
+            NoQuery::NotACompactJws(CompactFault::NotString),
         ),
         (
             "openid4vp-v1-multisigned",
             serde_json::json!({"request": {"payload": "!!!"}}),
-            NoQuery::PayloadNotBase64url,
+            NoQuery::PayloadNotBase64url(PayloadFault::Encoding(Base64Error::Alphabet(0))),
         ),
         // Present but not decodable is not the same as absent.
         (
@@ -278,7 +279,7 @@ fn a_jwe_is_not_mistaken_for_a_jws() {
     );
     assert_eq!(
         UnverifiedRequest::read("openid4vp-v1-signed", &serde_json::json!({"request": jwe})),
-        Err(NoQuery::NotACompactJws)
+        Err(NoQuery::NotACompactJws(CompactFault::Segments))
     );
 }
 
@@ -351,7 +352,7 @@ fn a_signed_label_does_not_accept_an_inline_query() {
 fn the_two_signed_protocols_do_not_accept_each_other_s_shape() {
     let compact = serde_json::json!({"request": compact_jws(&request_object())});
     let json = serde_json::json!({
-        "request": {"payload": b64(request_object().as_bytes()), "signatures": []}
+        "request": {"payload": b64(request_object().as_bytes()).to_string(), "signatures": []}
     });
 
     assert!(UnverifiedRequest::read("openid4vp-v1-signed", &compact).is_ok());
@@ -364,7 +365,7 @@ fn the_two_signed_protocols_do_not_accept_each_other_s_shape() {
     );
     assert_eq!(
         UnverifiedRequest::read("openid4vp-v1-signed", &json),
-        Err(NoQuery::NotACompactJws)
+        Err(NoQuery::NotACompactJws(CompactFault::NotString))
     );
 }
 

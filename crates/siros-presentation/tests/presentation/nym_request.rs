@@ -6,7 +6,8 @@
 //! is refused before an intermediary could be read.
 
 use serde_json::{json, Value};
-use siros_oid4vp::{IntakeError, IntakeState, SemanticIdError};
+use siros_codec::date::DateTime;
+use siros_oid4vp::{IntakeError, IntakeState, Origin, SemanticIdError};
 use siros_zkp_req_nym_auth::policy::{PolicyRule, RequestRefusal};
 use siros_zkp_req_nym_auth::request::NymAuthRequest;
 use siros_zkp_req_nym_auth::testing::query;
@@ -37,8 +38,8 @@ fn unsigned(params: &Value) -> IntakeState {
     let request = json!({"requests": [{"protocol": "openid4vp-v1-unsigned", "data": params}]});
     IntakeState::dc_api(
         request.to_string().as_bytes(),
-        ORIGIN,
-        crate::verifier::NOW as u64,
+        Origin::new(ORIGIN),
+        DateTime::from_unix(crate::verifier::NOW).unwrap(),
     )
 }
 

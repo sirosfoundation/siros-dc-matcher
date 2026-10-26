@@ -3,6 +3,7 @@
 use rustc_hash::FxHashMap;
 
 use crate::error::DisplayError;
+use crate::ids::{ConfigurationId, IssuerIdentifier, Vct};
 use crate::issuer::IssuerMetadata;
 use crate::type_metadata::TypeMetadata;
 
@@ -12,8 +13,8 @@ use crate::type_metadata::TypeMetadata;
 /// its start (SD-JWT VC, Sections 5.4 and 7.4).
 #[derive(Debug, Clone, Default)]
 pub struct DisplayCache {
-    issuers: FxHashMap<String, FxHashMap<String, IssuerMetadata>>,
-    types: FxHashMap<String, TypeMetadata>,
+    issuers: FxHashMap<IssuerIdentifier, FxHashMap<ConfigurationId, IssuerMetadata>>,
+    types: FxHashMap<Vct, TypeMetadata>,
 }
 
 impl DisplayCache {
@@ -30,42 +31,53 @@ impl DisplayCache {
         types: Vec<TypeMetadata>,
     ) -> Result<Self, DisplayError> {
         let mut cache = Self::default();
-        for metadata in issuers {
-            let configurations = cache
-                .issuers
-                .entry(metadata.credential_issuer().to_owned())
-                .or_default();
-            if configurations
-                .insert(metadata.configuration_id().to_owned(), metadata)
-                .is_some()
-            {
-                return Err(DisplayError::IssuerMetadataRepeated);
-            }
-        }
-        for metadata in types {
-            if cache
-                .types
-                .insert(metadata.vct().to_owned(), metadata)
-                .is_some()
-            {
-                return Err(DisplayError::TypeMetadataRepeated);
-            }
-        }
-        for start in cache.types.values() {
-            let mut steps = 0;
-            let mut at = start;
-            while let Some(extended) = at.extends() {
-                at = cache
-                    .types
-                    .get(extended)
-                    .ok_or(DisplayError::ExtendsUnknown)?;
-                steps += 1;
-                if steps > cache.types.len() {
-                    return Err(DisplayError::ExtendsCycle);
-                }
-            }
-        }
+        issuers
+            .into_iter()
+            .try_for_each(|metadata| cache.hold_issuer(metadata))?;
+        types
+            .into_iter()
+            .try_for_each(|metadata| cache.hold_type(metadata))?;
+        cache
+            .types
+            .values()
+            .try_for_each(|start| cache.extends_to_end(start))?;
         Ok(cache)
+    }
+
+    /// Holds the display metadata of one configuration.
+    fn hold_issuer(&mut self, metadata: IssuerMetadata) -> Result<(), DisplayError> {
+        let configurations = self
+            .issuers
+            .entry(metadata.credential_issuer().clone())
+            .or_default();
+        match configurations.insert(metadata.configuration_id().clone(), metadata) {
+            None => Ok(()),
+            Some(_) => Err(DisplayError::IssuerMetadataRepeated),
+        }
+    }
+
+    /// Holds the Type Metadata of one `vct`.
+    fn hold_type(&mut self, metadata: TypeMetadata) -> Result<(), DisplayError> {
+        match self.types.insert(metadata.vct().clone(), metadata) {
+            None => Ok(()),
+            Some(_) => Err(DisplayError::TypeMetadataRepeated),
+        }
+    }
+
+    /// Follows the `extends` of `start` to a type that extends none: every step names a type
+    /// the cache holds, and the chain takes fewer steps than the cache holds types.
+    fn extends_to_end(&self, start: &TypeMetadata) -> Result<(), DisplayError> {
+        let mut at = start;
+        for _ in 0..=self.types.len() {
+            let Some(extended) = at.extends() else {
+                return Ok(());
+            };
+            at = self
+                .types
+                .get(extended)
+                .ok_or(DisplayError::ExtendsUnknown)?;
+        }
+        Err(DisplayError::ExtendsCycle)
     }
 
     /// The OpenID4VCI display metadata of configuration `configuration_id` of `issuer`.
@@ -80,7 +92,7 @@ impl DisplayCache {
             let current = next?;
             next = current
                 .extends()
-                .and_then(|extended| self.types.get(extended));
+                .and_then(|extended| self.types.get(extended.as_str()));
             Some(current)
         })
     }

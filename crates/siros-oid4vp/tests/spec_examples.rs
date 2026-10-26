@@ -16,7 +16,8 @@ mod support;
 use serde_json::{json, Value};
 use siros_oid4vp::{
     read_reply, ClientIdPrefix, ContentEncryption, Effect, ErrorCode, FetchResponse, IntakeError,
-    IntakeState, KeyMaterial, Method, Presentation, ResponseMode, Submission, TrustSubject,
+    IntakeState, KeyMaterial, Kid, Method, Origin, Presentation, RedirectUri, ResponseMode, State,
+    Submission, TrustSubject,
 };
 use support::*;
 
@@ -48,7 +49,7 @@ fn direct_post_by_value() {
         ("nonce", "n-0S6_WzA2Mj"),
         ("state", "eyJhb...6-sVA"),
     ]);
-    let state = IntakeState::redirect(&uri, formats(), NOW, &mut Rng(1));
+    let state = IntakeState::redirect(&uri, formats(), now(), &mut Rng(1));
     let host = Host::trusting();
     let (request, effects) = run(state, |e| host.answer(e)).unwrap();
 
@@ -56,7 +57,7 @@ fn direct_post_by_value() {
     assert_eq!(client_id.prefix(), ClientIdPrefix::RedirectUri);
     assert_eq!(client_id.value(), "https://client.example.org/post");
     assert_eq!(request.response_mode(), ResponseMode::DirectPost);
-    assert_eq!(request.state(), Some("eyJhb...6-sVA"));
+    assert_eq!(request.state().map(State::as_str), Some("eyJhb...6-sVA"));
     let [Effect::Trust(trust)] = effects.as_slice() else {
         panic!("one trust effect, got {effects:?}")
     };
@@ -66,7 +67,7 @@ fn direct_post_by_value() {
     let presentation = Presentation::text("eyJhbGci...QMA".into());
     let token = request
         .vp_token(vec![(
-            "some_identity_credential".into(),
+            query_id("some_identity_credential"),
             vec![presentation],
         )])
         .unwrap();
@@ -77,7 +78,7 @@ fn direct_post_by_value() {
     let Method::Post { content_type, body } = post.method() else {
         panic!("a POST")
     };
-    assert_eq!(*content_type, "application/x-www-form-urlencoded");
+    assert_eq!(content_type.as_str(), "application/x-www-form-urlencoded");
     let fields = form(std::str::from_utf8(body).unwrap());
     let field = |name: &str| fields.iter().find(|(n, _)| n == name).unwrap().1.clone();
     assert_eq!(field("state"), "eyJhb...6-sVA");
@@ -89,13 +90,16 @@ fn direct_post_by_value() {
 
     // SOURCE: Section 8.2, the response of the Response URI to the wallet.
     let reply = FetchResponse::new(
-        200,
+        HttpStatus::OK,
         Some("application/json".into()),
         br#"{"redirect_uri": "https://client.example.org/cb#response_code=091535f699ea575c7937fa5f0f454aee"}"#
             .to_vec(),
     );
     assert_eq!(
-        read_reply(&reply).unwrap().as_deref(),
+        read_reply(&reply)
+            .unwrap()
+            .as_ref()
+            .map(RedirectUri::as_str),
         Some("https://client.example.org/cb#response_code=091535f699ea575c7937fa5f0f454aee")
     );
 }
@@ -140,7 +144,7 @@ fn request_uri_post() {
                     panic!("a POST")
                 };
                 let body = std::str::from_utf8(body).unwrap();
-                assert_eq!(fetch.accept(), "application/oauth-authz-req+jwt");
+                assert_eq!(fetch.accept().as_str(), "application/oauth-authz-req+jwt");
                 let fields = form(body);
                 let field = |name: &str| fields.iter().find(|(n, _)| n == name).unwrap().1.clone();
                 let metadata: Value = serde_json::from_str(&field("wallet_metadata")).unwrap();
@@ -156,7 +160,7 @@ fn request_uri_post() {
         }
     };
 
-    let state = IntakeState::redirect(&uri, formats(), NOW, &mut Rng(3));
+    let state = IntakeState::redirect(&uri, formats(), now(), &mut Rng(3));
     let (request, _) = run(state.clone(), answer(true)).unwrap();
     assert_eq!(
         request.verifier().client_id().unwrap().as_str(),
@@ -211,19 +215,19 @@ fn encrypted_response_key_choice() {
     });
     let state = IntakeState::dc_api(
         &dc_api("openid4vp-v1-unsigned", data),
-        "https://verifier.example.com",
-        NOW,
+        Origin::new("https://verifier.example.com"),
+        now(),
     );
     let host = Host::trusting();
     let (request, _) = run(state, |e| host.answer(e)).unwrap();
     let encryption = request.encryption().unwrap();
-    assert_eq!(encryption.kid(), Some("ac"));
+    assert_eq!(encryption.kid().map(Kid::as_str), Some("ac"));
     assert_eq!(encryption.enc(), ContentEncryption::A128Gcm);
     assert_eq!(request.response_mode(), ResponseMode::DcApiJwt);
 
     let token = request
         .vp_token(vec![(
-            "my_credential".into(),
+            query_id("my_credential"),
             vec![Presentation::text("eyJhb...YMetA".into())],
         )])
         .unwrap();
@@ -257,20 +261,24 @@ fn unsigned_dc_api() {
         "dcql_query": identity_query()
     });
     let origin = "https://verifier.example.com";
-    let state = IntakeState::dc_api(&dc_api("openid4vp-v1-unsigned", data), origin, NOW);
+    let state = IntakeState::dc_api(
+        &dc_api("openid4vp-v1-unsigned", data),
+        Origin::new(origin),
+        now(),
+    );
     let host = Host::trusting();
     let (request, effects) = run(state, |e| host.answer(e)).unwrap();
     assert_eq!(request.verifier().client_id(), None);
     assert_eq!(request.verifier().display(), origin);
-    assert_eq!(request.origin(), Some(origin));
+    assert_eq!(request.origin().map(Origin::as_str), Some(origin));
     let [Effect::Trust(trust)] = effects.as_slice() else {
         panic!("one trust effect, got {effects:?}")
     };
-    assert_eq!(trust.subject(), &TrustSubject::Origin(origin.into()));
+    assert_eq!(trust.subject(), &TrustSubject::Origin(Origin::new(origin)));
 
     let token = request
         .vp_token(vec![(
-            "some_identity_credential".into(),
+            query_id("some_identity_credential"),
             vec![Presentation::text("a~b~".into())],
         )])
         .unwrap();
@@ -310,7 +318,7 @@ fn signed_dc_api() {
     );
     let host = Host::trusting();
 
-    let state = IntakeState::dc_api(&request, "https://origin1.example.com", NOW);
+    let state = IntakeState::dc_api(&request, Origin::new("https://origin1.example.com"), now());
     let (verified, _) = run(state, |e| host.answer(e)).unwrap();
     assert_eq!(
         verified.verifier().client_id().unwrap().as_str(),
@@ -318,7 +326,7 @@ fn signed_dc_api() {
     );
     assert_eq!(verified.response_mode(), ResponseMode::DcApi);
 
-    let state = IntakeState::dc_api(&request, "https://attacker.example", NOW);
+    let state = IntakeState::dc_api(&request, Origin::new("https://attacker.example"), now());
     let error = run(state.clone(), |e| host.answer(e)).unwrap_err();
     assert_eq!(error, IntakeError::OriginNotExpected);
     assert_eq!(error.error_code(), ErrorCode::InvalidRequest);
@@ -363,8 +371,8 @@ fn multisigned_dc_api() {
     }});
     let state = IntakeState::dc_api(
         &dc_api("openid4vp-v1-multisigned", data),
-        "https://origin2.example.com",
-        NOW,
+        Origin::new("https://origin2.example.com"),
+        now(),
     );
     let host = Host::trusting();
     let (request, _) = run(state, |e| host.answer(e)).unwrap();
@@ -403,7 +411,7 @@ fn decentralized_identifier_by_value() {
         keys: vec![("did:example:123#1".into(), jwk(key.verifying_key()))],
         ..Host::trusting()
     };
-    let state = IntakeState::redirect(&uri, formats(), NOW, &mut Rng(6));
+    let state = IntakeState::redirect(&uri, formats(), now(), &mut Rng(6));
     let (request, effects) = run(state, |e| host.answer(e)).unwrap();
     assert_eq!(
         request.verifier().client_id().unwrap().prefix(),
@@ -415,7 +423,7 @@ fn decentralized_identifier_by_value() {
     assert_eq!(
         trust.key(),
         &KeyMaterial::Resolve {
-            kid: Some("did:example:123#1".into()),
+            kid: Some(Kid::new("did:example:123#1")),
             trust_chain: None
         }
     );

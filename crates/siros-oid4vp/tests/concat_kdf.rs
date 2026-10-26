@@ -13,11 +13,11 @@ fn rfc7518_appendix_c() {
     ];
     let key = concat_kdf(&z, ContentEncryption::A128Gcm, b"Alice", b"Bob").unwrap();
     assert_eq!(
-        key,
+        key.as_bytes(),
         [86, 170, 141, 234, 248, 35, 109, 32, 92, 34, 40, 205, 113, 167, 16, 26]
     );
     assert_eq!(
-        siros_codec::base64url::encode(&key),
+        siros_codec::base64url::encode(key.as_bytes()),
         "VqqN6vgjbSBcIijNcacQGg"
     );
 }

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize, Serializer};
 use serde_json::value::RawValue;
 use siros_codec::date::DateTime;
 
-use crate::error::WalletStateError;
+use crate::error::{PresentationsFault, WalletStateError};
 use crate::ids::{CredentialId, PresentationId, TransactionId};
 
 /// The members of `new_presentation`. It serialises to them, with
@@ -53,8 +53,9 @@ impl PresentationRecord {
 
     /// The entry of `S.presentations` that `raw` holds.
     pub(crate) fn parse(raw: &RawValue) -> Result<Self, WalletStateError> {
+        let fault = WalletStateError::Presentations;
         let stored: Stored =
-            serde_json::from_str(raw.get()).map_err(|_| WalletStateError::Presentations)?;
+            serde_json::from_str(raw.get()).map_err(|_| fault(PresentationsFault::Record))?;
         Ok(Self {
             presentation_id: PresentationId::new(stored.presentation_id),
             transaction_id: TransactionId::new(stored.transaction_id),
@@ -65,7 +66,7 @@ impl PresentationRecord {
                 .map(CredentialId::new)
                 .collect(),
             timestamp: DateTime::from_unix(stored.presentation_timestamp_seconds)
-                .ok_or(WalletStateError::Presentations)?,
+                .ok_or(fault(PresentationsFault::Timestamp))?,
             audience: stored.audience,
         })
     }

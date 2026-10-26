@@ -9,7 +9,7 @@ use std::borrow::Cow;
 use serde_json::Value;
 use siros_codec::base64url;
 
-use super::NoQuery;
+use super::{CompactFault, NoQuery, PayloadFault};
 use crate::protocol::Protocol;
 
 /// The request object an entry carries; it has a `dcql_query`. The unsigned shape borrows
@@ -26,7 +26,7 @@ pub(super) fn request_object(protocol: Protocol, data: &Value) -> Result<Cow<'_,
             Some(Value::String(jws)) => payload_object(compact_payload(jws)?),
             // An inline query under a signed label.
             None if data.get("dcql_query").is_some() => Err(NoQuery::ShapeDoesNotMatchProtocol),
-            _ => Err(NoQuery::NotACompactJws),
+            _ => Err(NoQuery::NotACompactJws(CompactFault::NotString)),
         },
         Protocol::Multisigned => payload_object(json_payload(data)?),
     }
@@ -67,18 +67,19 @@ fn json_payload(data: &Value) -> Result<Vec<u8>, NoQuery> {
 /// `splitn` bounds the work by the meaningful segments: the input is verifier-controlled and
 /// the picker has a time budget.
 fn compact_payload(jws: &str) -> Result<Vec<u8>, NoQuery> {
+    let fault = NoQuery::NotACompactJws;
     let mut segments = jws.splitn(4, '.');
     let header = segments.next();
     let payload = segments.next();
     let signature = segments.next();
-    if segments.next().is_some() {
-        return Err(NoQuery::NotACompactJws);
+    if segments.next().is_some() || signature.is_none() {
+        return Err(fault(CompactFault::Segments));
     }
-    if signature.is_none() || header.is_none_or(str::is_empty) {
-        return Err(NoQuery::NotACompactJws);
+    if header.is_none_or(str::is_empty) {
+        return Err(fault(CompactFault::EmptyHeader));
     }
     let Some(payload) = payload.filter(|p| !p.is_empty()) else {
-        return Err(NoQuery::NotACompactJws);
+        return Err(fault(CompactFault::EmptyPayload));
     };
     decode_payload(payload)
 }
@@ -99,7 +100,7 @@ const MAX_PAYLOAD: usize = 256 * 1024;
 
 fn decode_payload(payload: &str) -> Result<Vec<u8>, NoQuery> {
     if payload.len() > MAX_PAYLOAD {
-        return Err(NoQuery::PayloadNotBase64url);
+        return Err(NoQuery::PayloadNotBase64url(PayloadFault::TooLong));
     }
-    base64url::decode(payload).ok_or(NoQuery::PayloadNotBase64url)
+    base64url::decode(payload).map_err(|e| NoQuery::PayloadNotBase64url(PayloadFault::Encoding(e)))
 }

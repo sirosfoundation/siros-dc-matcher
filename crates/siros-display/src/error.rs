@@ -14,8 +14,8 @@ pub enum DisplayError {
     Text(TextError),
     /// A `locale` is no language tag. The code is its own.
     Locale(LocaleError),
-    /// A `zkp_req` option names a `_req` index its query lacks.
-    OptionItemUnknown,
+    /// A `zkp_req` option names this `_req` index, which its query lacks.
+    OptionItemUnknown(usize),
     /// A metadata document, or one of its members, is no JSON object.
     NotObject,
     /// `credential_issuer` is absent or no string.
@@ -32,18 +32,16 @@ pub enum DisplayError {
     ResponseMetadataNotObject,
     /// The display metadata record has an unknown member.
     RecordMemberUnknown,
-    /// A `display` array or entry breaks its rules: an entry is no object, or lacks a required
-    /// member.
-    Display,
+    /// A `display` array or one of its entries breaks its rules.
+    Display(EntryFault),
     /// Two `display` entries of one array have the same locale.
     DisplayLocaleRepeated,
-    /// A `logo` is no object with an `https:` or `data:` `uri`, or one of its members is
-    /// malformed.
-    Logo,
+    /// A `logo` breaks its rules.
+    Logo(LogoFault),
     /// A colour is no numerical colour value of CSS Color Module Level 3.
     Colour,
-    /// A `claims` array or a claim description breaks its rules.
-    Claims,
+    /// A `claims` array, a claim description or one of its `display` entries breaks its rules.
+    Claims(EntryFault),
     /// A claim `path` is no non-empty array of strings, nulls and non-negative integers.
     ClaimPath,
     /// Two claims descriptions address the same claim (OpenID4VCI 1.0, Appendix B.3).
@@ -80,6 +78,32 @@ pub enum DisplayError {
     NumberUnrepresentable,
 }
 
+/// The rule an array of metadata entries, or one of its entries, breaks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EntryFault {
+    /// The member is no array, or an empty one where it must hold an entry.
+    NotArray,
+    /// An entry is no JSON object.
+    EntryNotObject,
+    /// An entry lacks a member it requires.
+    MemberMissing,
+    /// A member of an entry has the wrong JSON type.
+    MemberType,
+}
+
+/// The rule a `logo` breaks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LogoFault {
+    /// The logo is no JSON object.
+    NotObject,
+    /// `uri` is absent, or no `https:` URL with an authority or `data:` URI of visible ASCII.
+    Uri,
+    /// `uri#integrity` is no non-empty string of visible ASCII and spaces.
+    Integrity,
+    /// `alt_text` is no string.
+    AltText,
+}
+
 impl DisplayError {
     /// A stable identifier.
     pub fn code(&self) -> &'static str {
@@ -87,7 +111,7 @@ impl DisplayError {
             Self::Text(e) => e.code(),
             Self::Locale(e) => e.code(),
             Self::Pointer(e) => e.code(),
-            Self::OptionItemUnknown => "option_item_unknown",
+            Self::OptionItemUnknown(_) => "option_item_unknown",
             Self::NotObject => "metadata_not_object",
             Self::IssuerIdentifier => "credential_issuer_malformed",
             Self::ConfigurationUnknown => "configuration_unknown",
@@ -95,11 +119,11 @@ impl DisplayError {
             Self::AuxiliaryDataPublished => "auxiliary_data_published",
             Self::ResponseMetadataNotObject => "response_metadata_not_object",
             Self::RecordMemberUnknown => "record_member_unknown",
-            Self::Display => "display_malformed",
+            Self::Display(_) => "display_malformed",
             Self::DisplayLocaleRepeated => "display_locale_repeated",
-            Self::Logo => "logo_malformed",
+            Self::Logo(_) => "logo_malformed",
             Self::Colour => "colour_malformed",
-            Self::Claims => "claims_malformed",
+            Self::Claims(_) => "claims_malformed",
             Self::ClaimPath => "claim_path_malformed",
             Self::ClaimRepeated => "claim_repeated",
             Self::ClaimContradictory => "claim_contradictory",

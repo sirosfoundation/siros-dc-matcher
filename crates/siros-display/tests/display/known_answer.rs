@@ -118,9 +118,9 @@ fn credential() -> Credential {
     });
     let sd_jwt = format!(
         "{}.{}.{}~",
-        base64url::encode(br#"{"alg":"ES256","typ":"dc+sd-jwt"}"#),
-        base64url::encode(payload.to_string().as_bytes()),
-        base64url::encode(&[7; 64]),
+        base64url::encode(br#"{"alg":"ES256","typ":"dc+sd-jwt"}"#).into_string(),
+        base64url::encode(payload.to_string().as_bytes()).into_string(),
+        base64url::encode(&[7; 64]).into_string(),
     );
     let state = json!({
         "schemaVersion": 4,
@@ -183,7 +183,10 @@ fn the_card_and_the_labels_of_the_example() {
             "{preference}"
         );
         let logo = card.logo().unwrap();
-        assert_eq!(logo.uri(), "https://university.example.edu/public/logo.png");
+        assert_eq!(
+            logo.uri().as_str(),
+            "https://university.example.edu/public/logo.png"
+        );
         assert_eq!(
             logo.alt_text().map(|a| a.as_str()),
             Some("a square logo of a university")

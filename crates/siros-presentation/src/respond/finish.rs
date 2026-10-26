@@ -3,6 +3,7 @@
 
 use itertools::Itertools;
 use rand_core::CryptoRngCore;
+use siros_dcql::QueryId;
 use siros_oid4vp::{Presentation, Submission};
 use siros_wallet_state::{CredentialId, PresentationId, PresentationRecord, TransactionId};
 use siros_zkp_req_nym_auth::prover::NymAuthProver;
@@ -61,7 +62,7 @@ impl Prepared<'_, '_> {
     ) -> Result<Response, PresentationError> {
         let signatures = verified(&self.signs, signatures)?;
         let used = used(&self.members);
-        let entries: Vec<(String, Vec<Presentation>)> = self
+        let entries: Vec<(QueryId, Vec<Presentation>)> = self
             .members
             .into_iter()
             .map(|member| presentations(member, &signatures, prover))
@@ -88,13 +89,13 @@ fn presentations(
     member: PendingMember<'_>,
     signatures: &[VerifiedSignature],
     prover: &dyn NymAuthProver,
-) -> Result<(String, Vec<Presentation>), PresentationError> {
+) -> Result<(QueryId, Vec<Presentation>), PresentationError> {
     let presentations = member
         .credentials
         .into_iter()
         .map(|(_, form)| form.present(signatures, prover))
         .try_collect()?;
-    Ok((member.query_id.as_str().to_owned(), presentations))
+    Ok((member.query_id, presentations))
 }
 
 /// The instances `members` present, each once, in order.

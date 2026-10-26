@@ -57,7 +57,7 @@ impl PlanDigest {
     ///
     /// [`DigestError`]: text that is not unpadded base64url, or not of 32 bytes.
     pub fn parse(text: &str) -> Result<Self, DigestError> {
-        let bytes = base64url::decode(text).ok_or(DigestError::Encoding)?;
+        let bytes = base64url::decode(text).map_err(|_| DigestError::Encoding)?;
         let length = bytes.len();
         <[u8; 32]>::try_from(bytes)
             .map(Self)
@@ -88,7 +88,7 @@ impl PlanDigest {
 
 impl fmt::Display for PlanDigest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&base64url::encode(&self.0))
+        f.write_str(base64url::encode(&self.0).as_str())
     }
 }
 
@@ -98,16 +98,16 @@ fn request_part(request: &VerifiedRequest, verifier_id: Option<&VerifierId>) -> 
     let transaction_data = request
         .transaction_data()
         .iter()
-        .map(|entry| Value::text(entry))
+        .map(|entry| Value::text(entry.as_str()))
         .collect();
     Value::Array(vec![
         Value::text(request.response_mode().as_str()),
         optional(verifier.client_id().map(|c| c.as_str())),
-        Value::Bool(verifier.trusted()),
-        optional(request.origin()),
+        Value::Bool(verifier.verdict().into()),
+        optional(request.origin().map(|origin| origin.as_str())),
         optional(request.response_uri().map(|u| u.as_str())),
-        Value::text(request.nonce()),
-        optional(request.state()),
+        Value::text(request.nonce().as_str()),
+        optional(request.state().map(|state| state.as_str())),
         Value::text(&request.dcql_query_json().to_string()),
         Value::Array(transaction_data),
         optional(verifier_id.map(VerifierId::as_str)),

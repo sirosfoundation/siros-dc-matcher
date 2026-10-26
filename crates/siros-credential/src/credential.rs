@@ -101,14 +101,14 @@ impl Credential {
     ///
     /// [`CredentialError`]: the first rule `entry` breaks.
     pub fn parse(entry: &CredentialEntry) -> Result<Self, CredentialError> {
-        let (body, validity) = match entry.format() {
+        let (body, validity) = match entry.format().as_str() {
             "dc+sd-jwt" | "vc+sd-jwt" => {
-                let vc = SdJwtVc::read(entry.data())?;
+                let vc = SdJwtVc::read(entry.data().as_str())?;
                 let validity = vc.validity();
                 (Body::SdJwtVc(vc), validity)
             }
             "mso_mdoc" => {
-                let mdoc = Box::new(Mdoc::parse(entry.data())?);
+                let mdoc = Box::new(Mdoc::parse(entry.data().as_str())?);
                 value::typed(&mdoc)?;
                 let mso = mdoc.mso().validity();
                 let validity = Validity::new(Some(mso.valid_from()), Some(mso.valid_until()));
@@ -123,8 +123,8 @@ impl Credential {
                 instance_id: entry.instance_id(),
             },
             id: entry.credential_id().to_string(),
-            issuer: entry.issuer().map(str::to_owned),
-            configuration_id: entry.configuration_id().map(str::to_owned),
+            issuer: entry.issuer().map(|issuer| issuer.as_str().to_owned()),
+            configuration_id: entry.configuration_id().map(|id| id.as_str().to_owned()),
             key_id: entry.key_id().cloned(),
             auxiliary_data: entry
                 .metadata()

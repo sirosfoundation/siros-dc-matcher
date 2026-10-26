@@ -132,7 +132,7 @@ fn read_value_digests(
         let digests = non_empty_map(Some(digests)).ok_or(MdocError::ValueDigests)?;
         let mut by_id = FxHashMap::default();
         for (id, digest) in digests {
-            let (Kind::Unsigned(id), Some(digest)) = (&id.kind, digest.as_bytes()) else {
+            let (Kind::Unsigned(id), Some(digest)) = (id.kind(), digest.as_bytes()) else {
                 return Err(MdocError::ValueDigests);
             };
             if digest.len() != algorithm.output_len()

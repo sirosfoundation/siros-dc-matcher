@@ -21,8 +21,8 @@ use p256::{EncodedPoint, PublicKey, SecretKey};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use siros_oid4vp::{
-    ErrorCode, Handover, IntakeState, Method, Presentation, ResponseMode, Submission,
-    VerifiedRequest,
+    ErrorCode, Handover, IntakeState, JwkThumbprint, Method, Presentation, ResponseMode,
+    Submission, VerifiedRequest,
 };
 use support::*;
 
@@ -67,7 +67,7 @@ fn request(kid: Option<&str>, enc: Option<Value>) -> VerifiedRequest {
         ("dcql_query", &query),
         ("client_metadata", &metadata),
     ]);
-    let state = IntakeState::redirect(&uri, formats(), NOW, &mut Rng(41));
+    let state = IntakeState::redirect(&uri, formats(), now(), &mut Rng(41));
     let host = Host::trusting();
     let (request, _) = run(state, |e| host.answer(e)).unwrap();
     assert_eq!(request.response_mode(), ResponseMode::DirectPostCwt);
@@ -232,10 +232,10 @@ fn entries(map: &Cbor) -> Vec<(Cbor, Cbor)> {
 }
 
 /// The JWK SHA-256 Thumbprint of the recipient's key (RFC 7638, Section 3.2).
-fn thumbprint() -> [u8; 32] {
+fn thumbprint() -> JwkThumbprint {
     let (x, y) = coordinates();
     let canonical = format!(r#"{{"crv":"P-256","kty":"EC","x":"{x}","y":"{y}"}}"#);
-    Sha256::digest(canonical.as_bytes()).into()
+    JwkThumbprint::new(Sha256::digest(canonical.as_bytes()).into())
 }
 
 #[test]
@@ -244,10 +244,10 @@ fn a_produced_cwt_response_decrypts_to_its_authorization_response() {
     let presentations = || {
         vec![
             (
-                "nym".to_owned(),
+                query_id("nym"),
                 vec![Presentation::cbor_map(encode(&zkp_presentation())).unwrap()],
             ),
-            ("pid".to_owned(), vec![Presentation::text(pid.into())]),
+            (query_id("pid"), vec![Presentation::text(pid.into())]),
         ]
     };
     let state = (Cbor::Text("state".into()), Cbor::Text("s-1".into()));
@@ -307,7 +307,7 @@ fn a_produced_cwt_response_decrypts_to_its_authorization_response() {
         let Method::Post { content_type, body } = post.method() else {
             panic!("a POST")
         };
-        assert_eq!(*content_type, "application/cwt", "case {seed}");
+        assert_eq!(content_type.as_str(), "application/cwt", "case {seed}");
         let opened = decrypt(body, &recipient());
         assert_eq!(opened.alg, alg, "case {seed}");
         assert_eq!(opened.kid, kid, "case {seed}");

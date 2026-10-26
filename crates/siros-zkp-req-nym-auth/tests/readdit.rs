@@ -99,7 +99,7 @@ fn prepared(facts: &Value, system: NymAuthSystem) -> Prepared {
     assert_eq!(unhex(&inputs["secret_seed"]), SEED);
     assert_eq!(
         unhex(&inputs["jwk_thumbprint"]),
-        ec_jwk_thumbprint(&encryption_jwk()).unwrap()
+        ec_jwk_thumbprint(&encryption_jwk()).unwrap().as_bytes()
     );
     let credential = stored("c1", inputs["credential"].as_str().unwrap().to_owned());
     let anchors = [unhex(&facts["longfellow"]["mdoc"]["document_signer"])];

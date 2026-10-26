@@ -30,24 +30,34 @@ pub fn rows(
     query: &ZkpReqQuery,
     option: &QueryOption,
 ) -> Result<Vec<(String, String)>, DisplayError> {
-    let mut rows = Vec::with_capacity(option.items.len());
-    for &index in &option.items {
-        let item = query
+    items(query, option)
+        .map(|item| {
+            let (label, detail) = parts(item?);
+            // Clipping shortens the detail and keeps the marker.
+            let value = match detail {
+                None => UNVERIFIED.to_string(),
+                Some(detail) => format!(
+                    "{} {UNVERIFIED}",
+                    clip(&detail, ROW_MAX_CHARS - UNVERIFIED.len() - 1)
+                ),
+            };
+            Ok((clip(label, ROW_MAX_CHARS), value))
+        })
+        .collect()
+}
+
+/// The `_req` items `option` names, in the Verifier's order.
+#[inline]
+fn items<'q>(
+    query: &'q ZkpReqQuery,
+    option: &'q QueryOption,
+) -> impl Iterator<Item = Result<&'q ReqItem, DisplayError>> {
+    option.items.iter().map(move |&index| {
+        query
             .items
             .get(index)
-            .ok_or(DisplayError::OptionItemUnknown)?;
-        let (label, detail) = parts(item);
-        // Clipping shortens the detail and keeps the marker.
-        let value = match detail {
-            None => UNVERIFIED.to_string(),
-            Some(detail) => format!(
-                "{} {UNVERIFIED}",
-                clip(&detail, ROW_MAX_CHARS - UNVERIFIED.len() - 1)
-            ),
-        };
-        rows.push((clip(label, ROW_MAX_CHARS), value));
-    }
-    Ok(rows)
+            .ok_or(DisplayError::OptionItemUnknown(index))
+    })
 }
 
 /// The label of `item` and the detail it shows.
@@ -103,15 +113,9 @@ pub fn verified_rows(
     query: &ZkpReqQuery,
     option: &QueryOption,
 ) -> Result<Vec<ProofRow>, DisplayError> {
-    option
-        .items
-        .iter()
-        .map(|&index| {
-            let item = query
-                .items
-                .get(index)
-                .ok_or(DisplayError::OptionItemUnknown)?;
-            let (label, detail) = parts(item);
+    items(query, option)
+        .map(|item| {
+            let (label, detail) = parts(item?);
             Ok(ProofRow {
                 label: DisplayText::label(label).map_err(DisplayError::Text)?,
                 value: detail

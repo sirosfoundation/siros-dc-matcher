@@ -40,13 +40,13 @@ impl IssuerAuth {
         let sig_structure = [
             &[0x84, 0x6a][..],
             b"Signature1",
-            protected.raw,
+            protected.raw(),
             &[0x40],
-            payload.raw,
+            payload.raw(),
         ]
         .concat();
         let auth = Self {
-            encoded: item.raw.to_vec(),
+            encoded: item.raw().to_vec(),
             algorithm,
             document_signer,
             sig_structure,
@@ -83,7 +83,7 @@ impl IssuerAuth {
 
 /// `x5chain`: one certificate, or a non-empty array of them, the signer's first (RFC 9360).
 fn read_document_signer(item: &Item<'_>) -> Result<Vec<u8>, MdocError> {
-    match &item.kind {
+    match item.kind() {
         Kind::Bytes(der) => Ok(der.to_vec()),
         Kind::Array(certificates) => {
             let mut ders = certificates.iter().map(Item::as_bytes);

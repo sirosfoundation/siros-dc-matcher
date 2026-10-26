@@ -79,7 +79,7 @@ impl DisplayCache {
             typed => typed,
         };
         let issuer = match issued.and_then(|m| choose(preferences, m.issuer_display())) {
-            Some(named) => Some(named.name.clone()),
+            Some(named) => Some(named.text.clone()),
             None => credential
                 .issuer()
                 .map(DisplayText::label)

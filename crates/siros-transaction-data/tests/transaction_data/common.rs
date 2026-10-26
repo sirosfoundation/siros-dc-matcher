@@ -7,7 +7,7 @@ use siros_codec::cbor::Value as Cbor;
 use siros_codec::date::DateTime;
 use siros_credential::Credential;
 use siros_dcql::DcqlQuery;
-use siros_oid4vp::FetchResponse;
+use siros_oid4vp::{FetchResponse, HttpStatus, TransactionDataItem};
 use siros_wallet_state::WalletState;
 
 pub const PAYMENT: &str = "urn:eudi:sca:payment:1";
@@ -35,6 +35,11 @@ pub fn query() -> DcqlQuery {
 }
 
 /// The time of the tests' requests.
+/// The `transaction_data` string `raw`.
+pub fn item(raw: &str) -> TransactionDataItem {
+    TransactionDataItem::new(raw.to_owned())
+}
+
 pub fn now() -> DateTime {
     DateTime::parse("2026-10-26T12:00:00Z").unwrap()
 }
@@ -46,12 +51,12 @@ pub fn encode_payload(transaction_type: &str, payload: &str) -> String {
         r#"{{"type":{},"credential_ids":["pay"],"transaction_data_hashes_alg":["sha-256"],"payload":{payload}}}"#,
         Value::from(transaction_type)
     );
-    base64url::encode(text.as_bytes())
+    base64url::encode(text.as_bytes()).into()
 }
 
 /// base64url of the JSON text of `entry`, as a verifier sends it.
 pub fn encode(entry: &Value) -> String {
-    base64url::encode(entry.to_string().as_bytes())
+    base64url::encode(entry.to_string().as_bytes()).into()
 }
 
 /// An entry of `transaction_type` with `payload`, naming `pay` and accepting SHA-256.
@@ -208,7 +213,11 @@ pub fn mdoc() -> Credential {
             ]),
         ),
     ]);
-    credentials(&[("mso_mdoc", base64url::encode(&issuer_signed.encode()))]).remove(0)
+    credentials(&[(
+        "mso_mdoc",
+        base64url::encode(&issuer_signed.encode()).into(),
+    )])
+    .remove(0)
 }
 
 /// Claim metadata of `path` below `payload`, labelled in English, at `visualisation` when
@@ -262,7 +271,7 @@ pub fn inline_payment_type() -> Value {
 /// A `200` response holding the JSON text of `document`.
 pub fn response(document: &Value) -> FetchResponse {
     FetchResponse::new(
-        200,
+        HttpStatus::OK,
         Some("application/json".to_owned()),
         document.to_string().into_bytes(),
     )

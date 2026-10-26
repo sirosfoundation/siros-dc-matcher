@@ -44,7 +44,7 @@ impl Mdoc {
     /// [`MdocError`]: the first part of the credential that breaks its structure or disagrees
     /// with the MSO.
     pub fn parse(data: &str) -> Result<Self, MdocError> {
-        let bytes = base64url::decode(data).ok_or(MdocError::Encoding)?;
+        let bytes = base64url::decode(data).map_err(|_| MdocError::Encoding)?;
         let root = cbor::decode(&bytes).map_err(MdocError::Cbor)?;
         let (issuer_signed, doc_type) = envelope(&root)?;
         let auth = issuer_signed
@@ -60,7 +60,7 @@ impl Mdoc {
             None => Vec::new(),
         };
         Ok(Self {
-            issuer_signed: issuer_signed.raw.to_vec(),
+            issuer_signed: issuer_signed.raw().to_vec(),
             name_spaces,
             issuer_auth,
             mso,
@@ -134,7 +134,7 @@ impl IssuerSignedItem {
             .and_then(Item::as_bytes)
             .ok_or(MdocError::NameSpaces)?;
         let item = cbor::decode(inner).map_err(|_| MdocError::Item)?;
-        let Some(Kind::Unsigned(digest_id)) = item.get("digestID").map(|d| &d.kind) else {
+        let Some(Kind::Unsigned(digest_id)) = item.get("digestID").map(Item::kind) else {
             return Err(MdocError::Item);
         };
         item.get("random")
@@ -146,7 +146,7 @@ impl IssuerSignedItem {
             .ok_or(MdocError::Item)?;
         let value = item.get("elementValue").ok_or(MdocError::Item)?;
         Ok(Self {
-            bytes: tagged.raw.to_vec(),
+            bytes: tagged.raw().to_vec(),
             digest_id: *digest_id,
             identifier: identifier.to_owned(),
             value: Value::from_item(value),

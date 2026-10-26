@@ -1,11 +1,21 @@
 //! Reading members of metadata objects.
 
+use rustc_hash::FxHashSet;
 use serde_json::{Map, Value};
 
 use crate::colour::Colour;
-use crate::error::DisplayError;
+use crate::error::{DisplayError, EntryFault};
 use crate::locale::Locale;
 use crate::text::DisplayText;
+
+/// How many entries an array member holds.
+#[derive(Clone, Copy)]
+pub(crate) enum Entries {
+    /// At least one.
+    AtLeastOne,
+    /// Any number, none included.
+    Any,
+}
 
 /// The object `value`.
 pub(crate) fn object(value: &Value) -> Result<&Map<String, Value>, DisplayError> {
@@ -56,18 +66,31 @@ pub(crate) fn colour(
         .transpose()
 }
 
-/// The array member `name`, non-empty when `non_empty`; `None` when absent.
+/// The array member `name` of `entries`; `None` when absent.
 pub(crate) fn array<'a>(
     object: &'a Map<String, Value>,
     name: &str,
-    non_empty: bool,
-    malformed: DisplayError,
+    entries: Entries,
+    malformed: fn(EntryFault) -> DisplayError,
 ) -> Result<Option<&'a [Value]>, DisplayError> {
-    match object.get(name) {
-        None => Ok(None),
-        Some(Value::Array(items)) if !(non_empty && items.is_empty()) => Ok(Some(items)),
-        Some(_) => Err(malformed),
+    match (object.get(name), entries) {
+        (None, _) => Ok(None),
+        (Some(Value::Array(items)), Entries::AtLeastOne) if items.is_empty() => {
+            Err(malformed(EntryFault::NotArray))
+        }
+        (Some(Value::Array(items)), _) => Ok(Some(items)),
+        (Some(_), _) => Err(malformed(EntryFault::NotArray)),
     }
+}
+
+/// The entry `value` of an array whose faults `malformed` reports: a JSON object.
+pub(crate) fn entry(
+    value: &Value,
+    malformed: fn(EntryFault) -> DisplayError,
+) -> Result<&Map<String, Value>, DisplayError> {
+    value
+        .as_object()
+        .ok_or(malformed(EntryFault::EntryNotObject))
 }
 
 /// Each entry has a different locale, or none (OpenID4VCI 1.0, Section 12.2.4; SD-JWT VC,
@@ -75,12 +98,10 @@ pub(crate) fn array<'a>(
 pub(crate) fn distinct_locales<'a>(
     locales: impl Iterator<Item = Option<&'a Locale>>,
 ) -> Result<(), DisplayError> {
-    let mut seen: Vec<&Locale> = Vec::new();
-    for locale in locales.flatten() {
-        if seen.contains(&locale) {
-            return Err(DisplayError::DisplayLocaleRepeated);
-        }
-        seen.push(locale);
+    let mut seen = FxHashSet::default();
+    if locales.flatten().all(|locale| seen.insert(locale)) {
+        Ok(())
+    } else {
+        Err(DisplayError::DisplayLocaleRepeated)
     }
-    Ok(())
 }

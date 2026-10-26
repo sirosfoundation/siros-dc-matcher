@@ -12,27 +12,22 @@ use std::fmt;
 use rand_core::CryptoRngCore;
 use serde_json::{Map, Value};
 
+pub use aead::ContentKey;
 pub use cose::cose_kdf;
 pub use jwe::concat_kdf;
 pub use vp_token::{Presentation, VpToken};
 
 use crate::error_code::ErrorCode;
-use crate::fetch::{Fetch, FetchResponse, Method};
+use crate::fetch::{BodyLimit, Fetch, FetchResponse, HttpStatus, MediaType, Method};
 use crate::form;
 use crate::verified::{Channel, PostEncoding, VerifiedRequest};
 use vp_token::Answer;
 
 /// The media type the Response URI answers with (Section 8.2).
-const REPLY_MEDIA_TYPE: &str = "application/json";
+const REPLY_MEDIA_TYPE: MediaType = MediaType::JSON;
 
-/// The media type of a form body.
-const FORM: &str = "application/x-www-form-urlencoded";
-
-/// The media type of a `direct_post.cwt` body (`zkp_req.md`, Section 6.2).
-const CWT: &str = "application/cwt";
-
-/// The largest reply to a direct post read, in bytes.
-const MAX_REPLY: usize = 64 * 1024;
+/// The largest reply to a direct post read.
+const MAX_REPLY: BodyLimit = BodyLimit::bytes(64 * 1024);
 
 /// What the wallet sends the Verifier.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,13 +62,13 @@ pub enum ResponseError {
     /// A CBOR presentation is not one CBOR map.
     PresentationNotCborMap,
     /// The JWE or the `COSE_Encrypt` could not be produced.
-    EncryptionFailed,
+    EncryptionFailed(EncryptionFault),
     /// The Response URI answered with a status other than 200 (Section 8.2).
     ReplyStatus,
     /// The Response URI answered with a media type other than `application/json`.
     ReplyContentType,
-    /// The reply is longer than the fetch allowed, or not a JSON object.
-    ReplyNotObject,
+    /// The reply is no JSON object the wallet reads.
+    ReplyNotObject(ReplyFault),
     /// The reply's `redirect_uri` is not an absolute URI (RFC 3986, Section 4.3).
     RedirectUriInvalid,
 }
@@ -88,13 +83,35 @@ impl ResponseError {
             Self::NoPresentation => "no_presentation",
             Self::MultipleNotAllowed => "multiple_not_allowed",
             Self::PresentationNotCborMap => "presentation_not_cbor_map",
-            Self::EncryptionFailed => "encryption_failed",
+            Self::EncryptionFailed(_) => "encryption_failed",
             Self::ReplyStatus => "reply_status",
             Self::ReplyContentType => "reply_content_type",
-            Self::ReplyNotObject => "reply_not_object",
+            Self::ReplyNotObject(_) => "reply_not_object",
             Self::RedirectUriInvalid => "redirect_uri_invalid",
         }
     }
+}
+
+/// The step of an encryption that failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EncryptionFault {
+    /// The ephemeral public key has no affine coordinates.
+    EphemeralKey,
+    /// A Concat KDF input is longer than a 32-bit length allows.
+    KdfInput,
+    /// The KDF cannot give a key of the length of `enc`.
+    KdfLength,
+    /// The cipher refused the key or the plaintext.
+    Seal,
+}
+
+/// Why a reply to a direct post is no JSON object the wallet reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ReplyFault {
+    /// The reply is longer than the fetch allowed.
+    TooLarge,
+    /// The reply is not a JSON object.
+    NotObject,
 }
 
 impl fmt::Display for ResponseError {
@@ -136,7 +153,7 @@ impl VerifiedRequest {
                 encoding,
                 ..
             } => {
-                let state = self.state.as_deref();
+                let state = self.state.as_ref();
                 let (content_type, body) = match encoding {
                     PostEncoding::Form => {
                         let fields: Vec<(String, String)> = answer
@@ -151,16 +168,19 @@ impl VerifiedRequest {
                             .iter()
                             .map(|(name, value)| (name.as_str(), value.as_str()))
                             .collect();
-                        (FORM, form::encode(&pairs).into_bytes())
+                        (MediaType::FORM, form::encode(&pairs).into_bytes())
                     }
                     PostEncoding::Jwe(encryption) => {
                         let payload = Value::Object(answer.json(state)).to_string();
                         let jwe = jwe::encrypt(encryption, payload.as_bytes(), rng)?;
-                        (FORM, form::encode(&[("response", &jwe)]).into_bytes())
+                        (
+                            MediaType::FORM,
+                            form::encode(&[("response", &jwe)]).into_bytes(),
+                        )
                     }
                     PostEncoding::Cose(encryption) => {
                         let payload = answer.cbor(state).encode();
-                        (CWT, cose::encrypt(encryption, &payload, rng)?)
+                        (MediaType::CWT, cose::encrypt(encryption, &payload, rng)?)
                     }
                 };
                 Ok(Submission::Post(Fetch::new(
@@ -216,37 +236,51 @@ impl VpToken<'_> {
 ///
 /// [`ResponseError`]: a status other than 200, a media type other than `application/json`, a
 /// body that is not a JSON object, or a `redirect_uri` that is not an absolute URI.
-pub fn read_reply(response: &FetchResponse) -> Result<Option<String>, ResponseError> {
-    if response.status() != 200 {
+pub fn read_reply(response: &FetchResponse) -> Result<Option<RedirectUri>, ResponseError> {
+    if response.status() != HttpStatus::OK {
         return Err(ResponseError::ReplyStatus);
     }
     if !response.has_media_type(REPLY_MEDIA_TYPE) {
         return Err(ResponseError::ReplyContentType);
     }
-    if response.body().len() > MAX_REPLY {
-        return Err(ResponseError::ReplyNotObject);
+    if !MAX_REPLY.admits(response.body()) {
+        return Err(ResponseError::ReplyNotObject(ReplyFault::TooLarge));
     }
     let Ok(Value::Object(reply)) = serde_json::from_slice(response.body()) else {
-        return Err(ResponseError::ReplyNotObject);
+        return Err(ResponseError::ReplyNotObject(ReplyFault::NotObject));
     };
     match reply.get("redirect_uri") {
         None => Ok(None),
-        Some(Value::String(uri)) if absolute_uri(uri) => Ok(Some(uri.clone())),
+        Some(Value::String(uri)) => RedirectUri::parse(uri)
+            .map(Some)
+            .ok_or(ResponseError::RedirectUriInvalid),
         Some(_) => Err(ResponseError::RedirectUriInvalid),
     }
 }
 
-/// `scheme ":" …` with `scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )` (RFC 3986,
-/// Section 3.1), something after the colon, and no whitespace or control character.
-fn absolute_uri(uri: &str) -> bool {
-    let Some((scheme, rest)) = uri.split_once(':') else {
-        return false;
-    };
-    let mut chars = scheme.bytes();
-    chars.next().is_some_and(|c| c.is_ascii_alphabetic())
-        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, b'+' | b'-' | b'.'))
-        && !rest.is_empty()
-        && !uri
-            .bytes()
-            .any(|b| b.is_ascii_whitespace() || b.is_ascii_control())
+/// The `redirect_uri` of a Verifier's reply: an absolute URI (RFC 3986, Section 4.3).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct RedirectUri(String);
+
+impl RedirectUri {
+    /// The URI `uri`: `scheme ":" …` with `scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )`
+    /// (RFC 3986, Section 3.1), something after the colon, and no whitespace or control
+    /// character.
+    fn parse(uri: &str) -> Option<Self> {
+        let (scheme, rest) = uri.split_once(':')?;
+        let mut chars = scheme.bytes();
+        let absolute = chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+            && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, b'+' | b'-' | b'.'))
+            && !rest.is_empty()
+            && !uri
+                .bytes()
+                .any(|b| b.is_ascii_whitespace() || b.is_ascii_control());
+        absolute.then(|| Self(uri.to_owned()))
+    }
+
+    /// The URI.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }

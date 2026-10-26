@@ -118,7 +118,7 @@ pub fn presentations_of(
         .enumerate()
         .map(|(index, p)| {
             let text = p.as_str().ok_or(VpTokenError::NotString { index })?;
-            base64url::decode(text).ok_or(VpTokenError::NotBase64url { index })
+            base64url::decode(text).map_err(|_| VpTokenError::NotBase64url { index })
         })
         .collect()
 }
