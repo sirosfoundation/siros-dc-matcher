@@ -26,3 +26,10 @@ impl ClaimPointer {
         &self.0
     }
 }
+
+/// The components, as [`siros_sdjwt::SdJwt::select`] takes them.
+impl AsRef<[PathComponent]> for ClaimPointer {
+    fn as_ref(&self) -> &[PathComponent] {
+        &self.0
+    }
+}
