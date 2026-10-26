@@ -310,7 +310,7 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
   - Each member names its query, its instance (C5), its answer (SD-JWT pointers, mdoc elements, or the `zkp_req` system, backend and option) and the transaction entries bound to it (T4).
 - **A4. Plan binding.** A plan MUST carry a digest of its inputs. A selection MUST be parsed against the recomputed plan into a chosen-offer witness. A digest mismatch, an unknown offer, or an out-of-range optional choice is an error.
 - **A5. Signatures.** Phase 2 MUST state every signing input as a `Sign` effect. The signatures returned MUST be parsed against those requests: none missing, none duplicated, none unknown.
-- **A6. Audience.** The SD-JWT `aud` is `prefix:value` of the client identifier for redirects and signed DC API requests, and `origin:<origin>` for unsigned DC API requests.
+- **A6. Audience.** The SD-JWT `aud` is `prefix:value` of the client identifier for redirects. Over the DC API it is `origin:<origin>`, signed requests included (OpenID4VP A.4).
 - **A7. SessionTranscript.** The mdoc and nym_auth SessionTranscript uses `OpenID4VPHandover` (client id, nonce, encryption key thumbprint or null, response URI) for redirects. It uses `OpenID4VPDCAPIHandover` (origin, nonce, thumbprint or null) for the DC API.
 - **A8. Response.**
   - One `vp_token` answers every member of the chosen offer and its chosen additions, keyed by query id, whatever the formats.
