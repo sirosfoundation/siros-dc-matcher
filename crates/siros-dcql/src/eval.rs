@@ -13,6 +13,7 @@
 
 use serde_json::Value;
 
+use crate::id::QueryId;
 use crate::path::{PathComponent, PathError};
 use crate::query::{ClaimsQuery, CredentialQuery, CredentialSetQuery, DcqlQuery};
 
@@ -95,7 +96,7 @@ pub struct Candidate {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueryMatch {
     /// The credential query's `id`.
-    pub query_id: String,
+    pub query_id: QueryId,
     /// Credentials that satisfy it, in the order the wallet holds them.
     pub candidates: Vec<Candidate>,
     /// Whether the query accepts more than one credential (§6.1 `multiple`).
@@ -328,7 +329,11 @@ impl QueryResult {
         let groups: Vec<(Option<Value>, Vec<Vec<String>>)> = match &self.credential_sets {
             None => vec![(
                 None,
-                vec![self.matches.iter().map(|m| m.query_id.clone()).collect()],
+                vec![self
+                    .matches
+                    .iter()
+                    .map(|m| m.query_id.to_string())
+                    .collect()],
             )],
             Some(sets) => sets
                 .iter()

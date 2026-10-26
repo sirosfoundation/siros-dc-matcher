@@ -7,14 +7,12 @@ use siros_credential::PointerError;
 use siros_zkp_req::ErrorCode;
 
 use super::{Answered, ZkpRefusal};
-use crate::ids::{QueryId, QueryIdError};
+use siros_dcql::QueryId;
 
-/// Why a request cannot be matched: a Credential Query it names breaks a rule. The request is
-/// invalid (`invalid_request`).
+/// Why a request cannot be matched: the query as sent lacks a Credential Query of the parsed
+/// one. The request is invalid (`invalid_request`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AskedError {
-    /// A Credential Query `id` breaks OpenID4VP 1.0, Section 6.1.
-    Id(QueryIdError),
     /// The query as sent lacks the Credential Query of this `id`.
     Unsent(QueryId),
 }
@@ -23,7 +21,6 @@ impl AskedError {
     /// A stable identifier.
     pub fn code(&self) -> &'static str {
         match self {
-            Self::Id(error) => error.code(),
             Self::Unsent(_) => "query_unsent",
         }
     }

@@ -12,9 +12,10 @@ use super::digest::PlanDigest;
 use super::transactions::{offered, Bound, EntryPosition, Offered, Transactions, Wallet};
 use crate::display_rule::{Choice, DisplayFacts, Presentability, TransactionData, WalletDisplay};
 use crate::error::{Inconsistency, PresentationError};
-use crate::ids::{QueryId, SetIndex};
+use crate::ids::SetIndex;
 use crate::matching::{Answer, Candidate};
 use crate::offers::{Addition, Member, Offer, Offers};
+use siros_dcql::QueryId;
 
 /// What the user consents to. It holds no delivered secret and no undisclosable attribute.
 pub struct ConsentView<'a> {

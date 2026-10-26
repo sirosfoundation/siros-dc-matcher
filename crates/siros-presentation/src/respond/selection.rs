@@ -3,7 +3,9 @@
 
 use crate::display_rule::WalletDisplay;
 use crate::error::{Inconsistency, PresentationError};
-use crate::ids::{AdditionIndex, OfferIndex, Position, QueryId, QueryIndex};
+use siros_dcql::QueryId;
+
+use crate::ids::{AdditionIndex, OfferIndex, Position, QueryIndex};
 use crate::offers::{Addition, Member, Offer};
 use crate::plan::{PlanDigest, Planned};
 

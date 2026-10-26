@@ -4,10 +4,11 @@
 use serde_json::{json, Value};
 use siros_codec::cbor::Value as Cbor;
 use siros_dcql::Dropped;
+use siros_dcql::QueryId;
 use siros_oid4vp::{ErrorCode, Submission};
 use siros_presentation::{
-    Failure, Position, PresentationError, QueryId, SubsetError, WalletDisplay, MAX_ADDITIONS,
-    MAX_EXAMINED, MAX_OFFERS,
+    Failure, Position, PresentationError, SubsetError, WalletDisplay, MAX_ADDITIONS, MAX_EXAMINED,
+    MAX_OFFERS,
 };
 use siros_zkp_req_nym_auth::testing::Spec;
 

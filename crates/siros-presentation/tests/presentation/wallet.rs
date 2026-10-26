@@ -9,11 +9,12 @@ use siros_codec::base64url;
 use siros_codec::cbor::Value as Cbor;
 use siros_codec::date::DateTime;
 use siros_credential::Credential;
+use siros_dcql::QueryId;
 use siros_display::{DisplayCache, Locale};
 use siros_oid4vp::{FetchResponse, VerifiedRequest};
 use siros_presentation::{
     plan, AdditionIndex, Fetches, Fulfilment, OfferIndex, PlanInput, PlanStep, Planned, Position,
-    PresentationError, QueryId, Response, Selection, SignId, Subset,
+    PresentationError, Response, Selection, SignId, Subset,
 };
 use siros_transaction_data::{Amr, Factor, Inherence, Possession};
 use siros_wallet_state::{CredentialId, WalletState};

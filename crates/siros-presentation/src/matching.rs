@@ -9,14 +9,16 @@ use serde_json::Value;
 use siros_codec::date::Date;
 use siros_credential::{least_used, ClaimPointer, Format, PointerError};
 use siros_dcql::eval::select_claims;
-use siros_dcql::{CredentialQuery, CredentialSetQuery, DcqlQuery, PathComponent, PathError};
+use siros_dcql::{
+    CredentialQuery, CredentialSetQuery, DcqlQuery, PathComponent, PathError, QueryId,
+};
 use siros_wallet_state::PresentationRecord;
 use siros_zkp_req_nym_auth::catalogue::{BBS_SCHEMA_ID, MDOC_DOCTYPE};
 use siros_zkp_req_nym_auth::policy::RequestRefusal;
 use siros_zkp_req_nym_auth::system::NymAuthSystem;
 
 use crate::credential::{KeyHolding, MatchCredential};
-use crate::ids::{CandidateIndex, QueryId, QueryIndex};
+use crate::ids::{CandidateIndex, QueryIndex};
 
 pub use failure::{AskedError, Failure, QueryRefusal};
 pub use zkp::{ChoiceError, ProofChoice, ZkpQuery, ZkpRefusal};
@@ -60,7 +62,7 @@ impl<'r> Asked<'r> {
             .credentials
             .iter()
             .map(|credential| {
-                let id = QueryId::parse(&credential.id).map_err(AskedError::Id)?;
+                let id = credential.id.clone();
                 let sent = sent_queries
                     .iter()
                     .find(|c| c.get("id").and_then(Value::as_str) == Some(id.as_str()))

@@ -14,11 +14,12 @@ use siros_wallet_state::KeyId;
 use siros_zkp_req_nym_auth::policy::RequestRefusal;
 use siros_zkp_req_nym_auth::presenter::{ProveError, Unanswerable};
 
-use crate::ids::{AdditionIndex, CandidateIndex, OfferIndex, QueryId, QueryIndex, SetIndex};
+use crate::ids::{AdditionIndex, CandidateIndex, OfferIndex, QueryIndex, SetIndex};
 use crate::matching::{AskedError, ChoiceError, Failure};
 use crate::offers::SubsetError;
 use crate::plan::{DigestError, MemberPosition, Unproven};
 use crate::respond::SignatureError;
+use siros_dcql::QueryId;
 
 /// Why the core gives no plan, no chosen offer or no response.
 #[derive(Debug, Clone, PartialEq, Eq)]

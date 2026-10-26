@@ -43,8 +43,7 @@ mod offers;
 pub use credential::{KeyHolding, MatchCredential};
 pub use display_rule::{Choice, DisplayFacts, Presentability, TransactionData, WalletDisplay};
 pub use ids::{
-    AdditionIndex, CandidateIndex, OfferIndex, OptionIndex, Position, QueryId, QueryIdError,
-    QueryIndex, SetIndex,
+    AdditionIndex, CandidateIndex, OfferIndex, OptionIndex, Position, QueryIndex, SetIndex,
 };
 pub use matching::{
     Answer, Answered, Answers, Asked, AskedError, Candidate, ChoiceError, Claims, Excluded,
