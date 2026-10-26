@@ -1,5 +1,7 @@
 //! A stored mdoc: its `IssuerSigned` and the MSO (ISO/IEC 18013-5, 8.3.2.1.2.2 and 9.1.2).
 
+use std::fmt;
+
 use rustc_hash::FxHashSet;
 use siros_codec::base64url;
 use siros_codec::cbor::{self, Item, Kind, Value};
@@ -9,7 +11,7 @@ use crate::issuer_auth::IssuerAuth;
 use crate::mso::Mso;
 
 /// An mdoc whose `Document` and items agree with its MSO.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Mdoc {
     issuer_signed: Vec<u8>,
     name_spaces: Vec<IssuerNameSpace>,
@@ -25,7 +27,7 @@ pub struct IssuerNameSpace {
 }
 
 /// An `IssuerSignedItem` whose digest the MSO lists.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct IssuerSignedItem {
     bytes: Vec<u8>,
     digest_id: u64,
@@ -149,6 +151,27 @@ impl IssuerSignedItem {
             identifier: identifier.to_owned(),
             value: Value::from_item(value),
         })
+    }
+}
+
+/// Shows the namespaces, `issuerAuth` and the MSO: an element value may be a secret.
+impl fmt::Debug for Mdoc {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Mdoc")
+            .field("name_spaces", &self.name_spaces)
+            .field("issuer_auth", &self.issuer_auth)
+            .field("mso", &self.mso)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Shows `digestID` and the element identifier: the value may be a secret.
+impl fmt::Debug for IssuerSignedItem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("IssuerSignedItem")
+            .field("digest_id", &self.digest_id)
+            .field("identifier", &self.identifier)
+            .finish_non_exhaustive()
     }
 }
 

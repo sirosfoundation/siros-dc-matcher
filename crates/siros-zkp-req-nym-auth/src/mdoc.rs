@@ -75,7 +75,7 @@ impl fmt::Display for FormError {
 impl std::error::Error for FormError {}
 
 /// A signed data element and the bytes its digest covers.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct SignedElement<T> {
     /// The element's value.
     pub value: T,
@@ -84,7 +84,7 @@ pub struct SignedElement<T> {
 }
 
 /// A nym_auth attestation in the ISO/IEC 18013-5 form.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct NymAuthMdoc {
     /// The `IssuerSigned` structure, as issued.
     pub issuer_signed: Vec<u8>,
@@ -106,6 +106,25 @@ pub struct NymAuthMdoc {
     pub ssc: SignedElement<[u8; 32]>,
     /// `psc`, when issued.
     pub psc: Option<SignedElement<[u8; 32]>>,
+}
+
+/// Shows nothing: `birth_date`, `ssc` and `psc` are undisclosable.
+impl<T> fmt::Debug for SignedElement<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SignedElement").finish_non_exhaustive()
+    }
+}
+
+/// Shows the Document Signer, the device key and the validity: the elements are undisclosable.
+impl fmt::Debug for NymAuthMdoc {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("NymAuthMdoc")
+            .field("document_signer", &self.document_signer)
+            .field("device_key", &self.device_key)
+            .field("valid_from", &self.valid_from)
+            .field("valid_until", &self.valid_until)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Whether a stored credential is a nym_auth mdoc.
