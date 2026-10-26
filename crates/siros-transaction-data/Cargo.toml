@@ -1,0 +1,28 @@
+[package]
+name = "siros-transaction-data"
+version = "0.11.0"
+description = "OpenID4VP transaction data for the SIROS wallet core: entries, the EC TS12 SCA types, their bindings into a presentation, and their display"
+publish = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rustc-hash = { workspace = true }
+serde = { workspace = true }
+# `raw_value` gives each JSON value as its text, which keeps numbers as the verifier wrote them.
+serde_json = { workspace = true, features = ["raw_value"] }
+sha2 = "0.10.9"
+siros-codec = { workspace = true }
+siros-credential = { workspace = true }
+siros-dcql = { workspace = true }
+siros-display = { workspace = true }
+siros-oid4vp = { workspace = true, features = ["crypto"] }
+
+[dev-dependencies]
+# The TS12 schemas as the oracle of the payload parsers. Only the validator: no remote
+# references, no TLS.
+jsonschema = { version = "0.42.0", default-features = false }
+siros-wallet-state = { workspace = true }
