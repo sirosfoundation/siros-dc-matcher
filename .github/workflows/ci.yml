@@ -214,9 +214,12 @@ jobs:
       # toolchain is whatever the wallet's build uses, not ours.
       #
       # The zkp_req crates are in the matcher, so they hold the same floor.
+      # The wallet core crates hold it too: the picker links the presentation component and
+      # what it builds on.
       #
       # siros-oid4vp holds it without `crypto`, the part the matcher links;
-      # `crypto` builds with the pinned toolchain.
+      # `crypto` builds with the pinned toolchain. siros-presentation holds it
+      # without `wallet`: the matching the picker runs.
       #
       # -ffi and -testhost are deliberately excluded: they declare 1.88 in
       # their own manifests. Checking them here would only re-discover that.
@@ -228,6 +231,7 @@ jobs:
             -p siros-zkp-req -p siros-zkp-req-nym-auth -p siros-sdjwt -p siros-mdoc \
             -p siros-wallet-state -p siros-credential -p siros-display -p siros-transaction-data
           cargo check --locked -p siros-oid4vp
+          cargo check --locked -p siros-presentation --no-default-features
           cargo check --locked --all-features --target wasm32-wasip1 \
             -p siros-dc-matcher-wasm -p android-credman-sys -p android-credman
 
