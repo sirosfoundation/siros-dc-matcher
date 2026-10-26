@@ -225,6 +225,23 @@ pub struct Wallet {
 impl Wallet {
     /// A wallet holding `held`, each bound to the holder's key under the `kid` `key-<id>`.
     pub fn new(held: Vec<Held>) -> Self {
+        Self::with_records(held, Vec::new())
+    }
+
+    /// A wallet holding `held`, whose presentation records name the credentials of each of
+    /// `records`.
+    pub fn with_records(held: Vec<Held>, records: Vec<Vec<u64>>) -> Self {
+        let presentations: Vec<Value> = records
+            .iter()
+            .enumerate()
+            .map(|(id, used)| {
+                json!({
+                    "presentationId": id, "transactionId": id, "data": "",
+                    "usedCredentialIds": used, "presentationTimestampSeconds": 1_750_000_000,
+                    "audience": "https://verifier.example"
+                })
+            })
+            .collect();
         let entries: Vec<Value> = held
             .iter()
             .map(|h| {
@@ -249,7 +266,7 @@ impl Wallet {
                 "schemaVersion": 4,
                 "credentials": entries,
                 "keypairs": [],
-                "presentations": [],
+                "presentations": presentations,
                 "settings": {"openidRefreshTokenMaxAgeInSeconds": "0"},
                 "credentialIssuanceSessions": []
             })
@@ -360,6 +377,25 @@ pub fn sign_all(signs: &[siros_presentation::Sign]) -> Vec<(SignId, Vec<u8>)> {
             (sign.id(), signature.to_bytes().to_vec())
         })
         .collect()
+}
+
+/// Both phases for the offer at `offer` of the plan of `input`, with the additions at
+/// `additions` and the subsets `subsets`: the plan, the plan again, the selection on the
+/// plan's digest, the holder's signatures and the response.
+pub fn respond_to(
+    input: &PlanInput<'_>,
+    offer: usize,
+    additions: Vec<usize>,
+    subsets: Vec<(String, Vec<usize>)>,
+) -> Result<Response, PresentationError> {
+    let digest = ready(input)?.view().digest().to_owned();
+    let planned = ready(input)?;
+    let selection = Selection::new(&digest, offer, additions, subsets)?;
+    let chosen = planned.choose(&selection, Fulfilment::WalletUi)?;
+    let mut rng = Rng(77);
+    let prepared = chosen.prepare(&mut rng)?;
+    let signatures = sign_all(prepared.signs());
+    prepared.finish(signatures, &TestProver { fail: None }, &mut rng)
 }
 
 /// Both phases for the first offer of the plan of `input`: the plan, the plan again, the

@@ -1,6 +1,7 @@
 //! The honest paths of `zkp_req`: over redirects with `direct_post.cwt`, and over the DC API with
 //! `dc_api.jwt` beside an mdoc, in one consent and one `vp_token`. nym_auth's verifier accepts
-//! each proof against the session the verifier computes from its own values.
+//! each proof against the session the verifier computes from its own values. A credential that
+//! fails an option's assertion answers the next option (A2).
 
 use ciborium::Value as Ciborium;
 use serde_json::{json, Value};
@@ -8,6 +9,7 @@ use siros_codec::base64url;
 use siros_codec::cbor::Value as Cbor;
 use siros_oid4vp::Handover;
 use siros_presentation::WalletDisplay;
+use siros_zkp_req::ZkpPresentation;
 use siros_zkp_req_nym_auth::presenter::Session;
 use siros_zkp_req_nym_auth::testing::{query, Spec, TestVerifier};
 use siros_zkp_req_nym_auth::verifier_id::VerifierId;
@@ -40,16 +42,16 @@ fn nym_query() -> Value {
     query(Some("18+"), true)
 }
 
-/// nym_auth's verifier accepts `presentation`, the CBOR `ZkpPresentation`, in the session of
-/// `handover`.
-fn accepted(presentation: &[u8], handover: &[u8]) {
+/// nym_auth's verifier accepts `presentation`, the CBOR `ZkpPresentation` answering `query`, in
+/// the session of `handover`.
+fn accepted(query: &Value, presentation: &[u8], handover: &[u8]) {
     let session = Session {
         handover: Handover::from_cbor(handover).unwrap(),
         verifier_id: VerifierId::x509_san_dns(&signed_client_id(), false).unwrap(),
     };
     let verified = verify(
         &VerifyInput {
-            query: &nym_query(),
+            query,
             client_metadata: &client_metadata(),
             session: &session,
             presentation,
@@ -94,7 +96,7 @@ fn zkp_req_over_redirect_direct_post_cwt() {
     };
     let mut encoded = Vec::new();
     ciborium::into_writer(presentation, &mut encoded).unwrap();
-    accepted(&encoded, &redirect_handover());
+    accepted(&nym_query(), &encoded, &redirect_handover());
     let record = serde_json::to_value(response.record()).unwrap();
     assert_eq!(record["usedCredentialIds"], json!([1]));
     assert_eq!(record["audience"], signed_client_id());
@@ -131,7 +133,7 @@ fn zkp_req_and_mdoc_over_dc_api_jwt() {
     assert_eq!(keys, ["mdl", "nym"]);
 
     let zkp = base64url::decode(token["nym"][0].as_str().unwrap()).unwrap();
-    accepted(&zkp, &dc_api_handover());
+    accepted(&nym_query(), &zkp, &dc_api_handover());
 
     let device_response = ciborium(&base64url::decode(token["mdl"][0].as_str().unwrap()).unwrap());
     let text = |s: &str| Ciborium::Text(s.into());
@@ -172,4 +174,25 @@ fn zkp_req_and_mdoc_over_dc_api_jwt() {
 
     let record = serde_json::to_value(response.record()).unwrap();
     assert_eq!(record["usedCredentialIds"], json!([2, 1]));
+}
+
+#[test]
+fn a_credential_answers_the_first_option_it_passes() {
+    let wallet = wallet();
+    // Born 2000-01-01, the holder fails option 0's `13-17` and answers option 1.
+    let mut nym = query(Some("13-17"), false);
+    nym["_req_sets"] = json!([[0, 1], [0]]);
+    let request = redirect_signed(&json!({
+        "response_type": "vp_token",
+        "response_mode": "direct_post.jwt",
+        "nonce": NONCE,
+        "client_metadata": client_metadata(),
+        "dcql_query": {"credentials": [nym.clone()]}
+    }));
+    let fetches = wallet.fetches(&request);
+    let (_, response) = respond(&wallet.input(&request, &fetches));
+    let payload = decrypt_jwe(response.submission());
+    let encoded = base64url::decode(payload["vp_token"]["nym"][0].as_str().unwrap()).unwrap();
+    assert_eq!(ZkpPresentation::decode(&encoded).unwrap().req_set, Some(1));
+    accepted(&nym, &encoded, &redirect_handover());
 }

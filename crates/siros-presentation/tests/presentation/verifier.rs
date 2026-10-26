@@ -7,7 +7,7 @@ use std::time::Duration;
 use aes_gcm::aead::{Aead, KeyInit, Payload};
 use aes_gcm::{Aes128Gcm, Nonce};
 use ciborium::Value as Cbor;
-use p256::ecdsa::signature::Signer;
+use p256::ecdsa::signature::Signer as _;
 use p256::ecdsa::{DerSignature, Signature, SigningKey};
 use p256::elliptic_curve::sec1::ToEncodedPoint;
 use p256::{EncodedPoint, PublicKey, SecretKey};
@@ -16,8 +16,8 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use siros_codec::base64url;
 use siros_oid4vp::{
-    concat_kdf, cose_kdf, ContentEncryption, Effect, EffectResult, IntakeState, Method, Step,
-    Submission, TrustAnswer, VerifiedRequest,
+    concat_kdf, cose_kdf, ContentEncryption, Effect, EffectResult, IntakeError, IntakeState,
+    Method, Step, Submission, TrustAnswer, VerifiedRequest,
 };
 use x509_cert::builder::{Builder, CertificateBuilder, Profile};
 use x509_cert::der::asn1::{Ia5String, UtcTime};
@@ -108,12 +108,17 @@ pub fn client_metadata() -> Value {
 }
 
 /// Intake of `state` to its end, the host trusting every subject.
-fn intake(mut state: IntakeState) -> VerifiedRequest {
+fn intake(state: IntakeState) -> VerifiedRequest {
+    intake_with(state, true).unwrap()
+}
+
+/// Intake of `state` to its end, the host's trust verdict `trusted` on every subject.
+pub fn intake_with(mut state: IntakeState, trusted: bool) -> Result<VerifiedRequest, IntakeError> {
     loop {
-        match state.step().unwrap() {
-            Step::Verified(request) => return *request,
+        match state.step()? {
+            Step::Verified(request) => return Ok(*request),
             Step::Effect(Effect::Trust(_)) => {
-                state.answer(EffectResult::Trusted(TrustAnswer::new(true, None, None)))
+                state.answer(EffectResult::Trusted(TrustAnswer::new(trusted, None, None)))
             }
             Step::Effect(other) => panic!("no fetch expected: {other:?}"),
         }
@@ -160,8 +165,24 @@ pub fn redirect_unsigned(params: &Value) -> VerifiedRequest {
     ))
 }
 
-/// The verifier's signing key and its self-signed certificate with the dNSName SAN [`DNS`].
-fn certificate() -> (SigningKey, Vec<u8>) {
+/// How the verifier signs its Request Object: the subject of its access certificate, and
+/// whether its Client Identifier is `x509_hash` rather than `x509_san_dns`.
+#[derive(Clone, Copy)]
+pub struct Signer {
+    pub subject: &'static str,
+    pub hash: bool,
+}
+
+/// An `x509_san_dns` client whose access certificate names a legal person by its VAT number
+/// (ETSI EN 319 412-1, LEG-5.1.4).
+pub const SIGNER: Signer = Signer {
+    subject: "CN=Test verifier,O=Test only,2.5.4.97=VATBE-0876866142",
+    hash: false,
+};
+
+/// The verifier's signing key and its self-signed certificate of `subject`, with the dNSName
+/// SAN [`DNS`].
+fn certificate(subject: &str) -> (SigningKey, Vec<u8>) {
     let key = SigningKey::from_bytes(&[5; 32].into()).unwrap();
     let at =
         |unix: u64| Time::UtcTime(UtcTime::from_unix_duration(Duration::from_secs(unix)).unwrap());
@@ -174,7 +195,7 @@ fn certificate() -> (SigningKey, Vec<u8>) {
         Profile::Root,
         SerialNumber::new(&[1]).unwrap(),
         validity,
-        Name::from_str("CN=Test verifier,O=Test only").unwrap(),
+        Name::from_str(subject).unwrap(),
         spki,
         &key,
     )
@@ -193,62 +214,102 @@ pub fn signed_client_id() -> String {
     format!("x509_san_dns:{DNS}")
 }
 
-/// `request_object` as a Request Object signed under `x509_san_dns`.
-fn signed(request_object: &Value) -> String {
-    let (key, der) = certificate();
-    let mut x5c = base64url::encode(&der).replace('-', "+").replace('_', "/");
-    while x5c.len() % 4 != 0 {
-        x5c.push('=');
+impl Signer {
+    /// The Client Identifier.
+    pub fn client_id(self) -> String {
+        if self.hash {
+            let (_, der) = certificate(self.subject);
+            format!("x509_hash:{}", b64(&Sha256::digest(&der)))
+        } else {
+            signed_client_id()
+        }
     }
-    let header = json!({"alg": "ES256", "typ": "oauth-authz-req+jwt", "x5c": [x5c]});
-    let input = format!(
-        "{}.{}",
-        b64(header.to_string().as_bytes()),
-        b64(request_object.to_string().as_bytes())
-    );
-    let signature: Signature = key.sign(input.as_bytes());
-    format!("{input}.{}", b64(&signature.to_bytes()))
+
+    /// The protected header of a Request Object, with `x5c`.
+    fn header(self) -> Value {
+        let (_, der) = certificate(self.subject);
+        let mut x5c = base64url::encode(&der).replace('-', "+").replace('_', "/");
+        while x5c.len() % 4 != 0 {
+            x5c.push('=');
+        }
+        json!({"alg": "ES256", "typ": "oauth-authz-req+jwt", "x5c": [x5c]})
+    }
+
+    /// The signature of `input`, `r ‖ s`, base64url.
+    fn sign(self, input: &str) -> String {
+        let (key, _) = certificate(self.subject);
+        let signature: Signature = key.sign(input.as_bytes());
+        b64(&signature.to_bytes())
+    }
+
+    /// `request_object` as a compact JWS.
+    fn compact(self, request_object: &Value) -> String {
+        let input = format!(
+            "{}.{}",
+            b64(self.header().to_string().as_bytes()),
+            b64(request_object.to_string().as_bytes())
+        );
+        format!("{input}.{}", self.sign(&input))
+    }
 }
 
 /// A signed Request Object by value over redirects, with the members of `params`.
 pub fn redirect_signed(params: &Value) -> VerifiedRequest {
-    let mut object = params.clone();
-    object["client_id"] = signed_client_id().into();
-    object["response_uri"] = RESPONSE_URI.into();
-    let jws = signed(&object);
-    let uri = format!(
-        "openid4vp://?client_id={}&request={jws}",
-        signed_client_id()
-    );
-    intake(IntakeState::redirect(
-        &uri,
-        wallet_formats(),
-        NOW as u64,
-        &mut Rng(9),
-    ))
+    intake(redirect_signed_state(params, SIGNER))
 }
 
-/// A DC API request of one entry from [`ORIGIN`].
-fn dc_api(protocol: &str, data: Value) -> VerifiedRequest {
+/// The intake of a Request Object `signer` signs, by value over redirects, with the members of
+/// `params`.
+pub fn redirect_signed_state(params: &Value, signer: Signer) -> IntakeState {
+    let mut object = params.clone();
+    object["client_id"] = signer.client_id().into();
+    object["response_uri"] = RESPONSE_URI.into();
+    let jws = signer.compact(&object);
+    let uri = format!(
+        "openid4vp://?client_id={}&request={jws}",
+        signer.client_id()
+    );
+    IntakeState::redirect(&uri, wallet_formats(), NOW as u64, &mut Rng(9))
+}
+
+/// The intake of a DC API request of one entry from [`ORIGIN`].
+fn dc_api_state(protocol: &str, data: Value) -> IntakeState {
     let request = json!({"requests": [{"protocol": protocol, "data": data}]});
-    intake(IntakeState::dc_api(
-        request.to_string().as_bytes(),
-        ORIGIN,
-        NOW as u64,
-    ))
+    IntakeState::dc_api(request.to_string().as_bytes(), ORIGIN, NOW as u64)
 }
 
 /// An unsigned DC API request of `params`.
 pub fn dc_api_unsigned(params: &Value) -> VerifiedRequest {
-    dc_api("openid4vp-v1-unsigned", params.clone())
+    intake(dc_api_state("openid4vp-v1-unsigned", params.clone()))
 }
 
 /// A signed DC API request of `params`, which expects [`ORIGIN`].
 pub fn dc_api_signed(params: &Value) -> VerifiedRequest {
+    intake(dc_api_signed_state(params, SIGNER, false))
+}
+
+/// The intake of a DC API request of `params` that `signer` signs, which expects [`ORIGIN`]:
+/// `openid4vp-v1-signed`, or `openid4vp-v1-multisigned` with one signature when `multiple`.
+pub fn dc_api_signed_state(params: &Value, signer: Signer, multiple: bool) -> IntakeState {
     let mut object = params.clone();
-    object["client_id"] = signed_client_id().into();
     object["expected_origins"] = json!([ORIGIN]);
-    dc_api("openid4vp-v1-signed", json!({"request": signed(&object)}))
+    if !multiple {
+        object["client_id"] = signer.client_id().into();
+        return dc_api_state(
+            "openid4vp-v1-signed",
+            json!({"request": signer.compact(&object)}),
+        );
+    }
+    // A.3.2.2: `client_id` travels in the protected header of each signature.
+    let mut header = signer.header();
+    header["client_id"] = signer.client_id().into();
+    let protected = b64(header.to_string().as_bytes());
+    let payload = b64(object.to_string().as_bytes());
+    let signature = signer.sign(&format!("{protected}.{payload}"));
+    dc_api_state(
+        "openid4vp-v1-multisigned",
+        json!({"payload": payload, "signatures": [{"protected": protected, "signature": signature}]}),
+    )
 }
 
 /// The JWE a submission carries: `data.response`, or the form parameter `response`.

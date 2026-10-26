@@ -1,10 +1,12 @@
 //! A4 and A5: a selection parses only against the plan it was made on, and the signatures only
-//! against the `Sign` effects they answer.
+//! against the `Sign` effects they answer, each under the key its effect names.
 
+use p256::ecdsa::signature::Signer as _;
+use p256::ecdsa::Signature;
 use serde_json::json;
 use siros_codec::cbor::Value as Cbor;
-use siros_presentation::{Fulfilment, PresentationError, Selection, SignId};
-use siros_zkp_req_nym_auth::testing::TestProver;
+use siros_presentation::{Fulfilment, PresentationError, Selection, Sign, SignId};
+use siros_zkp_req_nym_auth::testing::{self, TestProver};
 
 use crate::verifier::{b64, redirect_unsigned, Rng, NONCE, STATE};
 use crate::wallet::{mdoc, ready, sd_jwt, sign_all, Held, Wallet, MDL, MDL_NS, VCT};
@@ -100,28 +102,36 @@ fn selections_and_signatures_parse_against_the_plan() {
     }
 
     // A5: (case, the signatures from the honest ones, refusal)
-    type Edit = fn(&mut Vec<(SignId, Vec<u8>)>);
-    let signatures: [(&str, Edit, Option<PresentationError>); 5] = [
-        ("every signature once", |_| {}, None),
+    type Edit = fn(&[Sign], &mut Vec<(SignId, Vec<u8>)>);
+    let signatures: [(&str, Edit, Option<PresentationError>); 6] = [
+        ("every signature once", |_, _| {}, None),
         (
             "one missing",
-            |s| drop(s.pop()),
+            |_, s| drop(s.pop()),
             Some(PresentationError::SignatureMissing),
         ),
         (
             "one twice",
-            |s| s.push(s[0].clone()),
+            |_, s| s.push(s[0].clone()),
             Some(PresentationError::SignatureRepeated),
         ),
         (
             "one of no effect",
-            |s| s.push((SignId::new(s.len()), s[0].1.clone())),
+            |_, s| s.push((SignId::new(s.len()), s[0].1.clone())),
             Some(PresentationError::SignatureUnknown),
         ),
         (
             "one not 64 bytes",
-            |s| s[0].1.truncate(63),
+            |_, s| s[0].1.truncate(63),
             Some(PresentationError::SignatureLength),
+        ),
+        (
+            "one under another key",
+            |signs, s| {
+                let other: Signature = testing::key(0x55).sign(signs[0].input());
+                s[0].1 = other.to_bytes().to_vec();
+            },
+            Some(PresentationError::SignatureInvalid),
         ),
     ];
     for (case, edit, refusal) in signatures {
@@ -139,7 +149,7 @@ fn selections_and_signatures_parse_against_the_plan() {
             "the KB-JWT and the DeviceAuthentication"
         );
         let mut signed = sign_all(prepared.signs());
-        edit(&mut signed);
+        edit(prepared.signs(), &mut signed);
         let response = prepared.finish(signed, &TestProver { fail: None }, &mut rng);
         assert_eq!(response.err(), refusal, "{case}");
     }

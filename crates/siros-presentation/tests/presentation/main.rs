@@ -8,8 +8,10 @@
     dead_code
 )]
 
+mod digest;
 mod display;
 mod mdoc;
+mod nym_request;
 mod offers;
 mod refusals;
 mod sd_jwt;

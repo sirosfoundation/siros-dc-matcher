@@ -1,6 +1,6 @@
 //! A9: an offer needs the wallet's display unless every member is presentable without its UI,
 //! the request carries no transaction data, every row shows whole and nothing is left to
-//! choose; a background fulfilment of an offer that needs it is refused with `access_denied`.
+//! choose, neither an addition nor a subset; a background fulfilment of an offer that needs it is refused with `access_denied`.
 
 use serde_json::{json, Value};
 use siros_codec::cbor::Value as Cbor;
@@ -17,6 +17,13 @@ use crate::wallet::{mdoc, nym_auth, ready, sd_jwt, Held, Wallet, MDL, MDL_NS, VC
 fn pid() -> Value {
     json!({"id": "pid", "format": "dc+sd-jwt", "meta": {"vct_values": [VCT]},
         "claims": [{"path": ["given_name"]}]})
+}
+
+/// The `pid` query answered by every matching credential.
+fn every_pid() -> Value {
+    let mut query = pid();
+    query["multiple"] = json!(true);
+    query
 }
 
 fn unsigned(dcql: Value, transaction_data: Option<Vec<String>>) -> VerifiedRequest {
@@ -43,8 +50,8 @@ fn proof(range: &str) -> VerifiedRequest {
     }))
 }
 
-/// The wallet: an SD-JWT VC, an mDL and the nym_auth attestation, each presentable without its
-/// UI when `background`.
+/// The wallet: two SD-JWT VCs, an mDL and the nym_auth attestation, each presentable without
+/// its UI when `background`.
 fn wallet(background: bool) -> Wallet {
     let (data, auxiliary) = nym_auth(&Spec::default());
     let mut nym = Held::new(3, "mso_mdoc", data);
@@ -61,6 +68,7 @@ fn wallet(background: bool) -> Wallet {
             mdoc(MDL, MDL_NS, &[("family_name", Cbor::text("Doe"))]),
         ),
         nym,
+        Held::new(4, "dc+sd-jwt", sd_jwt(VCT, &[("given_name", json!("Max"))])),
     ]);
     wallet.documents.push((VCT.to_owned(), type_metadata()));
     if background {
@@ -119,6 +127,12 @@ fn an_offer_needs_the_wallet_display_unless_a9_holds() {
                     {"options": [["pid"]]}, {"options": [["mdl"]], "required": false}]}),
                 None,
             ),
+            WalletDisplay::Needed,
+        ),
+        (
+            "a subset of a multiple query",
+            true,
+            unsigned(json!({"credentials": [every_pid()]}), None),
             WalletDisplay::Needed,
         ),
         (

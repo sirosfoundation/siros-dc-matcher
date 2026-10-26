@@ -9,17 +9,23 @@ use siros_oid4vp::FetchResponse;
 use siros_presentation::{plan, PlanStep, WalletDisplay};
 
 use crate::verifier::{
-    b64, client_metadata, decrypt_jwe, redirect_unsigned, NONCE, NOW, RESPONSE_URI, STATE,
+    b64, client_metadata, dc_api_signed, decrypt_jwe, redirect_unsigned, NONCE, NOW, RESPONSE_URI,
+    STATE,
 };
 use crate::wallet::{disclosed, holder_signed, ready, respond, sd_jwt, Held, Wallet, VCT};
 
 const PAYMENT: &str = "urn:eudi:sca:payment:1";
 
-/// The payment entry of `transaction_data`, as the verifier sends it.
+/// The payment entry of `transaction_data` naming the query `pid`, as the verifier sends it.
 pub fn payment() -> String {
+    payment_for("pid")
+}
+
+/// The payment entry of `transaction_data` naming the query `query`.
+pub fn payment_for(query: &str) -> String {
     let entry = json!({
         "type": PAYMENT,
-        "credential_ids": ["pid"],
+        "credential_ids": [query],
         "transaction_data_hashes_alg": ["sha-256"],
         "payload": {
             "transaction_id": "tx-0001",
@@ -152,4 +158,29 @@ fn sd_jwt_over_redirect_direct_post_jwt() {
     assert_eq!(record["presentationTimestampSeconds"], NOW);
     let data: Value = serde_json::from_str(record["data"].as_str().unwrap()).unwrap();
     assert_eq!(data, payload["vp_token"]);
+}
+
+/// A6: over the DC API the KB-JWT names the calling origin, a signed request included.
+#[test]
+fn kb_jwt_aud_over_the_dc_api() {
+    let wallet = Wallet::new(vec![Held::new(
+        1,
+        "dc+sd-jwt",
+        sd_jwt(VCT, &[("given_name", json!("Erika"))]),
+    )]);
+    let request = dc_api_signed(&json!({
+        "response_type": "vp_token",
+        "response_mode": "dc_api.jwt",
+        "nonce": NONCE,
+        "client_metadata": client_metadata(),
+        "dcql_query": {"credentials": [{"id": "pid", "format": "dc+sd-jwt",
+            "meta": {"vct_values": [VCT]}, "claims": [{"path": ["given_name"]}]}]}
+    }));
+    let fetches = wallet.fetches(&request);
+    let (_, response) = respond(&wallet.input(&request, &fetches));
+    let payload = decrypt_jwe(response.submission());
+    let sent = payload["vp_token"]["pid"][0].as_str().unwrap();
+    let body = sent.rsplit('~').next().unwrap().split('.').nth(1).unwrap();
+    let claims: Value = serde_json::from_slice(&base64url::decode(body).unwrap()).unwrap();
+    assert_eq!(claims["aud"], "origin:https://verifier.example");
 }
