@@ -13,6 +13,10 @@ this file.
 
 ## Unreleased
 
+### Added
+
+- `resolve`, the §7.1.1 processing over any claim tree that implements `ClaimNode` (with `Lookup`), which `resolve_json` now runs on, and `PathError::code`.
+
 ## 0.11.0 — 2026-10-20
 
 No change to this crate: version bump only, to stay in step with the workspace

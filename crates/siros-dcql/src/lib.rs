@@ -32,5 +32,7 @@ pub use eval::{
     execute, Candidate, Combination, Combinations, Credential, Dropped, ExactFormat, Policy,
     QueryMatch, QueryResult, SelectedClaim,
 };
-pub use path::{mdoc_components, resolve_json, PathComponent, PathError};
+pub use path::{
+    mdoc_components, resolve, resolve_json, ClaimNode, Lookup, PathComponent, PathError,
+};
 pub use query::{ClaimsQuery, CredentialQuery, CredentialSetQuery, DcqlQuery, QueryError};

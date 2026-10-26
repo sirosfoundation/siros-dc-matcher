@@ -1,10 +1,9 @@
-//! Selecting the disclosures that claims path pointers reach (OpenID4VP 1.0, Section 7.1.1;
+//! Selecting the disclosures that claims path pointers reach (OpenID4VP 1.0, Section 7;
 //! RFC 9901, Section 7.2).
 
 use rustc_hash::FxHashSet;
-use siros_dcql::PathComponent;
+use siros_dcql::{resolve, ClaimNode, Lookup, PathComponent, PathError};
 
-use crate::error::SelectError;
 use crate::key_binding::Presentation;
 use crate::sd_jwt::SdJwt;
 use crate::tree::{Claim, ClaimValue, Element, Object};
@@ -17,20 +16,24 @@ impl SdJwt {
     /// Section 7.3 selects a claim "with its sub-claims as the value"). The disclosures follow
     /// the pointers' order, each once. An empty `pointers` gives the issuer JWT alone.
     ///
-    /// A pointer follows OpenID4VP 1.0, Section 7.1.1. An index counts issued positions, and a
+    /// [`siros_dcql::resolve`] walks each pointer. An index counts issued positions, and a
     /// withheld position selects nothing; `null` selects the present elements.
     ///
     /// # Errors
     ///
-    /// [`SelectError`]: a pointer is empty, applies a component to the wrong kind of value, or
+    /// [`PathError`]: a pointer is empty, applies a component to the wrong kind of value, or
     /// selects no present claim.
     pub fn select<P: AsRef<[PathComponent]>>(
         &self,
         pointers: &[P],
-    ) -> Result<Presentation, SelectError> {
+    ) -> Result<Presentation, PathError> {
         let mut chosen = Chosen::default();
         for pointer in pointers {
-            for target in resolve(self.claims(), pointer.as_ref())? {
+            let root = Target {
+                node: Node::Object(self.claims()),
+                path: Vec::new(),
+            };
+            for target in resolve(root, pointer.as_ref())? {
                 for disclosure in target.path {
                     chosen.add(disclosure);
                 }
@@ -47,20 +50,67 @@ impl SdJwt {
     }
 }
 
-/// A selected claim's value and the disclosures on its path, root first.
+/// A node of the claim tree and the disclosures on its path, root first.
 struct Target<'a> {
     node: Node<'a>,
     path: Vec<&'a str>,
 }
 
-impl<'a> Target<'a> {
-    fn descend(&self, claim: &'a Claim) -> Self {
-        let mut path = self.path.clone();
-        path.extend(claim.disclosure_text());
-        Target {
-            node: Node::of(claim.value()),
-            path,
+/// The node of `claim`, below the disclosures `path`.
+fn child<'a>(path: &[&'a str], claim: &'a Claim) -> Target<'a> {
+    let mut path = path.to_vec();
+    path.extend(claim.disclosure_text());
+    Target {
+        node: Node::of(claim.value()),
+        path,
+    }
+}
+
+impl<'a> ClaimNode for Target<'a> {
+    type Elements = Children<'a>;
+
+    fn member(&self, key: &str) -> Lookup<Self> {
+        match self.node {
+            Node::Object(object) => object.get(key).map_or(Lookup::Absent, |claim| {
+                Lookup::Found(child(&self.path, claim))
+            }),
+            _ => Lookup::WrongKind,
         }
+    }
+
+    fn element(&self, index: u64) -> Lookup<Self> {
+        let Node::Array(elements) = self.node else {
+            return Lookup::WrongKind;
+        };
+        match usize::try_from(index).ok().and_then(|i| elements.get(i)) {
+            Some(Element::Present(claim)) => Lookup::Found(child(&self.path, claim)),
+            Some(Element::Withheld) | None => Lookup::Absent,
+        }
+    }
+
+    fn elements(&self) -> Option<Children<'a>> {
+        match self.node {
+            Node::Array(elements) => Some(Children {
+                elements: elements.iter(),
+                path: self.path.clone(),
+            }),
+            _ => None,
+        }
+    }
+}
+
+/// The present elements of an array, as nodes below the array's disclosures.
+struct Children<'a> {
+    elements: std::slice::Iter<'a, Element>,
+    path: Vec<&'a str>,
+}
+
+impl<'a> Iterator for Children<'a> {
+    type Item = Target<'a>;
+
+    fn next(&mut self) -> Option<Target<'a>> {
+        let claim = present(&mut self.elements).next()?;
+        Some(child(&self.path, claim))
     }
 }
 
@@ -82,48 +132,8 @@ impl<'a> Node<'a> {
     }
 }
 
-/// The claims `pointer` selects in `root` (OpenID4VP 1.0, Section 7.1.1).
-fn resolve<'a>(
-    root: &'a Object,
-    pointer: &[PathComponent],
-) -> Result<Vec<Target<'a>>, SelectError> {
-    if pointer.is_empty() {
-        return Err(SelectError::EmptyPointer);
-    }
-    let mut selected = vec![Target {
-        node: Node::Object(root),
-        path: Vec::new(),
-    }];
-    for (at, component) in pointer.iter().enumerate() {
-        let mut next = Vec::new();
-        for target in &selected {
-            match (component, target.node) {
-                (PathComponent::Key(name), Node::Object(object)) => {
-                    next.extend(object.get(name).map(|claim| target.descend(claim)));
-                }
-                (PathComponent::Null, Node::Array(elements)) => {
-                    next.extend(present(elements).map(|claim| target.descend(claim)));
-                }
-                (PathComponent::Index(index), Node::Array(elements)) => {
-                    let element = usize::try_from(*index).ok().and_then(|i| elements.get(i));
-                    if let Some(Element::Present(claim)) = element {
-                        next.push(target.descend(claim));
-                    }
-                }
-                _ => return Err(SelectError::TypeMismatch { at }),
-            }
-        }
-        selected = next;
-    }
-    if selected.is_empty() {
-        Err(SelectError::NothingSelected)
-    } else {
-        Ok(selected)
-    }
-}
-
-fn present(elements: &[Element]) -> impl Iterator<Item = &Claim> {
-    elements.iter().filter_map(|element| match element {
+fn present<'a>(elements: impl Iterator<Item = &'a Element>) -> impl Iterator<Item = &'a Claim> {
+    elements.filter_map(|element| match element {
         Element::Present(claim) => Some(claim),
         Element::Withheld => None,
     })
@@ -147,7 +157,7 @@ impl<'a> Chosen<'a> {
     fn add_within(&mut self, node: Node<'a>) {
         let claims: Vec<&'a Claim> = match node {
             Node::Object(object) => object.members().map(|(_, claim)| claim).collect(),
-            Node::Array(elements) => present(elements).collect(),
+            Node::Array(elements) => present(elements.iter()).collect(),
             Node::Leaf => Vec::new(),
         };
         for claim in claims {

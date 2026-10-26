@@ -1,4 +1,4 @@
-//! Why a stored SD-JWT, a selection or a key binding is refused. Each error has a stable code.
+//! Why a stored SD-JWT or a key binding is refused. Each error has a stable code.
 
 use std::fmt;
 
@@ -56,43 +56,6 @@ impl fmt::Display for ParseError {
 }
 
 impl std::error::Error for ParseError {}
-
-/// Why claims path pointers select no disclosures (OpenID4VP 1.0, Section 7.1.1).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum SelectError {
-    /// A pointer has no component (Section 7).
-    EmptyPointer,
-    /// A key meets a value other than an object, or `null` or an index meets a value other than
-    /// an array.
-    TypeMismatch {
-        /// The position of the component in its pointer.
-        at: usize,
-    },
-    /// A pointer selects no present claim.
-    NothingSelected,
-}
-
-impl SelectError {
-    /// A stable identifier.
-    pub fn code(&self) -> &'static str {
-        match self {
-            Self::EmptyPointer => "pointer_empty",
-            Self::TypeMismatch { .. } => "pointer_type_mismatch",
-            Self::NothingSelected => "pointer_selects_nothing",
-        }
-    }
-}
-
-impl fmt::Display for SelectError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::TypeMismatch { at } => write!(f, "{} at component {at}", self.code()),
-            _ => f.write_str(self.code()),
-        }
-    }
-}
-
-impl std::error::Error for SelectError {}
 
 /// Why claims do not form a KB-JWT payload.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

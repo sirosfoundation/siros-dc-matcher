@@ -68,9 +68,9 @@ fn selection() {
             ]),
         ),
         (r#"[["nationalities", null]]"#, Ok(&["nationalities"])),
-        ("[[]]", Err("pointer_empty")),
-        (r#"[["address", 0]]"#, Err("pointer_type_mismatch")),
-        (r#"[["birth_middle_name"]]"#, Err("pointer_selects_nothing")),
+        ("[[]]", Err("path_malformed")),
+        (r#"[["address", 0]]"#, Err("path_type_mismatch")),
+        (r#"[["birth_middle_name"]]"#, Err("path_selects_nothing")),
     ];
     for (pointers, expected) in rows {
         let expected = expected.map(|labels| labels.iter().map(|l| l.to_string()).collect());
@@ -106,7 +106,7 @@ fn decoy_keeps_array_positions() {
 
     let rows: [(&str, Result<&[&str], &str>); 4] = [
         (r#"[["nationalities", 0]]"#, Ok(&[])),
-        (r#"[["nationalities", 1]]"#, Err("pointer_selects_nothing")),
+        (r#"[["nationalities", 1]]"#, Err("path_selects_nothing")),
         (r#"[["nationalities", 2]]"#, Ok(&[r#"["FR"]"#])),
         (r#"[["nationalities", null]]"#, Ok(&[r#"["FR"]"#])),
     ];
