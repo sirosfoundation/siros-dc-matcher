@@ -2,22 +2,34 @@
 //! in the form of the Response Mode, error submissions (Section 8.5), and the Verifier's reply
 //! to a direct post (Section 8.2).
 
+mod aead;
+mod cose;
 mod jwe;
+mod vp_token;
 
 use std::fmt;
 
 use rand_core::CryptoRngCore;
 use serde_json::{Map, Value};
 
+pub use cose::cose_kdf;
 pub use jwe::concat_kdf;
+pub use vp_token::{Presentation, VpToken};
 
 use crate::error_code::ErrorCode;
-use crate::fetch::{Fetch, FetchResponse, HttpsUrl, Method};
+use crate::fetch::{Fetch, FetchResponse, Method};
 use crate::form;
-use crate::verified::{Channel, VerifiedRequest};
+use crate::verified::{Channel, PostEncoding, VerifiedRequest};
+use vp_token::Answer;
 
 /// The media type the Response URI answers with (Section 8.2).
 const REPLY_MEDIA_TYPE: &str = "application/json";
+
+/// The media type of a form body.
+const FORM: &str = "application/x-www-form-urlencoded";
+
+/// The media type of a `direct_post.cwt` body (`zkp_req.md`, Section 6.2).
+const CWT: &str = "application/cwt";
 
 /// The largest reply to a direct post read, in bytes.
 const MAX_REPLY: usize = 64 * 1024;
@@ -25,8 +37,8 @@ const MAX_REPLY: usize = 64 * 1024;
 /// What the wallet sends the Verifier.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Submission {
-    /// `direct_post` and `direct_post.jwt`: a form POST to the Response URI. Its reply goes to
-    /// [`read_reply`].
+    /// `direct_post`, `direct_post.jwt` and `direct_post.cwt`: a POST to the Response URI. Its
+    /// reply goes to [`read_reply`].
     Post(Fetch),
     /// `dc_api` and `dc_api.jwt`: the `data` object the platform returns to the caller (A.4).
     DcApi(Value),
@@ -52,9 +64,9 @@ pub enum ResponseError {
     NoPresentation,
     /// A `vp_token` entry has several presentations, and its query does not set `multiple`.
     MultipleNotAllowed,
-    /// A presentation is neither a string nor an object (Section 8.1).
-    PresentationNotStringOrObject,
-    /// The JWE could not be produced.
+    /// A CBOR presentation is not one CBOR map.
+    PresentationNotCborMap,
+    /// The JWE or the `COSE_Encrypt` could not be produced.
     EncryptionFailed,
     /// The Response URI answered with a status other than 200 (Section 8.2).
     ReplyStatus,
@@ -75,7 +87,7 @@ impl ResponseError {
             Self::DuplicateQueryId => "duplicate_query_id",
             Self::NoPresentation => "no_presentation",
             Self::MultipleNotAllowed => "multiple_not_allowed",
-            Self::PresentationNotStringOrObject => "presentation_not_string_or_object",
+            Self::PresentationNotCborMap => "presentation_not_cbor_map",
             Self::EncryptionFailed => "encryption_failed",
             Self::ReplyStatus => "reply_status",
             Self::ReplyContentType => "reply_content_type",
@@ -93,59 +105,10 @@ impl fmt::Display for ResponseError {
 
 impl std::error::Error for ResponseError {}
 
-/// A `vp_token` for one verified request (Section 8.1).
-///
-/// Its existence guarantees that each key is the `id` of a Credential Query of the request,
-/// once, with at least one presentation, and exactly one unless the query sets `multiple`;
-/// each presentation is a string or an object.
-#[derive(Debug, Clone)]
-pub struct VpToken<'r> {
-    request: &'r VerifiedRequest,
-    token: Map<String, Value>,
-}
-
 impl VerifiedRequest {
-    /// The `vp_token` of `entries`: the presentations answering each Credential Query, by its
-    /// `id`.
-    ///
-    /// # Errors
-    ///
-    /// [`ResponseError`]: the first rule of Section 8.1 an entry breaks.
-    pub fn vp_token(
-        &self,
-        entries: Vec<(String, Vec<Value>)>,
-    ) -> Result<VpToken<'_>, ResponseError> {
-        let mut token = Map::new();
-        for (id, presentations) in entries {
-            let query = self
-                .dcql_query
-                .credential(&id)
-                .ok_or(ResponseError::UnknownQueryId)?;
-            match presentations.len() {
-                0 => return Err(ResponseError::NoPresentation),
-                1 => {}
-                _ if !query.multiple => return Err(ResponseError::MultipleNotAllowed),
-                _ => {}
-            }
-            if !presentations
-                .iter()
-                .all(|p| matches!(p, Value::String(_) | Value::Object(_)))
-            {
-                return Err(ResponseError::PresentationNotStringOrObject);
-            }
-            if token.insert(id, Value::Array(presentations)).is_some() {
-                return Err(ResponseError::DuplicateQueryId);
-            }
-        }
-        Ok(VpToken {
-            request: self,
-            token,
-        })
-    }
-
     /// The submission refusing this request with `code` (P5: the response target is
-    /// verified). Over redirects it carries `state`; `direct_post.jwt` encrypts it with a key
-    /// and IV from `rng`.
+    /// verified). Over redirects it carries `state`, encrypted as the Response Mode encrypts,
+    /// with a key and IV from `rng`; over the DC API it is `{"error": code}` (A.4).
     ///
     /// # Errors
     ///
@@ -155,24 +118,61 @@ impl VerifiedRequest {
         code: ErrorCode,
         rng: &mut impl CryptoRngCore,
     ) -> Result<Submission, ResponseError> {
-        let mut parameters = Map::new();
-        parameters.insert("error".into(), code.as_str().into());
         match &self.channel {
-            Channel::Redirect { response_uri, .. } => self.post(response_uri, parameters, rng),
+            Channel::Redirect { .. } => self.submit(&Answer::Error(code), rng),
             Channel::DcApi { .. } => Ok(Submission::dc_api_error(code)),
         }
     }
 
-    /// The submission of the response `parameters` in the form of the Response Mode (P4).
+    /// The submission of `answer` in the form of the Response Mode (P4).
     fn submit(
         &self,
-        parameters: Map<String, Value>,
+        answer: &Answer<'_>,
         rng: &mut impl CryptoRngCore,
     ) -> Result<Submission, ResponseError> {
         match &self.channel {
-            Channel::Redirect { response_uri, .. } => self.post(response_uri, parameters, rng),
-            Channel::DcApi { .. } => {
-                let data = match &self.encryption {
+            Channel::Redirect {
+                response_uri,
+                encoding,
+                ..
+            } => {
+                let state = self.state.as_deref();
+                let (content_type, body) = match encoding {
+                    PostEncoding::Form => {
+                        let fields: Vec<(String, String)> = answer
+                            .json(state)
+                            .into_iter()
+                            .map(|(name, value)| match value {
+                                Value::String(text) => (name, text),
+                                other => (name, other.to_string()),
+                            })
+                            .collect();
+                        let pairs: Vec<(&str, &str)> = fields
+                            .iter()
+                            .map(|(name, value)| (name.as_str(), value.as_str()))
+                            .collect();
+                        (FORM, form::encode(&pairs).into_bytes())
+                    }
+                    PostEncoding::Jwe(encryption) => {
+                        let payload = Value::Object(answer.json(state)).to_string();
+                        let jwe = jwe::encrypt(encryption, payload.as_bytes(), rng)?;
+                        (FORM, form::encode(&[("response", &jwe)]).into_bytes())
+                    }
+                    PostEncoding::Cose(encryption) => {
+                        let payload = answer.cbor(state).encode();
+                        (CWT, cose::encrypt(encryption, &payload, rng)?)
+                    }
+                };
+                Ok(Submission::Post(Fetch::new(
+                    response_uri.clone(),
+                    Method::Post { content_type, body },
+                    REPLY_MEDIA_TYPE,
+                    MAX_REPLY,
+                )))
+            }
+            Channel::DcApi { encryption, .. } => {
+                let parameters = answer.json(None);
+                let data = match encryption {
                     None => parameters,
                     Some(encryption) => {
                         let payload = Value::Object(parameters).to_string();
@@ -186,46 +186,6 @@ impl VerifiedRequest {
             }
         }
     }
-
-    /// A form POST to `response_uri` of `parameters` and `state`: each as a form parameter
-    /// for `direct_post`, together in the JWE of `response` for `direct_post.jwt`.
-    fn post(
-        &self,
-        response_uri: &HttpsUrl,
-        mut parameters: Map<String, Value>,
-        rng: &mut impl CryptoRngCore,
-    ) -> Result<Submission, ResponseError> {
-        if let Some(state) = &self.state {
-            parameters.insert("state".into(), state.as_str().into());
-        }
-        let body = match &self.encryption {
-            None => {
-                let fields: Vec<(String, String)> = parameters
-                    .into_iter()
-                    .map(|(name, value)| match value {
-                        Value::String(text) => (name, text),
-                        other => (name, other.to_string()),
-                    })
-                    .collect();
-                let pairs: Vec<(&str, &str)> = fields
-                    .iter()
-                    .map(|(name, value)| (name.as_str(), value.as_str()))
-                    .collect();
-                form::encode(&pairs)
-            }
-            Some(encryption) => {
-                let payload = Value::Object(parameters).to_string();
-                let jwe = jwe::encrypt(encryption, payload.as_bytes(), rng)?;
-                form::encode(&[("response", &jwe)])
-            }
-        };
-        Ok(Submission::Post(Fetch::new(
-            response_uri.clone(),
-            Method::PostForm { body },
-            REPLY_MEDIA_TYPE,
-            MAX_REPLY,
-        )))
-    }
 }
 
 impl VpToken<'_> {
@@ -235,6 +195,7 @@ impl VpToken<'_> {
     /// |---|---|
     /// | `direct_post` | form parameters `vp_token`, `state` |
     /// | `direct_post.jwt` | form parameter `response`: the JWE of `{vp_token, state}` |
+    /// | `direct_post.cwt` | an `application/cwt` body: the `COSE_Encrypt` of the CBOR `{vp_token, state}` |
     /// | `dc_api` | `{vp_token}` |
     /// | `dc_api.jwt` | `{response}`: the JWE of `{vp_token}` |
     ///
@@ -244,9 +205,7 @@ impl VpToken<'_> {
     ///
     /// [`ResponseError::EncryptionFailed`].
     pub fn submission(&self, rng: &mut impl CryptoRngCore) -> Result<Submission, ResponseError> {
-        let mut parameters = Map::new();
-        parameters.insert("vp_token".into(), Value::Object(self.token.clone()));
-        self.request.submit(parameters, rng)
+        self.request.submit(&Answer::VpToken(self), rng)
     }
 }
 

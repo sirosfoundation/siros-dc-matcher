@@ -55,10 +55,12 @@ impl HttpsUrl {
 pub enum Method {
     /// `GET`, without a body.
     Get,
-    /// `POST`, with a body of the content type `application/x-www-form-urlencoded`.
-    PostForm {
-        /// The form-encoded body.
-        body: String,
+    /// `POST`, with a body.
+    Post {
+        /// The `Content-Type` of the body.
+        content_type: &'static str,
+        /// The body.
+        body: Vec<u8>,
     },
 }
 

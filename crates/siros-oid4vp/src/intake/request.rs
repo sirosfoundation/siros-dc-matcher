@@ -6,10 +6,11 @@ use siros_dcql::DcqlQuery;
 
 use super::signature::{strings, Metadata, UriRule, Verifier};
 use super::IntakeError;
+use crate::client_id::ClientId;
 use crate::fetch::HttpsUrl;
 use crate::handover::ec_jwk_thumbprint;
 use crate::jose;
-use crate::verified::{Channel, ContentEncryption, Encryption, VerifiedRequest};
+use crate::verified::{Channel, ContentEncryption, Encryption, PostEncoding, VerifiedRequest};
 
 /// The channel a request arrived on, and who sent it.
 pub(super) enum Arrival<'a> {
@@ -48,22 +49,24 @@ pub(super) fn verified(
                 .to_owned(),
         ),
     };
-    let redirect = matches!(arrival, Arrival::Redirect(_));
-    let encrypted = match (redirect, text("response_mode")) {
-        (true, Some("direct_post")) | (false, Some("dc_api")) => false,
-        (true, Some("direct_post.jwt")) | (false, Some("dc_api.jwt")) => true,
-        _ => return Err(IntakeError::ResponseModeUnsupported),
-    };
-    let (channel, trusted, metadata) = match arrival {
+    let mode = text("response_mode");
+    let (target, trusted, metadata) = match arrival {
         Arrival::Redirect(verifier) => {
-            let response_uri = response_uri(params, &verifier.response_uri)?;
-            let channel = Channel::Redirect {
-                client_id: verifier.client_id,
-                response_uri,
+            let encoding = match mode {
+                Some("direct_post") => Encoding::Form,
+                Some("direct_post.jwt") => Encoding::Jwe,
+                Some("direct_post.cwt") => Encoding::Cose,
+                _ => return Err(IntakeError::ResponseModeUnsupported),
             };
-            (channel, verifier.trusted, verifier.metadata)
+            let target = Target::Redirect {
+                response_uri: response_uri(params, &verifier.response_uri)?,
+                client_id: verifier.client_id,
+                encoding,
+            };
+            (target, verifier.trusted, verifier.metadata)
         }
         Arrival::DcApiSigned { origin, verifier } => {
+            let encrypted = dc_api_encrypted(mode)?;
             let expected = params
                 .get("expected_origins")
                 .and_then(strings)
@@ -72,19 +75,21 @@ pub(super) fn verified(
             if !expected.iter().any(|o| o == origin) {
                 return Err(IntakeError::OriginNotExpected);
             }
-            let channel = Channel::DcApi {
+            let target = Target::DcApi {
                 client_id: Some(verifier.client_id),
-                origin: origin.to_owned(),
+                origin,
+                encrypted,
             };
-            (channel, verifier.trusted, verifier.metadata)
+            (target, verifier.trusted, verifier.metadata)
         }
         // A.2: the Wallet ignores `client_id` and `expected_origins` of an unsigned request.
         Arrival::DcApiUnsigned { origin, trusted } => {
-            let channel = Channel::DcApi {
+            let target = Target::DcApi {
                 client_id: None,
-                origin: origin.to_owned(),
+                origin,
+                encrypted: dc_api_encrypted(mode)?,
             };
-            (channel, trusted, Metadata::Request)
+            (target, trusted, Metadata::Request)
         }
     };
     let (dcql_query, dcql_query_json) = dcql_query(params)?;
@@ -102,14 +107,38 @@ pub(super) fn verified(
             .filter(|e| !e.is_empty())
             .ok_or(IntakeError::TransactionDataInvalid)?,
     };
-    let encryption = if encrypted {
-        Some(encryption(client_metadata.as_ref())?)
-    } else {
-        None
+    let metadata = client_metadata.as_ref();
+    let channel = match target {
+        Target::Redirect {
+            client_id,
+            response_uri,
+            encoding,
+        } => Channel::Redirect {
+            client_id,
+            response_uri,
+            encoding: match encoding {
+                Encoding::Form => PostEncoding::Form,
+                Encoding::Jwe => PostEncoding::Jwe(encryption(metadata, &ContentEncryption::JWE)?),
+                Encoding::Cose => {
+                    PostEncoding::Cose(encryption(metadata, &ContentEncryption::COSE)?)
+                }
+            },
+        },
+        Target::DcApi {
+            client_id,
+            origin,
+            encrypted,
+        } => Channel::DcApi {
+            client_id,
+            origin: origin.to_owned(),
+            encryption: match encrypted {
+                false => None,
+                true => Some(encryption(metadata, &ContentEncryption::JWE)?),
+            },
+        },
     };
     Ok(VerifiedRequest {
         channel,
-        encryption,
         trusted,
         nonce,
         state,
@@ -118,6 +147,36 @@ pub(super) fn verified(
         client_metadata,
         transaction_data,
     })
+}
+
+/// Where the response goes, before its encryption is chosen.
+enum Target<'a> {
+    Redirect {
+        client_id: ClientId,
+        response_uri: HttpsUrl,
+        encoding: Encoding,
+    },
+    DcApi {
+        client_id: Option<ClientId>,
+        origin: &'a str,
+        encrypted: bool,
+    },
+}
+
+/// The body a redirect Response Mode names.
+enum Encoding {
+    Form,
+    Jwe,
+    Cose,
+}
+
+/// Whether a DC API Response Mode encrypts: `dc_api.jwt` does, `dc_api` does not (A.2).
+fn dc_api_encrypted(mode: Option<&str>) -> Result<bool, IntakeError> {
+    match mode {
+        Some("dc_api") => Ok(false),
+        Some("dc_api.jwt") => Ok(true),
+        _ => Err(IntakeError::ResponseModeUnsupported),
+    }
 }
 
 /// ASCII URL-safe characters only, at least one (Section 5.2).
@@ -171,10 +230,14 @@ fn dcql_query(params: &Map<String, Value>) -> Result<(DcqlQuery, Value), IntakeE
     }
 }
 
-/// The key and `enc` of an encrypted response (Section 8.3): the first key of `jwks` that is
-/// a P-256 `ECDH-ES` key for encryption, and the first `enc` of
-/// `encrypted_response_enc_values_supported` this wallet supports, `A128GCM` when absent.
-fn encryption(metadata: Option<&Value>) -> Result<Encryption, IntakeError> {
+/// The key and `enc` of an encrypted response, for a JWE and for a `COSE_Encrypt` alike
+/// (Section 8.3; `zkp_req.md`, Section 6.2): the first key of `jwks` that is a P-256 `ECDH-ES`
+/// key for encryption, and the first value of `encrypted_response_enc_values_supported` among
+/// `supported`, `A128GCM` when the list is absent.
+fn encryption(
+    metadata: Option<&Value>,
+    supported: &[ContentEncryption],
+) -> Result<Encryption, IntakeError> {
     let keys = metadata
         .and_then(|m| m.get("jwks"))
         .and_then(|j| j.get("keys"))
@@ -199,7 +262,8 @@ fn encryption(metadata: Option<&Value>) -> Result<Encryption, IntakeError> {
             .and_then(|values| {
                 values
                     .iter()
-                    .find_map(|v| v.as_str().and_then(ContentEncryption::named))
+                    .filter_map(Value::as_str)
+                    .find_map(|v| supported.iter().copied().find(|e| e.as_str() == v))
             })
             .ok_or(IntakeError::EncryptionUnsupported)?,
     };

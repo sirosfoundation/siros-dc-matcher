@@ -17,8 +17,8 @@ use crate::handover::Handover;
 /// - the host gave a trust verdict for the Client Identifier, or for the origin of an
 ///   unsigned DC API request;
 /// - `nonce` is present;
-/// - the Response Mode belongs to the channel: `direct_post` or `direct_post.jwt` over
-///   redirects, `dc_api` or `dc_api.jwt` over the DC API;
+/// - the Response Mode belongs to the channel: `direct_post`, `direct_post.jwt` or
+///   `direct_post.cwt` over redirects, `dc_api` or `dc_api.jwt` over the DC API;
 /// - a redirect response has a `response_uri`;
 /// - a signed DC API request lists the calling origin in `expected_origins`;
 /// - an encrypted Response Mode has a chosen key and `enc`;
@@ -27,7 +27,6 @@ use crate::handover::Handover;
 #[derive(Debug, Clone)]
 pub struct VerifiedRequest {
     pub(crate) channel: Channel,
-    pub(crate) encryption: Option<Encryption>,
     pub(crate) trusted: bool,
     pub(crate) nonce: String,
     pub(crate) state: Option<String>,
@@ -40,17 +39,30 @@ pub struct VerifiedRequest {
 /// Where the response goes, and who sent the request.
 #[derive(Debug, Clone)]
 pub(crate) enum Channel {
-    /// Redirects: the response is posted to `response_uri`.
+    /// Redirects: the response is posted to `response_uri` in `encoding`.
     Redirect {
         client_id: ClientId,
         response_uri: HttpsUrl,
+        encoding: PostEncoding,
     },
-    /// The DC API: the platform returns the response to `origin`. `client_id` is `None` for an
-    /// unsigned request.
+    /// The DC API: the platform returns the response to `origin`, encrypted for `dc_api.jwt`.
+    /// `client_id` is `None` for an unsigned request.
     DcApi {
         client_id: Option<ClientId>,
         origin: String,
+        encryption: Option<Encryption>,
     },
+}
+
+/// The body of a redirect response.
+#[derive(Debug, Clone)]
+pub(crate) enum PostEncoding {
+    /// `direct_post`: form parameters.
+    Form,
+    /// `direct_post.jwt`: the form parameter `response`, a JWE.
+    Jwe(Encryption),
+    /// `direct_post.cwt`: a `COSE_Encrypt` (`zkp_req.md`, Section 6.2).
+    Cose(Encryption),
 }
 
 /// The Response Mode of a verified request (Sections 8.2, 8.3.1; A.2).
@@ -60,6 +72,8 @@ pub enum ResponseMode {
     DirectPost,
     /// `direct_post.jwt`.
     DirectPostJwt,
+    /// `direct_post.cwt` (`zkp_req.md`, Section 6.2).
+    DirectPostCwt,
     /// `dc_api`.
     DcApi,
     /// `dc_api.jwt`.
@@ -73,37 +87,48 @@ impl ResponseMode {
         match self {
             Self::DirectPost => "direct_post",
             Self::DirectPostJwt => "direct_post.jwt",
+            Self::DirectPostCwt => "direct_post.cwt",
             Self::DcApi => "dc_api",
             Self::DcApiJwt => "dc_api.jwt",
         }
     }
 }
 
-/// The JWE `enc` of an encrypted response (RFC 7518, Section 5.3).
+/// The content encryption of an encrypted response: AES GCM with a 96-bit IV and a 128-bit tag
+/// (RFC 7518, Section 5.3; RFC 9053, Section 4.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ContentEncryption {
     /// `A128GCM`.
     A128Gcm,
+    /// `A192GCM`, for `direct_post.cwt` only.
+    A192Gcm,
     /// `A256GCM`.
     A256Gcm,
 }
 
 impl ContentEncryption {
-    /// The `enc` value.
+    /// What a JWE uses (Section 8.3).
+    pub(crate) const JWE: [Self; 2] = [Self::A128Gcm, Self::A256Gcm];
+
+    /// What a `COSE_Encrypt` uses (`zkp_req.md`, Section 6.2).
+    pub(crate) const COSE: [Self; 3] = [Self::A128Gcm, Self::A192Gcm, Self::A256Gcm];
+
+    /// The name in `encrypted_response_enc_values_supported` and in the JWE `enc`.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Self::A128Gcm => "A128GCM",
+            Self::A192Gcm => "A192GCM",
             Self::A256Gcm => "A256GCM",
         }
     }
 
-    /// The `enc` a value names.
-    pub(crate) fn named(text: &str) -> Option<Self> {
-        match text {
-            "A128GCM" => Some(Self::A128Gcm),
-            "A256GCM" => Some(Self::A256Gcm),
-            _ => None,
+    /// The COSE algorithm value (RFC 9053, Section 4.1).
+    pub(crate) fn cose_alg(self) -> u64 {
+        match self {
+            Self::A128Gcm => 1,
+            Self::A192Gcm => 2,
+            Self::A256Gcm => 3,
         }
     }
 
@@ -111,6 +136,7 @@ impl ContentEncryption {
     pub(crate) fn key_bits(self) -> u32 {
         match self {
             Self::A128Gcm => 128,
+            Self::A192Gcm => 192,
             Self::A256Gcm => 256,
         }
     }
@@ -119,6 +145,7 @@ impl ContentEncryption {
     pub(crate) fn key_len(self) -> usize {
         match self {
             Self::A128Gcm => 16,
+            Self::A192Gcm => 24,
             Self::A256Gcm => 32,
         }
     }
@@ -190,6 +217,7 @@ impl VerifiedRequest {
             Channel::DcApi {
                 client_id: None,
                 origin,
+                ..
             } => (None, origin.as_str()),
         };
         VerifierView {
@@ -211,11 +239,16 @@ impl VerifiedRequest {
     /// The Response Mode.
     #[must_use]
     pub fn response_mode(&self) -> ResponseMode {
-        match (&self.channel, self.encryption.is_some()) {
-            (Channel::Redirect { .. }, false) => ResponseMode::DirectPost,
-            (Channel::Redirect { .. }, true) => ResponseMode::DirectPostJwt,
-            (Channel::DcApi { .. }, false) => ResponseMode::DcApi,
-            (Channel::DcApi { .. }, true) => ResponseMode::DcApiJwt,
+        match &self.channel {
+            Channel::Redirect { encoding, .. } => match encoding {
+                PostEncoding::Form => ResponseMode::DirectPost,
+                PostEncoding::Jwe(_) => ResponseMode::DirectPostJwt,
+                PostEncoding::Cose(_) => ResponseMode::DirectPostCwt,
+            },
+            Channel::DcApi { encryption, .. } => match encryption {
+                None => ResponseMode::DcApi,
+                Some(_) => ResponseMode::DcApiJwt,
+            },
         }
     }
 
@@ -231,7 +264,13 @@ impl VerifiedRequest {
     /// The response encryption of an encrypted Response Mode.
     #[must_use]
     pub fn encryption(&self) -> Option<&Encryption> {
-        self.encryption.as_ref()
+        match &self.channel {
+            Channel::Redirect { encoding, .. } => match encoding {
+                PostEncoding::Form => None,
+                PostEncoding::Jwe(encryption) | PostEncoding::Cose(encryption) => Some(encryption),
+            },
+            Channel::DcApi { encryption, .. } => encryption.as_ref(),
+        }
     }
 
     /// `nonce`.
@@ -277,11 +316,12 @@ impl VerifiedRequest {
     /// `null`.
     #[must_use]
     pub fn handover(&self) -> Handover {
-        let thumbprint = self.encryption.as_ref().map(|e| &e.thumbprint);
+        let thumbprint = self.encryption().map(|e| &e.thumbprint);
         match &self.channel {
             Channel::Redirect {
                 client_id,
                 response_uri,
+                ..
             } => Handover::redirect(
                 client_id.as_str(),
                 &self.nonce,
