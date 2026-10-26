@@ -25,7 +25,7 @@ enum Input {
     /// A `transaction_data` string, against the query of the tests.
     Entry(String),
     /// The type metadata fetch of a credential.
-    Fetch(Credential),
+    Fetch(Box<Credential>),
     /// A response to the type metadata fetch of the SD-JWT VC with this payload.
     Metadata(Value, FetchResponse),
     /// Entries bound to the SD-JWT VC with this payload, presented for `pay`, with the type
