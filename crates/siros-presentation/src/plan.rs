@@ -110,7 +110,7 @@ pub fn plan<'a>(input: &PlanInput<'a>) -> Result<PlanStep<'a>, PresentationError
         policy,
     )
     .answer(|credential, zkp| {
-        let (attestation, seed) = tested(credential, input.now)?;
+        let (attestation, seed) = tested(credential, zkp, input.now)?;
         zkp.choices().iter().position(|choice| {
             zkp.pair(choice)
                 .is_some_and(|pair| NymAnswer::new(pair, attestation.clone(), &seed).is_ok())
@@ -211,20 +211,29 @@ pub(crate) fn nym_answer<'z>(
     choice: &ProofChoice,
     now: DateTime,
 ) -> Option<NymAnswer<'z>> {
-    let (attestation, seed) = tested(credential, now)?;
+    let (attestation, seed) = tested(credential, zkp, now)?;
     NymAnswer::new(zkp.pair(choice)?, attestation, &seed).ok()
 }
 
-/// The usable attestation of `credential`'s mdoc at `now`, and the `secret_seed` its issuer
-/// delivered.
+/// The usable attestation of `credential`'s mdoc for `zkp` at `now`, and the `secret_seed` its
+/// issuer delivered.
 fn tested(
     credential: &UsableCredential<'_>,
+    zkp: &ZkpQuery,
     now: DateTime,
 ) -> Option<(UsableAttestation, Zeroizing<[u8; 16]>)> {
     let Parsed::Mdoc(mdoc) = credential.credential().parsed() else {
         return None;
     };
-    let attestation = UsableAttestation::of(mdoc, None, now).ok()?;
+    // No input resolves `trusted_authorities` to anchors: a query that names authorities finds
+    // every issuer untrusted.
+    let anchors = zkp
+        .query()
+        .query()
+        .trusted_authorities
+        .as_ref()
+        .map(|_| &[][..]);
+    let attestation = UsableAttestation::of(mdoc, anchors, now).ok()?;
     let seed = seed::delivered(credential.credential()).ok()?;
     Some((attestation, seed))
 }
