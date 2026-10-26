@@ -1,7 +1,8 @@
 //! The display of a TS12 entry (EC TS12 v1.0.1, Sections 3.3.1 to 3.3.3).
 
 use serde_json::Value as JsonValue;
-use siros_display::{choose, DisplayText, Locale};
+use siros_codec::date::Date;
+use siros_display::{DisplayText, Locale};
 
 use crate::error::TransactionDataError;
 use crate::json::{Json, Number};
@@ -27,6 +28,8 @@ enum LeafValue {
     Text(String),
     Number(String),
     Boolean(bool),
+    Date(Date),
+    Image(String),
     Frequency(Frequency),
 }
 
@@ -54,6 +57,20 @@ impl Leaves {
     pub(crate) fn optional_text(&mut self, name: &str, value: Option<&str>) {
         if let Some(value) = value {
             self.text(name, value, None);
+        }
+    }
+
+    /// The date member `name`, when present.
+    pub(crate) fn optional_date(&mut self, name: &str, value: Option<Date>) {
+        if let Some(value) = value {
+            self.push(name, LeafValue::Date(value), None);
+        }
+    }
+
+    /// The image URL member `name`, when present.
+    pub(crate) fn optional_image(&mut self, name: &str, value: Option<&str>) {
+        if let Some(value) = value {
+            self.push(name, LeafValue::Image(value.to_owned()), None);
         }
     }
 
@@ -146,7 +163,9 @@ fn compact(value: &Json, out: &mut String) {
 ///
 /// A leaf takes the `visualisation` of its claim metadata, 3 when unset, raised to its floor.
 /// It needs a localised name, except one the metadata marks 4, which is left out without one
-/// (Section 3.3.1). The rows go by level, in schema order within a level.
+/// (Section 3.3.1). The rows go by level, in schema order within a level. The required UI
+/// element, `affirmative_action_label`, needs a localised label; an optional one without a
+/// localised label is absent.
 pub(crate) fn view(
     transaction_type: &'static str,
     leaves: Leaves,
@@ -160,7 +179,7 @@ pub(crate) fn view(
             .and_then(|c| c.level())
             .unwrap_or(Level::Supplementary);
         let level = leaf.floor.map_or(set, |floor| set.min(floor));
-        let Some(label) = claim.and_then(|c| choose(preferences, c.labels())) else {
+        let Some(label) = claim.and_then(|c| localised(preferences, c.labels())) else {
             if claim.is_some() && level == Level::Omittable {
                 continue;
             }
@@ -171,7 +190,7 @@ pub(crate) fn view(
     rows.sort_by_key(Row::level);
     let ui = &metadata.ui_labels;
     let labels = Labels {
-        affirmative: choose(preferences, &ui.affirmative)
+        affirmative: localised(preferences, &ui.affirmative)
             .ok_or(TransactionDataError::AffirmativeLabelMissing)
             .and_then(shown)?,
         denial: optional(preferences, &ui.denial)?,
@@ -181,12 +200,31 @@ pub(crate) fn view(
     Ok(TransactionView::new(transaction_type, labels, rows))
 }
 
-/// The label for `preferences` among `labels`, when there is one.
+/// The localised label among `labels`, when there is one.
 fn optional(
     preferences: &[Locale],
     labels: &[Label],
 ) -> Result<Option<DisplayText>, TransactionDataError> {
-    choose(preferences, labels).map(shown).transpose()
+    localised(preferences, labels).map(shown).transpose()
+}
+
+/// The label localised for the user's `preferences`, most preferred first (Section 3.3.1): for
+/// each preference in order, the label of its exact tag, else a label of its primary language.
+/// Without one, the label is unavailable.
+fn localised<'a>(preferences: &[Locale], labels: &'a [Label]) -> Option<&'a Label> {
+    preferences.iter().find_map(|wanted| {
+        labels
+            .iter()
+            .find(|label| label.locale() == wanted)
+            .or_else(|| {
+                labels.iter().find(|label| {
+                    label
+                        .locale()
+                        .primary_language()
+                        .eq_ignore_ascii_case(wanted.primary_language())
+                })
+            })
+    })
 }
 
 /// `label` as display text.
@@ -204,6 +242,8 @@ impl LeafValue {
             Self::Text(value) => RowValue::Text(text(&value)?),
             Self::Number(value) => RowValue::Number(text(&value)?),
             Self::Boolean(b) => RowValue::Boolean(b),
+            Self::Date(date) => RowValue::Date(date),
+            Self::Image(url) => RowValue::Image(url),
             Self::Frequency(f) => RowValue::Frequency(f),
         })
     }

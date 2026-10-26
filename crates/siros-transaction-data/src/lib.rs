@@ -9,14 +9,15 @@
 //! | T3: the B.3.3.1 hashes, over each entry as received, one algorithm per credential | [`bind`], [`MemberBinding::kb_jwt_claims`], [`HashAlg`] |
 //! | T4: an entry binds to the first of its `credential_ids` the chosen offer answers with a credential the type authorizes | [`bind`], [`Presented`] |
 //! | T5: no binding under `require_cryptographic_holder_binding: false` | [`Entry::parse`] refuses such a query (B.3.3) |
-//! | T6: the four TS12 types, SD-JWT VC only, typed payloads, hashes plus `jti`, `response_mode`, `amr`, display failing closed | [`Entry::parse`], [`KbJwtInputs`], [`Amr`], [`MemberBinding::views`] |
+//! | T6: the four TS12 types, SD-JWT VC only, payloads typed by their schemas and TS12's prose, hashes plus `jti`, `response_mode`, `amr`, display failing closed in the user's language | [`Entry::parse`], [`KbJwtInputs`], [`Amr`], [`MemberBinding::views`] |
 //! | T7: type metadata and referenced documents as host fetches under H1 | [`ScaMetadata::fetch`], [`Step::Fetch`], [`Fetched`] |
 //!
 //! Every refusal is a [`TransactionDataError`], which reaches the verifier as
 //! `invalid_transaction_data` (Section 8.5).
 //!
 //! A presentation with transaction data goes through these steps:
-//! 1. [`Entry::parse`] each string of the request's `transaction_data` against its DCQL query.
+//! 1. [`Entry::parse`] each string of the request's `transaction_data` against its DCQL query,
+//!    at the time of the request.
 //! 2. For each SD-JWT VC that answers a query some entry names, have the host perform
 //!    [`ScaMetadata::fetch`] and read the response with [`ScaMetadata::parse`].
 //! 3. For each offer, [`bind`] the entries to the credentials it presents.

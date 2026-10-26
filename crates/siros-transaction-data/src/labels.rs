@@ -2,7 +2,7 @@
 //! Section 3.3.2) and its UI elements catalogue (Section 3.3.3).
 
 use rustc_hash::FxHashSet;
-use siros_display::{Locale, Localized};
+use siros_display::Locale;
 
 use crate::error::TransactionDataError;
 use crate::json::{Fields, Json};
@@ -33,13 +33,12 @@ pub(crate) struct Label {
     text: String,
 }
 
-impl Localized for Label {
-    fn locale(&self) -> Option<&Locale> {
-        Some(&self.locale)
-    }
-}
-
 impl Label {
+    /// The language tag.
+    pub(crate) fn locale(&self) -> &Locale {
+        &self.locale
+    }
+
     /// The text.
     pub(crate) fn text(&self) -> &str {
         &self.text

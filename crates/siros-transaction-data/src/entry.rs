@@ -1,6 +1,7 @@
 //! An entry of the `transaction_data` request parameter (T1; OpenID4VP 1.0, Section 5.1).
 
 use siros_codec::base64url;
+use siros_codec::date::DateTime;
 use siros_credential::Format;
 use siros_dcql::DcqlQuery;
 
@@ -18,18 +19,23 @@ pub struct Entry {
 
 impl Entry {
     /// The entry `raw`, a string of the request's `transaction_data` array, against the
-    /// request's `query`.
+    /// request's `query`, at the time `now`.
     ///
     /// `raw` is base64url of a JSON object that repeats no member name in any object, with a
     /// string `type` and a non-empty array `credential_ids` of Credential Query ids of
     /// `query`. Its other members belong to its type, which refuses one it does not define.
     /// Each Credential Query named is of the format of the credentials that can authorize the
-    /// type, and an SD-JWT VC query requires cryptographic holder binding (B.3.3).
+    /// type, and an SD-JWT VC query requires cryptographic holder binding (B.3.3). A rule of the
+    /// type that depends on the time holds at `now`.
     ///
     /// # Errors
     ///
     /// [`TransactionDataError`]: the first rule `raw` breaks.
-    pub fn parse(raw: &str, query: &DcqlQuery) -> Result<Self, TransactionDataError> {
+    pub fn parse(
+        raw: &str,
+        query: &DcqlQuery,
+        now: DateTime,
+    ) -> Result<Self, TransactionDataError> {
         let bytes = base64url::decode(raw).ok_or(TransactionDataError::NotBase64url)?;
         let text = String::from_utf8(bytes).map_err(|_| TransactionDataError::NotJsonObject)?;
         let object = match Json::parse(&text) {
@@ -41,7 +47,7 @@ impl Entry {
         let mut fields = object.into_fields();
         let identifier = json::text(fields.require("type", "type")?, "type")?;
         let credential_ids = credential_ids(fields.require("credential_ids", "credential_ids")?)?;
-        let body = kind::parse(&identifier, fields)?;
+        let body = kind::parse(&identifier, fields, now)?;
         for id in &credential_ids {
             let credential = query
                 .credential(id)

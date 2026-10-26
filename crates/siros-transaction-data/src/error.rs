@@ -27,6 +27,8 @@ pub enum TransactionDataError {
     InvalidValue(&'static str),
     /// The entry or its payload holds a member its type does not define (Section 8.5).
     UnknownMember,
+    /// A member is present where its type forbids it (Section 8.5).
+    MemberNotAllowed(&'static str),
     /// `type` names no supported transaction data type (Sections 5.1 and 8.5).
     UnsupportedType,
     /// A `credential_ids` element names no Credential Query of the DCQL query (Sections 5.1
@@ -96,6 +98,7 @@ impl TransactionDataError {
             Self::WrongType(_) => "transaction_data_member_wrong_type",
             Self::InvalidValue(_) => "transaction_data_member_invalid",
             Self::UnknownMember => "transaction_data_member_unknown",
+            Self::MemberNotAllowed(_) => "transaction_data_member_not_allowed",
             Self::UnsupportedType => "transaction_data_type_unsupported",
             Self::UnknownCredentialId => "transaction_data_credential_id_unknown",
             Self::QueryFormat => "transaction_data_query_format",
@@ -133,6 +136,7 @@ impl fmt::Display for TransactionDataError {
             Self::MissingMember(member)
             | Self::WrongType(member)
             | Self::InvalidValue(member)
+            | Self::MemberNotAllowed(member)
             | Self::MetadataMalformed(member) => write!(f, "{}: {member}", self.code()),
             _ => f.write_str(self.code()),
         }

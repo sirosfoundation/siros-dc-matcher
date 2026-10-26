@@ -13,8 +13,8 @@ use siros_oid4vp::FetchResponse;
 use siros_transaction_data::{bind, Amr, Entry, Factor, Fetched, Presented, ScaMetadata, Step};
 
 use crate::common::{
-    card, encode, entry, inline_payment_type, payment, query, response, sd_jwt_vc, type_metadata,
-    with, PAYMENT,
+    card, encode, encode_payload, entry, inline_payment_type, now, payment, query, response,
+    sd_jwt_vc, type_metadata, with, PAYMENT,
 };
 use crate::fixtures::payloads;
 
@@ -48,7 +48,9 @@ enum Input {
 
 fn outcome(input: Input) -> Result<(), &'static str> {
     match input {
-        Input::Entry(raw) => Entry::parse(&raw, &query()).map(drop).map_err(|e| e.code()),
+        Input::Entry(raw) => Entry::parse(&raw, &query(), now())
+            .map(drop)
+            .map_err(|e| e.code()),
         Input::Fetch(credential) => ScaMetadata::fetch(&credential)
             .map(drop)
             .map_err(|e| e.code()),
@@ -83,7 +85,7 @@ fn views(
 ) -> Result<(), &'static str> {
     let entries: Vec<Entry> = entries
         .iter()
-        .map(|e| Entry::parse(&encode(e), &query()).unwrap())
+        .map(|e| Entry::parse(&encode(e), &query(), now()).unwrap())
         .collect();
     let credential = sd_jwt_vc(card);
     let metadata = ScaMetadata::parse(&credential, &response(metadata)).map_err(|e| e.code())?;
@@ -157,7 +159,7 @@ fn each_rule_is_refused_alone() {
     for fixture in payloads() {
         table.push((
             fixture.case,
-            Input::Entry(encode(&entry(fixture.transaction_type, fixture.payload))),
+            Input::Entry(encode_payload(fixture.transaction_type, &fixture.payload)),
             fixture.expected,
         ));
     }

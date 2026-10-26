@@ -241,7 +241,7 @@ pub(crate) fn optional<T>(
     fields: &mut Fields,
     name: &str,
     path: &'static str,
-    read: fn(Json, &'static str) -> Result<T, TransactionDataError>,
+    read: impl FnOnce(Json, &'static str) -> Result<T, TransactionDataError>,
 ) -> Result<Option<T>, TransactionDataError> {
     fields.take(name).map(|value| read(value, path)).transpose()
 }

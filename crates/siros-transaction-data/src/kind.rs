@@ -1,6 +1,7 @@
 //! The transaction data types (T2): what each type owns, and the registry of the supported
 //! ones.
 
+use siros_codec::date::DateTime;
 use siros_credential::Format;
 use siros_display::Locale;
 
@@ -37,8 +38,9 @@ pub(crate) trait TransactionType {
     ) -> Result<TransactionView, TransactionDataError>;
 }
 
-/// The parser of a type: from the members of an entry besides `type` and `credential_ids`.
-type Parse = fn(Fields) -> Result<Box<dyn TransactionType>, TransactionDataError>;
+/// The parser of a type: from the members of an entry besides `type` and `credential_ids`, at
+/// the time of the request.
+type Parse = fn(Fields, DateTime) -> Result<Box<dyn TransactionType>, TransactionDataError>;
 
 /// The supported types (T6).
 const REGISTRY: [(&str, Parse); 4] = [
@@ -48,7 +50,7 @@ const REGISTRY: [(&str, Parse); 4] = [
     (Emandate::TYPE, Ts12::<Emandate>::parse),
 ];
 
-/// The entry of type `identifier` of `fields`.
+/// The entry of type `identifier` of `fields`, at the time `now`.
 ///
 /// # Errors
 ///
@@ -57,12 +59,13 @@ const REGISTRY: [(&str, Parse); 4] = [
 pub(crate) fn parse(
     identifier: &str,
     fields: Fields,
+    now: DateTime,
 ) -> Result<Box<dyn TransactionType>, TransactionDataError> {
     let (_, parse) = REGISTRY
         .iter()
         .find(|(supported, _)| *supported == identifier)
         .ok_or(TransactionDataError::UnsupportedType)?;
-    parse(fields)
+    parse(fields, now)
 }
 
 /// The supported type named `identifier`.

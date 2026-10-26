@@ -125,8 +125,37 @@ pub(super) fn rows() -> Vec<Row> {
         ),
         // The display of TS12 Section 3.3.
         (
-            "an honest display",
+            "an honest display, its labels in the user's primary language",
             display(honest_metadata.clone()),
+            Ok(()),
+        ),
+        (
+            "a parameter name in another language only (TS12 Section 3.3.1)",
+            display(claims(json!([
+                claim(&["transaction_id"], "Transaction ID", None),
+                claim(&["payee", "name"], "Payee", None),
+                claim(&["payee", "id"], "Payee ID", None),
+                claim(&["currency"], "Currency", None),
+                {"path": ["payload", "amount"], "display": [{"lang": "fr", "label": "Montant"}]}
+            ]))),
+            Err("transaction_display_label_missing"),
+        ),
+        (
+            "an affirmative_action_label in another language only (TS12 Section 3.3.1)",
+            display(listing(with(
+                inline_payment_type(),
+                json!({"ui_labels": {"affirmative_action_label":
+                    [{"lang": "fr", "value": "Confirmer le paiement"}]}}),
+            ))),
+            Err("transaction_display_affirmative_label_missing"),
+        ),
+        (
+            "a denial_action_label in another language only: the wallet labels the control",
+            display(listing(with(
+                inline_payment_type(),
+                json!({"ui_labels": with(ui_labels(), json!({"denial_action_label":
+                    [{"lang": "fr", "value": "Annuler"}]}))}),
+            ))),
             Ok(()),
         ),
         (

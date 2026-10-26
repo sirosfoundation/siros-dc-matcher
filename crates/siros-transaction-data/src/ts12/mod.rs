@@ -4,10 +4,13 @@
 //! of the TS12 repository): `additionalProperties: false` at the top, open nested objects, and
 //! `format` an annotation only, as JSON Schema 2020-12 has it.
 
+mod currency;
 mod display;
 mod payloads;
 mod payment;
+mod rules;
 
+use siros_codec::date::DateTime;
 use siros_credential::Format;
 use siros_display::Locale;
 
@@ -35,8 +38,8 @@ pub(crate) trait Payload: Sized + 'static {
     /// The `type` value.
     const TYPE: &'static str;
 
-    /// The payload of the members of the `payload` object.
-    fn parse(fields: Fields) -> Result<Self, TransactionDataError>;
+    /// The payload of the members of the `payload` object, at the time `now`.
+    fn parse(fields: Fields, now: DateTime) -> Result<Self, TransactionDataError>;
 
     /// Its leaf parameters, in the order of its schema (Section 3.3.1).
     fn leaves(&self, leaves: &mut Leaves);
@@ -49,16 +52,17 @@ pub(crate) struct Ts12<P> {
 }
 
 impl<P: Payload> Ts12<P> {
-    /// The entry of the members besides `type` and `credential_ids`: `transaction_data_hashes_alg`
-    /// and `payload`, both required (Section 4.2).
+    /// The entry of the members besides `type` and `credential_ids`, at the time `now`:
+    /// `transaction_data_hashes_alg` and `payload`, both required (Section 4.2).
     pub(crate) fn parse(
         mut fields: Fields,
+        now: DateTime,
     ) -> Result<Box<dyn TransactionType>, TransactionDataError> {
         let accepted = Accepted::parse(Some(fields.require(HASHES_ALG, HASHES_ALG)?))?;
-        let payload = P::parse(json::object(
-            fields.require("payload", "payload")?,
-            "payload",
-        )?)?;
+        let payload = P::parse(
+            json::object(fields.require("payload", "payload")?, "payload")?,
+            now,
+        )?;
         fields.finish()?;
         Ok(Box::new(Self { accepted, payload }))
     }

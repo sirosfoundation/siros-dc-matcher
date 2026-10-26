@@ -1,5 +1,6 @@
 //! What the consent screen shows for one transaction (EC TS12 v1.0.1, Section 3.3).
 
+use siros_codec::date::Date;
 use siros_display::DisplayText;
 
 /// The display of one transaction data entry: the UI elements of its type (Section 3.3.3) and
@@ -112,6 +113,10 @@ pub enum RowValue {
     Number(DisplayText),
     /// A boolean.
     Boolean(bool),
+    /// A calendar date.
+    Date(Date),
+    /// The URL of an image, for the UI to show: `http`, `https` or `data` (RFC 2397).
+    Image(String),
     /// A recurrence frequency, which the wallet names in the user's language (Section 4.3.1).
     Frequency(Frequency),
 }

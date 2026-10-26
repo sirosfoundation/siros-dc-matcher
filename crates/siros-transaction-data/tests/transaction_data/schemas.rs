@@ -1,12 +1,13 @@
 //! The payload parsers against the TS12 schemas of `tests/ts12-schemas` (see
-//! `tests/ts12-schemas/SOURCE`): on every payload fixture, an entry of the payload parses
-//! exactly when the schema of its type accepts the payload.
+//! `tests/ts12-schemas/SOURCE`). On every payload fixture, a payload the parser accepts is one
+//! its schema accepts. A payload the schema accepts and the parser refuses breaks a rule of
+//! TS12's prose, which the fixture names.
 
 use jsonschema::{Resource, Validator};
 use serde_json::Value;
 use siros_transaction_data::Entry;
 
-use crate::common::{encode, entry, query, ACCESS, LOGIN, MANDATE, PAYMENT};
+use crate::common::{encode_payload, now, query, ACCESS, LOGIN, MANDATE, PAYMENT};
 use crate::fixtures::payloads;
 
 const PAYMENT_SCHEMA: &str =
@@ -28,7 +29,7 @@ fn validator(text: &str) -> Validator {
 }
 
 #[test]
-fn the_parsers_accept_what_the_schemas_accept() {
+fn the_parsers_accept_only_what_the_schemas_accept() {
     let schemas = [
         (PAYMENT, validator(PAYMENT_SCHEMA)),
         (
@@ -55,9 +56,20 @@ fn the_parsers_accept_what_the_schemas_accept() {
             .iter()
             .find(|(t, _)| *t == fixture.transaction_type)
             .unwrap();
-        let schema_accepts = schema.is_valid(&fixture.payload);
-        let raw = encode(&entry(fixture.transaction_type, fixture.payload));
-        let parser_accepts = Entry::parse(&raw, &query()).is_ok();
-        assert_eq!(parser_accepts, schema_accepts, "{}", fixture.case);
+        let payload: Value = serde_json::from_str(&fixture.payload).unwrap();
+        let schema_accepts = schema.is_valid(&payload);
+        let raw = encode_payload(fixture.transaction_type, &fixture.payload);
+        let parser_accepts = Entry::parse(&raw, &query(), now()).is_ok();
+        let case = fixture.case;
+        assert!(
+            schema_accepts || !parser_accepts,
+            "{case}: accepted, schema refuses"
+        );
+        assert_eq!(
+            schema_accepts && !parser_accepts,
+            fixture.prose.is_some(),
+            "{case}: the prose rule named is {:?}",
+            fixture.prose
+        );
     }
 }

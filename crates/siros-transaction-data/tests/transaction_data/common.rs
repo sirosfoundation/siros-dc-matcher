@@ -4,6 +4,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use siros_codec::base64url;
 use siros_codec::cbor::Value as Cbor;
+use siros_codec::date::DateTime;
 use siros_credential::Credential;
 use siros_dcql::DcqlQuery;
 use siros_oid4vp::FetchResponse;
@@ -31,6 +32,21 @@ pub fn query() -> DcqlQuery {
         .to_string(),
     )
     .unwrap()
+}
+
+/// The time of the tests' requests.
+pub fn now() -> DateTime {
+    DateTime::parse("2026-10-26T12:00:00Z").unwrap()
+}
+
+/// The entry of `transaction_type` with the payload of the JSON text `payload`, naming `pay` and
+/// accepting SHA-256, as a verifier sends it.
+pub fn encode_payload(transaction_type: &str, payload: &str) -> String {
+    let text = format!(
+        r#"{{"type":{},"credential_ids":["pay"],"transaction_data_hashes_alg":["sha-256"],"payload":{payload}}}"#,
+        Value::from(transaction_type)
+    );
+    base64url::encode(text.as_bytes())
 }
 
 /// base64url of the JSON text of `entry`, as a verifier sends it.
