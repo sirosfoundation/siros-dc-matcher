@@ -195,10 +195,29 @@ const MINOR_UNITS: [(&str, Minor); 178] = [
     ("ZWG", Minor::Digits(2)),
 ];
 
-/// The minor unit of the ISO 4217 code `code`; `None` for a code the list lacks.
-pub(crate) fn minor_unit(code: &str) -> Option<Minor> {
-    MINOR_UNITS
-        .iter()
-        .find(|(listed, _)| *listed == code)
-        .map(|(_, digits)| *digits)
+/// An ISO 4217 alphabetic code of the list, with its minor unit.
+#[derive(Clone, Copy)]
+pub(crate) struct CurrencyCode {
+    code: &'static str,
+    minor: Minor,
+}
+
+impl CurrencyCode {
+    /// The code `code`; `None` for a code the list lacks.
+    pub(crate) fn of(code: &str) -> Option<Self> {
+        MINOR_UNITS
+            .iter()
+            .find(|(listed, _)| *listed == code)
+            .map(|&(code, minor)| Self { code, minor })
+    }
+
+    /// The code.
+    pub(crate) fn as_str(self) -> &'static str {
+        self.code
+    }
+
+    /// The minor unit.
+    pub(crate) fn minor(self) -> Minor {
+        self.minor
+    }
 }

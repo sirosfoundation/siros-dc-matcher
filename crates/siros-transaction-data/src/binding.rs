@@ -2,7 +2,7 @@
 //! credential add to its presentation (T3; OpenID4VP 1.0, Section 8.4).
 
 use serde_json::Value;
-use siros_codec::base64url;
+use siros_codec::base64url::{self, Base64Url};
 use siros_credential::Credential;
 use siros_dcql::QueryId;
 use siros_display::Locale;
@@ -11,7 +11,7 @@ use siros_oid4vp::ResponseMode;
 use crate::amr::Amr;
 use crate::entry::Entry;
 use crate::error::TransactionDataError;
-use crate::hash::{Accepted, Choice};
+use crate::hash::{Accepted, AlgClaim, Choice};
 use crate::metadata::{Fetched, ScaMetadata, Step};
 use crate::view::TransactionView;
 
@@ -36,6 +36,17 @@ pub(crate) enum KbJwtClaim {
 
 /// The order of the required claims in a KB-JWT.
 const CLAIM_ORDER: [KbJwtClaim; 3] = [KbJwtClaim::Jti, KbJwtClaim::ResponseMode, KbJwtClaim::Amr];
+
+impl KbJwtClaim {
+    /// The claim's name and its value of `inputs`.
+    fn of(self, inputs: &KbJwtInputs) -> (&'static str, Value) {
+        match self {
+            Self::Jti => ("jti", inputs.jti.as_str().into()),
+            Self::ResponseMode => ("response_mode", inputs.response_mode.as_str().into()),
+            Self::Amr => ("amr", inputs.amr.claim()),
+        }
+    }
+}
 
 /// A credential the chosen offer presents for a Credential Query, with its SCA Attestation
 /// metadata.
@@ -92,25 +103,26 @@ pub fn bind<'e, 'a>(
     entries: &'e [Entry],
     offer: &[Presented<'a>],
 ) -> Result<Vec<MemberBinding<'e, 'a>>, TransactionDataError> {
-    let mut bound: Vec<(usize, Vec<&'e Entry>)> = Vec::new();
-    for entry in entries {
-        let at = authorizing(entry, offer).ok_or(TransactionDataError::CredentialUnavailable)?;
-        match bound.iter_mut().find(|(member, _)| *member == at) {
-            Some((_, entries)) => entries.push(entry),
-            None => bound.push((at, vec![entry])),
-        }
-    }
-    bound.sort_by_key(|(member, _)| *member);
-    bound
-        .into_iter()
-        .map(|(member, entries)| {
-            let presented = offer
-                .get(member)
-                .copied()
-                .ok_or(TransactionDataError::CredentialUnavailable)?;
+    let mut placed = entries
+        .iter()
+        .map(|entry| {
+            authorizing(entry, offer)
+                .map(|placed| (placed, entry))
+                .ok_or(TransactionDataError::CredentialUnavailable)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    // Stable: the entries of one credential stay in the order of the request.
+    placed.sort_by_key(|(placed, _)| placed.position);
+    placed
+        .chunk_by(|(a, _), (b, _)| a.position == b.position)
+        .map(|group| {
+            let entries: Vec<&'e Entry> = group.iter().map(|(_, entry)| *entry).collect();
             let accepted: Vec<&Accepted> = entries.iter().map(|e| e.binding().hashes).collect();
             Ok(MemberBinding {
-                presented,
+                presented: group
+                    .first()
+                    .map(|(placed, _)| placed.presented)
+                    .ok_or(TransactionDataError::CredentialUnavailable)?,
                 choice: Choice::of(&accepted)?,
                 entries,
             })
@@ -118,13 +130,25 @@ pub fn bind<'e, 'a>(
         .collect()
 }
 
-/// The position in `offer` of the credential `entry` binds to: the first that carries it, for the
-/// first of its `credential_ids` one does.
-fn authorizing(entry: &Entry, offer: &[Presented<'_>]) -> Option<usize> {
+/// A credential of the offer, and its position there.
+#[derive(Clone, Copy)]
+struct Placed<'a> {
+    position: usize,
+    presented: Presented<'a>,
+}
+
+/// The credential of `offer` that `entry` binds to: the first that carries it, for the first of
+/// its `credential_ids` one does.
+fn authorizing<'a>(entry: &Entry, offer: &[Presented<'a>]) -> Option<Placed<'a>> {
     entry.credential_ids().iter().find_map(|id| {
         offer
             .iter()
-            .position(|presented| presented.query_id == id && entry.carried_by(presented))
+            .enumerate()
+            .find(|(_, presented)| presented.query_id == id && entry.carried_by(presented))
+            .map(|(position, presented)| Placed {
+                position,
+                presented: *presented,
+            })
     })
 }
 
@@ -141,20 +165,20 @@ impl Entry {
 /// `jti`: a fresh, random KB-JWT identifier (RFC 7519, Section 4.1.7; EC TS12 v1.0.1, Section
 /// 3.6).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Jti(String);
+pub struct Jti(Base64Url);
 
 impl Jti {
     /// The identifier of `random`, 128 bits the host's CSPRNG drew for this presentation: their
     /// base64url.
     #[must_use]
     pub fn new(random: [u8; 16]) -> Self {
-        Self(base64url::encode(&random).into())
+        Self(base64url::encode(&random))
     }
 
     /// The identifier.
     #[must_use]
     pub fn as_str(&self) -> &str {
-        &self.0
+        self.0.as_str()
     }
 }
 
@@ -202,32 +226,26 @@ impl<'e, 'a> MemberBinding<'e, 'a> {
         let hashes = self
             .entries
             .iter()
-            .map(|entry| Value::String(alg.hash(entry.raw())))
+            .map(|entry| Value::String(alg.hash(entry.raw()).into()))
             .collect();
-        let mut claims = vec![("transaction_data_hashes".to_owned(), Value::Array(hashes))];
-        if self.choice.carried() {
-            claims.push((
-                "transaction_data_hashes_alg".to_owned(),
-                alg.identifier().into(),
-            ));
-        }
-        for claim in CLAIM_ORDER {
-            if self
-                .entries
-                .iter()
-                .any(|e| e.binding().claims.contains(&claim))
-            {
-                claims.push(match claim {
-                    KbJwtClaim::Jti => ("jti".to_owned(), inputs.jti.as_str().into()),
-                    KbJwtClaim::ResponseMode => (
-                        "response_mode".to_owned(),
-                        inputs.response_mode.as_str().into(),
-                    ),
-                    KbJwtClaim::Amr => ("amr".to_owned(), inputs.amr.claim()),
-                });
-            }
-        }
-        claims
+        let hashes_alg = (self.choice.claim() == AlgClaim::Repeated)
+            .then(|| ("transaction_data_hashes_alg", alg.identifier().into()));
+        let required = CLAIM_ORDER
+            .into_iter()
+            .filter(|claim| self.requires(*claim))
+            .map(|claim| claim.of(inputs));
+        std::iter::once(("transaction_data_hashes", Value::Array(hashes)))
+            .chain(hashes_alg)
+            .chain(required)
+            .map(|(name, value)| (name.to_owned(), value))
+            .collect()
+    }
+
+    /// Whether an entry bound to the credential requires `claim`.
+    fn requires(&self, claim: KbJwtClaim) -> bool {
+        self.entries
+            .iter()
+            .any(|e| e.binding().claims.contains(&claim))
     }
 
     /// The display of each entry, in the order of [`MemberBinding::entries`], from the type
@@ -244,17 +262,30 @@ impl<'e, 'a> MemberBinding<'e, 'a> {
     ) -> Result<Step<Vec<TransactionView>>, TransactionDataError> {
         let mut views = Vec::with_capacity(self.entries.len());
         for entry in &self.entries {
-            let body = entry.body();
-            let display = self
-                .presented
-                .metadata
-                .display_metadata(body.identifier())
-                .ok_or(TransactionDataError::CredentialUnavailable)?;
-            match display.resolve(fetched)? {
+            match self.view(entry, fetched, preferences)? {
                 Step::Fetch(fetch) => return Ok(Step::Fetch(fetch)),
-                Step::Done(metadata) => views.push(body.display(&metadata, preferences)?),
+                Step::Done(view) => views.push(view),
             }
         }
         Ok(Step::Done(views))
+    }
+
+    /// The display of `entry`, or the fetch of a document it references.
+    fn view(
+        &self,
+        entry: &Entry,
+        fetched: &Fetched,
+        preferences: &[Locale],
+    ) -> Result<Step<TransactionView>, TransactionDataError> {
+        let body = entry.body();
+        let display = self
+            .presented
+            .metadata
+            .display_metadata(body.identifier())
+            .ok_or(TransactionDataError::CredentialUnavailable)?;
+        Ok(match display.resolve(fetched)? {
+            Step::Fetch(fetch) => Step::Fetch(fetch),
+            Step::Done(metadata) => Step::Done(body.display(&metadata, preferences)?),
+        })
     }
 }

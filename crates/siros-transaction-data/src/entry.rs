@@ -3,19 +3,24 @@
 use siros_codec::base64url;
 use siros_codec::date::DateTime;
 use siros_credential::Format;
-use siros_dcql::{DcqlQuery, QueryId};
+use siros_dcql::{CredentialQuery, DcqlQuery, QueryId};
+use siros_oid4vp::TransactionDataItem;
 
 use crate::binding::Binding;
-use crate::error::TransactionDataError;
+use crate::error::{MemberPath, TransactionDataError};
 use crate::json::{self, Json, JsonError};
-use crate::kind::{self, TransactionType};
+use crate::kind::{SupportedType, TransactionType};
 
 /// A `transaction_data` entry of a supported type, its members parsed into typed values.
 pub struct Entry {
-    raw: String,
+    raw: TransactionDataItem,
     credential_ids: Vec<QueryId>,
     body: Box<dyn TransactionType>,
 }
+
+/// The paths of the members every entry has.
+const TYPE: MemberPath = MemberPath::new("type");
+const CREDENTIAL_IDS: MemberPath = MemberPath::new("credential_ids");
 
 impl Entry {
     /// The entry `raw`, a string of the request's `transaction_data` array, against the
@@ -32,11 +37,11 @@ impl Entry {
     ///
     /// [`TransactionDataError`]: the first rule `raw` breaks.
     pub fn parse(
-        raw: &str,
+        raw: &TransactionDataItem,
         query: &DcqlQuery,
         now: DateTime,
     ) -> Result<Self, TransactionDataError> {
-        let bytes = base64url::decode(raw).map_err(|_| TransactionDataError::NotBase64url)?;
+        let bytes = base64url::decode(raw.as_str()).map_err(TransactionDataError::NotBase64url)?;
         let text = String::from_utf8(bytes).map_err(|_| TransactionDataError::NotJsonObject)?;
         let object = match Json::parse(&text) {
             Ok(Json::Object(object)) => object,
@@ -45,26 +50,22 @@ impl Entry {
             Err(JsonError::TooDeep) => return Err(TransactionDataError::TooDeep),
         };
         let mut fields = object.into_fields();
-        let identifier = json::text(fields.require("type", "type")?, "type")?;
-        let named = credential_ids(fields.require("credential_ids", "credential_ids")?)?;
-        let body = kind::parse(&identifier, fields, now)?;
-        let mut credential_ids = Vec::with_capacity(named.len());
-        for id in &named {
-            let credential = query
-                .credential(id)
-                .ok_or(TransactionDataError::UnknownCredentialId)?;
-            if credential.format != body.format().identifier() {
-                return Err(TransactionDataError::QueryFormat);
-            }
-            if credential.format == Format::SdJwtVc.identifier()
-                && !credential.require_cryptographic_holder_binding
-            {
-                return Err(TransactionDataError::HolderBindingNotRequired);
-            }
-            credential_ids.push(credential.id.clone());
-        }
+        let identifier = json::text(fields.require("type", TYPE)?, TYPE)?;
+        let named = credential_ids(fields.require("credential_ids", CREDENTIAL_IDS)?)?;
+        let body = SupportedType::named(&identifier)
+            .ok_or(TransactionDataError::UnsupportedType)?
+            .parse(fields, now)?;
+        let credential_ids = named
+            .iter()
+            .map(|id| {
+                let credential = query
+                    .credential(id)
+                    .ok_or(TransactionDataError::UnknownCredentialId)?;
+                authorizes(credential, body.format()).map(|()| credential.id.clone())
+            })
+            .collect::<Result<_, _>>()?;
         Ok(Self {
-            raw: raw.to_owned(),
+            raw: raw.clone(),
             credential_ids,
             body,
         })
@@ -72,7 +73,7 @@ impl Entry {
 
     /// The `type` value.
     #[must_use]
-    pub fn transaction_type(&self) -> &'static str {
+    pub fn transaction_type(&self) -> SupportedType {
         self.body.identifier()
     }
 
@@ -89,7 +90,7 @@ impl Entry {
     }
 
     /// The string the request carried.
-    pub(crate) fn raw(&self) -> &str {
+    pub(crate) fn raw(&self) -> &TransactionDataItem {
         &self.raw
     }
 
@@ -104,15 +105,29 @@ impl Entry {
     }
 }
 
+/// Refuses a Credential Query whose credentials cannot authorize a type of the format
+/// `format`: a query of another format, or an SD-JWT VC query without cryptographic holder
+/// binding (B.3.3).
+fn authorizes(credential: &CredentialQuery, format: Format) -> Result<(), TransactionDataError> {
+    if credential.format != format.identifier() {
+        return Err(TransactionDataError::QueryFormat);
+    }
+    if credential.format == Format::SdJwtVc.identifier()
+        && !credential.require_cryptographic_holder_binding
+    {
+        return Err(TransactionDataError::HolderBindingNotRequired);
+    }
+    Ok(())
+}
+
 /// `credential_ids`: a non-empty array of strings (Section 5.1).
 fn credential_ids(value: Json) -> Result<Vec<String>, TransactionDataError> {
-    const PATH: &str = "credential_ids";
-    let ids = json::array(value, PATH)?
+    let ids = json::array(value, CREDENTIAL_IDS)?
         .into_iter()
-        .map(|id| json::text(id, PATH))
+        .map(|id| json::text(id, CREDENTIAL_IDS))
         .collect::<Result<Vec<_>, _>>()?;
     if ids.is_empty() {
-        return Err(TransactionDataError::InvalidValue(PATH));
+        return Err(TransactionDataError::InvalidValue(CREDENTIAL_IDS));
     }
     Ok(ids)
 }

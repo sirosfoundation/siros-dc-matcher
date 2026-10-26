@@ -7,7 +7,7 @@ use siros_codec::cbor::Value as Cbor;
 use siros_codec::date::DateTime;
 use siros_credential::Credential;
 use siros_dcql::DcqlQuery;
-use siros_oid4vp::{FetchResponse, HttpStatus};
+use siros_oid4vp::{FetchResponse, HttpStatus, TransactionDataItem};
 use siros_wallet_state::WalletState;
 
 pub const PAYMENT: &str = "urn:eudi:sca:payment:1";
@@ -35,6 +35,11 @@ pub fn query() -> DcqlQuery {
 }
 
 /// The time of the tests' requests.
+/// The `transaction_data` string `raw`.
+pub fn item(raw: &str) -> TransactionDataItem {
+    TransactionDataItem::new(raw.to_owned())
+}
+
 pub fn now() -> DateTime {
     DateTime::parse("2026-10-26T12:00:00Z").unwrap()
 }

@@ -491,7 +491,7 @@ pub fn view_texts(view: &siros_presentation::ConsentView<'_>) -> Vec<String> {
                     out.push(row.label().as_str().to_owned());
                     match row.value() {
                         RowValue::Text(t) | RowValue::Number(t) => out.push(t.as_str().to_owned()),
-                        RowValue::Image(url) => out.push(url.clone()),
+                        RowValue::Image(url) => out.push(url.as_str().to_owned()),
                         _ => {}
                     }
                 }

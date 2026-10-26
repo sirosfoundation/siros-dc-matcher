@@ -3,16 +3,48 @@
 
 use std::fmt;
 
+use siros_codec::Base64Error;
+use siros_display::TextError;
 use siros_oid4vp::ErrorCode;
+
+/// The path of a member in a `transaction_data` entry, `payee.name` for one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MemberPath(&'static str);
+
+impl MemberPath {
+    pub(crate) const fn new(path: &'static str) -> Self {
+        Self(path)
+    }
+
+    /// The path.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        self.0
+    }
+}
+
+/// A metadata document, or the member of one, that a refusal names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MetadataPart(&'static str);
+
+impl MetadataPart {
+    pub(crate) const fn new(part: &'static str) -> Self {
+        Self(part)
+    }
+
+    /// The name of the document or member.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        self.0
+    }
+}
 
 /// A rule a `transaction_data` entry, the type metadata of a credential, or a caller input
 /// breaks.
-///
-/// A member is named by its path in the entry, `payload.payee.name` for one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TransactionDataError {
     /// The entry is not base64url without padding (OpenID4VP 1.0, Sections 1.2 and 5.1).
-    NotBase64url,
+    NotBase64url(Base64Error),
     /// The entry does not decode to the UTF-8 JSON text of one object (Section 5.1).
     NotJsonObject,
     /// An object repeats a member name.
@@ -20,15 +52,15 @@ pub enum TransactionDataError {
     /// Objects and arrays nest deeper than [`MAX_DEPTH`](crate::MAX_DEPTH).
     TooDeep,
     /// A required member is absent (Section 8.5).
-    MissingMember(&'static str),
+    MissingMember(MemberPath),
     /// A member has the wrong JSON type (Section 8.5).
-    WrongType(&'static str),
+    WrongType(MemberPath),
     /// A member has a value its type does not allow (Section 8.5).
-    InvalidValue(&'static str),
+    InvalidValue(MemberPath),
     /// The entry or its payload holds a member its type does not define (Section 8.5).
     UnknownMember,
     /// A member is present where its type forbids it (Section 8.5).
-    MemberNotAllowed(&'static str),
+    MemberNotAllowed(MemberPath),
     /// `type` names no supported transaction data type (Sections 5.1 and 8.5).
     UnsupportedType,
     /// A `credential_ids` element names no Credential Query of the DCQL query (Sections 5.1
@@ -63,7 +95,7 @@ pub enum TransactionDataError {
     /// A metadata fetch answered with more bytes than the fetch allowed.
     FetchTooLarge,
     /// A metadata document is not a JSON document of the shape its specification gives.
-    MetadataMalformed(&'static str),
+    MetadataMalformed(MetadataPart),
     /// The type metadata describes another `vct` than the credential's (SD-JWT VC, Section
     /// 6.3).
     VctMismatch,
@@ -80,9 +112,9 @@ pub enum TransactionDataError {
     AffirmativeLabelMissing,
     /// A payload value is not display text: it holds a control, format, separator,
     /// private-use or unassigned character, or is too long ([`siros_display::DisplayText`]).
-    ValueNotDisplayable,
+    ValueNotDisplayable(TextError),
     /// A label of the type metadata is not display text.
-    LabelNotDisplayable,
+    LabelNotDisplayable(TextError),
 }
 
 impl TransactionDataError {
@@ -90,7 +122,7 @@ impl TransactionDataError {
     #[must_use]
     pub fn code(&self) -> &'static str {
         match self {
-            Self::NotBase64url => "transaction_data_not_base64url",
+            Self::NotBase64url(_) => "transaction_data_not_base64url",
             Self::NotJsonObject => "transaction_data_not_json_object",
             Self::DuplicateKey => "transaction_data_duplicate_key",
             Self::TooDeep => "transaction_data_too_deep",
@@ -118,8 +150,8 @@ impl TransactionDataError {
             Self::IntegrityMismatch => "metadata_integrity_mismatch",
             Self::LabelMissing => "transaction_display_label_missing",
             Self::AffirmativeLabelMissing => "transaction_display_affirmative_label_missing",
-            Self::ValueNotDisplayable => "transaction_display_value_refused",
-            Self::LabelNotDisplayable => "transaction_display_label_refused",
+            Self::ValueNotDisplayable(_) => "transaction_display_value_refused",
+            Self::LabelNotDisplayable(_) => "transaction_display_label_refused",
         }
     }
 
@@ -136,8 +168,8 @@ impl fmt::Display for TransactionDataError {
             Self::MissingMember(member)
             | Self::WrongType(member)
             | Self::InvalidValue(member)
-            | Self::MemberNotAllowed(member)
-            | Self::MetadataMalformed(member) => write!(f, "{}: {member}", self.code()),
+            | Self::MemberNotAllowed(member) => write!(f, "{}: {}", self.code(), member.as_str()),
+            Self::MetadataMalformed(part) => write!(f, "{}: {}", self.code(), part.as_str()),
             _ => f.write_str(self.code()),
         }
     }

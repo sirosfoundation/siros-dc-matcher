@@ -13,8 +13,8 @@ use siros_transaction_data::{
 };
 
 use crate::common::{
-    card, credentials, encode, entry, inline_payment_type, now, payment, query, response, sd_jwt,
-    type_metadata, with, PAYMENT,
+    card, credentials, encode, entry, inline_payment_type, item, now, payment, query, response,
+    sd_jwt, type_metadata, with, PAYMENT,
 };
 
 #[test]
@@ -23,7 +23,7 @@ fn an_entry_binds_to_one_credential() {
         entry(PAYMENT, payment()),
         json!({"credential_ids": ["pay", "card"]}),
     ));
-    let entries = [Entry::parse(&raw, &query(), now()).unwrap()];
+    let entries = [Entry::parse(&item(&raw), &query(), now()).unwrap()];
     let cards = credentials(&[
         ("dc+sd-jwt", sd_jwt(&card(json!({})))),
         ("dc+sd-jwt", sd_jwt(&card(json!({})))),

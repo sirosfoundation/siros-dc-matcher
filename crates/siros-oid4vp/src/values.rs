@@ -164,7 +164,9 @@ impl TrustChain {
 pub struct TransactionDataItem(String);
 
 impl TransactionDataItem {
-    pub(crate) fn new(text: String) -> Self {
+    /// The string `text`, as a request carries it.
+    #[must_use]
+    pub fn new(text: String) -> Self {
         Self(text)
     }
 

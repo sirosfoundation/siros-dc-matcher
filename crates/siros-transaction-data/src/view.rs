@@ -3,11 +3,14 @@
 use siros_codec::date::Date;
 use siros_display::DisplayText;
 
+use crate::kind::SupportedType;
+use crate::ts12::ImageUrl;
+
 /// The display of one transaction data entry: the UI elements of its type (Section 3.3.3) and
 /// a row per leaf parameter of its payload (Sections 3.3.1 and 3.3.2).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TransactionView {
-    transaction_type: &'static str,
+    transaction_type: SupportedType,
     labels: Labels,
     rows: Vec<Row>,
 }
@@ -22,7 +25,7 @@ pub(crate) struct Labels {
 }
 
 impl TransactionView {
-    pub(crate) fn new(transaction_type: &'static str, labels: Labels, rows: Vec<Row>) -> Self {
+    pub(crate) fn new(transaction_type: SupportedType, labels: Labels, rows: Vec<Row>) -> Self {
         Self {
             transaction_type,
             labels,
@@ -32,7 +35,7 @@ impl TransactionView {
 
     /// The `type` value.
     #[must_use]
-    pub fn transaction_type(&self) -> &'static str {
+    pub fn transaction_type(&self) -> SupportedType {
         self.transaction_type
     }
 
@@ -115,8 +118,8 @@ pub enum RowValue {
     Boolean(bool),
     /// A calendar date.
     Date(Date),
-    /// The URL of an image, for the UI to show: `http`, `https` or `data` (RFC 2397).
-    Image(String),
+    /// The URL of an image, for the UI to show.
+    Image(ImageUrl),
     /// A recurrence frequency, which the wallet names in the user's language (Section 4.3.1).
     Frequency(Frequency),
 }

@@ -4,7 +4,7 @@
 use rustc_hash::FxHashSet;
 use siros_display::{Locale, Localized};
 
-use crate::error::TransactionDataError;
+use crate::error::{MetadataPart, TransactionDataError};
 use crate::json::{Fields, Json};
 use crate::view::Level;
 
@@ -21,9 +21,27 @@ pub(crate) struct ClaimMetadata(Vec<Claim>);
 /// The metadata of one claim.
 #[derive(Clone)]
 pub(crate) struct Claim {
-    path: Vec<String>,
+    path: KeyPath,
     level: Option<Level>,
     labels: Vec<Label>,
+}
+
+/// A path of object member names into an entry, `payload.payee.name` for one.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub(crate) struct KeyPath(Vec<String>);
+
+impl KeyPath {
+    /// The path of the member `name` of the entry.
+    pub(crate) fn root(name: &str) -> Self {
+        Self(vec![name.to_owned()])
+    }
+
+    /// The path of the member `name` of the object at this path.
+    pub(crate) fn child(&self, name: &str) -> Self {
+        let mut path = self.0.clone();
+        path.push(name.to_owned());
+        Self(path)
+    }
 }
 
 /// A text for one locale.
@@ -55,8 +73,8 @@ pub(crate) struct UiLabels {
     pub(crate) security_hint: Vec<Label>,
 }
 
-const CLAIMS: &str = "claims";
-const UI_LABELS: &str = "ui_labels";
+const CLAIMS: MetadataPart = MetadataPart::new("claims");
+const UI_LABELS: MetadataPart = MetadataPart::new("ui_labels");
 
 impl ClaimMetadata {
     /// The claim metadata of the array `value`: SD-JWT VC claim metadata (Section 9) with
@@ -68,22 +86,21 @@ impl ClaimMetadata {
         let Json::Array(items) = value else {
             return Err(TransactionDataError::MetadataMalformed(CLAIMS));
         };
-        let mut claims = Vec::new();
-        for item in items {
-            if let Some(claim) = Claim::parse(item)? {
-                claims.push(claim);
-            }
-        }
+        let claims = items
+            .into_iter()
+            .map(Claim::parse)
+            .filter_map(Result::transpose)
+            .collect::<Result<Vec<_>, _>>()?;
         let mut paths = FxHashSet::default();
-        if !claims.iter().all(|c| paths.insert(c.path.as_slice())) {
+        if !claims.iter().all(|c| paths.insert(&c.path)) {
             return Err(TransactionDataError::MetadataMalformed(CLAIMS));
         }
         Ok(Self(claims))
     }
 
     /// The metadata of the claim at `path`.
-    pub(crate) fn get(&self, path: &[String]) -> Option<&Claim> {
-        self.0.iter().find(|c| c.path == path)
+    pub(crate) fn get(&self, path: &KeyPath) -> Option<&Claim> {
+        self.0.iter().find(|c| c.path == *path)
     }
 }
 
@@ -98,18 +115,18 @@ impl Claim {
         let Some(Json::Array(components)) = fields.take("path") else {
             return Err(malformed);
         };
-        let mut path = Vec::with_capacity(components.len());
-        for component in components {
-            match component {
-                Json::String(key) => path.push(key),
-                Json::Null => return Ok(None),
-                Json::Number(n) if n.is_integer() && !n.text().starts_with('-') => return Ok(None),
-                _ => return Err(malformed),
-            }
-        }
+        // The first component that is no key decides: an array element labels no row.
+        let Some(path) = components
+            .into_iter()
+            .map(key)
+            .collect::<Result<Option<Vec<_>>, _>>()?
+        else {
+            return Ok(None);
+        };
         if path.is_empty() {
             return Err(malformed);
         }
+        let path = KeyPath(path);
         let level = match fields.take("visualisation") {
             None => None,
             Some(Json::Number(n)) => {
@@ -140,6 +157,17 @@ impl Claim {
     /// The labels, one per locale.
     pub(crate) fn labels(&self) -> &[Label] {
         &self.labels
+    }
+}
+
+/// The key of the path component `component`; `None` for an array element: `null` or a
+/// non-negative integer (SD-JWT VC, Section 9.1).
+fn key(component: Json) -> Result<Option<String>, TransactionDataError> {
+    match component {
+        Json::String(key) => Ok(Some(key)),
+        Json::Null => Ok(None),
+        Json::Number(n) if n.is_integer() && !n.text().starts_with('-') => Ok(None),
+        _ => Err(TransactionDataError::MetadataMalformed(CLAIMS)),
     }
 }
 

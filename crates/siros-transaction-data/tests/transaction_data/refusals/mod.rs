@@ -14,7 +14,7 @@ use siros_oid4vp::FetchResponse;
 use siros_transaction_data::{bind, Amr, Entry, Factor, Fetched, Presented, ScaMetadata, Step};
 
 use crate::common::{
-    card, encode, encode_payload, entry, inline_payment_type, now, payment, query, response,
+    card, encode, encode_payload, entry, inline_payment_type, item, now, payment, query, response,
     sd_jwt_vc, type_metadata, with, PAYMENT,
 };
 use crate::fixtures::payloads;
@@ -49,7 +49,7 @@ enum Input {
 
 fn outcome(input: Input) -> Result<(), &'static str> {
     match input {
-        Input::Entry(raw) => Entry::parse(&raw, &query(), now())
+        Input::Entry(raw) => Entry::parse(&item(&raw), &query(), now())
             .map(drop)
             .map_err(|e| e.code()),
         Input::Fetch(credential) => ScaMetadata::fetch(&credential)
@@ -86,7 +86,7 @@ fn views(
 ) -> Result<(), &'static str> {
     let entries: Vec<Entry> = entries
         .iter()
-        .map(|e| Entry::parse(&encode(e), &query(), now()).unwrap())
+        .map(|e| Entry::parse(&item(&encode(e)), &query(), now()).unwrap())
         .collect();
     let credential = sd_jwt_vc(card);
     let metadata = ScaMetadata::parse(&credential, &response(metadata)).map_err(|e| e.code())?;

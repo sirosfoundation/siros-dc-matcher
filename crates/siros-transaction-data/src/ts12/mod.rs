@@ -15,10 +15,10 @@ use siros_credential::Format;
 use siros_display::Locale;
 
 use crate::binding::{Binding, KbJwtClaim};
-use crate::error::TransactionDataError;
+use crate::error::{MemberPath, TransactionDataError};
 use crate::hash::{Accepted, HASHES_ALG};
-use crate::json::{self, Fields, Json};
-use crate::kind::TransactionType;
+use crate::json::{self, Fields};
+use crate::kind::{SupportedType, TransactionType};
 use crate::labels::DisplayMetadata;
 use crate::metadata::ScaMetadata;
 use crate::view::TransactionView;
@@ -26,6 +26,7 @@ use crate::view::TransactionView;
 pub(crate) use display::Leaves;
 pub(crate) use payloads::{AccountAccess, Emandate, LoginRisk};
 pub(crate) use payment::Payment;
+pub use rules::ImageUrl;
 
 /// The `category` that makes an SD-JWT VC an SCA Attestation (Section 3).
 const SCA_CATEGORY: &str = "urn:eu:europa:ec:eudi:sua:sca";
@@ -36,7 +37,7 @@ const CLAIMS: [KbJwtClaim; 3] = [KbJwtClaim::Jti, KbJwtClaim::ResponseMode, KbJw
 /// The `payload` of one TS12 type.
 pub(crate) trait Payload: Sized + 'static {
     /// The `type` value.
-    const TYPE: &'static str;
+    const TYPE: SupportedType;
 
     /// The payload of the members of the `payload` object, at the time `now`.
     fn parse(fields: Fields, now: DateTime) -> Result<Self, TransactionDataError>;
@@ -58,9 +59,9 @@ impl<P: Payload> Ts12<P> {
         mut fields: Fields,
         now: DateTime,
     ) -> Result<Box<dyn TransactionType>, TransactionDataError> {
-        let accepted = Accepted::parse(Some(fields.require(HASHES_ALG, HASHES_ALG)?))?;
+        let accepted = Accepted::parse(Some(fields.require(HASHES_ALG.as_str(), HASHES_ALG)?))?;
         let payload = P::parse(
-            json::object(fields.require("payload", "payload")?, "payload")?,
+            json::object(fields.require("payload", PAYLOAD)?, PAYLOAD)?,
             now,
         )?;
         fields.finish()?;
@@ -69,7 +70,7 @@ impl<P: Payload> Ts12<P> {
 }
 
 impl<P: Payload> TransactionType for Ts12<P> {
-    fn identifier(&self) -> &'static str {
+    fn identifier(&self) -> SupportedType {
         P::TYPE
     }
 
@@ -80,7 +81,10 @@ impl<P: Payload> TransactionType for Ts12<P> {
 
     /// An SCA Attestation whose type metadata lists the type (Sections 3 and 3.2).
     fn authorizes(&self, metadata: &ScaMetadata<'_>) -> bool {
-        metadata.category() == Some(SCA_CATEGORY) && metadata.display_metadata(P::TYPE).is_some()
+        metadata
+            .category()
+            .is_some_and(|category| category.as_str() == SCA_CATEGORY)
+            && metadata.display_metadata(P::TYPE).is_some()
     }
 
     /// The B.3.3.1 hashes, and `jti`, `response_mode` and `amr` (Section 3.6).
@@ -102,27 +106,19 @@ impl<P: Payload> TransactionType for Ts12<P> {
     }
 }
 
-/// `transaction_id`: 1 to 36 characters, required in every payload (Section 4.3).
-fn transaction_id(fields: &mut Fields) -> Result<String, TransactionDataError> {
-    bounded(
-        fields.require("transaction_id", "transaction_id")?,
-        "transaction_id",
-        1,
-        36,
-    )
+/// The path of the payload member `name`: its name.
+pub(crate) const fn member(name: &'static str) -> MemberPath {
+    MemberPath::new(name)
 }
 
-/// `value` as a string of `min` to `max` characters (JSON Schema `minLength`, `maxLength`).
-fn bounded(
-    value: Json,
-    path: &'static str,
-    min: usize,
-    max: usize,
-) -> Result<String, TransactionDataError> {
-    let text = json::text(value, path)?;
-    if (min..=max).contains(&text.chars().count()) {
-        Ok(text)
-    } else {
-        Err(TransactionDataError::InvalidValue(path))
-    }
+/// The `payload` member of every TS12 entry (Section 4.2).
+const PAYLOAD: MemberPath = MemberPath::new("payload");
+
+/// `transaction_id`: 1 to 36 characters, required in every payload (Section 4.3).
+type TransactionId = rules::Text<1, 36>;
+
+/// The `transaction_id` of the payload `fields`.
+fn transaction_id(fields: &mut Fields) -> Result<TransactionId, TransactionDataError> {
+    const PATH: MemberPath = MemberPath::new("transaction_id");
+    TransactionId::parse(fields.require("transaction_id", PATH)?, PATH)
 }

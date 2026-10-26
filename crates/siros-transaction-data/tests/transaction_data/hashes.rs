@@ -2,6 +2,7 @@
 //! each `transaction_data` string hashed as received (OpenID4VP 1.0, B.3.3.1).
 
 use serde_json::Value;
+use siros_oid4vp::TransactionDataItem;
 use siros_transaction_data::HashAlg;
 
 #[test]
@@ -15,7 +16,7 @@ fn each_entry_is_hashed_as_received() {
         for alg in [HashAlg::Sha256, HashAlg::Sha384, HashAlg::Sha512] {
             let expected = vector["hashes"][alg.identifier()].as_str().unwrap();
             assert_eq!(
-                alg.hash(raw),
+                alg.hash(&TransactionDataItem::new(raw.to_owned())),
                 expected,
                 "{} {}",
                 vector["name"],

@@ -6,18 +6,20 @@ use siros_display::{preferred, DisplayText, Locale};
 
 use crate::error::TransactionDataError;
 use crate::json::{Json, Number};
-use crate::labels::{DisplayMetadata, Label};
+use crate::kind::SupportedType;
+use crate::labels::{DisplayMetadata, KeyPath, Label};
+use crate::ts12::rules::ImageUrl;
 use crate::view::{Frequency, Labels, Level, Row, RowValue, TransactionView};
 
 /// The leaf parameters of a payload, each with its path in the entry.
 pub(crate) struct Leaves {
-    path: Vec<String>,
+    path: KeyPath,
     leaves: Vec<Leaf>,
 }
 
 /// A leaf parameter.
 struct Leaf {
-    path: Vec<String>,
+    path: KeyPath,
     value: LeafValue,
     /// The least prominent level the type allows, whatever the metadata sets: for a member its
     /// schema requires and the user must see.
@@ -29,7 +31,7 @@ enum LeafValue {
     Number(String),
     Boolean(bool),
     Date(Date),
-    Image(String),
+    Image(ImageUrl),
     Frequency(Frequency),
 }
 
@@ -37,24 +39,26 @@ impl Leaves {
     /// The leaves below `payload`.
     pub(crate) fn payload() -> Self {
         Self {
-            path: vec!["payload".to_owned()],
+            path: KeyPath::root("payload"),
             leaves: Vec::new(),
         }
     }
 
     fn push(&mut self, name: &str, value: LeafValue, floor: Option<Level>) {
-        let mut path = self.path.clone();
-        path.push(name.to_owned());
-        self.leaves.push(Leaf { path, value, floor });
+        self.leaves.push(Leaf {
+            path: self.path.child(name),
+            value,
+            floor,
+        });
     }
 
     /// The string member `name`.
-    pub(crate) fn text(&mut self, name: &str, value: &str, floor: Option<Level>) {
-        self.push(name, LeafValue::Text(value.to_owned()), floor);
+    pub(crate) fn text(&mut self, name: &str, value: &impl AsRef<str>, floor: Option<Level>) {
+        self.push(name, LeafValue::Text(value.as_ref().to_owned()), floor);
     }
 
     /// The string member `name`, when present.
-    pub(crate) fn optional_text(&mut self, name: &str, value: Option<&str>) {
+    pub(crate) fn optional_text(&mut self, name: &str, value: Option<&impl AsRef<str>>) {
         if let Some(value) = value {
             self.text(name, value, None);
         }
@@ -68,9 +72,9 @@ impl Leaves {
     }
 
     /// The image URL member `name`, when present.
-    pub(crate) fn optional_image(&mut self, name: &str, value: Option<&str>) {
+    pub(crate) fn optional_image(&mut self, name: &str, value: Option<&ImageUrl>) {
         if let Some(value) = value {
-            self.push(name, LeafValue::Image(value.to_owned()), None);
+            self.push(name, LeafValue::Image(value.clone()), None);
         }
     }
 
@@ -100,10 +104,10 @@ impl Leaves {
 
     /// The leaves of the object member `name`, which `leaves` adds.
     pub(crate) fn object(&mut self, name: &str, leaves: impl FnOnce(&mut Self)) {
-        let depth = self.path.len();
-        self.path.push(name.to_owned());
+        let child = self.path.child(name);
+        let parent = std::mem::replace(&mut self.path, child);
         leaves(self);
-        self.path.truncate(depth);
+        self.path = parent;
     }
 
     /// The members the schema of an object leaves open: an object's leaves, or the value of any
@@ -118,43 +122,32 @@ impl Leaves {
                 Json::Number(number) => self.number(name, number, None),
                 Json::Bool(b) => self.push(name, LeafValue::Boolean(*b), None),
                 Json::Null | Json::Array(_) => {
-                    let mut text = String::new();
-                    compact(value, &mut text);
-                    self.push(name, LeafValue::Text(text), None);
+                    self.push(name, LeafValue::Text(compact(value)), None)
                 }
             }
         }
     }
 }
 
-/// Appends the compact JSON text of `value` to `out`.
-fn compact(value: &Json, out: &mut String) {
+/// The compact JSON text of `value`.
+fn compact(value: &Json) -> String {
+    let quoted = |text: &str| JsonValue::from(text).to_string();
     match value {
-        Json::Null => out.push_str("null"),
-        Json::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
-        Json::Number(number) => out.push_str(number.text()),
-        Json::String(text) => out.push_str(&JsonValue::from(text.as_str()).to_string()),
-        Json::Array(items) => {
-            out.push('[');
-            for (i, item) in items.iter().enumerate() {
-                if i > 0 {
-                    out.push(',');
-                }
-                compact(item, out);
-            }
-            out.push(']');
-        }
+        Json::Null => "null".to_owned(),
+        Json::Bool(b) => b.to_string(),
+        Json::Number(number) => number.text().to_owned(),
+        Json::String(text) => quoted(text),
+        Json::Array(items) => format!(
+            "[{}]",
+            items.iter().map(compact).collect::<Vec<_>>().join(",")
+        ),
         Json::Object(object) => {
-            out.push('{');
-            for (i, (name, item)) in object.members().iter().enumerate() {
-                if i > 0 {
-                    out.push(',');
-                }
-                out.push_str(&JsonValue::from(name.as_str()).to_string());
-                out.push(':');
-                compact(item, out);
-            }
-            out.push('}');
+            let members = object
+                .members()
+                .iter()
+                .map(|(name, item)| format!("{}:{}", quoted(name), compact(item)))
+                .collect::<Vec<_>>();
+            format!("{{{}}}", members.join(","))
         }
     }
 }
@@ -167,26 +160,16 @@ fn compact(value: &Json, out: &mut String) {
 /// element, `affirmative_action_label`, needs a localised label; an optional one without a
 /// localised label is absent.
 pub(crate) fn view(
-    transaction_type: &'static str,
+    transaction_type: SupportedType,
     leaves: Leaves,
     metadata: &DisplayMetadata,
     preferences: &[Locale],
 ) -> Result<TransactionView, TransactionDataError> {
-    let mut rows = Vec::with_capacity(leaves.leaves.len());
-    for leaf in leaves.leaves {
-        let claim = metadata.claims.get(&leaf.path);
-        let set = claim
-            .and_then(|c| c.level())
-            .unwrap_or(Level::Supplementary);
-        let level = leaf.floor.map_or(set, |floor| set.min(floor));
-        let Some(label) = claim.and_then(|c| preferred(preferences, c.labels())) else {
-            if claim.is_some() && level == Level::Omittable {
-                continue;
-            }
-            return Err(TransactionDataError::LabelMissing);
-        };
-        rows.push(Row::new(shown(label)?, leaf.value.shown()?, level));
-    }
+    let mut rows = leaves
+        .leaves
+        .into_iter()
+        .filter_map(|leaf| row(leaf, metadata, preferences).transpose())
+        .collect::<Result<Vec<_>, _>>()?;
     rows.sort_by_key(Row::level);
     let ui = &metadata.ui_labels;
     let labels = Labels {
@@ -200,6 +183,24 @@ pub(crate) fn view(
     Ok(TransactionView::new(transaction_type, labels, rows))
 }
 
+/// The row of `leaf`; `None` for a leaf without a localised name that the metadata marks 4.
+fn row(
+    leaf: Leaf,
+    metadata: &DisplayMetadata,
+    preferences: &[Locale],
+) -> Result<Option<Row>, TransactionDataError> {
+    let claim = metadata.claims.get(&leaf.path);
+    let set = claim
+        .and_then(|c| c.level())
+        .unwrap_or(Level::Supplementary);
+    let level = leaf.floor.map_or(set, |floor| set.min(floor));
+    match claim.and_then(|c| preferred(preferences, c.labels())) {
+        Some(label) => Ok(Some(Row::new(shown(label)?, leaf.value.shown()?, level))),
+        None if claim.is_some() && level == Level::Omittable => Ok(None),
+        None => Err(TransactionDataError::LabelMissing),
+    }
+}
+
 /// The label of `labels` localised for the user's `preferences`, most preferred first (Section
 /// 3.3.1); `None` without one.
 fn optional(
@@ -211,14 +212,14 @@ fn optional(
 
 /// `label` as display text.
 fn shown(label: &Label) -> Result<DisplayText, TransactionDataError> {
-    DisplayText::label(label.text()).map_err(|_| TransactionDataError::LabelNotDisplayable)
+    DisplayText::label(label.text()).map_err(TransactionDataError::LabelNotDisplayable)
 }
 
 impl LeafValue {
     /// The value of a row.
     fn shown(self) -> Result<RowValue, TransactionDataError> {
         let text = |text: &str| {
-            DisplayText::value(text).map_err(|_| TransactionDataError::ValueNotDisplayable)
+            DisplayText::value(text).map_err(TransactionDataError::ValueNotDisplayable)
         };
         Ok(match self {
             Self::Text(value) => RowValue::Text(text(&value)?),

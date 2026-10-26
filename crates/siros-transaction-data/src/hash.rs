@@ -3,14 +3,15 @@
 //! `transaction_data_hashes_alg`.
 
 use sha2::{Digest, Sha256, Sha384, Sha512};
-use siros_codec::base64url;
+use siros_codec::base64url::{self, Base64Url};
+use siros_oid4vp::TransactionDataItem;
 
-use crate::error::TransactionDataError;
+use crate::error::{MemberPath, TransactionDataError};
 use crate::json::{self, Json};
 
 /// A hash algorithm of the IANA Named Information Hash Algorithm Registry that this wallet
-/// computes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// computes, weakest first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum HashAlg {
     /// `sha-256`, which every implementation supports (B.3.3.1).
     Sha256,
@@ -21,6 +22,8 @@ pub enum HashAlg {
 }
 
 impl HashAlg {
+    const ALL: [Self; 3] = [Self::Sha256, Self::Sha384, Self::Sha512];
+
     /// The Hash Name String of the registry.
     #[must_use]
     pub fn identifier(self) -> &'static str {
@@ -35,20 +38,48 @@ impl HashAlg {
     /// base64url of the hash over its bytes. The string is hashed as received, without
     /// base64url decoding (B.3.3.1).
     #[must_use]
-    pub fn hash(self, entry: &str) -> String {
-        let bytes = entry.as_bytes();
+    pub fn hash(self, entry: &TransactionDataItem) -> Base64Url {
+        base64url::encode(&self.digest(entry.as_str().as_bytes()))
+    }
+
+    /// The digest of `bytes`.
+    pub(crate) fn digest(self, bytes: &[u8]) -> Vec<u8> {
         match self {
-            Self::Sha256 => base64url::encode(&Sha256::digest(bytes)).into(),
-            Self::Sha384 => base64url::encode(&Sha384::digest(bytes)).into(),
-            Self::Sha512 => base64url::encode(&Sha512::digest(bytes)).into(),
+            Self::Sha256 => Sha256::digest(bytes).to_vec(),
+            Self::Sha384 => Sha384::digest(bytes).to_vec(),
+            Self::Sha512 => Sha512::digest(bytes).to_vec(),
+        }
+    }
+
+    /// The length of a digest, in bytes.
+    pub(crate) fn len(self) -> usize {
+        match self {
+            Self::Sha256 => 32,
+            Self::Sha384 => 48,
+            Self::Sha512 => 64,
         }
     }
 
     /// The algorithm the Hash Name String `name` names.
     fn named(name: &str) -> Option<Self> {
-        [Self::Sha256, Self::Sha384, Self::Sha512]
+        Self::ALL.into_iter().find(|alg| alg.identifier() == name)
+    }
+
+    /// The algorithm the W3C Subresource Integrity token `token` names (SRI, Section 3.2),
+    /// compared without regard to ASCII case.
+    pub(crate) fn sri_named(token: &str) -> Option<Self> {
+        Self::ALL
             .into_iter()
-            .find(|alg| alg.identifier() == name)
+            .find(|alg| alg.sri_token().eq_ignore_ascii_case(token))
+    }
+
+    /// The token of the algorithm in SRI.
+    fn sri_token(self) -> &'static str {
+        match self {
+            Self::Sha256 => "sha256",
+            Self::Sha384 => "sha384",
+            Self::Sha512 => "sha512",
+        }
     }
 }
 
@@ -62,7 +93,7 @@ pub(crate) enum Accepted {
 }
 
 /// The name of the request member.
-pub(crate) const HASHES_ALG: &str = "transaction_data_hashes_alg";
+pub(crate) const HASHES_ALG: MemberPath = MemberPath::new("transaction_data_hashes_alg");
 
 impl Accepted {
     /// The algorithms `value`, the entry's `transaction_data_hashes_alg`, accepts: a
@@ -76,12 +107,14 @@ impl Accepted {
         if names.is_empty() {
             return Err(TransactionDataError::InvalidValue(HASHES_ALG));
         }
-        let mut algs = Vec::new();
-        for name in names {
-            if let Some(alg) = HashAlg::named(&json::text(name, HASHES_ALG)?) {
-                algs.push(alg);
-            }
-        }
+        let names = names
+            .into_iter()
+            .map(|name| json::text(name, HASHES_ALG))
+            .collect::<Result<Vec<_>, _>>()?;
+        let algs: Vec<HashAlg> = names
+            .iter()
+            .filter_map(|name| HashAlg::named(name))
+            .collect();
         if algs.is_empty() {
             return Err(TransactionDataError::HashAlgUnsupported);
         }
@@ -96,18 +129,29 @@ impl Accepted {
         }
     }
 
-    /// Whether the request carried `transaction_data_hashes_alg`, which the KB-JWT then
-    /// repeats.
-    fn carried(&self) -> bool {
-        matches!(self, Self::Listed(_))
+    /// The claim the KB-JWT carries for the request's `transaction_data_hashes_alg`.
+    fn claim(&self) -> AlgClaim {
+        match self {
+            Self::Default => AlgClaim::Omitted,
+            Self::Listed(_) => AlgClaim::Repeated,
+        }
     }
+}
+
+/// Whether a KB-JWT carries `transaction_data_hashes_alg` (B.3.3.1).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AlgClaim {
+    /// An entry bound to the credential carried the member: the KB-JWT repeats the algorithm.
+    Repeated,
+    /// No entry carried it.
+    Omitted,
 }
 
 /// The algorithm of one KB-JWT, shared by the entries bound to its credential (B.3.3.1).
 #[derive(Clone, Copy)]
 pub(crate) struct Choice {
     alg: HashAlg,
-    carried: bool,
+    claim: AlgClaim,
 }
 
 impl Choice {
@@ -123,9 +167,14 @@ impl Choice {
             .copied()
             .find(|alg| accepted.iter().all(|a| a.algs().contains(alg)))
             .ok_or(TransactionDataError::HashAlgConflict)?;
+        let repeated = accepted.iter().any(|a| a.claim() == AlgClaim::Repeated);
         Ok(Self {
             alg,
-            carried: accepted.iter().any(|a| a.carried()),
+            claim: if repeated {
+                AlgClaim::Repeated
+            } else {
+                AlgClaim::Omitted
+            },
         })
     }
 
@@ -136,7 +185,7 @@ impl Choice {
 
     /// Whether the KB-JWT carries `transaction_data_hashes_alg`: when any entry bound to the
     /// credential carried it (B.3.3.1).
-    pub(crate) fn carried(self) -> bool {
-        self.carried
+    pub(crate) fn claim(self) -> AlgClaim {
+        self.claim
     }
 }
