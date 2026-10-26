@@ -88,8 +88,9 @@ pub enum IntakeError {
     NonceInvalid,
     /// `state` holds a character other than ASCII URL-safe ones (Section 5.2).
     StateInvalid,
-    /// `response_mode` is missing, unknown, or of the other channel: `direct_post` and
-    /// `direct_post.jwt` over redirects, `dc_api` and `dc_api.jwt` over the DC API.
+    /// `response_mode` is missing, unknown, or of the other channel: `direct_post`,
+    /// `direct_post.jwt` and `direct_post.cwt` over redirects, `dc_api` and `dc_api.jwt` over
+    /// the DC API.
     ResponseModeUnsupported,
     /// A `direct_post` request has no `response_uri` (Section 8.2).
     ResponseUriMissing,
@@ -116,7 +117,8 @@ pub enum IntakeError {
     TransactionDataInvalid,
     /// An encrypted Response Mode, and no key of `jwks` is a P-256 `ECDH-ES` encryption key.
     EncryptionKeyMissing,
-    /// `encrypted_response_enc_values_supported` names neither `A128GCM` nor `A256GCM`.
+    /// `encrypted_response_enc_values_supported` names no `enc` of the Response Mode's
+    /// envelope: `A128GCM` or `A256GCM` for a JWE, these or `A192GCM` for a `COSE_Encrypt`.
     EncryptionUnsupported,
     /// The host answered an effect with the result of the other kind.
     AnswerMismatch,

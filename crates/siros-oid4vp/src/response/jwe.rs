@@ -1,16 +1,12 @@
 //! The encrypted response: a JWE with `ECDH-ES` key agreement and AES GCM (RFC 7516; RFC 7518,
 //! Sections 4.6 and 5.3; OpenID4VP 1.0, Section 8.3), in the Compact Serialization.
 
-use aes_gcm::aead::{AeadInPlace, KeyInit};
-use aes_gcm::{Aes128Gcm, Aes256Gcm, Nonce};
-use p256::ecdh::EphemeralSecret;
-use p256::elliptic_curve::sec1::ToEncodedPoint;
 use rand_core::CryptoRngCore;
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use siros_codec::base64url;
 
-use super::ResponseError;
+use super::{aead, ResponseError};
 use crate::verified::{ContentEncryption, Encryption};
 
 /// The Concat KDF of RFC 7518, Section 4.6.2, for the Direct Key Agreement mode: the content
@@ -46,24 +42,19 @@ pub fn concat_kdf(
 }
 
 /// `payload` encrypted to the chosen key, with an ephemeral key and an IV from `rng`.
-pub(crate) fn encrypt(
+pub(super) fn encrypt(
     encryption: &Encryption,
     payload: &[u8],
     rng: &mut impl CryptoRngCore,
 ) -> Result<String, ResponseError> {
-    let ephemeral = EphemeralSecret::random(rng);
-    let shared = ephemeral.diffie_hellman(&encryption.key);
-    let z: &[u8] = shared.raw_secret_bytes();
+    let agreement = aead::agree(encryption, rng)?;
+    let z: &[u8] = agreement.shared.raw_secret_bytes();
     let cek = concat_kdf(z, encryption.enc, &[], &[])?;
-    let point = ephemeral.public_key().to_encoded_point(false);
-    let (Some(x), Some(y)) = (point.x(), point.y()) else {
-        return Err(ResponseError::EncryptionFailed);
-    };
     let mut epk = Map::new();
     epk.insert("kty".into(), "EC".into());
     epk.insert("crv".into(), "P-256".into());
-    epk.insert("x".into(), base64url::encode(x).into());
-    epk.insert("y".into(), base64url::encode(y).into());
+    epk.insert("x".into(), base64url::encode(&agreement.x).into());
+    epk.insert("y".into(), base64url::encode(&agreement.y).into());
     let mut header = Map::new();
     header.insert("alg".into(), "ECDH-ES".into());
     header.insert("enc".into(), encryption.enc.as_str().into());
@@ -72,22 +63,9 @@ pub(crate) fn encrypt(
         header.insert("kid".into(), kid.as_str().into());
     }
     let protected = base64url::encode(Value::Object(header).to_string().as_bytes());
-
-    let mut iv = [0u8; 12];
-    rng.fill_bytes(&mut iv);
-    let nonce = Nonce::from(iv);
-    let mut ciphertext = payload.to_vec();
+    let iv = aead::iv(rng);
     // RFC 7516, Section 5.1, step 14: the AAD is the encoded protected header.
-    let aad = protected.as_bytes();
-    let tag = match encryption.enc {
-        ContentEncryption::A128Gcm => Aes128Gcm::new_from_slice(&cek)
-            .map_err(|_| ResponseError::EncryptionFailed)?
-            .encrypt_in_place_detached(&nonce, aad, &mut ciphertext),
-        ContentEncryption::A256Gcm => Aes256Gcm::new_from_slice(&cek)
-            .map_err(|_| ResponseError::EncryptionFailed)?
-            .encrypt_in_place_detached(&nonce, aad, &mut ciphertext),
-    }
-    .map_err(|_| ResponseError::EncryptionFailed)?;
+    let (ciphertext, tag) = aead::seal(encryption.enc, &cek, iv, protected.as_bytes(), payload)?;
     // The JWE Encrypted Key is empty in Direct Key Agreement (RFC 7518, Section 4.6).
     Ok(format!(
         "{protected}..{}.{}.{}",

@@ -59,11 +59,13 @@ pub(super) fn intake(
             let url = HttpsUrl::parse(request_uri).ok_or(IntakeError::RequestUriNotHttps)?;
             let method = if post {
                 let metadata = wallet_metadata(wallet.vp_formats_supported);
-                Method::PostForm {
+                Method::Post {
+                    content_type: "application/x-www-form-urlencoded",
                     body: form::encode(&[
                         ("wallet_metadata", &metadata),
                         ("wallet_nonce", wallet.nonce),
-                    ]),
+                    ])
+                    .into_bytes(),
                 }
             } else {
                 Method::Get

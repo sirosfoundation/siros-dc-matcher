@@ -17,7 +17,7 @@ use p256::{PublicKey, SecretKey};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use siros_codec::base64url;
-use siros_oid4vp::{ErrorCode, IntakeState, Method, Submission, VerifiedRequest};
+use siros_oid4vp::{ErrorCode, IntakeState, Method, Presentation, Submission, VerifiedRequest};
 use support::*;
 
 /// The verifier's encryption key.
@@ -142,10 +142,11 @@ fn jwe_of(submission: Submission) -> String {
     match submission {
         Submission::DcApi(data) => data["response"].as_str().unwrap().to_owned(),
         Submission::Post(post) => {
-            let Method::PostForm { body } = post.method() else {
-                panic!("a form")
+            let Method::Post { content_type, body } = post.method() else {
+                panic!("a POST")
             };
-            let fields = form(body);
+            assert_eq!(*content_type, "application/x-www-form-urlencoded");
+            let fields = form(std::str::from_utf8(body).unwrap());
             assert_eq!(fields.len(), 1);
             assert_eq!(fields[0].0, "response");
             fields[0].1.clone()
@@ -155,7 +156,12 @@ fn jwe_of(submission: Submission) -> String {
 
 #[test]
 fn a_produced_response_decrypts_to_its_payload() {
-    let presentations = || vec![("pid".to_owned(), vec![json!("eyJ...~WyJ...~")])];
+    let presentations = || {
+        vec![(
+            "pid".to_owned(),
+            vec![Presentation::text("eyJ...~WyJ...~".into())],
+        )]
+    };
     let vp_token = json!({"pid": ["eyJ...~WyJ...~"]});
     let cases = [
         (

@@ -81,6 +81,8 @@ against the 307,200-byte budget (303,914 before).
   `decentralized_identifier`, `verifier_attestation`, `openid_federation` and `redirect_uri`;
   ES256 Request Objects; the `vp_token`, its submission per Response Mode, `ECDH-ES` response
   encryption with `A128GCM` or `A256GCM`, error submissions, and the reply to a direct post.
+  `direct_post.cwt` (`zkp_req.md`, Section 6.2) posts the CBOR Authorization Response in a
+  `COSE_Encrypt` by ECDH-ES + HKDF-256 with `A128GCM`, `A192GCM` or `A256GCM`.
   Without `crypto` it holds the picker's request reading and builds with Rust 1.82.
 - `siros-codec`'s `base64`: padded base64 (RFC 4648, Section 4), as `x5c` carries certificates.
 - `siros-zkp-req`, the `zkp_req` protocol layer, and `siros-zkp-req-nym-auth`, the nym_auth

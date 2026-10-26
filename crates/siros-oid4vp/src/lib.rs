@@ -61,6 +61,8 @@ pub use intake::{
     TrustSubject,
 };
 #[cfg(feature = "crypto")]
-pub use response::{concat_kdf, read_reply, ResponseError, Submission, VpToken};
+pub use response::{
+    concat_kdf, cose_kdf, read_reply, Presentation, ResponseError, Submission, VpToken,
+};
 #[cfg(feature = "crypto")]
 pub use verified::{ContentEncryption, Encryption, ResponseMode, VerifiedRequest, VerifierView};

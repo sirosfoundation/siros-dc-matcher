@@ -16,7 +16,7 @@ mod support;
 use serde_json::{json, Value};
 use siros_oid4vp::{
     read_reply, ClientIdPrefix, ContentEncryption, Effect, ErrorCode, FetchResponse, IntakeError,
-    IntakeState, KeyMaterial, Method, ResponseMode, Submission, TrustSubject,
+    IntakeState, KeyMaterial, Method, Presentation, ResponseMode, Submission, TrustSubject,
 };
 use support::*;
 
@@ -63,7 +63,7 @@ fn direct_post_by_value() {
     assert_eq!(trust.subject(), &TrustSubject::Client(client_id.clone()));
     assert_eq!(trust.key(), &KeyMaterial::None);
 
-    let presentation = json!("eyJhbGci...QMA");
+    let presentation = Presentation::text("eyJhbGci...QMA".into());
     let token = request
         .vp_token(vec![(
             "some_identity_credential".into(),
@@ -74,10 +74,11 @@ fn direct_post_by_value() {
         panic!("a POST")
     };
     assert_eq!(post.url().as_str(), "https://client.example.org/post");
-    let Method::PostForm { body } = post.method() else {
-        panic!("a form")
+    let Method::Post { content_type, body } = post.method() else {
+        panic!("a POST")
     };
-    let fields = form(body);
+    assert_eq!(*content_type, "application/x-www-form-urlencoded");
+    let fields = form(std::str::from_utf8(body).unwrap());
     let field = |name: &str| fields.iter().find(|(n, _)| n == name).unwrap().1.clone();
     assert_eq!(field("state"), "eyJhb...6-sVA");
     assert_eq!(
@@ -135,9 +136,10 @@ fn request_uri_post() {
     let answer = |echo: bool| {
         move |effect: &Effect| match effect {
             Effect::Fetch(fetch) => {
-                let Method::PostForm { body } = fetch.method() else {
+                let Method::Post { body, .. } = fetch.method() else {
                     panic!("a POST")
                 };
+                let body = std::str::from_utf8(body).unwrap();
                 assert_eq!(fetch.accept(), "application/oauth-authz-req+jwt");
                 let fields = form(body);
                 let field = |name: &str| fields.iter().find(|(n, _)| n == name).unwrap().1.clone();
@@ -220,7 +222,10 @@ fn encrypted_response_key_choice() {
     assert_eq!(request.response_mode(), ResponseMode::DcApiJwt);
 
     let token = request
-        .vp_token(vec![("my_credential".into(), vec![json!("eyJhb...YMetA")])])
+        .vp_token(vec![(
+            "my_credential".into(),
+            vec![Presentation::text("eyJhb...YMetA".into())],
+        )])
         .unwrap();
     let Submission::DcApi(data) = token.submission(&mut Rng(4)).unwrap() else {
         panic!("a DC API response")
@@ -266,7 +271,7 @@ fn unsigned_dc_api() {
     let token = request
         .vp_token(vec![(
             "some_identity_credential".into(),
-            vec![json!("a~b~")],
+            vec![Presentation::text("a~b~".into())],
         )])
         .unwrap();
     assert_eq!(
