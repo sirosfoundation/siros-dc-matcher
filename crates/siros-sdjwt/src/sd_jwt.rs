@@ -16,6 +16,8 @@ use crate::tree::Object;
 /// disclosure is referenced, no reserved claim name is used, and `_sd_alg` names a supported
 /// algorithm.
 pub struct SdJwt {
+    issuer_jwt: String,
+    alg: HashAlg,
     claims: Object,
 }
 
@@ -34,18 +36,30 @@ impl SdJwt {
         for (position, encoded) in disclosures.into_iter().enumerate() {
             let content = disclosure_content(encoded)?;
             let digest = alg.digest(encoded.as_bytes());
-            let disclosure = Pending::new(position, content);
+            let disclosure = Pending::new(position, encoded.to_owned(), content);
             if pending.insert(digest, disclosure).is_some() {
                 return Err(ParseError::RepeatedDigest);
             }
         }
         let claims = process::claims(payload, pending)?;
-        Ok(Self { claims })
+        Ok(Self {
+            issuer_jwt: issuer_jwt.to_owned(),
+            alg,
+            claims,
+        })
     }
 
     /// The processed payload: every claim the credential holds, `_sd_alg` removed.
     pub fn claims(&self) -> &Object {
         &self.claims
+    }
+
+    pub(crate) fn issuer_jwt(&self) -> &str {
+        &self.issuer_jwt
+    }
+
+    pub(crate) fn alg(&self) -> HashAlg {
+        self.alg
     }
 }
 

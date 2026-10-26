@@ -1,4 +1,4 @@
-//! Why a stored SD-JWT is refused. Each error has a stable code.
+//! Why a stored SD-JWT or a key binding is refused. Each error has a stable code.
 
 use std::fmt;
 
@@ -56,3 +56,28 @@ impl fmt::Display for ParseError {
 }
 
 impl std::error::Error for ParseError {}
+
+/// Why claims do not form a KB-JWT payload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum KeyBindingError {
+    /// An extra claim is named `iat`, `aud`, `nonce` or `sd_hash`, or shares its name with
+    /// another extra claim.
+    ClaimCollision,
+}
+
+impl KeyBindingError {
+    /// A stable identifier.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::ClaimCollision => "kb_jwt_claim_collision",
+        }
+    }
+}
+
+impl fmt::Display for KeyBindingError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.code())
+    }
+}
+
+impl std::error::Error for KeyBindingError {}

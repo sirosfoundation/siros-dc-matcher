@@ -17,12 +17,17 @@ const SD_ALG: &str = "_sd_alg";
 /// A disclosure not yet referenced by a digest.
 pub(crate) struct Pending {
     position: usize,
+    encoded: String,
     content: Content,
 }
 
 impl Pending {
-    pub(crate) fn new(position: usize, content: Content) -> Self {
-        Self { position, content }
+    pub(crate) fn new(position: usize, encoded: String, content: Content) -> Self {
+        Self {
+            position,
+            encoded,
+            content,
+        }
     }
 }
 
@@ -121,7 +126,12 @@ impl Processor {
             object.push(name, Claim::new(value, None));
         }
         for digest in digests {
-            let Some(Pending { position, content }) = self.reference(digest)? else {
+            let Some(Pending {
+                position,
+                encoded,
+                content,
+            }) = self.reference(digest)?
+            else {
                 continue;
             };
             let Content::Property { name, value } = content else {
@@ -134,7 +144,10 @@ impl Processor {
                 return Err(ParseError::ClaimNameExists);
             }
             let value = self.value(value, depth + 1)?;
-            object.push(name, Claim::new(value, Some(Disclosure::new(position))));
+            object.push(
+                name,
+                Claim::new(value, Some(Disclosure::new(position, encoded))),
+            );
         }
         Ok(object)
     }
@@ -157,12 +170,13 @@ impl Processor {
             None => Ok(Element::Withheld),
             Some(Pending {
                 position,
+                encoded,
                 content: Content::Element(value),
             }) => {
                 let value = self.value(value, depth)?;
                 Ok(Element::Present(Claim::new(
                     value,
-                    Some(Disclosure::new(position)),
+                    Some(Disclosure::new(position, encoded)),
                 )))
             }
             Some(_) => Err(ParseError::MisplacedDisclosure),
