@@ -5,7 +5,7 @@
 //! | D1: the only metadata merger; `auxiliary_data` leaves the Credential Response's `credential_metadata` before the merge | [`IssuerMetadata::merge`] |
 //! | Display metadata: OpenID4VCI `credential_metadata` and SD-JWT VC Type Metadata, held by the host | [`IssuerMetadata`], [`TypeMetadata`], [`DisplayCache`] |
 //! | D2: locale choice by exact tag, then primary language, then the first entry | [`Locale`], [`choose`] |
-//! | D3: OpenID4VCI display wins over Type Metadata display for the same locale | [`DisplayCache::card`], [`DisplayCache::claim_rows`] |
+//! | D3: SD-JWT VC Type Metadata display wins; OpenID4VCI `credential_metadata` is the fallback | [`DisplayCache::card`], [`DisplayCache::claim_rows`] |
 //! | D4: values typed for display | [`DisplayValue`] |
 //! | D5: bytes shown by their length | [`DisplayValue::Bytes`] |
 //! | Credential cards and claim rows | [`Card`], [`ClaimRow`] |

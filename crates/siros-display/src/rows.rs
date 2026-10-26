@@ -5,7 +5,7 @@ use siros_credential::{ClaimPointer, Credential, TypedValue};
 use siros_dcql::PathComponent;
 
 use crate::cache::DisplayCache;
-use crate::claims::{describes, ClaimDescription, Label};
+use crate::claims::{describes, ClaimDescription};
 use crate::error::DisplayError;
 use crate::locale::{choose, Locale};
 use crate::text::DisplayText;
@@ -66,11 +66,11 @@ impl DisplayCache {
     /// The rows of the claims `pointers` select in `credential`, one per pointer, for the
     /// user's `preferences`, most preferred first.
     ///
-    /// A row's label comes from the claims descriptions of the credential's configuration and
-    /// of its Type Metadata that address the row's path: [`choose`] takes it from the OpenID4VCI
-    /// labels followed by those of the nearest type with a labelled description, so that an
-    /// OpenID4VCI label wins for the same locale (D3). Without any label it is the path's last
-    /// key. A pointer with a `null` gives a [`DisplayValue::List`] of the values it selects. An
+    /// [`choose`] takes a row's label from the nearest type of the credential's Type Metadata
+    /// with a labelled claim description that addresses the row's path. Without a type label it
+    /// takes it from the claims description of the credential's configuration that addresses the
+    /// path, the fallback (D3, OpenID4VCI 1.0, Section 12.2.4). Without any label it is the
+    /// path's last key. A pointer with a `null` gives a [`DisplayValue::List`] of the values it selects. An
     /// object gives a [`DisplayValue::Group`] of rows, labelled at the member's path; an
     /// array's elements are at its path extended with `null`. A byte string shows its length
     /// (D5): no display metadata of the ecosystem declares a claim to be an image.
@@ -137,8 +137,11 @@ impl Labels<'_> {
                     .find_map(|claim| claim.labels.as_deref())
             })
             .unwrap_or_default();
-        let candidates: Vec<&Label> = issuer.iter().chain(types).collect();
-        if let Some(label) = choose(self.preferences, &candidates) {
+        let candidates = match types {
+            [] => issuer,
+            typed => typed,
+        };
+        if let Some(label) = choose(self.preferences, candidates) {
             return Ok(label.text.clone());
         }
         let key = path

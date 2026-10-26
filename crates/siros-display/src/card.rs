@@ -4,7 +4,6 @@ use siros_credential::{Credential, Format};
 
 use crate::cache::DisplayCache;
 use crate::colour::Colour;
-use crate::entry::DisplayEntry;
 use crate::error::DisplayError;
 use crate::issuer::IssuerMetadata;
 use crate::locale::{choose, Locale};
@@ -52,11 +51,11 @@ impl Card {
 impl DisplayCache {
     /// The card of `credential` for the user's `preferences`, most preferred first.
     ///
-    /// The entry comes from the `credential_metadata.display` of the credential's configuration
-    /// and the `display` of its Type Metadata, the nearest type that has one (SD-JWT VC, Section
-    /// 5.5.2). [`choose`] takes it from the OpenID4VCI entries followed by the type entries, so
-    /// that an OpenID4VCI entry wins for the same locale (D3). The entry gives the title, logo and
-    /// colours; without any entry the title is the credential type. The issuer line is the
+    /// [`choose`] takes the entry from the `display` of the credential's Type Metadata, the
+    /// nearest type that has one (SD-JWT VC, Section 5.5.2). Without a type entry it takes it from
+    /// the `credential_metadata.display` of the credential's configuration, the fallback (D3,
+    /// OpenID4VCI 1.0, Section 12.2.4). The entry gives the title, logo and colours; without any
+    /// entry the title is the credential type. The issuer line is the
     /// chosen named entry of the Credential Issuer's `display`, else the credential's Credential
     /// Issuer Identifier.
     ///
@@ -75,12 +74,10 @@ impl DisplayCache {
             .into_iter()
             .find_map(TypeMetadata::display)
             .unwrap_or_default();
-        let entries: Vec<&DisplayEntry> = issued
-            .map(IssuerMetadata::display)
-            .unwrap_or_default()
-            .iter()
-            .chain(type_display)
-            .collect();
+        let entries = match type_display {
+            [] => issued.map(IssuerMetadata::display).unwrap_or_default(),
+            typed => typed,
+        };
         let issuer = match issued.and_then(|m| choose(preferences, m.issuer_display())) {
             Some(named) => Some(named.name.clone()),
             None => credential
@@ -89,7 +86,7 @@ impl DisplayCache {
                 .transpose()
                 .map_err(DisplayError::Text)?,
         };
-        Ok(match choose(preferences, &entries) {
+        Ok(match choose(preferences, entries) {
             Some(entry) => Card {
                 title: entry.name.clone(),
                 issuer,
