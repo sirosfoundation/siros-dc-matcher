@@ -35,6 +35,8 @@ Key words: MUST, MUST NOT, SHOULD and MAY as in RFC 2119.
 | SIROS private data specification 3.1 | §5A delivered secrets; §6 WalletStateContainer; §6.0 credential entry |
 | OpenID4VCI 1.0 | `credential_metadata` (`display`, `claims`) |
 | EC TS12 v1.0.1 | §1.2, §3.6, §4.2, §4.3 |
+| OpenID4VC HAIP 1.0 | §5 (`aki` support), §6.1.1 (`x5c` in SD-JWT VCs) |
+| RFC 5280 | §4.2.1.1 AuthorityKeyIdentifier; §6 path validation, as TR3 restricts it |
 
 ## 3. Cross-cutting requirements
 
@@ -71,14 +73,15 @@ Dependencies point downward through the layers:
 | Layer | Components |
 |---|---|
 | L0 | codec |
-| L1 | DCQL, SD-JWT, mdoc, OpenID4VP, `zkp_req`, nym_auth |
+| L1 | DCQL, SD-JWT, mdoc, OpenID4VP, `zkp_req`, nym_auth, trust |
 | L2 | wallet state, credential, display, transaction data |
 | L3 | presentation |
 | L4 | wallet (provers), facades, picker |
 
 A component MUST NOT depend on a component of its own or a higher layer, except these:
 - SD-JWT and OpenID4VP depend on DCQL, for its claims path components and query.
-- nym_auth depends on `zkp_req`, mdoc and OpenID4VP.
+- nym_auth depends on `zkp_req`, mdoc, OpenID4VP and trust.
+- Trust depends on DCQL, for `trusted_authorities`.
 - Transaction data depends on credential and display.
 - Display depends on credential.
 
@@ -95,7 +98,7 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
 - **H1.** It MUST execute every `Fetch` effect within its constraints: HTTPS only, public addresses only, no redirects, the stated size cap and timeout.
 - **H2.** It MUST answer `Trust` effects with the AuthZEN verdict for the stated subject and key material.
 - **H3.** It MUST sign exactly the bytes a `Sign` effect states, with the key it names, and report that key's authentication factors (`amr`) before signing.
-- **H4.** It MUST supply the decrypted wallet state, the display metadata it holds, the user's locale preferences, the current time, and the circuit artifacts it ships.
+- **H4.** It MUST supply the decrypted wallet state, the display metadata it holds, the user's locale preferences, the current time, the circuit artifacts it ships, and the trust store it provisions (TR1, TR4).
 - **H5.** It MUST append the presentation record the core returns as a `new_presentation` event (privatedata §6).
 - **H6.** It MUST render the views the core returns and return the user's selection.
 - **H7.** It MUST NOT interpret protocol data, choose credentials, choose claims, choose a proof system, or build a presentation.
@@ -119,6 +122,7 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
 **Requirements:**
 - **Q1.** `DcqlQuery` MUST be constructible only by parsing.
   - The parse enforces identifier syntax and uniqueness, non-empty `credentials`, `claim_sets` that refer to claim ids, and `credential_sets` that refer to query ids.
+  - `trusted_authorities` is a non-empty array of entries, each with a string `type` and a non-empty array of string `values` (§6.1.1). The `zkp_req` component reads it from here.
   - Today's public `validate()` and public fields go; the change is a breaking version of the crate.
 - **Q2.** Evaluation MUST implement §6.4: claim presence, `claim_sets` (first satisfiable), `values`, `credential_sets` (`required`) and `multiple`.
 - **Q3.** `meta` and `format` are judged by a policy the presentation component supplies.
@@ -213,7 +217,7 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
 **Requirements:**
 - **N1.** `NymAuthQuery` MUST be constructible only from a `ZkpReqQuery` that satisfies the catalogue. This replaces today's `catalogue::validate`.
 - **N2.** `NymAuthRequest` MUST be constructible only from a `VerifiedRequest` that meets the nym_auth policy: `openid4vp-v1-signed` over the DC API, a positive trust verdict for the Client Identifier, an encrypted Response Mode with its key. The `verifier_id` MUST derive from the request's authenticated certificates in the form the trust framework fixes (catalogue, "Verifier identity"). The host supplies only the form. This replaces the host-asserted `signed` flag of today's `check_request`.
-- **N3.** The credential tests (signature, issuer anchors, validity at `proof_time`, form) MUST be the constructor of a usable-attestation witness. Proving MUST require that witness.
+- **N3.** The credential tests (form, issuer signature, listed digests, validity at `proof_time`) MUST be the constructor of a tested-attestation witness. A usable-attestation witness MUST be constructible only from a tested attestation and the `AdmittedIssuer` (TR3) of the same Document Signer certificate for the same query. Proving MUST require the usable witness.
 - **N4.** `OpenedSeed` MUST be constructible only from a delivered `secret_seed` whose SHA-256 equals the credential's `ssc`. It is constructed again for each use (privatedata §5A.2), and the prover job MUST require it. This replaces today's `opens_ssc -> bool`.
 - **N5.** A system is available exactly when its circuits are loaded through the pinned `load` (digest and length). Circuits are data shipped with each build.
 
@@ -235,7 +239,7 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
 - claims path pointer resolution (§7).
 
 **Requirements:**
-- **C1.** A credential MUST be constructible only by parsing a wallet state entry through the format components. An unsupported format is an error.
+- **C1.** A credential MUST be constructible only by parsing a wallet state entry through the format components. An unsupported format is an error. The parse includes the issuer chain (TR2).
 - **C2.** Claim values MUST keep their type: null, boolean, integer, number, text, bytes, full-date, date-time, array, object. The credential reads them from the format's own tree; it keeps no copy of the claims.
 - **C3.** Pointer resolution goes through Q4 for JSON-based formats, and through §7.2 (`[namespace, element]`) for mdoc. A pointer MUST be constructible only by parsing, and is never empty.
 - **C4.** `UsableCredential` MUST be the witness of validity at a given time: `not_before ≤ now < not_after`, from the MSO or from `nbf`/`exp`.
@@ -299,6 +303,7 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
   - Format table: `mso_mdoc` from `mso_mdoc`; `dc+sd-jwt` from `dc+sd-jwt`; `zkp_req` from its `meta.source_format`.
   - `meta.doctype_value` and `meta.vct_values` are matched against the credential type.
   - Holder binding holds when the credential has a key.
+  - A credential whose issuer the query's `trusted_authorities` do not admit (TR3) matches nothing, in every format (§6.1, §6.4.2).
   - Only usable credentials are offered (C4).
   - No query other than `zkp_req` may disclose a nym_auth undisclosable attribute.
   - Any other format, `mso_mdoc_zk` included, matches no credential.
@@ -350,8 +355,8 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
 - the registration projection the wallet writes for it.
 
 **Requirements:**
-- **K1.** The projection MUST hold, per credential: entry reference, format, type, the typed claim tree minus undisclosable attributes, card and labels. It also holds the available system ids, and is versioned. It MUST NOT hold delivered or derived secrets (R-G6).
-- **K2.** The picker MUST run the presentation component's matching over an `UnverifiedRequest`. For the same request and credentials, it MUST give the offers the wallet's plan gives, except where the wallet's plan depends on what the projection leaves out: the `zkp_req` credential tests that read undisclosable attributes (N3, for example the `age_check` bounds against `birth_date`) and the delivered seed (N4). The wallet refuses such an offer with `access_denied` (A9 applies to it as to any other).
+- **K1.** The projection MUST hold, per credential: entry reference, format, type, the typed claim tree minus undisclosable attributes, card and labels, and the issuer facts of TR5. It also holds the available system ids, and is versioned. It MUST NOT hold delivered or derived secrets (R-G6).
+- **K2.** The picker MUST run the presentation component's matching over an `UnverifiedRequest`. For the same request, credentials, trust store and time, it MUST give the offers the wallet's plan gives, except where the wallet's plan depends on what the projection leaves out: the `zkp_req` credential tests that read undisclosable attributes (N3, for example the `age_check` bounds against `birth_date`) and the delivered seed (N4). The wallet refuses such an offer with `access_denied` (A9 applies to it as to any other).
 - **K3.** Each picker entry MUST carry the offer, query id and credential id, so that the wallet maps the pick to a selection after its own verified plan.
 - **K4. Delegation.** The picker MUST send `Full` delegation (Credential Manager keeps its UI and the wallet fulfils from its background service) for the entries of an offer that needs no wallet display, and no delegation otherwise. Every entry of one set gets the same type. The rule is A9's, applied with the host's display level: an offer that the host displayed only in part (`display_skipped`) needs the wallet's display.
 
@@ -371,11 +376,30 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
 
 **Requirement:** it MUST render only what a view contains and MUST return selections in the core's selection form.
 
+### 4.18 Trust
+
+**Responsibility:** the trust store's format, issuer chains, and the resolution of `trusted_authorities` (OpenID4VP §6.1.1) into an admission of a credential's issuer. Provisioning the store is the host's.
+
+**Requirements:**
+- **TR1. Store.** The trust store MUST be constructible only by parsing its record: a JSON array of entries `{type, value, certificates}`.
+  - `type` is `etsi_tl` or `openid_federation`, and `value` is the authority value as a verifier sends it.
+  - `certificates` is a non-empty array of DER certificates in the `x5c` encoding (base64).
+  - An unknown `type`, a repeated `type` and `value`, or a certificate that does not parse is an error.
+- **TR2. Issuer chain.** The credential's issuer chain is the mdoc `issuerAuth` `x5chain` (every certificate, signer first) or the SD-JWT VC issuer-signed JWT's `x5c` header (leaf first). It parses with the credential. A chain that does not parse is a credential error. An SD-JWT VC without `x5c` has no chain.
+- **TR3. Resolution.** For one Credential Query, a credential's issuer is admitted exactly when one of these holds:
+  - the query has no `trusted_authorities`;
+  - an `aki` value, base64url-decoded, equals the keyIdentifier of the AuthorityKeyIdentifier extension of a certificate in the chain;
+  - for an `etsi_tl` or `openid_federation` value, the store has an entry of that type and value, and the chain's first certificate validates up to one of its certificates at the current time. Each certificate on the path is signed by the next one or by the store certificate, names its signer as issuer, is valid at that time, and every signer is a CA (basicConstraints). Signatures are ECDSA P-256 with SHA-256 or P-384 with SHA-384.
+
+  An entry of any other type admits nothing. A malformed `aki` value makes the query invalid. Admission MUST be the constructor of an `AdmittedIssuer` witness that names the query and the chain's first certificate.
+- **TR4. Provision.** The host supplies the store (H4). The core fetches no list, federation statement or certificate. The store is global, the same for every request and channel, because the DC API gives the picker nothing per request.
+- **TR5. Picker facts.** At registration the wallet resolves each credential against the store. The projection records the credential's AKI keyIdentifiers and the `type` and `value` of every store entry that admits it. The picker admits an issuer from these facts alone, with the same rule. The wallet registers again when the store or the wallet state changes.
+
 ## 5. Boundary contracts
 
 | Boundary | Crosses inward | Crosses outward | Guaranteed by the core | Guaranteed by the other side |
 |---|---|---|---|---|
-| Host ↔ core | wallet state; display metadata; locales; key factors; circuits; time; effect results | effects (`Fetch`, `Trust`, `Sign`); views; submissions; presentation records; refusals | R-G2 to R-G7; every effect is the only I/O it needs | H1 to H5 |
+| Host ↔ core | wallet state; display metadata; locales; key factors; circuits; trust store; time; effect results | effects (`Fetch`, `Trust`, `Sign`); views; submissions; presentation records; refusals | R-G2 to R-G7; every effect is the only I/O it needs | H1 to H5 |
 | UI ↔ core | selection | consent view: verifier, purposes, offers with cards, rows and proof statements, optional additions, transactions | the view equals the plan; R-G6 | H6, §4.17 |
 | Engine ↔ web client | verified request | submission | P1; F3 | E1 to E4 |
 | Wallet ↔ picker | the picker's chosen entry | registration projection | K1 to K3 | Credential Manager runs the matcher on the registered projection |
@@ -411,6 +435,8 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
 | nym_auth `policy.rs` (generic parts) | OpenID4VP | the nym_auth part becomes `NymAuthRequest` (N2) |
 | nym_auth `catalogue::validate`, `checks::check`, `checks::opens_ssc` | nym_auth | constructors of witnesses (N1, N3, N4) |
 | nym_auth `presenter::match_query` selection | presentation | one selection (A2) |
+| nym_auth `attestation.rs` `anchors` and the wallet's `chains_to`; FFI `anchors` arguments | trust | the `AdmittedIssuer` witness (TR3, N3) |
+| `siros-zkp-req` `TrustedAuthority`, `AuthorityKind` | DCQL | one parse of `trusted_authorities` (Q1) |
 | `siros-dc-matcher-wasm`, `-testhost` | picker | |
 | `siros-dc-matcher-ffi` | facades (UniFFI) | |
 | `proving/` | wallet and facades (web) | |
@@ -456,5 +482,6 @@ The core meets this document when all of the following hold:
 | All-optional `credential_sets` offer each option | Today such a request offers nothing (vc's issuance-auth query has this shape) |
 | Transaction data types own their bindings | OpenID4VP §8.4; Appendix B is a set of recommendations to type authors |
 | The mdoc ZK path (`mso_mdoc_zk`, `zk_system_type`) is retired everywhere | Owner's decision, 2026-10-26; `zkp_req` covers proof presentations |
+| Issuer trust: the core owns the store's format and the resolution; the host provisions one global store | Owner's decision, 2026-10-26; the DC API picker receives nothing per request. AuthZEN issuer evaluation stays a hook, to be built in the core when it is taken up |
 
 **Open:** none.
