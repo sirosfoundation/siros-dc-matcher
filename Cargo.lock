@@ -2149,7 +2149,12 @@ dependencies = [
 name = "siros-display"
 version = "0.11.0"
 dependencies = [
+ "rustc-hash",
  "serde_json",
+ "siros-codec",
+ "siros-credential",
+ "siros-dcql",
+ "siros-wallet-state",
  "siros-zkp-req",
  "unicode-general-category",
 ]

@@ -20,8 +20,7 @@ pub fn display(purpose: &Value) -> String {
 /// the wallet share, and are left out; [`display`] gives them to the application.
 ///
 /// `None` when no string purpose holds more than whitespace. A blank purpose is no purpose: the
-/// host renders the presence of a line rather than its content, and showed a warning triangle on
-/// every entry with an empty one (v0.6.1).
+/// host shows a warning triangle for any line, a blank one included (v0.6.1).
 // `inline`: see `proof::rows`.
 #[inline]
 pub fn line(purposes: &[Value]) -> Option<String> {

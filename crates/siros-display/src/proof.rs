@@ -41,7 +41,7 @@ pub fn rows(
             "pseudonym" => ("Pseudonym", param("config").map(|c| format!("config {c}"))),
             other => (other, None),
         };
-        // The detail is clipped, never the marker.
+        // Clipping shortens the detail and keeps the marker.
         let value = match detail {
             None => UNVERIFIED.to_string(),
             Some(detail) => format!(

@@ -86,7 +86,7 @@ impl fmt::Display for Locale {
     }
 }
 
-/// The subtags of a tag not yet read.
+/// The unread subtags of a tag.
 struct Subtags<'a>(&'a [&'a str]);
 
 impl Subtags<'_> {
@@ -202,6 +202,12 @@ impl std::error::Error for LocaleError {}
 pub trait Localized {
     /// The entry's locale. `None` when the entry states none.
     fn locale(&self) -> Option<&Locale>;
+}
+
+impl<T: Localized + ?Sized> Localized for &T {
+    fn locale(&self) -> Option<&Locale> {
+        (**self).locale()
+    }
 }
 
 /// The entry to show for the user's `preferences`, most preferred first (D2).

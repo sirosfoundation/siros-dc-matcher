@@ -62,7 +62,7 @@ impl fmt::Display for DisplayText {
     }
 }
 
-/// A `char` is never a surrogate (Cs), so the categories Cc, Cf, Zl, Zp, Co and Cn remain.
+/// A `char` excludes the surrogates (Cs), so the categories Cc, Cf, Zl, Zp, Co and Cn remain.
 fn unsafe_to_show(c: char) -> bool {
     matches!(
         get_general_category(c),
