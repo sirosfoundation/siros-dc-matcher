@@ -86,8 +86,9 @@ Two floors are checked separately, because they differ on purpose:
 # Everything that ships inside the credential picker holds Rust 1.82.
 cargo +1.82 check --locked --all-features \
   -p siros-dcql -p siros-dc-matcher-core -p siros-dc-matcher-wasm \
-  -p siros-zkp-req -p siros-zkp-req-nym-auth
+  -p siros-zkp-req -p siros-zkp-req-nym-auth -p siros-trust
 cargo +1.82 check --locked -p siros-oid4vp
+cargo +1.82 check --locked -p siros-trust
 
 # siros-dcql's public API against the version it declares.
 # Unlike fmt and clippy this is not part of the toolchain:

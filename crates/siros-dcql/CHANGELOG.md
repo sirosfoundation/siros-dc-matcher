@@ -22,10 +22,40 @@ this file.
   refused.
   `QueryError::EmptyCredentialId` is gone: `QueryIdError::Empty` covers it. The version is
   0.12.0.
+- **BREAKING:** a query is constructed only by parsing. The fields of `DcqlQuery`,
+  `CredentialQuery`, `ClaimsQuery` and `CredentialSetQuery` are private and read through
+  accessors of the same names (`credentials()`, `id()`, `format()`, `meta()`, `claims()`,
+  `claim_sets()`, `path()`, `values()`, `options()`, `purpose()`); `DcqlQuery::validate` is
+  gone. `DcqlQuery::parse` reads a JSON value, and `Deserialize` runs the same checks.
+- **BREAKING:** `trusted_authorities` parses into `TrustedAuthorities`: a non-empty array of
+  `TrustedAuthority`, each an `AuthorityType` and a non-empty list of `AuthorityValue`s
+  (§6.1.1). A malformed one is `QueryError::TrustedAuthorities` with its
+  `TrustedAuthorityError`; `null` reads as absent.
+- **BREAKING:** a claims query id, and an id a `claim_sets` option names, is a `ClaimId` (§6.3);
+  another is `QueryError::ClaimId`. A `credential_sets` option names `QueryId`s; another id is
+  `QueryError::Id`. `QueryError::DuplicateClaimId::claim` is a `ClaimId`.
+- **BREAKING:** `multiple`, `require_cryptographic_holder_binding` and `required` read as
+  `CredentialQuery::multiplicity()` (`Multiplicity`), `holder_binding()` (`HolderBinding`) and
+  `CredentialSetQuery::requirement()` (`SetRequirement`); the format is a `CredentialFormat`.
+- **BREAKING:** `Credential::has_cryptographic_holder_binding` is `Credential::binding`, a
+  `CryptographicBinding`.
+- **BREAKING:** the results of `execute` keep their fields private, read through accessors:
+  `QueryResult::matches()`, `satisfaction()` (a `Satisfaction`), `credential_sets()`;
+  `QueryMatch::query_id()`, `candidates()`, `multiplicity()`; `Candidate::credential_id()`,
+  `claims()`; `SelectedClaim::claim_id()` (a `ClaimId`), `path()`, `into_path()`;
+  `Combinations::combinations()`, `dropped()`; `Combination::members()` (keyed by `QueryId`),
+  `purposes()`.
+- **BREAKING:** `PathError::TypeMismatch::at` is a `ComponentIndex`.
+- Every error has a stable code, which its `Display` writes. A query that repeats an id is
+  checked by comparing each id with the earlier ones.
 
 ### Added
 
 - `QueryId`, `QueryIdError` and `QueryError::Id`.
+- `ClaimId`, `ClaimIdError`, `AuthorityType`, `AuthorityValue`, `TrustedAuthority`,
+  `TrustedAuthorities`, `TrustedAuthorityError`, `CredentialFormat`, `Multiplicity`,
+  `HolderBinding`, `SetRequirement`, `CryptographicBinding`, `Satisfaction`, `ComponentIndex`,
+  `QueryError::code` and `select_claims` at the crate root.
 
 - `resolve`, the §7.1.1 processing over any claim tree that implements `ClaimNode` (with `Lookup`), which `resolve_json` now runs on, and `PathError::code`.
 

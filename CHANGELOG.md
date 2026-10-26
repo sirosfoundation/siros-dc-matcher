@@ -71,6 +71,47 @@ against the 307,200-byte budget (303,914 before).
   of `ProofJob`, `NymAuthQuery`, `NymAuthMdoc`, `SignedElement` and `Credential` are private;
   methods of the same names read them.
 - `matcher.wasm` is 300,478 bytes (304,452 before).
+- **BREAKING (Rust API):** `siros-dcql`'s query is constructed only by parsing: its fields are
+  private, read through accessors, and `DcqlQuery::validate` is gone. `trusted_authorities`
+  parses into `TrustedAuthorities` (a non-empty array of entries, each with a string `type` and
+  a non-empty array of string `values`, OpenID4VP 1.0, Section 6.1.1); a malformed one refuses
+  the query. Claims query ids are `ClaimId`s and `credential_sets` options name `QueryId`s;
+  `multiple`, `require_cryptographic_holder_binding` and `required` are enums. See
+  [its changelog](crates/siros-dcql/CHANGELOG.md).
+- **BREAKING (Rust API):** `siros-zkp-req` reads no `trusted_authorities`: `TrustedAuthority`,
+  `AuthorityKind` and `RequestRule::TrustedAuthoritiesInvalid` are gone, and so is the request
+  vector `err_trusted_authorities_without_values`; the rule is `siros-dcql`'s. `ZkpReqQuery::id`
+  is a `QueryId`.
+- **BREAKING (Rust API):** `siros-mdoc` gives the whole `x5chain` (`IssuerAuth::x5chain`, the
+  Document Signer's first) and loses `P256Certificate`, `CertificateError` and `chains_to`;
+  `P256Key::from_sec1` reads an uncompressed point. `siros-sdjwt` keeps the issuer JWT's `x5c`
+  (`SdJwt::x5c`); a malformed one is `ParseError::X5c`.
+- **BREAKING (credential):** a credential parses with its issuer chain (TR2): the mdoc's
+  `x5chain`, or the SD-JWT VC issuer JWT's `x5c`. A chain that does not parse is
+  `CredentialError::IssuerChain`; `Credential::issuer_chain` gives it. `UsableCredential::time`
+  gives the time it is valid at.
+- **BREAKING (presentation):** `PlanInput` takes the host's `TrustStore`. A credential whose
+  issuer the query's `trusted_authorities` do not admit matches nothing, in every format (A1),
+  and a malformed `aki` value refuses the request with `invalid_request`
+  (`QueryRefusal::Authorities`). A candidate carries its issuer's admission into the offers and
+  phase 2. `MatchCredential` gives the admission, with the trust context its implementor needs:
+  the store for the wallet, nothing for the picker's TR5 facts. `Unproven::Unlisted` is gone and
+  `Unproven::Issuer` names an admission of another certificate or query.
+- **BREAKING (nym_auth):** `TestedAttestation::of(mdoc, proof_time)` runs the credential tests;
+  `UsableAttestation::new(tested, admitted, query)` takes the `AdmittedIssuer` of the same
+  Document Signer for the same query (N3), and `Answer::new` refuses an attestation of another
+  query. The `anchors` of every signature, `HostError::AnchorsMissing`,
+  `CredentialCode::IssuerUntrusted`, `UsableAttestation::of` and the stored-data reader are
+  gone. The Verifier's `trust_anchors` are parsed certificates. The presenter keeps `Answer` and
+  `Prepared::new` (feature `request`); `match_query`, `prepare`, `present`, `Signer`,
+  `StoredCredential` and the rest of the old presenter path are removed.
+- **BREAKING (FFI):** `zkp_req_match`, `zkp_req_prepare`, `FfiPrepared`, `FfiProofJob`,
+  `FfiStoredCredential`, `FfiCandidate`, `FfiZkpMatch` and their records are removed; the
+  facades expose the plan. `zkp_req_verify` refuses a trust anchor that does not parse.
+  Bindings are regenerated.
+- **BREAKING (browser):** `siros-zkp-req-wasm` keeps `ZkpProvers` and `vpTokenJson`;
+  `matchQuery`, `session` and `prepare` are removed.
+- Vector set digest: `1e2b5b3dc8107d8ce1f7a7d36461d70f66c6734e0bcaa1ebcfa82c8c261a03f8`.
 
 ### Fixed
 
@@ -82,6 +123,16 @@ against the 307,200-byte budget (303,914 before).
 
 ### Added
 
+- `siros-trust`, issuer trust for the wallet core (§4.18). `TrustStore::parse` reads the
+  host's record of `{type, value, certificates}` entries (TR1); `IssuerChain::parse` reads a
+  credential's certificates with their AuthorityKeyIdentifier keyIdentifiers (TR2);
+  `QueryAuthorities::of` and `AdmittedIssuer::resolve` admit a credential's issuer for one query
+  at a time: no `trusted_authorities`, an `aki` value a certificate of the chain names, or the
+  store entry of an `etsi_tl` or `openid_federation` value whose certificates the chain
+  validates up to (TR3: names, validity, `cA` of every signer, ECDSA P-256/SHA-256 and
+  P-384/SHA-384). `IssuerFacts::at` gives the facts the wallet records for the picker, and
+  `Admission::of` admits from them alone with the same rule (TR5). Without the feature `chain`
+  the crate holds the rule and the facts, on Rust 1.82.
 - `siros-presentation`, the presentation component of the wallet core. Phase 1 plans a
   verified request over the wallet's credentials usable at the plan's time: the format table,
   `meta`, holder binding and no query but `zkp_req` on a nym_auth attestation (A1); `zkp_req` as
