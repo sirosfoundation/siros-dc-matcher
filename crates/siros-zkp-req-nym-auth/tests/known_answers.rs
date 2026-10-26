@@ -10,9 +10,9 @@
 use serde_json::Value;
 use siros_codec::date::Date;
 use siros_mdoc::{device_signing_digest, DeviceNameSpaces};
+use siros_oid4vp::Handover;
 use siros_zkp_req_nym_auth::age::{AgeRange, Bound, Bounds};
 use siros_zkp_req_nym_auth::catalogue::{Config, Prf, Pseudonym};
-use siros_zkp_req_nym_auth::session::Handover;
 use siros_zkp_req_nym_auth::verifier_id::{pseudonym_sha256, verifier_input, VerifierId};
 
 /// A range, D, E, C, and where the case comes from.
@@ -198,8 +198,12 @@ fn session_vectors() {
     for e in v["redirect"].as_array().unwrap() {
         let s = |k: &str| e[k].as_str().unwrap();
         let thumbprint: [u8; 32] = hex(s("jwk_thumbprint_hex")).try_into().unwrap();
-        let handover =
-            Handover::redirect(s("client_id"), s("nonce"), &thumbprint, s("response_uri"));
+        let handover = Handover::redirect(
+            s("client_id"),
+            s("nonce"),
+            Some(&thumbprint),
+            s("response_uri"),
+        );
         let transcript = handover.session_transcript();
         assert_eq!(
             transcript,
@@ -225,7 +229,7 @@ fn session_vectors() {
         );
         if let Some(thumbprint) = e["jwk_thumbprint_hex"].as_str() {
             let thumbprint: [u8; 32] = hex(thumbprint).try_into().unwrap();
-            let handover = Handover::dc_api(s("origin"), s("nonce"), &thumbprint);
+            let handover = Handover::dc_api(s("origin"), s("nonce"), Some(&thumbprint));
             assert_eq!(handover.session_transcript(), transcript, "{}", s("name"));
         }
     }

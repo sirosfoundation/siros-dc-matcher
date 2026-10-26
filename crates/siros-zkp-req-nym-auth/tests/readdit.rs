@@ -18,13 +18,13 @@ use ciborium::value::Value as Ciborium;
 use serde_json::{json, Value};
 use siros_codec::date::DateTime;
 use siros_mdoc::P256Key;
+use siros_oid4vp::ec_jwk_thumbprint;
 use siros_zkp_req::Match;
 use siros_zkp_req_nym_auth::catalogue::MDOC_DOCTYPE;
 use siros_zkp_req_nym_auth::checks::{check, Checked};
 use siros_zkp_req_nym_auth::outcome::CredentialCode;
 use siros_zkp_req_nym_auth::presenter::{match_query, prepare, MatchInput, Prepared, ProveInput};
 use siros_zkp_req_nym_auth::prover::ProofOutput;
-use siros_zkp_req_nym_auth::session::ec_jwk_thumbprint;
 use siros_zkp_req_nym_auth::system::NymAuthSystem;
 use support::*;
 

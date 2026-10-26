@@ -1,6 +1,6 @@
 //! The encodings every SIROS wallet core crate shares: a strict CBOR reader and deterministic
-//! writer, unpadded base64url, and the calendar dates and UTC times of CBOR's `full-date` and
-//! `tdate`.
+//! writer, unpadded base64url, the padded base64 of JOSE certificates, and the calendar dates
+//! and UTC times of CBOR's `full-date` and `tdate`.
 //!
 //! Nothing here panics on any input: the matcher runs this code inside the credential picker,
 //! where a trap reads as "no matching credential".
@@ -14,6 +14,7 @@
     clippy::panic
 )]
 
+pub mod base64;
 pub mod base64url;
 pub mod cbor;
 pub mod date;

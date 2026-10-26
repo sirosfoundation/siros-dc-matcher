@@ -10,7 +10,6 @@
 //! | [`age`] | `range`, E and C | `age_check` |
 //! | [`verifier_id`] | `verifier_id`, `verifier_input`, the `sha-256` pseudonym | `pseudonym` |
 //! | [`system`] | The systems and the options each supports | System rulebooks, Sections 1 to 3 |
-//! | [`session`] | The `Handover` | Binding |
 //! | [`policy`] | Signed requests, encrypted responses | Binding, Response confidentiality |
 //! | [`mdoc`] | The nym_auth form of the ISO/IEC 18013-5 attestation | Attestation |
 //! | [`checks`] | The Wallet's tests of a credential | System rulebooks, Section 7 |
@@ -21,8 +20,8 @@
 //! The provers stay outside. A host implements [`prover::NymAuthProver`] and
 //! [`prover::NymAuthProofVerifier`] with a system's prover and verifier.
 //!
-//! Without the default feature `credential`, the crate holds the catalogue, the systems, the
-//! session binding and the policy: what the credential picker needs.
+//! Without the default feature `credential`, the crate holds the catalogue, the systems and the
+//! policy: what the credential picker needs.
 
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
@@ -47,7 +46,6 @@ pub mod age;
 pub mod catalogue;
 pub mod outcome;
 pub mod policy;
-pub mod session;
 pub mod system;
 pub mod verifier_id;
 

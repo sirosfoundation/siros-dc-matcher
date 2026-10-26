@@ -52,6 +52,17 @@ against the 307,200-byte budget (303,914 before).
   `{"display_skipped":bool,"host_level":n,"data":{…}}`. The matcher's own
   members moved under `data`; `host_abi` became `host_level`.
 - A NUL inside a picker string becomes a space; it used to end the string.
+- **BREAKING (Rust API):** `siros-dc-matcher-core`'s `request` module is `siros-oid4vp`'s
+  `UnverifiedRequest` and `UnverifiedQuery`. An entry reads only under the three protocols of
+  OpenID4VP 1.0, A.1; a profile label outside them reads as no protocol.
+  `UnverifiedRequest::first_registered` and `diagnose` take the registration as a label
+  predicate, and `ProfilePolicy::with_context` takes the query and `client_metadata`.
+  `first_supported_request` and the entry predicate are removed.
+- **BREAKING (Rust API):** `Handover`, `HandoverInvalid` and `ec_jwk_thumbprint` move from
+  `siros_zkp_req_nym_auth::session` to `siros-oid4vp`. `Handover::dc_api` and
+  `Handover::redirect` take the encryption key thumbprint as an `Option`: `None` is CBOR `null`,
+  for an unencrypted response (B.2.6).
+- `matcher.wasm` is 300,538 bytes (304,452 before).
 
 ### Fixed
 
@@ -63,6 +74,15 @@ against the 307,200-byte budget (303,914 before).
 
 ### Added
 
+- `siros-oid4vp`, OpenID4VP 1.0 for the wallet core. With the `crypto` feature: sans-IO intake
+  of redirect requests (by value, `request`, `request_uri` with `get` or `post`) and DC API
+  requests (unsigned, signed, multisigned) into a `VerifiedRequest`, with `Fetch` and `Trust`
+  effects for the host; the Client Identifier Prefixes `x509_san_dns`, `x509_hash`,
+  `decentralized_identifier`, `verifier_attestation`, `openid_federation` and `redirect_uri`;
+  ES256 Request Objects; the `vp_token`, its submission per Response Mode, `ECDH-ES` response
+  encryption with `A128GCM` or `A256GCM`, error submissions, and the reply to a direct post.
+  Without `crypto` it holds the picker's request reading and builds with Rust 1.82.
+- `siros-codec`'s `base64`: padded base64 (RFC 4648, Section 4), as `x5c` carries certificates.
 - `siros-zkp-req`, the `zkp_req` protocol layer, and `siros-zkp-req-nym-auth`, the nym_auth
   catalogue with the Longfellow and Vega systems, the session binding, the Wallet's credential
   tests, a presenter in phases and the Verifier's checks, behind `NymAuthProver` and

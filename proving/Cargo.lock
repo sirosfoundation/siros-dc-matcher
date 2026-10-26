@@ -1177,6 +1177,15 @@ name = "siros-codec"
 version = "0.11.0"
 
 [[package]]
+name = "siros-dcql"
+version = "0.11.0"
+dependencies = [
+ "rustc-hash",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "siros-mdoc"
 version = "0.11.0"
 dependencies = [
@@ -1186,6 +1195,17 @@ dependencies = [
  "sha2",
  "siros-codec",
  "x509-cert",
+]
+
+[[package]]
+name = "siros-oid4vp"
+version = "0.11.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+ "siros-codec",
+ "siros-dcql",
 ]
 
 [[package]]
@@ -1240,6 +1260,7 @@ dependencies = [
  "sha2",
  "siros-codec",
  "siros-mdoc",
+ "siros-oid4vp",
  "siros-zkp-req",
  "x509-cert",
  "zeroize",

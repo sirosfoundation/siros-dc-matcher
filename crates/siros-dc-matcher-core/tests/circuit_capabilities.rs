@@ -17,8 +17,8 @@ use siros_dc_matcher_core::db::CredentialDatabase;
 use siros_dc_matcher_core::evaluator::{credentials, ProfilePolicy};
 use siros_dc_matcher_core::fixtures::{circuit, nym_wallet, NYM_AUTH_DOCTYPE};
 use siros_dc_matcher_core::profile::{CAPABILITIES_PARAM, CREDENTIAL_TYPE_PARAM, SYSTEM_ID_PARAM};
-use siros_dc_matcher_core::request::first_supported_context;
 use siros_dcql::execute;
+use siros_oid4vp::UnverifiedRequest;
 
 // --- the shared vectors ----------------------------------------------------
 
@@ -269,13 +269,15 @@ fn offered(db: &CredentialDatabase, query: Value) -> Vec<String> {
         "data": {"dcql_query": {"credentials": [query]},
                  "client_metadata": client_metadata(&[CIRCUIT])}}]})
     .to_string();
-    let Some(context) = first_supported_context(request.as_bytes(), &db.profile, None) else {
+    let registered = |label: &str| db.profile.parser_for(label).is_some();
+    let Some(context) = UnverifiedRequest::first_registered(request.as_bytes(), &registered) else {
         return vec![];
     };
-    let Some(typed) = context.matching_query() else {
+    let Some(typed) = context.query().matching_query() else {
         return vec![];
     };
-    let policy = ProfilePolicy::new(&db.profile).with_context(&context);
+    let policy =
+        ProfilePolicy::new(&db.profile).with_context(context.query(), context.client_metadata());
     execute(&typed, &credentials(db), &policy)
         .query("nym")
         .map(|m| {
@@ -527,11 +529,13 @@ fn the_verifiers_circuit_lists_still_apply_with_capabilities() {
             "client_metadata": client_metadata(ids)}}]})
         .to_string()
     };
+    let registered = |label: &str| db.profile.parser_for(label).is_some();
     let run = |ids: &[&str]| {
         let bytes = request(ids);
-        let context = first_supported_context(bytes.as_bytes(), &db.profile, None).unwrap();
-        let typed = context.matching_query().unwrap();
-        let policy = ProfilePolicy::new(&db.profile).with_context(&context);
+        let context = UnverifiedRequest::first_registered(bytes.as_bytes(), &registered).unwrap();
+        let typed = context.query().matching_query().unwrap();
+        let policy = ProfilePolicy::new(&db.profile)
+            .with_context(context.query(), context.client_metadata());
         execute(&typed, &credentials(&db), &policy)
             .query("nym")
             .map_or(0, |m| m.candidates.len())

@@ -28,6 +28,7 @@ test-fixtures = [
 
 [dependencies]
 siros-codec = { workspace = true }
+siros-oid4vp = { workspace = true }
 siros-zkp-req = { workspace = true }
 siros-mdoc = { workspace = true, optional = true }
 serde_json = { workspace = true }

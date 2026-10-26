@@ -28,7 +28,6 @@ use crate::prover::{
     NymAuthProofVerifier, NymAuthProver, ProofFailure, ProofJob, ProofOutput, ProverFailure,
     Statement,
 };
-use crate::session::ec_jwk_thumbprint;
 use crate::system::NymAuthSystem;
 use crate::verifier_id::VerifierId;
 use der::asn1::{GeneralizedTime, UtcTime};
@@ -40,6 +39,7 @@ use sha2::{Digest, Sha256};
 use siros_codec::base64url;
 use siros_codec::cbor::Value as Cbor;
 use siros_codec::date::DateTime;
+use siros_oid4vp::ec_jwk_thumbprint;
 use x509_cert::builder::{Builder, CertificateBuilder, Profile};
 use x509_cert::name::Name;
 use x509_cert::serial_number::SerialNumber;

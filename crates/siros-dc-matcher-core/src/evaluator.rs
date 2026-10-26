@@ -31,7 +31,7 @@ use crate::profile::{
     Capability, MatchProfile, Op, UnknownFormat, CAPABILITIES_PARAM, CREDENTIAL_TYPE_PARAM,
     FUNCTIONS_PARAM, SYSTEM_ID_PARAM, ZKP_REQ_CAPABILITY, ZKP_REQ_FORMAT,
 };
-use crate::request::RequestContext;
+use siros_oid4vp::UnverifiedQuery;
 use siros_zkp_req::{usable_backend, CredentialType, QueryOption, ZkpFormats, ZkpReqQuery};
 
 /// A credential from the registered blob, wrapped so DCQL can evaluate it.
@@ -151,7 +151,14 @@ fn claim_value(claim: &Claim) -> Value {
 /// Evaluates a [`MatchProfile`] as a DCQL [`siros_dcql::Policy`].
 pub struct ProfilePolicy<'a> {
     profile: &'a MatchProfile,
-    context: Option<&'a RequestContext>,
+    context: Option<Context<'a>>,
+}
+
+/// What a `zkp_req` query is matched against besides the profile.
+#[derive(Clone, Copy)]
+struct Context<'a> {
+    query: &'a UnverifiedQuery,
+    client_metadata: Option<&'a Value>,
 }
 
 /// The circuit a `zkp_req` query will be answered with, and the option it answers
@@ -229,13 +236,21 @@ impl<'a> ProfilePolicy<'a> {
         }
     }
 
-    /// Evaluate with the request the query came from.
+    /// Evaluate with the request the query came from: its `dcql_query` and the
+    /// verifier's `client_metadata`.
     ///
     /// `zkp_req` is matched against its planned request and the verifier's
     /// `client_metadata`, neither of which the typed query carries.
     #[must_use]
-    pub fn with_context(mut self, context: &'a RequestContext) -> Self {
-        self.context = Some(context);
+    pub fn with_context(
+        mut self,
+        query: &'a UnverifiedQuery,
+        client_metadata: Option<&'a Value>,
+    ) -> Self {
+        self.context = Some(Context {
+            query,
+            client_metadata,
+        });
         self
     }
 
@@ -248,14 +263,15 @@ impl<'a> ProfilePolicy<'a> {
     pub fn zkp_req_selection(&self, query: &CredentialQuery) -> Option<ZkpReqSelection<'a>> {
         let context = self.context?;
         let raw = context
-            .dcql_query_raw
+            .query
+            .raw()
             .get("credentials")?
             .as_array()?
             .iter()
             .find(|c| c.get("id").and_then(Value::as_str) == Some(query.id.as_str()))?;
         let parsed = ZkpReqQuery::parse(raw).ok()?;
         // zkp_req, Section 1.2: the Verifier MUST send both lists.
-        let formats = ZkpFormats::from_client_metadata(context.client_metadata.as_ref()?).ok()?;
+        let formats = ZkpFormats::from_client_metadata(context.client_metadata?).ok()?;
         siros_zkp_req_nym_auth::catalogue::validate(&parsed).ok()?;
         let held = self.profile.capabilities.get(ZKP_REQ_CAPABILITY)?;
         // zkp_req, Section 2.1: the first option the wallet can answer.
