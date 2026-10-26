@@ -1,0 +1,432 @@
+# SIROS wallet core: presentation
+
+Responsibilities, requirements and contracts of the Rust core that answers OpenID4VP presentation requests for every SIROS wallet.
+
+## 1. Scope
+
+The core answers OpenID4VP 1.0 presentation requests:
+
+| Flows | Formats |
+|---|---|
+| Redirect from a native app | SD-JWT VC |
+| Redirect from the web wallet through the cloud engine | ISO/IEC 18013-5 mdoc |
+| Digital Credentials API on Android, iOS and the web | `zkp_req` with the nym_auth catalogue |
+| Android credential picker | |
+
+It covers two functions:
+- **Phase 1** maps a request and the wallet state to the consent display.
+- **Phase 2** maps the user's selection to the response the wallet sends.
+
+Other bricks own issuance (OpenID4VCI), proximity presentation, the private data container's crypto and sync, and credential status checking.
+
+Key words: MUST, MUST NOT, SHOULD and MAY as in RFC 2119.
+
+## 2. Normative references
+
+| Reference | Sections used |
+|---|---|
+| OpenID4VP 1.0 | §5 Authorization Request (§5.1 `transaction_data`, §5.10 `request_uri_method`); §6 DCQL; §7 claims path pointers; §8 response (§8.1 `vp_token`, §8.2 response modes, §8.3 encryption, §8.4 transaction data, §8.5 errors); Appendix A (DC API); Appendix B.2 (mdoc: B.2.1 transaction data, B.2.6 handovers); Appendix B.3 (SD-JWT VC: B.3.3, B.3.3.1) |
+| RFC 9901 (SD-JWT) | the whole |
+| SD-JWT VC draft, as vc's `pkg/sdjwtvc` implements it | §5.6 array positions; type metadata `display` and `claims` |
+| ISO/IEC 18013-5 | IssuerSigned, MSO, `KeyAuthorizations`, DeviceResponse, DeviceAuthentication |
+| nym_auth rulebook at `e65861c` | `zkp_req.md` draft 0.1; `nym_auth_rulebook.md` 0.5; `systems/*` |
+| SIROS private data specification 3.1 | §5A delivered secrets; §6 WalletStateContainer; §6.0 credential entry |
+| OpenID4VCI 1.0 | `credential_metadata` (`display`, `claims`) |
+| EC TS12 v1.0.1 | §1.2, §3.6, §4.2, §4.3 |
+
+## 3. Cross-cutting requirements
+
+- **R-G1 Logic lives in the core.** Every rule about requests, credentials, matching, disclosure, proof choice, transaction data, display content and response construction MUST have its only implementation in the core. Platforms MUST NOT keep their own copy of such a rule.
+- **R-G2 Sans-IO.** The core MUST NOT perform network, storage, clock, randomness or key operations by itself. It requests each one from the host as an effect (§5.1). Every call MUST receive all of its inputs and MUST keep nothing between calls.
+- **R-G3 Construction guards validity.** Data MUST enter through a parser whose output type can only hold valid states. The core MUST NOT expose a separate validation function beside a parser, nor a boolean predicate that callers must remember to call.
+  - Where a rule depends on runtime context (the time, a trust verdict, a selection against a plan, a seed against a commitment), the check MUST be the constructor of a witness type. The next operation MUST require that witness.
+  - Fields of these types MUST be private.
+- **R-G4 One owner per rule.** Each rule MUST live in exactly one component. Every other component MUST use that component's types.
+- **R-G5 Errors.** An unexpected state MUST be an error where it is detected. Every error MUST carry a stable code. Errors that reach a verifier MUST map to an OpenID4VP §8.5 code.
+- **R-G6 Secrets.** These MUST NOT appear in any view, log, picker registration or error:
+  - a delivered secret (privatedata §5A);
+  - a derived secret;
+  - a nym_auth undisclosable attribute (`ssc`, `psc`, `secret_seed`, `birth_date`).
+- **R-G7 Determinism.** With the same inputs and the same effect results, every operation MUST give the same output. Randomness enters only as an effect result.
+- **R-G8 Rules in code.** Matching rules MUST be code, versioned with the binary. No rule MAY travel as data in the picker registration.
+- **R-G9 Build constraints.**
+  - Everything the picker links MUST build with Rust 1.82.
+  - `matcher.wasm` MUST stay at or below 307,200 bytes.
+  - Library code MUST deny `unwrap`, `expect`, indexing and `panic`.
+  - Library code MUST hold no interior mutability.
+  - Library code MUST use Fx hash collections and never B-trees.
+- **R-G10 Provenance.** `CONTRIBUTING.md` §Provenance applies: Multipaz is an oracle only.
+- **R-G11 Published coordinates** stay stable:
+  - crates.io `siros-dcql`;
+  - Maven `org.siros:siros-dc-matcher`;
+  - XCFramework `siros_dc_matcher_ffi`;
+  - UniFFI namespace `siros_dc_matcher_ffi`.
+
+## 4. Components
+
+Dependencies point downward through the layers:
+
+| Layer | Components |
+|---|---|
+| L0 | codec |
+| L1 | DCQL, SD-JWT, mdoc, OpenID4VP, `zkp_req`, nym_auth |
+| L2 | wallet state, credential, display, transaction data |
+| L3 | presentation |
+| L4 | wallet (provers), facades, picker |
+
+A component MUST NOT depend on a component of its own or a higher layer, except where this section names the dependency.
+
+### 4.1 Host (each platform)
+
+**Responsibility:**
+- network transport, persistent storage and the private data container;
+- key custody and signing through wscd;
+- OS registration (Credential Manager, IdentityDocumentServices);
+- the attested calling origin and app;
+- the clock, randomness and the user interface.
+
+**Requirements:**
+- **H1.** It MUST execute every `Fetch` effect within its constraints: HTTPS only, public addresses only, no redirects, the stated size cap and timeout.
+- **H2.** It MUST answer `Trust` effects with the AuthZEN verdict for the stated subject and key material.
+- **H3.** It MUST sign exactly the bytes a `Sign` effect states, with the key it names, and report that key's authentication factors (`amr`) before signing.
+- **H4.** It MUST supply the decrypted wallet state, the display metadata it holds, the user's locale preferences, the current time, and the circuit artifacts it ships.
+- **H5.** It MUST append the presentation record the core returns as a `new_presentation` event (privatedata §6).
+- **H6.** It MUST render the views the core returns and return the user's selection.
+- **H7.** It MUST NOT interpret protocol data, choose credentials, choose claims, choose a proof system, or build a presentation.
+
+### 4.2 Codec
+
+**Responsibility:**
+- strict CBOR (definite lengths, no duplicate keys, no trailing bytes, depth limit);
+- base64url;
+- hash and JOSE algorithm identifiers.
+
+**Contract:**
+- It accepts bytes or text.
+- It guarantees that a decoded value is canonical-strict, and that encoding the value back gives the same bytes.
+- It is the only CBOR and base64url implementation in the core.
+
+### 4.3 DCQL
+
+**Responsibility:** the DCQL query model (OpenID4VP §6.1–6.3) and its evaluation over any credential that resolves claims path pointers (§6.4, §7).
+
+**Requirements:**
+- **Q1.** `DcqlQuery` MUST be constructible only by parsing.
+  - The parse enforces identifier syntax and uniqueness, non-empty `credentials`, `claim_sets` that refer to claim ids, and `credential_sets` that refer to query ids.
+  - Today's public `validate()` and public fields go; the change is a breaking version of the crate.
+- **Q2.** Evaluation MUST implement §6.4: claim presence, `claim_sets` (first satisfiable), `values`, `credential_sets` (`required`) and `multiple`.
+- **Q3.** `meta` and `format` are judged by a policy the presentation component supplies.
+
+### 4.4 SD-JWT
+
+**Responsibility:** reading a stored SD-JWT VC, selecting disclosures, and building the presentation and the KB-JWT signing input.
+
+**Requirements:**
+- **S1.** Parsing MUST enforce RFC 9901 §7.1:
+  - digests are unique;
+  - every disclosure is referenced;
+  - no reserved claim name is used;
+  - `sd_alg` is supported.
+- **S2.** The claim tree MUST keep issued array positions. An array digest without a disclosure, a decoy among them, is a withheld element at its position (SD-JWT VC §5.6).
+- **S3.** For a set of pointers, selection MUST include the disclosure of every selectively disclosed node on each path, parents included, each once. An empty pointer set selects no disclosure.
+- **S4.** The KB-JWT payload MUST be:
+  - `iat`, `aud`, `nonce`;
+  - `sd_hash`, computed over the presentation exactly as sent;
+  - the claims the member's transaction bindings give (§7).
+
+  A claim name that collides MUST be an error.
+
+### 4.5 mdoc
+
+**Responsibility:**
+- reading a stored mdoc (base64url of an `IssuerSigned`, a `Document`, or a single-document `DeviceResponse`);
+- selecting elements;
+- building `DeviceResponse` and the DeviceAuthentication signing input;
+- the issuer certificate and ES256 primitives.
+
+**Requirements:**
+- **M1.** Parsing MUST yield the document type, namespaces with their items, and the MSO (validity, device key, value digests, key authorizations). It MUST keep each `IssuerSignedItemBytes` verbatim.
+- **M2.** A response MUST carry exactly the selected items, in their issued bytes, with `issuerAuth` verbatim. `deviceSigned.nameSpaces` MUST hold exactly the member's `DeviceSigned` transaction elements.
+- **M3.** A `DeviceSigned` element that the MSO `KeyAuthorizations` do not authorize MUST NOT be presentable (B.2.1).
+
+### 4.6 OpenID4VP
+
+**Responsibility:**
+- request intake for redirects and the DC API;
+- client identifier prefixes and request object verification;
+- handovers and SessionTranscripts (B.2.6), JWK thumbprints;
+- `vp_token`, response encryption, submissions and error responses.
+
+**Requirements:**
+- **P1.** `VerifiedRequest` MUST be constructible only by intake. Its existence guarantees:
+  - the request object signature verifies under the rule of its client identifier prefix (`x509_san_dns`, `x509_hash`, `decentralized_identifier`, `verifier_attestation`, `openid_federation`; `redirect_uri` for unsigned requests only);
+  - the outer and inner `client_id` are equal;
+  - a trust verdict was obtained for the client identifier, or for the origin of an unsigned DC API request;
+  - `nonce` is present;
+  - the response mode belongs to the channel (`direct_post*` over redirects, `dc_api*` over the DC API);
+  - a redirect response has a `response_uri`;
+  - a signed DC API request lists the calling origin in `expected_origins`;
+  - an encrypted mode has a chosen key and `enc`;
+  - for `openid4vp-v1-multisigned`, the client identifier is that of the first signature that qualifies.
+- **P2.** `UnverifiedRequest` MUST be the only request type the picker can construct, and the only one it accepts. It guarantees a supported protocol and a data shape that matches the protocol label.
+- **P3.** `request_uri_method=post` MUST send the wallet's `wallet_metadata` and a `wallet_nonce`, and require the request object to echo the nonce.
+- **P4.** A submission MUST take the form of its response mode:
+
+  | Mode | Form |
+  |---|---|
+  | `direct_post` | `vp_token`, `state` |
+  | `direct_post.jwt` | `response` |
+  | `dc_api` | `{vp_token}` |
+  | `dc_api.jwt` | `{response}` |
+
+  Encryption is ECDH-ES with the request's first supported `enc` (A128GCM, A256GCM); A128GCM when none is stated.
+- **P5.** A refusal MAY produce an error submission only when the response target is verified.
+
+### 4.7 `zkp_req`
+
+**Responsibility:**
+- the protocol layer of `zkp_req.md`: the query (`_req`, `_req_sets`), `vp_formats_supported.zkp_req`;
+- the usable pair of a system and a proof backend (§1.3);
+- the consent model (§5), presentations and `vp_token` entries (§4, §6.1);
+- the verifier's structural checks.
+
+**Requirement:** `ZkpReqQuery` and `ZkpFormats` MUST be constructible only by parsing.
+
+### 4.8 nym_auth
+
+**Responsibility:**
+- the function catalogue (`pseudonym`, `age_check`);
+- the systems `urn:circuits:longfellow:nym_auth:v1` and `urn:circuits:vega:nym_auth:v1`, with their circuit pins (system rulebooks §8);
+- the session binding and its stricter channel policy (signed requests, encrypted responses);
+- the credential tests of system rulebooks §7;
+- the proof statement and prover interface;
+- the verifier.
+
+**Requirements:**
+- **N1.** `NymAuthQuery` MUST be constructible only from a `ZkpReqQuery` that satisfies the catalogue. This replaces today's `catalogue::validate`.
+- **N2.** `NymAuthRequest` MUST be constructible only from a `VerifiedRequest` that meets the nym_auth policy. This replaces the host-asserted `signed` flag of today's `check_request`.
+- **N3.** The credential tests (signature, issuer anchors, validity at `proof_time`, form) MUST be the constructor of a usable-attestation witness. Proving MUST require that witness.
+- **N4.** `OpenedSeed` MUST be constructible only from a delivered `secret_seed` whose SHA-256 equals the credential's `ssc`. It is constructed again for each use (privatedata §5A.2), and the prover job MUST require it. This replaces today's `opens_ssc -> bool`.
+- **N5.** A system is available exactly when its circuits are loaded through the pinned `load` (digest and length). Circuits are data shipped with each build.
+
+### 4.9 Wallet state
+
+**Responsibility:** the decrypted `S` of the private data container, as input.
+
+**Requirements:**
+- **W1.** Parsing MUST accept `schemaVersion` 3 and 4, with absent meaning 1, and refuse any other.
+- **W2.** It MUST require unique `credentialId`s held as 64-bit integers, and the eight members of §6.0 per entry. It MUST keep `metadata` entries verbatim.
+- **W3.** It MUST expose credentials, presentations (for usage counts) and key identifiers.
+- **W4.** The presentation record the core returns MUST have the members of `new_presentation`: `presentationId`, `transactionId`, `data`, `usedCredentialIds`, `presentationTimestampSeconds`, `audience`.
+
+### 4.10 Credential
+
+**Responsibility:**
+- the format-independent credential: entry reference (credential, batch, instance), format, type (`vct` or doctype), issuer, configuration id, validity, key identifier, delivered auxiliary data;
+- the typed claim tree, with a disclosure handle per node;
+- claims path pointer resolution (§7).
+
+**Requirements:**
+- **C1.** A credential MUST be constructible only by parsing a wallet state entry through the format components. An unsupported format is an error.
+- **C2.** Claim values MUST keep their type: null, boolean, integer, number, text, bytes, full-date, date-time, array, object.
+- **C3.** Pointer resolution MUST follow §7.1. `null` yields the present elements; an index counts issued positions, withheld ones included. A pointer MUST be constructible only by parsing, and is never empty.
+- **C4.** `UsableCredential` MUST be the witness of validity at a given time: `not_before ≤ now < not_after`, from the MSO or from `nbf`/`exp`.
+- **C5.** The instance used for a batch MUST be the instance named least often in the wallet's presentation records, the lowest `instanceId` on a tie.
+
+### 4.11 Display
+
+**Responsibility:**
+- display metadata (OpenID4VCI `credential_metadata`, SD-JWT VC type metadata) and its resolution per locale;
+- credential cards and claim rows;
+- purpose lines (§6.2 `purpose`);
+- proof statement rows.
+
+**Requirements:**
+- **D1.** It is the only metadata merger: it MUST remove `auxiliary_data` before any merge (privatedata §5A.3).
+- **D2.** Locale choice MUST be: exact tag, then primary language, then the first entry.
+- **D3.** OpenID4VCI display wins over type metadata display for the same locale.
+- **D4.** Values MUST be typed for display (text, boolean, integer, number, date, date-time, image, list, group). The UI formats dates and numbers for its locale.
+- **D5.** Bytes are shown only by length, except a claim the metadata declares as an image.
+
+### 4.12 Transaction data
+
+**Responsibility:**
+- the `transaction_data` request parameter (§5.1) and its error conditions (§8.5);
+- the registry of supported transaction data types;
+- what each type binds into a presentation (§8.4).
+
+**Requirements:**
+- **T1.** An entry MUST be parsed from base64url JSON with no duplicate keys, a string `type`, and a non-empty `credential_ids` that names DCQL query ids. Every other member belongs to the type.
+- **T2.** Each type MUST be one implementation that owns five things:
+  - parsing its members into typed values, which enforces the §8.5 conditions (unknown fields, wrong types, invalid values, missing fields);
+  - which credentials can authorize it;
+  - its display;
+  - its bindings per credential format: a KB-JWT claim (B.3.3), the hashes profile (B.3.3.1), or a `DeviceSigned` element (B.2.1);
+  - the extra KB-JWT claims its specification requires.
+- **T3.** The B.3.3.1 profile is one binding a type MAY adopt. It hashes each entry's string exactly as received. The algorithm is one listed in `transaction_data_hashes_alg`, or `sha-256` when absent, and is shared by the entries bound to one credential. `transaction_data_hashes_alg` is returned when the request carried it.
+- **T4.** An entry MUST bind to exactly one presented credential: the first of its `credential_ids` that the chosen offer answers with a credential the type authorizes (§5.1).
+- **T5.** An SD-JWT member whose query sets `require_cryptographic_holder_binding: false` MUST NOT carry a binding (B.3.3).
+- **T6.** The supported types are the four TS12 v1.0.1 types:
+  - `urn:eudi:sca:payment:1`
+  - `urn:eudi:sca:login_risk_transaction:1`
+  - `urn:eudi:sca:account_access:1`
+  - `urn:eudi:sca:emandate:1`
+
+  For each of them:
+  - SD-JWT VC only (§1.2);
+  - `transaction_data_hashes_alg` and `payload` required (§4.2), and `transaction_id` required in every payload (§4.3);
+  - payloads parsed into typed values equivalent to the TS12 schemas;
+  - bindings: the B.3.3.1 hashes plus the KB-JWT claims `jti` (fresh), `response_mode` and `amr` (§3.6);
+  - display fails closed on a missing localised name or `affirmative_action_label`, and on control, format or bidi characters or over-long strings.
+- **T7.** Type metadata and referenced documents arrive as host fetches under the H1 constraints.
+
+### 4.13 Presentation
+
+**Responsibility:**
+- **Phase 1:** the plan of a verified request (or an unverified one, in the picker) over the wallet's credentials, and the consent view.
+- **Phase 2:** the selection, the signing inputs, the response and the presentation record.
+
+**Requirements:**
+- **A1. Matching rules.**
+  - Format table: `mso_mdoc` from `mso_mdoc`; `dc+sd-jwt` from `dc+sd-jwt`; `zkp_req` from its `meta.source_format`.
+  - `meta.doctype_value` and `meta.vct_values` are matched against the credential type.
+  - Holder binding holds when the credential has a key.
+  - Only usable credentials are offered (C4).
+  - No query other than `zkp_req` may disclose a nym_auth undisclosable attribute.
+- **A2. `zkp_req` matching** MUST be one selection. It takes the options in the verifier's order and, for each, the first available system whose usable pair the verifier accepts. It then requires a usable-attestation witness and an `OpenedSeed` for the credential (N3, N4).
+- **A3. Offers.**
+  - Each combination of the required credential sets is an offer.
+  - Optional sets are additions the user may choose on top of an offer.
+  - When every set is optional, each option is an offer.
+  - Each member names its query, its instance (C5), its answer (SD-JWT pointers, mdoc elements, or the `zkp_req` system, backend and option) and the transaction entries bound to it (T4).
+- **A4. Plan binding.** A plan MUST carry a digest of its inputs. A selection MUST be parsed against the recomputed plan into a chosen-offer witness. A digest mismatch, an unknown offer, or an out-of-range optional choice is an error.
+- **A5. Signatures.** Phase 2 MUST state every signing input as a `Sign` effect. The signatures returned MUST be parsed against those requests: none missing, none duplicated, none unknown.
+- **A6. Audience.** The SD-JWT `aud` is `prefix:value` of the client identifier for redirects and signed DC API requests, and `origin:<origin>` for unsigned DC API requests.
+- **A7. SessionTranscript.** The mdoc and nym_auth SessionTranscript uses `OpenID4VPHandover` (client id, nonce, encryption key thumbprint or null, response URI) for redirects. It uses `OpenID4VPDCAPIHandover` (origin, nonce, thumbprint or null) for the DC API.
+- **A8. Response.**
+  - One `vp_token` answers every member of the chosen offer and its chosen additions, keyed by query id, whatever the formats.
+  - A user's decline gives `access_denied`.
+  - The presentation record names exactly the instances used.
+
+### 4.14 Wallet, facades and the cloud engine module
+
+**Responsibility:**
+- linking the provers in-process (Longfellow and Vega backends);
+- exposing the core to Kotlin and Swift (UniFFI), the browser (wasm-bindgen) and Go (a `wasm32-wasip1` module run under wazero, because go-wallet-backend builds with `CGO_ENABLED=0`).
+
+**Requirements:**
+- **F1.** Every facade MUST expose the same operations with the same wire form of every record, so a record serialises identically on every binding.
+- **F2.** Records crossing a facade MUST be parsed into core types at the boundary.
+- **F3.** The cloud engine module MUST expose intake and submission only. It holds no credentials and no keys.
+- **F4.** `secret_seed` MUST stay inside the process from the wallet state to the proof.
+
+### 4.15 Picker
+
+**Responsibility:**
+- the Android Credential Manager matcher (`matcher.wasm`) and its host ABI;
+- the registration projection the wallet writes for it.
+
+**Requirements:**
+- **K1.** The projection MUST hold, per credential: entry reference, format, type, the typed claim tree minus undisclosable attributes, card and labels. It also holds the available system ids, and is versioned. It MUST NOT hold delivered or derived secrets (R-G6).
+- **K2.** The picker MUST run the presentation component's matching over an `UnverifiedRequest`. For the same request and credentials, it MUST give the offers the wallet's plan gives.
+- **K3.** Each picker entry MUST carry the offer, query id and credential id, so that the wallet maps the pick to a selection after its own verified plan.
+
+### 4.16 Cloud engine (go-wallet-backend)
+
+**Responsibility:** the network legs of the redirect flow for the web wallet: fetching the request, trust evaluation, and delivering the submission.
+
+**Requirements:**
+- **E1.** It MUST run intake through the core module.
+- **E2.** It MUST send the client the `VerifiedRequest`.
+- **E3.** It MUST deliver the client's submission unchanged.
+- **E4.** It MUST NOT match credentials, vet consent, or assemble a `vp_token`.
+
+### 4.17 User interface (each platform)
+
+**Responsibility:** rendering views, collecting the selection, locale formatting of dates and numbers.
+
+**Requirement:** it MUST render only what a view contains and MUST return selections in the core's selection form.
+
+## 5. Boundary contracts
+
+| Boundary | Crosses inward | Crosses outward | Guaranteed by the core | Guaranteed by the other side |
+|---|---|---|---|---|
+| Host ↔ core | wallet state; display metadata; locales; key factors; circuits; time; effect results | effects (`Fetch`, `Trust`, `Sign`); views; submissions; presentation records; refusals | R-G2 to R-G7; every effect is the only I/O it needs | H1 to H5 |
+| UI ↔ core | selection | consent view: verifier, purposes, offers with cards, rows and proof statements, optional additions, transactions | the view equals the plan; R-G6 | H6, §4.17 |
+| Engine ↔ web client | verified request | submission | P1; F3 | E1 to E4 |
+| Wallet ↔ picker | the picker's chosen entry | registration projection | K1 to K3 | Credential Manager runs the matcher on the registered projection |
+| Core ↔ provers | proof output | proof job with statement, credential and `OpenedSeed` | N3 to N5; F4 | the backend proves exactly the statement it is given |
+| Core ↔ container | `S` | `new_presentation` record | W1 to W4 | H5 |
+| Core ↔ verifiers | requests | responses | conformance to §2 references | independent verifiers (vc) accept |
+
+## 6. Responsibility per flow
+
+| Flow | Intake | Trust call | Plan and phase 2 | Signing | Delivery |
+|---|---|---|---|---|---|
+| Redirect, native app | SDK (core) | SDK host to AuthZEN | SDK (core) | wscd | SDK host POSTs |
+| Redirect, web wallet | engine (core module) | engine | browser (core) | wscd in the browser | engine POSTs |
+| DC API, Android app | SDK (core) | SDK host | SDK (core); picker offers from the projection | wscd | platform |
+| DC API, iOS app | SDK (core) | SDK host | SDK (core) | wscd | platform |
+| DC API, web wallet | browser (core) | backend AuthZEN | browser (core); on Android the wrapper registers the projection with the picker | wscd | platform |
+
+## 7. Ownership of existing code
+
+| Today | Owner | Change of form |
+|---|---|---|
+| `siros-dcql` | DCQL | construction by parsing only (Q1) |
+| `siros-dc-matcher-core` `request.rs` | OpenID4VP | `UnverifiedRequest` |
+| `siros-dc-matcher-core` `evaluator.rs`, `profile.rs` | presentation | the profile becomes code (R-G8) |
+| `siros-dc-matcher-core` `purpose.rs` | display | |
+| `siros-dc-matcher-core` `db.rs`, `sink.rs` | picker | registration projection (K1) |
+| `siros-dc-matcher-core` `base64url.rs`, `siros-zkp-req` `cbor.rs`, `base64url.rs` | codec | one implementation |
+| `siros-dc-matcher-core` `circuit_capabilities.rs` | removed | systems in code (N5) |
+| `siros-dc-matcher-core` `zkp_req.rs`, `zkp_req_response.rs`, `proof_time.rs` (main) | removed | superseded by `zkp_req` and nym_auth |
+| nym_auth `session.rs` (handover, transcript, device message, thumbprint) | OpenID4VP and mdoc | the thumbprint may be null |
+| nym_auth `mdoc.rs`, `x509.rs`, `es256_verifies` (generic parts) | mdoc | |
+| nym_auth `policy.rs` (generic parts) | OpenID4VP | the nym_auth part becomes `NymAuthRequest` (N2) |
+| nym_auth `catalogue::validate`, `checks::check`, `checks::opens_ssc` | nym_auth | constructors of witnesses (N1, N3, N4) |
+| nym_auth `presenter::match_query` selection | presentation | one selection (A2) |
+| `siros-dc-matcher-wasm`, `-testhost` | picker | |
+| `siros-dc-matcher-ffi` | facades (UniFFI) | |
+| `proving/` | wallet and facades (web) | |
+| `android-credman`, `android-credman-sys` | picker | |
+
+## 8. What each platform keeps
+
+| Platform | Keeps | Its copies the core replaces |
+|---|---|---|
+| siros-sdk-kotlin | host (§4.1), UI, Credential Manager registration, wscd | built-in matcher and engine narrowing; claim and disclosure derivation; ZK registry and circuit catalog client; `zkp_req` validators, response validator, `proof_time`; DC API request parsing and rules; response encryption; transaction data pipeline; registration blob builders |
+| siros-sdk-swift | host, UI, wscd | the same, plus the `ZkpReq` and `CircuitZk` ports |
+| siros-wallet-frontend | UI, transport to the engine, DC API transport, wscd host | `dcql` matching, consent field model, SD-JWT and mdoc builders, DC API request reading and encryption |
+| go-wallet-backend | network legs, trust evaluation, storage | OpenID4VP parsing in the engine, consent vetting, `vp_token` assembly, `match_request` |
+| wallet-android-wrapper | WebView host, Credential Manager registration | the stock-matcher entry builder |
+| wallet-ios-wrapper | WebView host | none |
+
+## 9. Acceptance requirements
+
+The core meets this document when all of the following hold:
+
+1. **One vector suite.** It covers requests, wallet states, display metadata, systems and effect results, mapped to plans, views and submissions. It gives identical outputs through UniFFI (Kotlin and Swift), the browser build, the Go module (intake and submission) and the picker (offers).
+2. **Independent verifiers.** vc's verifiers accept the core's responses for every flow of §6 and every format of §1.
+3. **Spec examples.** The examples of RFC 9901, OpenID4VP §7 and Appendix A, ISO/IEC 18013-5 Annex D, and RFC 7518 Appendix C give their stated results.
+4. **Wallet against picker.** The picker's offers equal the wallet's offers on every plan vector.
+5. **No secrets.** No view, projection or error of the vectors contains a delivered seed, a derived secret or an undisclosable attribute.
+6. **No copies.** No platform in §8 keeps DCQL evaluation, claims path resolution, disclosure selection, proof system choice or response assembly (a grep per repository).
+7. **Picker size.** `matcher.wasm` ≤ 307,200 bytes.
+
+## 10. Decisions
+
+**Taken:**
+
+| Decision | Reason |
+|---|---|
+| Sans-IO with host effects | One shape for UniFFI, the browser, the WASI module and the picker |
+| Go runs a WASI module under wazero | go-wallet-backend builds with `CGO_ENABLED=0` |
+| Native apps run the redirect flow on device | The backend's own "local engine" model; the web keeps the cloud engine for CORS |
+| Matching rules in code | The picker and the wallet ship in one AAR |
+| Provers in-process; circuits pinned and loaded as data | The existing system pins; keeps `secret_seed` in-process |
+| Wallet state input is the decrypted `S` | The container is the next brick |
+| All-optional `credential_sets` offer each option | Today such a request offers nothing (vc's issuance-auth query has this shape) |
+| Transaction data types own their bindings | OpenID4VP §8.4; Appendix B is a set of recommendations to type authors |
+
+**Open:** O1. `mso_mdoc_zk` / `zk_system_type`. Either retire it from the platforms and vc, or carry its matching and Longfellow mdoc proving into the core. This document covers SD-JWT, mdoc and `zkp_req`. The platforms' current `mso_mdoc_zk` path depends on this decision before their matchers are removed.
