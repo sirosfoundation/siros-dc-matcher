@@ -1,0 +1,398 @@
+//! The wallet: its credentials, its host, and the phases driven to the response.
+
+use ciborium::Value as Ciborium;
+use p256::ecdsa::signature::Signer;
+use p256::ecdsa::{Signature, SigningKey};
+use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
+use siros_codec::base64url;
+use siros_codec::cbor::Value as Cbor;
+use siros_codec::date::DateTime;
+use siros_credential::{Credential, UsableCredential};
+use siros_display::{DisplayCache, Locale};
+use siros_oid4vp::{FetchResponse, VerifiedRequest};
+use siros_presentation::{
+    plan, Fetches, Fulfilment, PlanInput, PlanStep, Planned, PresentationError, Response,
+    Selection, SignId,
+};
+use siros_transaction_data::{Amr, Factor, Inherence, Possession};
+use siros_wallet_state::{CredentialId, WalletState};
+use siros_zkp_req_nym_auth::system::NymAuthSystem;
+use siros_zkp_req_nym_auth::testing::{self, Issuer, Spec, TestProver, SEED};
+use siros_zkp_req_nym_auth::verifier_id::VerifierIdForm;
+
+use crate::verifier::{b64, Rng, NOW};
+
+/// The holder's key, nym_auth's test device key, which every credential is bound to.
+pub fn holder() -> SigningKey {
+    testing::key(Spec::default().device)
+}
+
+/// The public JWK of the holder's key.
+pub fn holder_jwk() -> Value {
+    let point = holder().verifying_key().to_encoded_point(false);
+    json!({"kty": "EC", "crv": "P-256", "x": b64(point.x().unwrap()), "y": b64(point.y().unwrap())})
+}
+
+pub const VCT: &str = "https://issuer.example/pid";
+pub const MDL: &str = "org.iso.18013.5.1.mDL";
+pub const MDL_NS: &str = "org.iso.18013.5.1";
+
+/// The `[salt, name, value]` disclosure of a claim, base64url.
+fn disclosure(name: &str, value: &Value) -> String {
+    b64(json!([b64(name.as_bytes()), name, value])
+        .to_string()
+        .as_bytes())
+}
+
+/// An SD-JWT VC of `vct` bound to the holder's key, with the selectively disclosable claims
+/// `claims`.
+pub fn sd_jwt(vct: &str, claims: &[(&str, Value)]) -> String {
+    let disclosures: Vec<String> = claims.iter().map(|(n, v)| disclosure(n, v)).collect();
+    let digests: Vec<String> = disclosures
+        .iter()
+        .map(|d| b64(&Sha256::digest(d.as_bytes())))
+        .collect();
+    let payload = json!({
+        "iss": "https://issuer.example",
+        "vct": vct,
+        "cnf": {"jwk": holder_jwk()},
+        "_sd": digests,
+        "_sd_alg": "sha-256",
+    });
+    let header = json!({"alg": "ES256", "typ": "dc+sd-jwt"});
+    let input = format!(
+        "{}.{}",
+        b64(header.to_string().as_bytes()),
+        b64(payload.to_string().as_bytes())
+    );
+    let signature: Signature = testing::key(0x44).sign(input.as_bytes());
+    let mut compact = format!("{input}.{}~", b64(&signature.to_bytes()));
+    for d in disclosures {
+        compact.push_str(&d);
+        compact.push('~');
+    }
+    compact
+}
+
+/// The disclosure of a claim of [`sd_jwt`], as the presentation carries it.
+pub fn disclosed(name: &str, value: &Value) -> String {
+    disclosure(name, value)
+}
+
+/// An mdoc of `doc_type` bound to the holder's key, with the elements `items` in one namespace.
+pub fn mdoc(doc_type: &str, name_space: &str, items: &[(&str, Cbor)]) -> String {
+    let text = Cbor::text;
+    let tagged = |value: &Cbor| Cbor::Tag(24, Box::new(Cbor::Bytes(value.encode())));
+    let encoded: Vec<Vec<u8>> = items
+        .iter()
+        .enumerate()
+        .map(|(id, (identifier, value))| {
+            tagged(&Cbor::Map(vec![
+                (text("digestID"), Cbor::Unsigned(id as u64)),
+                (text("random"), Cbor::Bytes(vec![id as u8; 16])),
+                (text("elementIdentifier"), text(identifier)),
+                (text("elementValue"), value.clone()),
+            ]))
+            .encode()
+        })
+        .collect();
+    let digests = encoded
+        .iter()
+        .enumerate()
+        .map(|(id, item)| {
+            (
+                Cbor::Unsigned(id as u64),
+                Cbor::Bytes(Sha256::digest(item).to_vec()),
+            )
+        })
+        .collect();
+    let point = holder().verifying_key().to_encoded_point(false);
+    let tdate = |t: &str| Cbor::Tag(0, Box::new(text(t)));
+    let mso = Cbor::Map(vec![
+        (text("version"), text("1.0")),
+        (text("digestAlgorithm"), text("SHA-256")),
+        (
+            text("valueDigests"),
+            Cbor::Map(vec![(text(name_space), Cbor::Map(digests))]),
+        ),
+        (
+            text("deviceKeyInfo"),
+            Cbor::Map(vec![(
+                text("deviceKey"),
+                Cbor::Map(vec![
+                    (Cbor::Unsigned(1), Cbor::Unsigned(2)),
+                    (Cbor::Negative(0), Cbor::Unsigned(1)),
+                    (Cbor::Negative(1), Cbor::Bytes(point.x().unwrap().to_vec())),
+                    (Cbor::Negative(2), Cbor::Bytes(point.y().unwrap().to_vec())),
+                ]),
+            )]),
+        ),
+        (text("docType"), text(doc_type)),
+        (
+            text("validityInfo"),
+            Cbor::Map(vec![
+                (text("signed"), tdate("2026-01-01T00:00:00Z")),
+                (text("validFrom"), tdate("2026-01-01T00:00:00Z")),
+                (text("validUntil"), tdate("2027-01-01T00:00:00Z")),
+            ]),
+        ),
+    ]);
+    let issuer = Issuer::root(0x12, "Test mDL issuer");
+    let payload = tagged(&mso).encode();
+    let protected = Cbor::Map(vec![(Cbor::Unsigned(1), Cbor::Negative(6))]).encode();
+    let sig_structure = Cbor::Array(vec![
+        text("Signature1"),
+        Cbor::Bytes(protected.clone()),
+        Cbor::Bytes(Vec::new()),
+        Cbor::Bytes(payload.clone()),
+    ])
+    .encode();
+    let signature: Signature = issuer.key.sign(&sig_structure);
+    let issuer_signed = Cbor::Map(vec![
+        (
+            text("nameSpaces"),
+            Cbor::Map(vec![(
+                text(name_space),
+                Cbor::Array(encoded.into_iter().map(Cbor::Encoded).collect()),
+            )]),
+        ),
+        (
+            text("issuerAuth"),
+            Cbor::Array(vec![
+                Cbor::Bytes(protected),
+                Cbor::Map(vec![(Cbor::Unsigned(33), Cbor::Bytes(issuer.der))]),
+                Cbor::Bytes(payload),
+                Cbor::Bytes(signature.to_bytes().to_vec()),
+            ]),
+        ),
+    ]);
+    base64url::encode(&issuer_signed.encode())
+}
+
+/// A nym_auth attestation of nym_auth's test issuer, with its seed delivered.
+pub fn nym_auth(spec: &Spec) -> (String, Value) {
+    let issuer = Issuer::root(0x11, "Test Document Signer");
+    let data = testing::issue(&issuer, spec);
+    let auxiliary = json!([{"type": "auxiliary_data", "value": [{
+        "type": "hash_commitment", "alg": "sha-256",
+        "path": ["eu.europa.ec.eudi.nym_auth.1", "ssc"],
+        "opening": b64(&SEED)
+    }]}]);
+    (data, auxiliary)
+}
+
+/// The issuer certificate of [`nym_auth`]'s attestations.
+pub fn nym_auth_issuer() -> Vec<u8> {
+    Issuer::root(0x11, "Test Document Signer").der
+}
+
+/// A credential entry of the wallet state: `(format, data, metadata)` with `credentialId` `id`
+/// in batch `batch`.
+pub struct Held {
+    pub id: u64,
+    pub batch: u64,
+    pub format: &'static str,
+    pub data: String,
+    pub metadata: Option<Value>,
+}
+
+impl Held {
+    pub fn new(id: u64, format: &'static str, data: String) -> Self {
+        Self {
+            id,
+            batch: id,
+            format,
+            data,
+            metadata: None,
+        }
+    }
+}
+
+/// The wallet: its state, its credentials, and what its host gives the plan.
+pub struct Wallet {
+    pub credentials: Vec<Credential>,
+    pub display: DisplayCache,
+    pub locales: Vec<Locale>,
+    pub systems: Vec<NymAuthSystem>,
+    pub verifier_id: VerifierIdForm,
+    pub background: Vec<CredentialId>,
+    pub key_factors: Vec<(siros_wallet_state::KeyId, Amr)>,
+    pub documents: Vec<(String, FetchResponse)>,
+    state: WalletState,
+}
+
+impl Wallet {
+    /// A wallet holding `held`, each bound to the holder's key under the `kid` `key-<id>`.
+    pub fn new(held: Vec<Held>) -> Self {
+        let entries: Vec<Value> = held
+            .iter()
+            .map(|h| {
+                let mut entry = json!({
+                    "credentialId": h.id,
+                    "format": h.format,
+                    "data": h.data,
+                    "kid": format!("key-{}", h.id),
+                    "instanceId": h.id,
+                    "batchId": h.batch,
+                    "credentialIssuerIdentifier": "https://issuer.example",
+                    "credentialConfigurationId": "example"
+                });
+                if let Some(metadata) = &h.metadata {
+                    entry["metadata"] = metadata.clone();
+                }
+                entry
+            })
+            .collect();
+        let state = WalletState::parse(
+            &json!({
+                "schemaVersion": 4,
+                "credentials": entries,
+                "keypairs": [],
+                "presentations": [],
+                "settings": {"openidRefreshTokenMaxAgeInSeconds": "0"},
+                "credentialIssuanceSessions": []
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let credentials: Vec<Credential> = state
+            .credentials()
+            .iter()
+            .map(|e| Credential::parse(e).unwrap())
+            .collect();
+        let amr = Amr::new(vec![
+            Factor::Possession(Possession::KeyInLocalNativeWscd),
+            Factor::Inherence(Inherence::FingerprintDevice),
+        ])
+        .unwrap();
+        let key_factors = credentials
+            .iter()
+            .filter_map(|c| c.key_id().cloned())
+            .map(|kid| (kid, amr.clone()))
+            .collect();
+        Self {
+            credentials,
+            display: DisplayCache::new(Vec::new(), Vec::new()).unwrap(),
+            locales: vec![Locale::parse("en").unwrap()],
+            systems: NymAuthSystem::ALL.to_vec(),
+            verifier_id: VerifierIdForm::X509SanDns {
+                registration_names_intermediary: false,
+            },
+            background: Vec::new(),
+            key_factors,
+            documents: Vec::new(),
+            state,
+        }
+    }
+
+    /// The credentials usable at [`NOW`].
+    pub fn usable(&self) -> Vec<UsableCredential<'_>> {
+        let now = DateTime::from_unix(NOW).unwrap();
+        self.credentials
+            .iter()
+            .filter_map(|c| UsableCredential::at(c, now).ok())
+            .collect()
+    }
+
+    /// Every credential is presentable without the wallet's UI.
+    pub fn all_in_background(mut self) -> Self {
+        self.background = self
+            .credentials
+            .iter()
+            .map(|c| c.entry().credential_id())
+            .collect();
+        self
+    }
+
+    pub fn input<'a>(
+        &'a self,
+        request: &'a VerifiedRequest,
+        usable: &'a [UsableCredential<'a>],
+        fetches: &'a Fetches,
+    ) -> PlanInput<'a> {
+        PlanInput {
+            request,
+            credentials: usable,
+            records: self.state.presentations(),
+            display: &self.display,
+            locales: &self.locales,
+            systems: &self.systems,
+            verifier_id: &self.verifier_id,
+            background: &self.background,
+            key_factors: &self.key_factors,
+            fetches,
+            now: DateTime::from_unix(NOW).unwrap(),
+        }
+    }
+
+    /// The host's responses to every fetch the plan of `request` asks for.
+    pub fn fetches(&self, request: &VerifiedRequest, usable: &[UsableCredential<'_>]) -> Fetches {
+        let mut fetches = Fetches::new();
+        loop {
+            let fetch = match plan(&self.input(request, usable, &fetches)) {
+                Ok(PlanStep::Fetch(fetch)) => fetch,
+                Ok(PlanStep::Ready(_)) | Err(_) => return fetches,
+            };
+            let response = self
+                .documents
+                .iter()
+                .find(|(url, _)| url == fetch.url().as_str())
+                .map(|(_, r)| r.clone())
+                .unwrap_or_else(|| FetchResponse::new(404, None, Vec::new()));
+            fetches.answer(fetch, response);
+        }
+    }
+}
+
+/// The plan of `input`, which needs no further fetch.
+pub fn ready<'a>(input: &PlanInput<'a>) -> Result<Planned<'a>, PresentationError> {
+    match plan(input)? {
+        PlanStep::Ready(planned) => Ok(*planned),
+        PlanStep::Fetch(fetch) => panic!("unanswered fetch {}", fetch.url().as_str()),
+    }
+}
+
+/// The host's signatures for every `Sign` effect of `prepared`, with the holder's key.
+pub fn sign_all(signs: &[siros_presentation::Sign]) -> Vec<(SignId, Vec<u8>)> {
+    signs
+        .iter()
+        .map(|sign| {
+            assert!(sign.key().as_str().starts_with("key-"));
+            let signature: Signature = holder().sign(sign.input());
+            (sign.id(), signature.to_bytes().to_vec())
+        })
+        .collect()
+}
+
+/// Both phases for the first offer of the plan of `input`: the plan, the plan again, the
+/// selection on the plan's digest, the signatures and the response.
+pub fn respond(input: &PlanInput<'_>) -> (Vec<u8>, Response) {
+    let digest = ready(input).unwrap().view().digest().to_owned();
+    let planned = ready(input).unwrap();
+    let chosen = planned
+        .choose(
+            &Selection::new(&digest, 0, Vec::new()).unwrap(),
+            Fulfilment::WalletUi,
+        )
+        .unwrap();
+    let mut rng = Rng(77);
+    let prepared = chosen.prepare(&mut rng).unwrap();
+    let signatures = sign_all(prepared.signs());
+    let response = prepared
+        .finish(signatures, &TestProver { fail: None }, &mut rng)
+        .unwrap();
+    (base64url::decode(&digest).unwrap(), response)
+}
+
+/// An ES256 signature `r ‖ s` verifies `message` under the holder's key.
+pub fn holder_signed(message: &[u8], signature: &[u8]) -> bool {
+    use p256::ecdsa::signature::Verifier;
+    let signature = Signature::from_slice(signature).unwrap();
+    holder().verifying_key().verify(message, &signature).is_ok()
+}
+
+/// The CBOR item of `bytes`, read with ciborium.
+pub fn ciborium(bytes: &[u8]) -> Ciborium {
+    ciborium::from_reader(bytes).unwrap()
+}
