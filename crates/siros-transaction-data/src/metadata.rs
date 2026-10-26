@@ -18,9 +18,9 @@ const MAX_DOCUMENT: usize = 256 * 1024;
 /// The media type a metadata fetch accepts.
 const JSON: &str = "application/json";
 
-/// The SD-JWT VC type metadata of a credential (SD-JWT VC, Section 6), as far as transaction
-/// data reads it: `category` and `transaction_data_types` (EC TS12 v1.0.1, Section 4.1).
-pub struct TypeMetadata<'c> {
+/// The SCA Attestation metadata of a credential: the `category` and `transaction_data_types`
+/// of its SD-JWT VC Type Metadata (SD-JWT VC, Section 6; EC TS12 v1.0.1, Sections 2.3 and 4.1).
+pub struct ScaMetadata<'c> {
     credential: &'c Credential,
     category: Option<String>,
     types: Vec<(&'static str, TypeDisplay)>,
@@ -72,7 +72,7 @@ impl Fetched {
     }
 }
 
-impl<'c> TypeMetadata<'c> {
+impl<'c> ScaMetadata<'c> {
     /// The fetch of the type metadata of `credential`: a `GET` of its `vct` (SD-JWT VC, Section
     /// 6.3.1; EC TS12 v1.0.1, Section 4.1.1).
     ///
@@ -89,8 +89,8 @@ impl<'c> TypeMetadata<'c> {
         Ok(Fetch::get(url, JSON, MAX_DOCUMENT))
     }
 
-    /// The type metadata of `credential` that `response`, the response to
-    /// [`TypeMetadata::fetch`], holds.
+    /// The SCA Attestation metadata of `credential` in `response`, the response to
+    /// [`ScaMetadata::fetch`].
     ///
     /// The document matches the credential's `vct#integrity` when it has one (Section 7), and
     /// its `vct` is the credential's (Section 6.3). Of `transaction_data_types`, the entries of

@@ -10,7 +10,7 @@ use siros_codec::base64url;
 use siros_credential::Credential;
 use siros_display::Locale;
 use siros_oid4vp::FetchResponse;
-use siros_transaction_data::{bind, Amr, Entry, Factor, Fetched, Presented, Step, TypeMetadata};
+use siros_transaction_data::{bind, Amr, Entry, Factor, Fetched, Presented, ScaMetadata, Step};
 
 use crate::common::{
     card, encode, entry, inline_payment_type, payment, query, response, sd_jwt_vc, type_metadata,
@@ -49,12 +49,12 @@ enum Input {
 fn outcome(input: Input) -> Result<(), &'static str> {
     match input {
         Input::Entry(raw) => Entry::parse(&raw, &query()).map(drop).map_err(|e| e.code()),
-        Input::Fetch(credential) => TypeMetadata::fetch(&credential)
+        Input::Fetch(credential) => ScaMetadata::fetch(&credential)
             .map(drop)
             .map_err(|e| e.code()),
         Input::Metadata(card, response) => {
             let credential = sd_jwt_vc(&card);
-            TypeMetadata::parse(&credential, &response)
+            ScaMetadata::parse(&credential, &response)
                 .map(drop)
                 .map_err(|e| e.code())
         }
@@ -86,7 +86,7 @@ fn views(
         .map(|e| Entry::parse(&encode(e), &query()).unwrap())
         .collect();
     let credential = sd_jwt_vc(card);
-    let metadata = TypeMetadata::parse(&credential, &response(metadata)).map_err(|e| e.code())?;
+    let metadata = ScaMetadata::parse(&credential, &response(metadata)).map_err(|e| e.code())?;
     let offer = [Presented::new("pay", &metadata)];
     let bound = bind(&entries, &offer).map_err(|e| e.code())?;
     let Some(documents) = documents else {

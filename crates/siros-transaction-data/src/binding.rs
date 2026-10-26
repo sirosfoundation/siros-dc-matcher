@@ -11,7 +11,7 @@ use crate::amr::Amr;
 use crate::entry::Entry;
 use crate::error::TransactionDataError;
 use crate::hash::{Accepted, Choice};
-use crate::metadata::{Fetched, Step, TypeMetadata};
+use crate::metadata::{Fetched, ScaMetadata, Step};
 use crate::view::TransactionView;
 
 /// What an entry binds into the KB-JWT of the credential that authorizes it.
@@ -36,17 +36,18 @@ pub(crate) enum KbJwtClaim {
 /// The order of the required claims in a KB-JWT.
 const CLAIM_ORDER: [KbJwtClaim; 3] = [KbJwtClaim::Jti, KbJwtClaim::ResponseMode, KbJwtClaim::Amr];
 
-/// A credential the chosen offer presents for a Credential Query, with its type metadata.
+/// A credential the chosen offer presents for a Credential Query, with its SCA Attestation
+/// metadata.
 #[derive(Clone, Copy)]
 pub struct Presented<'a> {
     query_id: &'a str,
-    metadata: &'a TypeMetadata<'a>,
+    metadata: &'a ScaMetadata<'a>,
 }
 
 impl<'a> Presented<'a> {
     /// The credential of `metadata`, presented for the Credential Query `query_id`.
     #[must_use]
-    pub fn new(query_id: &'a str, metadata: &'a TypeMetadata<'a>) -> Self {
+    pub fn new(query_id: &'a str, metadata: &'a ScaMetadata<'a>) -> Self {
         Self { query_id, metadata }
     }
 
@@ -74,7 +75,7 @@ pub struct MemberBinding<'e, 'a> {
 /// `credential_ids` that the type authorizes (OpenID4VP 1.0, Section 5.1). When a query has
 /// several credentials, the first in `offer` that the type authorizes is taken.
 ///
-/// `offer` holds the credentials of the chosen offer whose type metadata the host fetched; a
+/// `offer` holds the credentials of the chosen offer whose type metadata the host fetched. A
 /// credential without type metadata authorizes no entry.
 ///
 /// The bindings are those of the credentials with at least one entry, in the order of `offer`.

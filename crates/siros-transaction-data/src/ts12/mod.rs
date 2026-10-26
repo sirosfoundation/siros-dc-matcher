@@ -17,7 +17,7 @@ use crate::hash::{Accepted, HASHES_ALG};
 use crate::json::{self, Fields, Json};
 use crate::kind::TransactionType;
 use crate::labels::DisplayMetadata;
-use crate::metadata::TypeMetadata;
+use crate::metadata::ScaMetadata;
 use crate::view::TransactionView;
 
 pub(crate) use display::Leaves;
@@ -75,7 +75,7 @@ impl<P: Payload> TransactionType for Ts12<P> {
     }
 
     /// An SCA Attestation whose type metadata lists the type (Sections 3 and 3.2).
-    fn authorizes(&self, metadata: &TypeMetadata<'_>) -> bool {
+    fn authorizes(&self, metadata: &ScaMetadata<'_>) -> bool {
         metadata.category() == Some(SCA_CATEGORY) && metadata.display_metadata(P::TYPE).is_some()
     }
 

@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 use siros_codec::base64url;
 use siros_oid4vp::ResponseMode;
 use siros_transaction_data::{
-    bind, Amr, Entry, Factor, Inherence, Jti, KbJwtInputs, Knowledge, Presented, TypeMetadata,
+    bind, Amr, Entry, Factor, Inherence, Jti, KbJwtInputs, Knowledge, Presented, ScaMetadata,
 };
 
 use crate::common::{
@@ -32,9 +32,9 @@ fn an_entry_binds_to_one_credential() {
         type_metadata(inline_payment_type()),
         json!({"category": null}),
     ));
-    let first = TypeMetadata::parse(&cards[0], &sca).unwrap();
-    let second = TypeMetadata::parse(&cards[1], &sca).unwrap();
-    let first_not_sca = TypeMetadata::parse(&cards[0], &not_sca).unwrap();
+    let first = ScaMetadata::parse(&cards[0], &sca).unwrap();
+    let second = ScaMetadata::parse(&cards[1], &sca).unwrap();
+    let first_not_sca = ScaMetadata::parse(&cards[0], &not_sca).unwrap();
 
     // (offer, the query of the one credential bound)
     let cases = [

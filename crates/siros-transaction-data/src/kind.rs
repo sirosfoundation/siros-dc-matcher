@@ -8,7 +8,7 @@ use crate::binding::Binding;
 use crate::error::TransactionDataError;
 use crate::json::Fields;
 use crate::labels::DisplayMetadata;
-use crate::metadata::TypeMetadata;
+use crate::metadata::ScaMetadata;
 use crate::ts12::{AccountAccess, Emandate, LoginRisk, Payload, Payment, Ts12};
 use crate::view::TransactionView;
 
@@ -22,7 +22,7 @@ pub(crate) trait TransactionType {
     fn format(&self) -> Format;
 
     /// Whether the credential of `metadata` can authorize it.
-    fn authorizes(&self, metadata: &TypeMetadata<'_>) -> bool;
+    fn authorizes(&self, metadata: &ScaMetadata<'_>) -> bool;
 
     /// What it binds into the presentation of the credential that authorizes it: its
     /// B.3.3.1 hash and the KB-JWT claims its specification requires.

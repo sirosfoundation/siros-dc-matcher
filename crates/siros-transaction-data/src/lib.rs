@@ -10,7 +10,7 @@
 //! | T4: an entry binds to the first of its `credential_ids` the chosen offer answers with a credential the type authorizes | [`bind`], [`Presented`] |
 //! | T5: no binding under `require_cryptographic_holder_binding: false` | [`Entry::parse`] refuses such a query (B.3.3) |
 //! | T6: the four TS12 types, SD-JWT VC only, typed payloads, hashes plus `jti`, `response_mode`, `amr`, display failing closed | [`Entry::parse`], [`KbJwtInputs`], [`Amr`], [`MemberBinding::views`] |
-//! | T7: type metadata and referenced documents as host fetches under H1 | [`TypeMetadata::fetch`], [`Step::Fetch`], [`Fetched`] |
+//! | T7: type metadata and referenced documents as host fetches under H1 | [`ScaMetadata::fetch`], [`Step::Fetch`], [`Fetched`] |
 //!
 //! Every refusal is a [`TransactionDataError`], which reaches the verifier as
 //! `invalid_transaction_data` (Section 8.5).
@@ -18,7 +18,7 @@
 //! A presentation with transaction data goes through these steps:
 //! 1. [`Entry::parse`] each string of the request's `transaction_data` against its DCQL query.
 //! 2. For each SD-JWT VC that answers a query some entry names, have the host perform
-//!    [`TypeMetadata::fetch`] and read the response with [`TypeMetadata::parse`].
+//!    [`ScaMetadata::fetch`] and read the response with [`ScaMetadata::parse`].
 //! 3. For each offer, [`bind`] the entries to the credentials it presents.
 //! 4. Show [`MemberBinding::views`], fetching each document it asks for into [`Fetched`].
 //! 5. Add [`MemberBinding::kb_jwt_claims`] to the KB-JWT of each bound credential.
@@ -54,5 +54,5 @@ pub use entry::Entry;
 pub use error::TransactionDataError;
 pub use hash::HashAlg;
 pub use json::MAX_DEPTH;
-pub use metadata::{Fetched, Step, TypeMetadata};
+pub use metadata::{Fetched, ScaMetadata, Step};
 pub use view::{Frequency, Level, Row, RowValue, TransactionView};
