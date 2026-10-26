@@ -5,7 +5,7 @@
 use std::fmt;
 
 use siros_codec::date::DateTime;
-use siros_mdoc::{chains_to, es256_verifies, CertificateError, MdocError, P256Certificate};
+use siros_mdoc::{chains_to, es256_verifies, CertificateError, Mdoc, MdocError, P256Certificate};
 use zeroize::Zeroizing;
 
 use crate::mdoc::{self, FormError, NymAuthMdoc, Reading};
@@ -143,7 +143,30 @@ impl UsableAttestation {
         anchors: Option<&[Vec<u8>]>,
         proof_time: DateTime,
     ) -> Result<Self, Unusable> {
-        let mdoc = match mdoc::read(data) {
+        Self::tested(mdoc::read(data), anchors, proof_time)
+    }
+
+    /// Tests `mdoc`, which `siros-mdoc` parsed, at `proof_time`, as [`UsableAttestation::new`]
+    /// tests a stored credential.
+    ///
+    /// # Errors
+    ///
+    /// [`Unusable`]: another `docType`, a credential out of the nym_auth form, or the failed
+    /// tests.
+    pub fn of(
+        mdoc: &Mdoc,
+        anchors: Option<&[Vec<u8>]>,
+        proof_time: DateTime,
+    ) -> Result<Self, Unusable> {
+        Self::tested(mdoc::read_mdoc(mdoc), anchors, proof_time)
+    }
+
+    fn tested(
+        reading: Result<Reading, FormError>,
+        anchors: Option<&[Vec<u8>]>,
+        proof_time: DateTime,
+    ) -> Result<Self, Unusable> {
+        let mdoc = match reading {
             Ok(Reading::NymAuth(mdoc)) => *mdoc,
             Ok(Reading::OtherDocType) => return Err(Unusable::OtherDocType),
             Err(FormError::Mdoc(MdocError::ItemDigest)) => return Err(Unusable::Unlisted),
@@ -206,6 +229,25 @@ impl fmt::Display for SeedMismatch {
 
 impl std::error::Error for SeedMismatch {}
 
+/// The 16-byte `secret_seed` an issuer delivered with a credential (privatedata, Section 5A).
+/// It is zeroed on drop.
+#[derive(Clone)]
+pub struct SecretSeed(Zeroizing<[u8; 16]>);
+
+impl SecretSeed {
+    /// The seed `seed`.
+    pub fn new(seed: Zeroizing<[u8; 16]>) -> Self {
+        Self(seed)
+    }
+}
+
+/// Shows nothing: the seed is a delivered secret.
+impl fmt::Debug for SecretSeed {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SecretSeed").finish_non_exhaustive()
+    }
+}
+
 /// A delivered `secret_seed` whose SHA-256 is the credential's `ssc`. The Wallet opens it again
 /// for each use (privatedata, Section 5A.2). It is zeroed on drop.
 #[derive(Clone)]
@@ -217,9 +259,9 @@ impl OpenedSeed {
     /// # Errors
     ///
     /// [`SeedMismatch`] when `SHA-256(secret_seed)` is not `ssc`.
-    pub fn open(credential: &Credential, secret_seed: &[u8; 16]) -> Result<Self, SeedMismatch> {
-        if sha256(secret_seed) == *credential.mdoc().ssc().value() {
-            Ok(Self(Zeroizing::new(*secret_seed)))
+    pub fn open(credential: &Credential, secret_seed: &SecretSeed) -> Result<Self, SeedMismatch> {
+        if sha256(&*secret_seed.0) == *credential.mdoc().ssc().value() {
+            Ok(Self(secret_seed.0.clone()))
         } else {
             Err(SeedMismatch)
         }

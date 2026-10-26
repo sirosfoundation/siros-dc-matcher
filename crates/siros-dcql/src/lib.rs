@@ -25,6 +25,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used)]
 
 pub mod eval;
+pub mod id;
 pub mod path;
 pub mod query;
 
@@ -32,6 +33,7 @@ pub use eval::{
     execute, Candidate, Combination, Combinations, Credential, Dropped, ExactFormat, Policy,
     QueryMatch, QueryResult, SelectedClaim,
 };
+pub use id::{QueryId, QueryIdError};
 pub use path::{
     mdoc_components, resolve, resolve_json, ClaimNode, Lookup, PathComponent, PathError,
 };

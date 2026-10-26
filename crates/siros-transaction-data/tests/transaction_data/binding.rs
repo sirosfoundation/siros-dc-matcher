@@ -6,6 +6,7 @@
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use siros_codec::base64url;
+use siros_dcql::QueryId;
 use siros_oid4vp::ResponseMode;
 use siros_transaction_data::{
     bind, Amr, Entry, Factor, Inherence, Jti, KbJwtInputs, Knowledge, Presented, ScaMetadata,
@@ -36,19 +37,21 @@ fn an_entry_binds_to_one_credential() {
     let second = ScaMetadata::parse(&cards[1], &sca).unwrap();
     let first_not_sca = ScaMetadata::parse(&cards[0], &not_sca).unwrap();
 
+    let card_id = QueryId::parse("card").unwrap();
+    let pay_id = QueryId::parse("pay").unwrap();
     // (offer, the query of the one credential bound)
     let cases = [
         (
             [
-                Presented::new("card", &second),
-                Presented::new("pay", &first),
+                Presented::new(&card_id, &second),
+                Presented::new(&pay_id, &first),
             ],
             "pay",
         ),
         (
             [
-                Presented::new("card", &second),
-                Presented::new("pay", &first_not_sca),
+                Presented::new(&card_id, &second),
+                Presented::new(&pay_id, &first_not_sca),
             ],
             "card",
         ),
@@ -63,7 +66,7 @@ fn an_entry_binds_to_one_credential() {
     for (offer, query_id) in cases {
         let bound = bind(&entries, &offer).unwrap();
         assert_eq!(bound.len(), 1, "{query_id}");
-        assert_eq!(bound[0].presented().query_id(), query_id);
+        assert_eq!(bound[0].presented().query_id().as_str(), query_id);
         assert_eq!(bound[0].entries().len(), 1);
         let expected: Vec<(String, Value)> = [
             ("transaction_data_hashes", json!([hash])),

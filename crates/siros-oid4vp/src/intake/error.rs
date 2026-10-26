@@ -2,6 +2,7 @@
 
 use std::fmt;
 
+use crate::client_id::ClientIdError;
 use crate::error_code::ErrorCode;
 
 /// A rule of OpenID4VP 1.0 (or of RFC 9101, RFC 7515, RFC 5280) that a request breaks, or a
@@ -45,8 +46,8 @@ pub enum IntakeError {
     ClientIdMismatch,
     /// The Request Object does not echo the `wallet_nonce` the wallet posted (Section 5.10.1).
     WalletNonceMismatch,
-    /// The `client_id` has no prefix this wallet supports, or an empty value (Section 5.9).
-    ClientIdPrefixUnsupported,
+    /// The `client_id` is not one this wallet supports (Section 5.9).
+    ClientId(ClientIdError),
     /// A signed request uses the `redirect_uri` prefix (Section 5.9.3).
     SignedRedirectUri,
     /// An unsigned request uses a prefix other than `redirect_uri` (Section 5.9.3).
@@ -115,6 +116,8 @@ pub enum IntakeError {
     ClientMetadataInvalid,
     /// `transaction_data` is not a non-empty array of strings (Section 5.1).
     TransactionDataInvalid,
+    /// `verifier_info` breaks a rule of Section 5.1.
+    VerifierInfo(VerifierInfoRule),
     /// An encrypted Response Mode, and no key of `jwks` is a P-256 `ECDH-ES` encryption key.
     EncryptionKeyMissing,
     /// `encrypted_response_enc_values_supported` names no `enc` of the Response Mode's
@@ -126,6 +129,41 @@ pub enum IntakeError {
     UnexpectedTrustKey,
     /// The state holds more answers than the request asked effects.
     UnusedAnswer,
+}
+
+/// A rule of `verifier_info` (Section 5.1) that a request breaks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum VerifierInfoRule {
+    /// `verifier_info` is not an array.
+    NotArray,
+    /// The array is empty.
+    Empty,
+    /// An attestation is not a JSON object.
+    NotObject,
+    /// An attestation has no string `format`.
+    Format,
+    /// An attestation's `data` is neither an object nor a string.
+    Data,
+    /// An attestation's `credential_ids` is not a non-empty array of strings.
+    CredentialIds,
+    /// An attestation's `credential_ids` names no Credential Query of `dcql_query`.
+    CredentialIdUnknown,
+}
+
+impl VerifierInfoRule {
+    /// A stable identifier.
+    #[must_use]
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::NotArray => "verifier_info_not_array",
+            Self::Empty => "verifier_info_empty",
+            Self::NotObject => "verifier_info_not_object",
+            Self::Format => "verifier_info_format",
+            Self::Data => "verifier_info_data",
+            Self::CredentialIds => "verifier_info_credential_ids",
+            Self::CredentialIdUnknown => "verifier_info_credential_id_unknown",
+        }
+    }
 }
 
 impl IntakeError {
@@ -151,7 +189,7 @@ impl IntakeError {
             Self::NestedRequest => "nested_request",
             Self::ClientIdMismatch => "client_id_mismatch",
             Self::WalletNonceMismatch => "wallet_nonce_mismatch",
-            Self::ClientIdPrefixUnsupported => "client_id_prefix_unsupported",
+            Self::ClientId(e) => e.code(),
             Self::SignedRedirectUri => "signed_redirect_uri",
             Self::UnsignedNeedsRedirectUri => "unsigned_needs_redirect_uri",
             Self::CertificateChainInvalid => "certificate_chain_invalid",
@@ -184,6 +222,7 @@ impl IntakeError {
             Self::DcqlQueryInvalid => "dcql_query_invalid",
             Self::ClientMetadataInvalid => "client_metadata_invalid",
             Self::TransactionDataInvalid => "transaction_data_invalid",
+            Self::VerifierInfo(rule) => rule.code(),
             Self::EncryptionKeyMissing => "encryption_key_missing",
             Self::EncryptionUnsupported => "encryption_unsupported",
             Self::AnswerMismatch => "answer_mismatch",
@@ -198,8 +237,74 @@ impl IntakeError {
         match self {
             Self::RequestUriMethodInvalid => ErrorCode::InvalidRequestUriMethod,
             Self::ScopeUnsupported => ErrorCode::InvalidScope,
-            _ => ErrorCode::InvalidRequest,
+            Self::NotAnAuthorizationRequest
+            | Self::ClientIdMissing
+            | Self::RequestAndRequestUri
+            | Self::RequestUriMethodWithoutRequestUri
+            | Self::RequestUriNotHttps
+            | Self::FetchStatus
+            | Self::FetchContentType
+            | Self::FetchTooLarge
+            | Self::JwsMalformed
+            | Self::AlgorithmUnsupported
+            | Self::CriticalHeader
+            | Self::TypMismatch
+            | Self::SignatureInvalid
+            | Self::RequestObjectNotObject
+            | Self::NestedRequest
+            | Self::ClientIdMismatch
+            | Self::WalletNonceMismatch
+            | Self::ClientId(_)
+            | Self::SignedRedirectUri
+            | Self::UnsignedNeedsRedirectUri
+            | Self::CertificateChainInvalid
+            | Self::SanMismatch
+            | Self::CertificateHashMismatch
+            | Self::KidNotOfClient
+            | Self::KeyNotResolved
+            | Self::AttestationInvalid
+            | Self::AttestationSubjectMismatch
+            | Self::AttestationExpired
+            | Self::AttestationSignatureInvalid
+            | Self::RedirectUriNotAttested
+            | Self::ClientIdInPayload
+            | Self::NoVerifiableSignature
+            | Self::EnvelopeUnreadable
+            | Self::ExpectedOriginsMissing
+            | Self::OriginNotExpected
+            | Self::ResponseTypeUnsupported
+            | Self::NonceInvalid
+            | Self::StateInvalid
+            | Self::ResponseModeUnsupported
+            | Self::ResponseUriMissing
+            | Self::ResponseUriNotHttps
+            | Self::RedirectUriWithDirectPost
+            | Self::ResponseUriNotClientId
+            | Self::ResponseUriHostMismatch
+            | Self::QueryAndScope
+            | Self::DcqlQueryMissing
+            | Self::DcqlQueryInvalid
+            | Self::ClientMetadataInvalid
+            | Self::TransactionDataInvalid
+            | Self::VerifierInfo(_)
+            | Self::EncryptionKeyMissing
+            | Self::EncryptionUnsupported
+            | Self::AnswerMismatch
+            | Self::UnexpectedTrustKey
+            | Self::UnusedAnswer => ErrorCode::InvalidRequest,
         }
+    }
+}
+
+impl From<ClientIdError> for IntakeError {
+    fn from(error: ClientIdError) -> Self {
+        Self::ClientId(error)
+    }
+}
+
+impl From<VerifierInfoRule> for IntakeError {
+    fn from(rule: VerifierInfoRule) -> Self {
+        Self::VerifierInfo(rule)
     }
 }
 

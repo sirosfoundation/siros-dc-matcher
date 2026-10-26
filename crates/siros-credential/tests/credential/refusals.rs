@@ -36,7 +36,7 @@ fn honest_payload(given_name_digest: &str) -> Value {
     json!({
         "iss": "https://issuer.example",
         "vct": "https://credentials.example/identity",
-        "cnf": {"jwk": {"kty": "EC", "crv": "P-256", "x": "AQ", "y": "Ag"}},
+        "cnf": {"jwk": {"kty": "EC", "crv": "P-256", "x": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE", "y": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI"}},
         "nbf": 1_700_000_000,
         "exp": 1_900_000_000,
         "_sd": [given_name_digest]
@@ -294,6 +294,30 @@ fn each_rule_refuses_its_input() {
             "cnf_malformed",
             Input::State(vc_state(
                 &with(&|p| p["cnf"] = json!("key-1")),
+                &[&given_name],
+            )),
+        ),
+        (
+            "cnf without jwk",
+            "holder_key_jwk",
+            Input::State(vc_state(
+                &with(&|p| p["cnf"] = json!({"kid": "key-1"})),
+                &[&given_name],
+            )),
+        ),
+        (
+            "cnf.jwk of another curve",
+            "holder_key_type",
+            Input::State(vc_state(
+                &with(&|p| p["cnf"]["jwk"]["crv"] = json!("P-384")),
+                &[&given_name],
+            )),
+        ),
+        (
+            "cnf.jwk with a coordinate not of 32 bytes",
+            "holder_key_coordinate",
+            Input::State(vc_state(
+                &with(&|p| p["cnf"]["jwk"]["x"] = json!("AQ")),
                 &[&given_name],
             )),
         ),

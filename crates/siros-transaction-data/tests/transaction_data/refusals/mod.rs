@@ -8,6 +8,7 @@ mod presentation;
 use serde_json::{json, Value};
 use siros_codec::base64url;
 use siros_credential::Credential;
+use siros_dcql::QueryId;
 use siros_display::Locale;
 use siros_oid4vp::FetchResponse;
 use siros_transaction_data::{bind, Amr, Entry, Factor, Fetched, Presented, ScaMetadata, Step};
@@ -25,7 +26,7 @@ enum Input {
     /// A `transaction_data` string, against the query of the tests.
     Entry(String),
     /// The type metadata fetch of a credential.
-    Fetch(Credential),
+    Fetch(Box<Credential>),
     /// A response to the type metadata fetch of the SD-JWT VC with this payload.
     Metadata(Value, FetchResponse),
     /// Entries bound to the SD-JWT VC with this payload, presented for `pay`, with the type
@@ -89,7 +90,8 @@ fn views(
         .collect();
     let credential = sd_jwt_vc(card);
     let metadata = ScaMetadata::parse(&credential, &response(metadata)).map_err(|e| e.code())?;
-    let offer = [Presented::new("pay", &metadata)];
+    let pay = QueryId::parse("pay").unwrap();
+    let offer = [Presented::new(&pay, &metadata)];
     let bound = bind(&entries, &offer).map_err(|e| e.code())?;
     let Some(documents) = documents else {
         return Ok(());
@@ -105,7 +107,7 @@ fn views(
                         .iter()
                         .find(|(url, _)| *url == fetch.url().as_str())
                         .unwrap_or_else(|| panic!("no document at {}", fetch.url().as_str()));
-                    assert!(fetched.insert(&fetch, document.clone()).is_none());
+                    assert!(fetched.insert_first(&fetch, document.clone()).is_ok());
                 }
             }
         }

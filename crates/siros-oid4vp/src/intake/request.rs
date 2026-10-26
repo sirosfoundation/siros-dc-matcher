@@ -5,19 +5,26 @@ use serde_json::{Map, Value};
 use siros_dcql::DcqlQuery;
 
 use super::signature::{strings, Metadata, UriRule, Verifier};
-use super::IntakeError;
+use super::{IntakeError, VerifierInfoRule};
 use crate::client_id::ClientId;
 use crate::fetch::HttpsUrl;
 use crate::handover::ec_jwk_thumbprint;
 use crate::jose;
-use crate::verified::{Channel, ContentEncryption, Encryption, PostEncoding, VerifiedRequest};
+use crate::protocol::Protocol;
+use crate::verified::{
+    AttestationFormat, Channel, ContentEncryption, Encryption, PostEncoding, VerifiedRequest,
+};
 
 /// The channel a request arrived on, and who sent it.
 pub(super) enum Arrival<'a> {
     /// Redirects.
     Redirect(Verifier),
-    /// A signed DC API request from `origin`.
-    DcApiSigned { origin: &'a str, verifier: Verifier },
+    /// A DC API request from `origin`, signed under `protocol`.
+    DcApiSigned {
+        origin: &'a str,
+        protocol: Protocol,
+        verifier: Verifier,
+    },
     /// An unsigned DC API request from `origin`, with the host's verdict on the origin.
     DcApiUnsigned { origin: &'a str, trusted: bool },
 }
@@ -50,7 +57,7 @@ pub(super) fn verified(
         ),
     };
     let mode = text("response_mode");
-    let (target, trusted, metadata) = match arrival {
+    let (target, trusted, certificate, metadata) = match arrival {
         Arrival::Redirect(verifier) => {
             let encoding = match mode {
                 Some("direct_post") => Encoding::Form,
@@ -63,9 +70,18 @@ pub(super) fn verified(
                 client_id: verifier.client_id,
                 encoding,
             };
-            (target, verifier.trusted, verifier.metadata)
+            (
+                target,
+                verifier.trusted,
+                verifier.certificate,
+                verifier.metadata,
+            )
         }
-        Arrival::DcApiSigned { origin, verifier } => {
+        Arrival::DcApiSigned {
+            origin,
+            protocol,
+            verifier,
+        } => {
             let encrypted = dc_api_encrypted(mode)?;
             let expected = params
                 .get("expected_origins")
@@ -76,23 +92,31 @@ pub(super) fn verified(
                 return Err(IntakeError::OriginNotExpected);
             }
             let target = Target::DcApi {
+                protocol,
                 client_id: Some(verifier.client_id),
                 origin,
                 encrypted,
             };
-            (target, verifier.trusted, verifier.metadata)
+            (
+                target,
+                verifier.trusted,
+                verifier.certificate,
+                verifier.metadata,
+            )
         }
         // A.2: the Wallet ignores `client_id` and `expected_origins` of an unsigned request.
         Arrival::DcApiUnsigned { origin, trusted } => {
             let target = Target::DcApi {
+                protocol: Protocol::Unsigned,
                 client_id: None,
                 origin,
                 encrypted: dc_api_encrypted(mode)?,
             };
-            (target, trusted, Metadata::Request)
+            (target, trusted, None, Metadata::Request)
         }
     };
     let (dcql_query, dcql_query_json) = dcql_query(params)?;
+    let verifier_info = verifier_info(params.get("verifier_info"), &dcql_query)?;
     let client_metadata = match metadata {
         Metadata::Request => match params.get("client_metadata") {
             None => None,
@@ -125,10 +149,12 @@ pub(super) fn verified(
             },
         },
         Target::DcApi {
+            protocol,
             client_id,
             origin,
             encrypted,
         } => Channel::DcApi {
+            protocol,
             client_id,
             origin: origin.to_owned(),
             encryption: match encrypted {
@@ -140,6 +166,8 @@ pub(super) fn verified(
     Ok(VerifiedRequest {
         channel,
         trusted,
+        access_certificate: certificate,
+        verifier_info,
         nonce,
         state,
         dcql_query,
@@ -157,6 +185,7 @@ enum Target<'a> {
         encoding: Encoding,
     },
     DcApi {
+        protocol: Protocol,
         client_id: Option<ClientId>,
         origin: &'a str,
         encrypted: bool,
@@ -228,6 +257,53 @@ fn dcql_query(params: &Map<String, Value>) -> Result<(DcqlQuery, Value), IntakeE
             Ok((query, raw.clone()))
         }
     }
+}
+
+/// The `format` of each attestation of `verifier_info` (Section 5.1): a non-empty array of
+/// objects, each with a string `format`, a `data` object or string, and `credential_ids`, when
+/// present, a non-empty array of the ids of Credential Queries of `query`.
+fn verifier_info(
+    value: Option<&Value>,
+    query: &DcqlQuery,
+) -> Result<Vec<AttestationFormat>, IntakeError> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    let attestations = value.as_array().ok_or(VerifierInfoRule::NotArray)?;
+    if attestations.is_empty() {
+        return Err(VerifierInfoRule::Empty.into());
+    }
+    attestations
+        .iter()
+        .map(|attestation| attestation_format(attestation, query).map_err(IntakeError::from))
+        .collect()
+}
+
+/// The `format` of the `verifier_info` attestation `attestation`.
+fn attestation_format(
+    attestation: &Value,
+    query: &DcqlQuery,
+) -> Result<AttestationFormat, VerifierInfoRule> {
+    let attestation = attestation.as_object().ok_or(VerifierInfoRule::NotObject)?;
+    let format = attestation
+        .get("format")
+        .and_then(Value::as_str)
+        .ok_or(VerifierInfoRule::Format)?;
+    if !attestation
+        .get("data")
+        .is_some_and(|data| data.is_object() || data.is_string())
+    {
+        return Err(VerifierInfoRule::Data);
+    }
+    if let Some(ids) = attestation.get("credential_ids") {
+        let ids = strings(ids)
+            .filter(|ids| !ids.is_empty())
+            .ok_or(VerifierInfoRule::CredentialIds)?;
+        if !ids.iter().all(|id| query.credential(id).is_some()) {
+            return Err(VerifierInfoRule::CredentialIdUnknown);
+        }
+    }
+    Ok(AttestationFormat(format.to_owned()))
 }
 
 /// The key and `enc` of an encrypted response, for a JWE and for a `COSE_Encrypt` alike

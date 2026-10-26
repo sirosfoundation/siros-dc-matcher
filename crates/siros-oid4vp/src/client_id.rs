@@ -1,6 +1,6 @@
 //! Client Identifiers and their prefixes (OpenID4VP 1.0, Section 5.9).
 
-use crate::intake::IntakeError;
+use std::fmt;
 
 /// A Client Identifier Prefix this wallet supports (OpenID4VP 1.0, Section 5.9.3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -48,6 +48,43 @@ impl ClientIdPrefix {
     }
 }
 
+/// Why a `client_id` is not one this wallet supports (Section 5.9).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ClientIdError {
+    /// The `client_id` has no `:`: a pre-registered client.
+    Unprefixed,
+    /// The prefix is not one of [`ClientIdPrefix`].
+    PrefixUnsupported,
+    /// The value after the prefix is empty.
+    ValueEmpty,
+    /// A `decentralized_identifier` value is not a DID.
+    NotADid,
+    /// An `x509_san_dns` value is not ASCII.
+    DnsName,
+}
+
+impl ClientIdError {
+    /// A stable identifier.
+    #[must_use]
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Unprefixed => "client_id_unprefixed",
+            Self::PrefixUnsupported => "client_id_prefix_unsupported",
+            Self::ValueEmpty => "client_id_value_empty",
+            Self::NotADid => "client_id_not_a_did",
+            Self::DnsName => "client_id_dns_name",
+        }
+    }
+}
+
+impl fmt::Display for ClientIdError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.code())
+    }
+}
+
+impl std::error::Error for ClientIdError {}
+
 /// A `client_id` with a supported prefix and a non-empty value.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ClientId {
@@ -60,20 +97,22 @@ impl ClientId {
     ///
     /// # Errors
     ///
-    /// [`IntakeError::ClientIdPrefixUnsupported`] for a `client_id` without `:` (a
-    /// pre-registered client), with another prefix (`origin` included, Section 5.9.3), with an
-    /// empty value, or a `decentralized_identifier` value that is not a DID.
-    pub fn parse(full: &str) -> Result<Self, IntakeError> {
-        let (prefix, value) = full
-            .split_once(':')
-            .ok_or(IntakeError::ClientIdPrefixUnsupported)?;
-        let prefix = ClientIdPrefix::named(prefix).ok_or(IntakeError::ClientIdPrefixUnsupported)?;
-        let well_formed = match prefix {
-            ClientIdPrefix::DecentralizedIdentifier => value.starts_with("did:"),
-            _ => !value.is_empty(),
-        };
-        if !well_formed {
-            return Err(IntakeError::ClientIdPrefixUnsupported);
+    /// [`ClientIdError`]: a `client_id` without `:` (a pre-registered client), with another
+    /// prefix (`origin` included, Section 5.9.3), with an empty value, a
+    /// `decentralized_identifier` value that is not a DID, or an `x509_san_dns` value that is
+    /// not an ASCII DNS name (Section 5.9.3: a dNSName is an IA5String).
+    pub fn parse(full: &str) -> Result<Self, ClientIdError> {
+        let (prefix, value) = full.split_once(':').ok_or(ClientIdError::Unprefixed)?;
+        let prefix = ClientIdPrefix::named(prefix).ok_or(ClientIdError::PrefixUnsupported)?;
+        if value.is_empty() {
+            return Err(ClientIdError::ValueEmpty);
+        }
+        match prefix {
+            ClientIdPrefix::DecentralizedIdentifier if !value.starts_with("did:") => {
+                return Err(ClientIdError::NotADid)
+            }
+            ClientIdPrefix::X509SanDns if !value.is_ascii() => return Err(ClientIdError::DnsName),
+            _ => {}
         }
         Ok(Self {
             prefix,

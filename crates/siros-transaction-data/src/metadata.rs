@@ -1,6 +1,8 @@
 //! The type metadata of an SD-JWT VC and the documents it references, each fetched by the host
 //! (T7, H1).
 
+use std::collections::hash_map::Entry;
+
 use rustc_hash::FxHashMap;
 use siros_credential::{ClaimPointer, Credential, Format, TypedValue};
 use siros_dcql::{PathComponent, PathError};
@@ -51,8 +53,8 @@ pub struct Fetched(FxHashMap<HttpsUrl, FetchResponse>);
 
 /// What a step of transaction data gives: a fetch for the host, or the value.
 pub enum Step<T> {
-    /// The document to fetch. Its response goes to [`Fetched::insert`], and the step is taken
-    /// again.
+    /// The document to fetch. Its response goes to [`Fetched::insert_first`], and the step is
+    /// taken again.
     Fetch(Fetch),
     /// The value.
     Done(T),
@@ -65,10 +67,26 @@ impl Fetched {
         Self::default()
     }
 
-    /// Records `response`, the host's response to `fetch`, and gives the response recorded
-    /// before for its URL.
-    pub fn insert(&mut self, fetch: &Fetch, response: FetchResponse) -> Option<FetchResponse> {
-        self.0.insert(fetch.url().clone(), response)
+    /// Records `response`, the host's first response to `fetch`, and gives it as recorded.
+    ///
+    /// # Errors
+    ///
+    /// `response`, back, when a response for the URL is recorded already.
+    pub fn insert_first(
+        &mut self,
+        fetch: &Fetch,
+        response: FetchResponse,
+    ) -> Result<&FetchResponse, FetchResponse> {
+        match self.0.entry(fetch.url().clone()) {
+            Entry::Occupied(_) => Err(response),
+            Entry::Vacant(vacant) => Ok(vacant.insert(response)),
+        }
+    }
+
+    /// The response recorded for the URL of `fetch`.
+    #[must_use]
+    pub fn response(&self, fetch: &Fetch) -> Option<&FetchResponse> {
+        self.0.get(fetch.url())
     }
 }
 

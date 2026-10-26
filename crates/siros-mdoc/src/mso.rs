@@ -161,6 +161,11 @@ pub struct P256Key {
 }
 
 impl P256Key {
+    /// The key of the big-endian coordinates `x` and `y`.
+    pub fn new(x: [u8; 32], y: [u8; 32]) -> Self {
+        Self { x, y }
+    }
+
     /// The x-coordinate.
     pub fn x(&self) -> &[u8; 32] {
         &self.x

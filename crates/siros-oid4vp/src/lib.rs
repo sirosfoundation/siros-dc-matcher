@@ -4,6 +4,7 @@
 //! | --- | --- | --- |
 //! | [`unverified`] | The request as the credential picker reads it (P2) | Appendix A |
 //! | [`handover`] | The mdoc `Handover` and `SessionTranscript`, the JWK thumbprint | B.2.6 |
+//! | [`semantic`] | The semantics identifier of a Wallet-Relying Party's certificate | ETSI TS 119 475, 5.1.3, 5.1.5 |
 //! | [`intake`] | Intake of redirect and DC API requests to a [`VerifiedRequest`] (P1, P3) | 5, 5.9, 5.10, A |
 //! | [`verified`] | The verified request and its verifier | 5, 8.3 |
 //! | [`response`] | `vp_token`, submissions, error submissions, the direct post reply (P4, P5) | 8 |
@@ -24,13 +25,13 @@
     clippy::panic
 )]
 
+pub mod client_id;
 pub mod error_code;
 pub mod handover;
 pub mod protocol;
+pub mod semantic;
 pub mod unverified;
 
-#[cfg(feature = "crypto")]
-pub mod client_id;
 #[cfg(feature = "crypto")]
 pub mod fetch;
 #[cfg(feature = "crypto")]
@@ -46,23 +47,26 @@ pub mod verified;
 #[cfg(feature = "crypto")]
 mod x509;
 
+pub use client_id::{ClientId, ClientIdError, ClientIdPrefix};
 pub use error_code::ErrorCode;
 pub use handover::{ec_jwk_thumbprint, Handover, HandoverInvalid};
 pub use protocol::Protocol;
+pub use semantic::{Person, SemanticIdError, SemanticIdentifier};
 pub use unverified::{diagnose, NoQuery, UnverifiedQuery, UnverifiedRequest};
 
-#[cfg(feature = "crypto")]
-pub use client_id::{ClientId, ClientIdPrefix};
 #[cfg(feature = "crypto")]
 pub use fetch::{Fetch, FetchResponse, HttpsUrl, Method};
 #[cfg(feature = "crypto")]
 pub use intake::{
     Effect, EffectResult, IntakeError, IntakeState, KeyMaterial, Step, Trust, TrustAnswer,
-    TrustSubject,
+    TrustSubject, VerifierInfoRule,
 };
 #[cfg(feature = "crypto")]
 pub use response::{
     concat_kdf, cose_kdf, read_reply, Presentation, ResponseError, Submission, VpToken,
 };
 #[cfg(feature = "crypto")]
-pub use verified::{ContentEncryption, Encryption, ResponseMode, VerifiedRequest, VerifierView};
+pub use verified::{
+    AccessCertificate, AttestationFormat, CertificateDer, ContentEncryption, Encryption,
+    ResponseMode, VerifiedRequest, VerifierView,
+};

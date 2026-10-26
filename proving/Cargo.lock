@@ -1178,7 +1178,7 @@ version = "0.11.0"
 
 [[package]]
 name = "siros-dcql"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "rustc-hash",
  "serde",
@@ -1275,6 +1275,7 @@ dependencies = [
  "serde_bytes",
  "serde_json",
  "siros-codec",
+ "siros-oid4vp",
  "siros-zkp-backend-longfellow",
  "siros-zkp-backend-vega",
  "siros-zkp-req",

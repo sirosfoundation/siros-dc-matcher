@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use siros_codec::base64url;
 
-pub use error::IntakeError;
+pub use error::{IntakeError, VerifierInfoRule};
 pub use trust::{KeyMaterial, Trust, TrustAnswer, TrustSubject};
 
 use crate::fetch::{Fetch, FetchResponse};
@@ -184,6 +184,12 @@ pub(crate) enum Halt {
 impl From<IntakeError> for Halt {
     fn from(error: IntakeError) -> Self {
         Self::Failed(error)
+    }
+}
+
+impl From<crate::client_id::ClientIdError> for Halt {
+    fn from(error: crate::client_id::ClientIdError) -> Self {
+        Self::Failed(IntakeError::ClientId(error))
     }
 }
 

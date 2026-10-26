@@ -265,17 +265,19 @@ pub(super) fn rows() -> Vec<Row> {
         // T7: the type metadata (SD-JWT VC, Sections 6 and 7; TS12 Section 4.1).
         (
             "the fetch of an SD-JWT VC's type metadata",
-            Input::Fetch(sd_jwt_vc(&card(json!({})))),
+            Input::Fetch(Box::new(sd_jwt_vc(&card(json!({}))))),
             Ok(()),
         ),
         (
             "a vct that is no https URL (SD-JWT VC Section 6.3.1)",
-            Input::Fetch(sd_jwt_vc(&card(json!({"vct": "urn:example:card"})))),
+            Input::Fetch(Box::new(sd_jwt_vc(&card(
+                json!({"vct": "urn:example:card"}),
+            )))),
             Err("type_metadata_vct_not_https"),
         ),
         (
             "an mdoc",
-            Input::Fetch(mdoc()),
+            Input::Fetch(Box::new(mdoc())),
             Err("type_metadata_not_sd_jwt_vc"),
         ),
         (

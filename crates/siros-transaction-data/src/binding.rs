@@ -4,6 +4,7 @@
 use serde_json::Value;
 use siros_codec::base64url;
 use siros_credential::Credential;
+use siros_dcql::QueryId;
 use siros_display::Locale;
 use siros_oid4vp::ResponseMode;
 
@@ -40,20 +41,20 @@ const CLAIM_ORDER: [KbJwtClaim; 3] = [KbJwtClaim::Jti, KbJwtClaim::ResponseMode,
 /// metadata.
 #[derive(Clone, Copy)]
 pub struct Presented<'a> {
-    query_id: &'a str,
+    query_id: &'a QueryId,
     metadata: &'a ScaMetadata<'a>,
 }
 
 impl<'a> Presented<'a> {
     /// The credential of `metadata`, presented for the Credential Query `query_id`.
     #[must_use]
-    pub fn new(query_id: &'a str, metadata: &'a ScaMetadata<'a>) -> Self {
+    pub fn new(query_id: &'a QueryId, metadata: &'a ScaMetadata<'a>) -> Self {
         Self { query_id, metadata }
     }
 
     /// The Credential Query id.
     #[must_use]
-    pub fn query_id(&self) -> &'a str {
+    pub fn query_id(&self) -> &'a QueryId {
         self.query_id
     }
 
@@ -117,14 +118,24 @@ pub fn bind<'e, 'a>(
         .collect()
 }
 
-/// The position in `offer` of the credential `entry` binds to.
+/// The position in `offer` of the credential `entry` binds to: the first that carries it, for the
+/// first of its `credential_ids` one does.
 fn authorizing(entry: &Entry, offer: &[Presented<'_>]) -> Option<usize> {
-    let body = entry.body();
     entry.credential_ids().iter().find_map(|id| {
         offer
             .iter()
-            .position(|presented| presented.query_id == id && body.authorizes(presented.metadata))
+            .position(|presented| presented.query_id == id && entry.carried_by(presented))
     })
+}
+
+impl Entry {
+    /// Whether `presented` can carry the entry: it answers a Credential Query the entry's
+    /// `credential_ids` name, and its SCA Attestation metadata authorizes the entry's type
+    /// (OpenID4VP 1.0, Section 5.1; EC TS12 v1.0.1, Section 4.1).
+    #[must_use]
+    pub fn carried_by(&self, presented: &Presented<'_>) -> bool {
+        self.names(presented.query_id) && self.body().authorizes(presented.metadata)
+    }
 }
 
 /// `jti`: a fresh, random KB-JWT identifier (RFC 7519, Section 4.1.7; EC TS12 v1.0.1, Section

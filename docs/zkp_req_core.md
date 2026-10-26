@@ -15,7 +15,7 @@ behind the nym_auth prover interface and the rulebooks' artifact pins.
 | Crate | Holds | Rust |
 | :-- | :-- | :-- |
 | `siros-zkp-req` | The protocol: the Credential Query with `_req` and `_req_sets`, `vp_formats_supported.zkp_req`, the usable pair of Section 1.3, the consent model, `ZkpPresentation`, the backends' `Proof`, the `vp_token`, the Verifier's steps 1 to 5 of Section 4.1. Depends on `serde` and `serde_json` only. | 1.82 |
-| `siros-zkp-req-nym-auth` | The catalogue (`pseudonym`, `age_check` with E and C), `verifier_id`, the Longfellow and Vega systems, the `Handover`, the request policy. With the default feature `credential`: the nym_auth form of an mdoc, the Wallet's credential tests, the presenter, the prover interface and the verifier (`siros-mdoc` with `crypto`, `zeroize`). With `test-fixtures`: a test issuer, requests and a test host. | 1.82 |
+| `siros-zkp-req-nym-auth` | The catalogue (`pseudonym`, `age_check` with E and C), `verifier_id`, the Longfellow and Vega systems, the `Handover`, the request policy. With the default feature `credential`: the nym_auth form of an mdoc, the Wallet's credential tests, the presenter, the prover interface and the verifier (`siros-mdoc` with `crypto`, `zeroize`). With `request`: the nym_auth request of `siros-oid4vp`'s verified request. With `test-fixtures`: a test issuer, requests and a test host. | 1.82 |
 | `siros-dc-matcher-core` | The matcher. It plans `zkp_req` with the two crates above, without `credential`. | 1.82 |
 | `siros-dc-matcher-ffi` | Module `zkp_req`: the presenter and the verifier for Kotlin and Swift (UniFFI), around a host's prover. | 1.88 |
 | `siros-zkp-backend-longfellow` | `urn:circuits:longfellow:nym_auth:v1` on `longfellow-libzk-v1`: `LongfellowProver` and `LongfellowVerifier` over zk-cred-longfellow. | 1.95 |
@@ -133,10 +133,25 @@ artifacts from their reference copies.
   `CatalogueRule` it breaks.
 * `attestation::UsableAttestation::new(data, anchors, proof_time)` reads a stored credential and
   runs the tests of system rulebooks Section 7, step 1. `Unusable` carries the Section 9 codes of
-  the failed tests. `attestation::OpenedSeed::open(credential, secret_seed)` requires
+  the failed tests. `attestation::OpenedSeed::open(credential, &SecretSeed)` requires
   `SHA-256(secret_seed) = ssc`; `prepare` opens it again for each presentation.
 * `policy::check_request(request_object, signed, channel)` and `CheckedRequest::handover(jwk
-  thumbprint)`, with `VerifierId::x509_san_dns` or `VerifierId::semantic`, give the `Session`.
+  thumbprint)`, with `VerifierId::x509_san_dns(&ClientId, Intermediary)` or
+  `VerifierId::semantic(&SemanticIdentifier)`, give the `Session`.
+* `request::NymAuthRequest::new(&VerifiedRequest, VerifierIdForm)` (feature `request`) gives the
+  `Session` of a verified request that is signed (`openid4vp-v1-signed` over the DC API),
+  trusted, asks for an encrypted response and carries no registration certificate, or the
+  `RequestRefusal`. Its `verifier_id` is the Client Identifier, or `semantic_id:` and the
+  access certificate's semantics identifier: under a WRPAC natural-person policy its
+  `serialNumber`, under a legal-person policy its `organizationIdentifier` (ETSI TS 119 475,
+  Clauses 5.1.3 and 5.1.5; TS 119 411-8).
+* `NymAuthQuery::options()` gives each option; `NymAuthOption::pair(formats, system, date)` gives
+  its `UsablePair` or the `PairRefusal` of Section 1.3.
+* `attestation::UsableAttestation::of(mdoc, anchors, proof_time)` tests an mdoc `siros-mdoc`
+  parsed.
+* `presenter::Answer::new(pair, attestation, secret_seed)` holds when the seed opens `ssc` and the
+  option's assertions hold; `Prepared::new(answer, &NymAuthRequest, key_id)` gives the `Prepared`
+  of the answer in the request's session.
 * `presenter::prepare(&ProveInput)` gives `Prepared`: `data_to_sign`, `key_id`, `statement`,
   `job(device_signature)`, `assemble(&ProofOutput)`, and `prove(device_signature, prover)` for
   a linked prover. `presenter::present` runs the phases with a `Signer` and a `NymAuthProver`.

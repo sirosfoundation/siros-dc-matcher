@@ -8,21 +8,25 @@ use siros_codec::cbor::Value as Cbor;
 use siros_codec::date::{Date, DateTime};
 use siros_mdoc::{device_signing_input, es256_verifies, DeviceNameSpaces};
 use siros_oid4vp::Handover;
-use siros_zkp_req::{Candidate, PairRefusal, ProofEnvelope, ZkpPresentation};
+use siros_zkp_req::{Candidate, PairRefusal, ProofEnvelope, QueryOption, ZkpPresentation};
 use zeroize::Zeroizing;
 
-use super::{
-    anchors_for, credential_errors, item_errors, parse, plan_option, HostError, OptionPlan, Parsed,
-    MAX_ZK_PROOF,
-};
+use super::answer::{opened_seed, Answer, Unanswerable};
+use super::{anchors_for, parse, HostError, Parsed, MAX_ZK_PROOF};
 use crate::age::Bound;
-use crate::attestation::{OpenedSeed, SeedMismatch, UsableAttestation};
-use crate::catalogue::{Function, NymAuthQuery, Pseudonym, MDOC_DOCTYPE};
+use crate::attestation::{OpenedSeed, SecretSeed, Unusable, UsableAttestation};
+use crate::catalogue::{Function, NymAuthQuery, MDOC_DOCTYPE};
 use crate::mdoc::StoredCredential;
-use crate::outcome::{CredentialCode, InvalidRequest, ItemCode, ZkpError};
+use crate::outcome::{CredentialCode, InvalidRequest, ZkpError};
+use crate::pair::UsablePair;
 use crate::prover::{NymAuthProver, ProofJob, ProofOutput, ProverFailure, Statement};
 use crate::system::{pair_code, NymAuthSystem, Unsupported};
 use crate::verifier_id::{pseudonym_sha256, sha256, verifier_input, VerifierId};
+
+#[cfg(feature = "request")]
+use crate::request::NymAuthRequest;
+#[cfg(feature = "request")]
+use siros_wallet_state::KeyId;
 
 /// The session a presentation is bound to.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -109,6 +113,15 @@ impl fmt::Display for ProveError {
 
 impl std::error::Error for ProveError {}
 
+impl From<Unanswerable> for ProveError {
+    fn from(e: Unanswerable) -> Self {
+        match e {
+            Unanswerable::ProofDate => Self::Host(HostError::Time),
+            Unanswerable::Failed(errors) => Self::Rejected(errors),
+        }
+    }
+}
+
 impl From<HostError> for ProveError {
     fn from(e: HostError) -> Self {
         Self::Host(e)
@@ -162,31 +175,46 @@ impl fmt::Debug for Prepared {
 /// [`ProveError`]: what fails, as the Section 9 codes name it.
 pub fn prepare(input: &ProveInput<'_>) -> Result<Prepared, ProveError> {
     let proof_time = DateTime::from_unix(input.now).ok_or(HostError::Time)?;
-    let seed: Zeroizing<[u8; 16]> = Zeroizing::new(
+    let seed = SecretSeed::new(Zeroizing::new(
         input
             .secret_seed
             .try_into()
             .map_err(|_| HostError::SeedLength)?,
-    );
+    ));
     let parsed = parse(input.query, input.client_metadata)
         .map_err(ProveError::Invalid)?
         .ok_or(HostError::CandidateMismatch)?;
-    let (plan, system) = candidate_plan(&parsed, input.candidate, proof_time.date())?;
+    let pair = candidate_pair(&parsed, input.candidate, proof_time.date())?;
     if input.credential.id != input.candidate.credential_id {
         return Err(HostError::CredentialMismatch.into());
     }
     let anchors = anchors_for(&parsed.query, input.anchors)?;
-    let (pseudonym_index, pseudonym_item) = pseudonym_of(&parsed.query, &plan)?;
-    let (attestation, opened) = usable_credential(
-        &parsed.query,
-        &plan,
-        pseudonym_index,
-        input.credential,
-        anchors,
-        proof_time,
-        &seed,
-    )?;
-    let session_transcript = input.session.handover.session_transcript();
+    let answer = answer(pair, input.credential, anchors, proof_time, &seed)?;
+    build(answer, input.session, &input.credential.kid)
+}
+
+impl Prepared {
+    /// The statement of `answer` in the session of `request`, for the device key `key_id`
+    /// (system rulebooks, Section 7).
+    ///
+    /// # Errors
+    ///
+    /// [`ProveError::NotUsable`] for an `age_check` bound the system does not encode.
+    #[cfg(feature = "request")]
+    pub fn new(
+        answer: Answer<'_>,
+        request: &NymAuthRequest<'_>,
+        key_id: &KeyId,
+    ) -> Result<Self, ProveError> {
+        build(answer, request.session(), key_id.as_str())
+    }
+}
+
+/// The statement of `answer` in `session`, and the data the device key `kid` signs.
+fn build(answer: Answer<'_>, session: &Session, kid: &str) -> Result<Prepared, ProveError> {
+    let (pair, attestation, seed) = answer.into_parts();
+    let (_, pseudonym_item) = pair.pseudonym();
+    let session_transcript = session.handover.session_transcript();
     let data_to_sign = device_signing_input(
         &session_transcript,
         MDOC_DOCTYPE,
@@ -194,110 +222,85 @@ pub fn prepare(input: &ProveInput<'_>) -> Result<Prepared, ProveError> {
     );
     let certificate = attestation.credential().certificate();
     let statement = Statement {
-        system,
-        proof_backend: input.candidate.proof_backend.clone(),
+        system: pair.system(),
+        proof_backend: pair.backend().as_str().to_owned(),
         doc_type: MDOC_DOCTYPE,
         issuer_certificate: certificate.der().to_vec(),
         issuer_key: *certificate.key(),
         proof_time: attestation.proof_time(),
-        earliest: bound_date(plan.bounds.earliest)?,
-        cutoff: bound_date(plan.bounds.cutoff)?,
-        verifier_input: verifier_input(pseudonym_item, &input.session.verifier_id),
+        earliest: bound_date(pair.bounds().earliest)?,
+        cutoff: bound_date(pair.bounds().cutoff)?,
+        verifier_input: verifier_input(pseudonym_item, &session.verifier_id),
         session_transcript,
         challenge_digest: sha256(&data_to_sign),
     };
     let pseudonym = pseudonym_sha256(
         &pseudonym_item.config,
-        opened.secret_seed(),
+        seed.secret_seed(),
         &[0; 32],
         &statement.verifier_input,
     );
-    let results = results(&parsed.query, &plan, &pseudonym);
+    let option = pair.option();
+    let results = results(option.query(), option.option(), &pseudonym);
     Ok(Prepared {
         statement,
         attestation,
-        seed: opened,
+        seed,
         data_to_sign,
-        kid: input.credential.kid.clone(),
-        req_set: plan.option.req_set,
+        kid: kid.to_owned(),
+        req_set: option.option().req_set,
         results,
         pseudonym,
     })
 }
 
-/// The candidate's option and pair, usable again at the proof date.
-fn candidate_plan<'q>(
+/// The candidate's pair, usable again at the proof date.
+fn candidate_pair<'q>(
     parsed: &'q Parsed,
     candidate: &Candidate,
     d: Date,
-) -> Result<(OptionPlan<'q>, NymAuthSystem), ProveError> {
+) -> Result<UsablePair<'q>, ProveError> {
     let option = parsed
         .query
-        .query()
-        .option(candidate.req_set)
-        .filter(|o| o.items == candidate.items)
+        .options()
+        .find(|o| o.option().req_set == candidate.req_set && o.option().items == candidate.items)
         .ok_or(HostError::CandidateMismatch)?;
     let system =
         NymAuthSystem::from_id(&candidate.system_id).ok_or(HostError::CandidateMismatch)?;
-    let plan = plan_option(parsed, option, &[system], d);
-    match (&plan.pair, plan.refusals.first()) {
-        (Some((_, backend)), _) if *backend == candidate.proof_backend => Ok((plan, system)),
-        (Some(_), _) => Err(HostError::CandidateMismatch.into()),
-        (None, Some((_, refusal))) => Err(ProveError::NotUsable(refusal.clone())),
-        (None, None) => Err(HostError::CandidateMismatch.into()),
+    let pair = option
+        .pair(&parsed.formats, system, d)
+        .map_err(ProveError::NotUsable)?;
+    if pair.backend().as_str() != candidate.proof_backend {
+        return Err(HostError::CandidateMismatch.into());
     }
+    Ok(pair)
 }
 
-/// The usable attestation and the opened seed of `stored`, after every test that needs no
-/// device signature. The failures of the credential come first, then those of the items: the
-/// `age_check` assertion and the `pseudonym` at `pseudonym_index`, whose seed must open `ssc`.
-fn usable_credential(
-    query: &NymAuthQuery,
-    plan: &OptionPlan<'_>,
-    pseudonym_index: usize,
+/// The answer of `pair`'s option by `stored` at `proof_time`, opened with `secret_seed`. The
+/// failures of the credential come first, then those of the items: the `age_check` assertion
+/// and the `pseudonym`, whose seed must open `ssc`.
+fn answer<'q>(
+    pair: UsablePair<'q>,
     stored: &StoredCredential,
     anchors: Option<&[Vec<u8>]>,
     proof_time: DateTime,
-    seed: &[u8; 16],
-) -> Result<(UsableAttestation, OpenedSeed), ProveError> {
-    let tested = UsableAttestation::new(&stored.data, anchors, proof_time);
-    let (mut errors, credential) =
-        credential_errors(&tested).ok_or(HostError::CredentialMismatch)?;
-    let Some(credential) = credential else {
-        return Err(ProveError::Rejected(errors));
-    };
-    errors.extend(item_errors(query, plan, credential));
-    let opened = match OpenedSeed::open(credential, seed) {
-        Ok(opened) => Some(opened),
-        Err(SeedMismatch) => {
-            errors.push(ZkpError::Item {
-                option: plan.option.req_set,
-                item: pseudonym_index,
-                code: ItemCode::SeedMismatch,
-            });
-            None
+    secret_seed: &SecretSeed,
+) -> Result<Answer<'q>, ProveError> {
+    match UsableAttestation::new(&stored.data, anchors, proof_time) {
+        Ok(attestation) => Ok(Answer::new(pair, attestation, secret_seed)?),
+        Err(Unusable::OtherDocType) => Err(HostError::CredentialMismatch.into()),
+        Err(unusable) => {
+            let tested = unusable
+                .codes()
+                .iter()
+                .map(|&code| ZkpError::Credential(code));
+            let items = unusable
+                .credential()
+                .and_then(|credential| opened_seed(&pair, credential, secret_seed).err())
+                .unwrap_or_default();
+            Err(ProveError::Rejected(tested.chain(items).collect()))
         }
-    };
-    match (tested, opened) {
-        (Ok(attestation), Some(opened)) if errors.is_empty() => Ok((attestation, opened)),
-        _ => Err(ProveError::Rejected(errors)),
     }
-}
-
-/// The option's `pseudonym` and its `_req` index. Every system requires one.
-fn pseudonym_of<'q>(
-    query: &'q NymAuthQuery,
-    plan: &OptionPlan<'q>,
-) -> Result<(usize, &'q Pseudonym), ProveError> {
-    query
-        .option_items(plan.option)
-        .find_map(|(index, item)| match &item.function {
-            Function::Pseudonym(p) => Some((index, p)),
-            Function::AgeCheck(_) => None,
-        })
-        .ok_or(ProveError::NotUsable(PairRefusal::Unsupported(
-            Unsupported::NoPseudonym,
-        )))
 }
 
 /// A bound the system encodes.
@@ -315,11 +318,11 @@ fn bound_date(bound: Option<Bound>) -> Result<Option<Date>, ProveError> {
 /// result (`zkp_req`, Section 3).
 fn results(
     query: &NymAuthQuery,
-    plan: &OptionPlan<'_>,
+    option: &QueryOption,
     pseudonym: &[u8; 32],
 ) -> Vec<(String, Cbor)> {
     query
-        .option_items(plan.option)
+        .option_items(option)
         .filter_map(|(_, item)| {
             let handle = item.ret.as_ref()?.as_str().to_owned();
             let value = match item.function {

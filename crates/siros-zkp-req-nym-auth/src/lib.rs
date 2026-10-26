@@ -11,6 +11,8 @@
 //! | [`verifier_id`] | `verifier_id`, `verifier_input`, the `sha-256` pseudonym | `pseudonym` |
 //! | [`system`] | The systems and the options each supports | System rulebooks, Sections 1 to 3 |
 //! | [`policy`] | Signed requests, encrypted responses | Binding, Response confidentiality |
+//! | [`request`] | The verified request that meets the policy (N2) | Binding, Response confidentiality, Verifier identity |
+//! | [`pair`] | The options of a query and the usable pair of a system for one | `zkp_req`, Section 1.3 |
 //! | [`mdoc`] | The nym_auth form of the ISO/IEC 18013-5 attestation | Attestation |
 //! | [`attestation`] | The usable attestation and the opened seed | System rulebooks, Section 7 |
 //! | [`presenter`] | `match`, then `prove` in phases | `zkp_req`, Sections 1.3, 2.1, 3, 4 |
@@ -20,8 +22,9 @@
 //! The provers stay outside. A host implements [`prover::NymAuthProver`] and
 //! [`prover::NymAuthProofVerifier`] with a system's prover and verifier.
 //!
-//! Without the default feature `credential`, the crate holds the catalogue, the systems and the
-//! policy: what the credential picker needs.
+//! Without the default feature `credential`, the crate holds the catalogue, the systems, the usable
+//! pairs and the policy: what the credential picker needs. The feature `request` adds
+//! [`request::NymAuthRequest`] over `siros-oid4vp`'s verified request.
 
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
@@ -45,6 +48,7 @@
 pub mod age;
 pub mod catalogue;
 pub mod outcome;
+pub mod pair;
 pub mod policy;
 pub mod system;
 pub mod verifier_id;
@@ -57,6 +61,8 @@ pub mod mdoc;
 pub mod presenter;
 #[cfg(feature = "credential")]
 pub mod prover;
+#[cfg(feature = "request")]
+pub mod request;
 #[cfg(feature = "credential")]
 pub mod verify;
 

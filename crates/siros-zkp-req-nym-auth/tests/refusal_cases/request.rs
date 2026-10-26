@@ -269,29 +269,19 @@ pub fn cases() -> Vec<Case> {
         ),
         // The catalogue's verifier identity: invalid_request.
         (
-            "semantic_id_missing",
-            verifier_id(VerifierId::semantic("")),
-            Got::VerifierId(VerifierIdRule::SemanticIdMissing),
-        ),
-        (
             "client_id_prefix",
             verifier_id(VerifierId::x509_san_dns(
-                "x509_hash:Uvo3HtuIxuhC92rShpgqcT3YXwrqRxWEviRiA0OZszk",
-                false,
+                &ClientId::parse("x509_hash:Uvo3HtuIxuhC92rShpgqcT3YXwrqRxWEviRiA0OZszk").unwrap(),
+                Intermediary::Absent,
             )),
             Got::VerifierId(VerifierIdRule::ClientIdPrefix),
         ),
         (
-            "dns_name",
-            verifier_id(VerifierId::x509_san_dns(
-                "x509_san_dns:bücher.example",
-                false,
-            )),
-            Got::VerifierId(VerifierIdRule::DnsName),
-        ),
-        (
             "intermediary",
-            verifier_id(VerifierId::x509_san_dns(CLIENT_ID, true)),
+            verifier_id(VerifierId::x509_san_dns(
+                &ClientId::parse(CLIENT_ID).unwrap(),
+                Intermediary::Named,
+            )),
             Got::VerifierId(VerifierIdRule::Intermediary),
         ),
     ]

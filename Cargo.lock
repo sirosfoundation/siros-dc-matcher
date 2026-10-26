@@ -2500,7 +2500,7 @@ dependencies = [
 
 [[package]]
 name = "siros-dcql"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "rustc-hash",
  "serde",
@@ -2552,6 +2552,33 @@ dependencies = [
  "siros-dcql",
  "siros-oid4vp",
  "x509-cert",
+]
+
+[[package]]
+name = "siros-presentation"
+version = "0.11.0"
+dependencies = [
+ "aes-gcm",
+ "ciborium",
+ "itertools",
+ "p256",
+ "rand_core",
+ "rustc-hash",
+ "serde_json",
+ "sha2",
+ "siros-codec",
+ "siros-credential",
+ "siros-dcql",
+ "siros-display",
+ "siros-mdoc",
+ "siros-oid4vp",
+ "siros-sdjwt",
+ "siros-transaction-data",
+ "siros-wallet-state",
+ "siros-zkp-req",
+ "siros-zkp-req-nym-auth",
+ "x509-cert",
+ "zeroize",
 ]
 
 [[package]]
@@ -2614,6 +2641,7 @@ dependencies = [
  "siros-codec",
  "siros-mdoc",
  "siros-oid4vp",
+ "siros-wallet-state",
  "siros-zkp-req",
  "siros-zkp-req-nym-auth",
  "x509-cert",

@@ -1,0 +1,67 @@
+[package]
+name = "siros-presentation"
+version = "0.11.0"
+description = "Presentation for the SIROS wallet core: the plan of a request over the wallet's credentials, the consent view, and the response to the user's selection"
+publish = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+# Without `wallet`: the matching the credential picker runs, checked on 1.82 in CI. `wallet`
+# builds with the toolchain of rust-toolchain.toml.
+rust-version.workspace = true
+
+[features]
+default = ["wallet"]
+# Phase 1's plan and consent view over a verified request, and phase 2. Without it the crate
+# holds the matching: no crypto, no prover and no display resolution.
+wallet = [
+    "dep:rand_core",
+    "dep:sha2",
+    "dep:siros-display",
+    "dep:siros-mdoc",
+    "dep:siros-oid4vp",
+    "dep:siros-sdjwt",
+    "dep:siros-transaction-data",
+    "dep:zeroize",
+    "siros-display/credential",
+    "siros-mdoc/crypto",
+    "siros-oid4vp/crypto",
+    "siros-zkp-req-nym-auth/request",
+]
+
+[dependencies]
+itertools = { workspace = true }
+rustc-hash = { workspace = true }
+serde_json = { workspace = true }
+siros-codec = { workspace = true }
+siros-credential = { workspace = true }
+siros-dcql = { workspace = true }
+siros-wallet-state = { workspace = true }
+siros-zkp-req = { workspace = true }
+siros-zkp-req-nym-auth = { workspace = true }
+rand_core = { version = "0.6.4", optional = true }
+sha2 = { version = "0.10.9", optional = true }
+siros-display = { workspace = true, optional = true }
+siros-mdoc = { workspace = true, optional = true }
+siros-oid4vp = { workspace = true, optional = true }
+siros-sdjwt = { workspace = true, optional = true }
+siros-transaction-data = { workspace = true, optional = true }
+zeroize = { version = "1.8.1", optional = true }
+
+# The tests act as the verifier: they sign requests, issue credentials, and decrypt and check
+# responses with code of their own.
+[dev-dependencies]
+aes-gcm = { version = "0.10.3", default-features = false, features = ["aes", "alloc"] }
+ciborium = { workspace = true }
+p256 = { version = "0.13.2", default-features = false, features = ["ecdsa", "ecdh", "alloc", "pem"] }
+rand_core = "0.6.4"
+serde_json = { workspace = true }
+sha2 = { version = "0.10.9", features = ["oid"] }
+siros-codec = { workspace = true }
+siros-credential = { workspace = true }
+siros-display = { workspace = true, features = ["credential"] }
+siros-oid4vp = { workspace = true, features = ["crypto"] }
+siros-wallet-state = { workspace = true }
+siros-zkp-req-nym-auth = { workspace = true, features = ["test-fixtures", "request"] }
+x509-cert = { version = "0.2.5", default-features = false, features = ["std", "builder"] }

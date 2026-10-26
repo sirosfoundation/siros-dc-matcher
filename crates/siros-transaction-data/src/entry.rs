@@ -3,7 +3,7 @@
 use siros_codec::base64url;
 use siros_codec::date::DateTime;
 use siros_credential::Format;
-use siros_dcql::DcqlQuery;
+use siros_dcql::{DcqlQuery, QueryId};
 
 use crate::binding::Binding;
 use crate::error::TransactionDataError;
@@ -13,7 +13,7 @@ use crate::kind::{self, TransactionType};
 /// A `transaction_data` entry of a supported type, its members parsed into typed values.
 pub struct Entry {
     raw: String,
-    credential_ids: Vec<String>,
+    credential_ids: Vec<QueryId>,
     body: Box<dyn TransactionType>,
 }
 
@@ -46,9 +46,10 @@ impl Entry {
         };
         let mut fields = object.into_fields();
         let identifier = json::text(fields.require("type", "type")?, "type")?;
-        let credential_ids = credential_ids(fields.require("credential_ids", "credential_ids")?)?;
+        let named = credential_ids(fields.require("credential_ids", "credential_ids")?)?;
         let body = kind::parse(&identifier, fields, now)?;
-        for id in &credential_ids {
+        let mut credential_ids = Vec::with_capacity(named.len());
+        for id in &named {
             let credential = query
                 .credential(id)
                 .ok_or(TransactionDataError::UnknownCredentialId)?;
@@ -60,6 +61,7 @@ impl Entry {
             {
                 return Err(TransactionDataError::HolderBindingNotRequired);
             }
+            credential_ids.push(credential.id.clone());
         }
         Ok(Self {
             raw: raw.to_owned(),
@@ -76,8 +78,14 @@ impl Entry {
 
     /// `credential_ids`: the Credential Query ids, at least one, in the verifier's order.
     #[must_use]
-    pub fn credential_ids(&self) -> &[String] {
+    pub fn credential_ids(&self) -> &[QueryId] {
         &self.credential_ids
+    }
+
+    /// Whether `credential_ids` names the Credential Query `id`.
+    #[must_use]
+    pub fn names(&self, id: &QueryId) -> bool {
+        self.credential_ids.contains(id)
     }
 
     /// The string the request carried.

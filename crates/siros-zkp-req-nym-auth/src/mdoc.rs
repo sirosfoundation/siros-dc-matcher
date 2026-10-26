@@ -194,7 +194,15 @@ pub enum Reading {
 ///
 /// [`FormError`]: what makes the credential unreadable or puts it out of the nym_auth form.
 pub fn read(data: &str) -> Result<Reading, FormError> {
-    let mdoc = Mdoc::parse(data).map_err(FormError::Mdoc)?;
+    read_mdoc(&Mdoc::parse(data).map_err(FormError::Mdoc)?)
+}
+
+/// Reads an mdoc `siros-mdoc` parsed.
+///
+/// # Errors
+///
+/// [`FormError`]: what puts the mdoc out of the nym_auth form.
+pub fn read_mdoc(mdoc: &Mdoc) -> Result<Reading, FormError> {
     if mdoc.doc_type() != MDOC_DOCTYPE {
         return Ok(Reading::OtherDocType);
     }

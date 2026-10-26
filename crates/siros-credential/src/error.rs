@@ -22,6 +22,8 @@ pub enum CredentialError {
     SelectivelyDisclosed(&'static str),
     /// The SD-JWT VC's `cnf` is not a JSON object (RFC 7800, Section 3.1).
     Cnf,
+    /// The SD-JWT VC's `cnf` holds no P-256 `jwk`. The code is its own.
+    HolderKey(HolderKeyError),
     /// The SD-JWT VC's `nbf` or `exp` is not a NumericDate of years 0000 to 9999 (RFC 7519,
     /// Section 2).
     NumericDate(&'static str),
@@ -48,6 +50,7 @@ impl CredentialError {
             Self::Vct => "vct_malformed",
             Self::SelectivelyDisclosed(_) => "claim_selectively_disclosed",
             Self::Cnf => "cnf_malformed",
+            Self::HolderKey(e) => e.code(),
             Self::NumericDate(_) => "numeric_date_malformed",
             Self::Tag => "claim_tag_unsupported",
             Self::Tdate => "tdate_malformed",
@@ -133,3 +136,33 @@ impl fmt::Display for ValidityError {
 }
 
 impl std::error::Error for ValidityError {}
+
+/// Why an SD-JWT VC's `cnf` gives no P-256 holder key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum HolderKeyError {
+    /// `cnf` has no `jwk` object (RFC 7800, Section 3.2).
+    Jwk,
+    /// The `jwk`'s `kty` is not `EC` or its `crv` not `P-256` (RFC 7518, Section 6.2.1).
+    KeyType,
+    /// The `jwk`'s `x` or `y` is not 32 bytes of base64url.
+    Coordinate,
+}
+
+impl HolderKeyError {
+    /// A stable identifier.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Jwk => "holder_key_jwk",
+            Self::KeyType => "holder_key_type",
+            Self::Coordinate => "holder_key_coordinate",
+        }
+    }
+}
+
+impl fmt::Display for HolderKeyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.code())
+    }
+}
+
+impl std::error::Error for HolderKeyError {}

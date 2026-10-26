@@ -7,6 +7,8 @@ use siros_dcql::DcqlQuery;
 use crate::client_id::ClientId;
 use crate::fetch::HttpsUrl;
 use crate::handover::Handover;
+use crate::protocol::Protocol;
+use crate::semantic::{SemanticIdError, SemanticIdentifier};
 
 /// An OpenID4VP request that intake verified. Only intake constructs it.
 ///
@@ -23,11 +25,16 @@ use crate::handover::Handover;
 /// - a signed DC API request lists the calling origin in `expected_origins`;
 /// - an encrypted Response Mode has a chosen key and `enc`;
 /// - for `openid4vp-v1-multisigned`, the Client Identifier is that of the first signature that
-///   verifies and is trusted, or of the first that verifies when none is trusted.
+///   verifies and is trusted, or of the first that verifies when none is trusted;
+/// - an `x509_san_dns` or `x509_hash` client's access certificate is the leaf that signed;
+/// - `verifier_info` is a non-empty array of objects with a string `format`, a `data` object or
+///   string, and `credential_ids` naming Credential Queries when present (Section 5.1).
 #[derive(Debug, Clone)]
 pub struct VerifiedRequest {
     pub(crate) channel: Channel,
     pub(crate) trusted: bool,
+    pub(crate) access_certificate: Option<AccessCertificate>,
+    pub(crate) verifier_info: Vec<AttestationFormat>,
     pub(crate) nonce: String,
     pub(crate) state: Option<String>,
     pub(crate) dcql_query: DcqlQuery,
@@ -48,6 +55,7 @@ pub(crate) enum Channel {
     /// The DC API: the platform returns the response to `origin`, encrypted for `dc_api.jwt`.
     /// `client_id` is `None` for an unsigned request.
     DcApi {
+        protocol: Protocol,
         client_id: Option<ClientId>,
         origin: String,
         encryption: Option<Encryption>,
@@ -174,6 +182,57 @@ impl Encryption {
     }
 }
 
+/// The certificate a Wallet-Relying Party signed its Request Object with under an `x509_san_dns`
+/// or `x509_hash` Client Identifier: its access certificate (ETSI TS 119 475, Clause 4.3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccessCertificate {
+    pub(crate) der: CertificateDer,
+    pub(crate) semantic_identifier: Result<SemanticIdentifier, SemanticIdError>,
+}
+
+/// An X.509 certificate that decoded, DER (RFC 5280).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CertificateDer(pub(crate) Vec<u8>);
+
+impl CertificateDer {
+    /// The DER bytes.
+    #[must_use]
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl AccessCertificate {
+    /// The certificate.
+    #[must_use]
+    pub fn der(&self) -> &CertificateDer {
+        &self.der
+    }
+
+    /// The Wallet-Relying Party's semantics identifier: its `organizationIdentifier`, or for a
+    /// natural person its `serialNumber` (ETSI TS 119 475, Clauses 5.1.3 and 5.1.5).
+    ///
+    /// # Errors
+    ///
+    /// [`SemanticIdError`]: the subject holds no such attribute, holds it twice, or its value
+    /// breaks the structure of ETSI EN 319 412-1.
+    pub fn semantic_identifier(&self) -> Result<&SemanticIdentifier, SemanticIdError> {
+        self.semantic_identifier.as_ref().map_err(|e| *e)
+    }
+}
+
+/// The `format` of a `verifier_info` attestation (Section 5.1).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AttestationFormat(pub(crate) String);
+
+impl AttestationFormat {
+    /// The format identifier.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 /// Who asks, as the consent screen shows it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VerifierView<'a> {
@@ -225,6 +284,27 @@ impl VerifiedRequest {
             trusted: self.trusted,
             display,
         }
+    }
+
+    /// The protocol a DC API request arrived under (A.1).
+    #[must_use]
+    pub fn dc_api_protocol(&self) -> Option<Protocol> {
+        match &self.channel {
+            Channel::DcApi { protocol, .. } => Some(*protocol),
+            Channel::Redirect { .. } => None,
+        }
+    }
+
+    /// The access certificate of an `x509_san_dns` or `x509_hash` client.
+    #[must_use]
+    pub fn access_certificate(&self) -> Option<&AccessCertificate> {
+        self.access_certificate.as_ref()
+    }
+
+    /// The `format` of each `verifier_info` attestation, in the request's order (Section 5.1).
+    #[must_use]
+    pub fn verifier_info_formats(&self) -> &[AttestationFormat] {
+        &self.verifier_info
     }
 
     /// The calling origin of a DC API request.

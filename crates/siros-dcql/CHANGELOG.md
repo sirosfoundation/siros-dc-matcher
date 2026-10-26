@@ -13,7 +13,19 @@ this file.
 
 ## Unreleased
 
+### Changed
+
+- **BREAKING:** `CredentialQuery::id`, `QueryMatch::query_id`, `QueryError::DuplicateCredentialId`
+  and `QueryError::DuplicateClaimId::credential` are a `QueryId`: "a non-empty string consisting
+  of alphanumeric, underscore (_), or hyphen (-) characters" (§6.1). `DcqlQuery::from_json`
+  refuses another id with `QueryError::Id`, which holds the `QueryIdError`; a dotted id is
+  refused.
+  `QueryError::EmptyCredentialId` is gone: `QueryIdError::Empty` covers it. The version is
+  0.12.0.
+
 ### Added
+
+- `QueryId`, `QueryIdError` and `QueryError::Id`.
 
 - `resolve`, the §7.1.1 processing over any claim tree that implements `ClaimNode` (with `Lookup`), which `resolve_json` now runs on, and `PathError::code`.
 

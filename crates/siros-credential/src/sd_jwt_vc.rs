@@ -1,9 +1,11 @@
 //! The rules of SD-JWT VC (draft-ietf-oauth-sd-jwt-vc-19) over a stored SD-JWT.
 
+use siros_codec::base64url;
 use siros_codec::date::DateTime;
-use siros_sdjwt::{Claim, ClaimValue, Element, SdJwt};
+use siros_mdoc::P256Key;
+use siros_sdjwt::{Claim, ClaimValue, Element, Object, SdJwt};
 
-use crate::error::CredentialError;
+use crate::error::{CredentialError, HolderKeyError};
 use crate::usable::Validity;
 
 /// The registered claims that, with their sub-claims, are never selectively disclosed
@@ -23,7 +25,7 @@ const PERMANENT: [&str; 8] = [
 pub(crate) struct SdJwtVc {
     sd_jwt: SdJwt,
     vct: String,
-    bound: bool,
+    holder_key: Option<P256Key>,
     validity: Validity,
 }
 
@@ -41,9 +43,11 @@ impl SdJwtVc {
             Some(ClaimValue::String(vct)) => vct.clone(),
             _ => return Err(CredentialError::Vct),
         };
-        let bound = match claims.get("cnf").map(Claim::value) {
-            None => false,
-            Some(ClaimValue::Object(_)) => true,
+        let holder_key = match claims.get("cnf").map(Claim::value) {
+            None => None,
+            Some(ClaimValue::Object(cnf)) => {
+                Some(p256_jwk(cnf).map_err(CredentialError::HolderKey)?)
+            }
             Some(_) => return Err(CredentialError::Cnf),
         };
         let validity = Validity::new(
@@ -53,7 +57,7 @@ impl SdJwtVc {
         Ok(Self {
             sd_jwt,
             vct,
-            bound,
+            holder_key,
             validity,
         })
     }
@@ -69,12 +73,40 @@ impl SdJwtVc {
     /// Whether `cnf` names a holder key: the KB-JWT must be secured by that key (Section
     /// 2.2.2.3).
     pub(crate) fn bound(&self) -> bool {
-        self.bound
+        self.holder_key.is_some()
     }
 
     pub(crate) fn validity(&self) -> Validity {
         self.validity
     }
+
+    /// The P-256 key of `cnf.jwk` (RFC 7800, Section 3.2); `None` without `cnf`.
+    pub(crate) fn holder_key(&self) -> Option<P256Key> {
+        self.holder_key
+    }
+}
+
+/// The P-256 key of `cnf`'s `jwk`: `kty` `EC`, `crv` `P-256`, and `x` and `y` of 32 bytes of
+/// base64url (RFC 7518, Section 6.2.1).
+fn p256_jwk(cnf: &Object) -> Result<P256Key, HolderKeyError> {
+    let jwk = match cnf.get("jwk").map(Claim::value) {
+        Some(ClaimValue::Object(jwk)) => jwk,
+        _ => return Err(HolderKeyError::Jwk),
+    };
+    let text = |name: &str| match jwk.get(name).map(Claim::value) {
+        Some(ClaimValue::String(text)) => Some(text.as_str()),
+        _ => None,
+    };
+    if text("kty") != Some("EC") || text("crv") != Some("P-256") {
+        return Err(HolderKeyError::KeyType);
+    }
+    let coordinate = |name: &str| -> Result<[u8; 32], HolderKeyError> {
+        text(name)
+            .and_then(base64url::decode)
+            .and_then(|bytes| <[u8; 32]>::try_from(bytes).ok())
+            .ok_or(HolderKeyError::Coordinate)
+    };
+    Ok(P256Key::new(coordinate("x")?, coordinate("y")?))
 }
 
 /// Whether a disclosure reveals `claim` or one of its sub-claims.
