@@ -1,0 +1,40 @@
+[package]
+name = "siros-zkp-req-nym-auth"
+version = "0.11.0"
+description = "The nym_auth function catalogue for zkp_req: requests, systems, session binding, credential checks and the presenter phases around a host's prover"
+publish = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[features]
+default = ["credential"]
+# The ISO/IEC 18013-5 credential, the checks that need it, the presenter and the verifier.
+# The matcher needs only the catalogue and the systems, and builds without it.
+credential = ["dep:p256", "dep:x509-cert", "dep:der", "dep:zeroize"]
+# A test issuer, requests and host, for this crate's tests and those of the bindings.
+test-fixtures = [
+    "credential",
+    "p256/pkcs8",
+    "p256/pem",
+    "x509-cert/builder",
+    "sha2/oid",
+]
+
+[dependencies]
+siros-zkp-req = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { version = "0.10.9", features = ["oid"] }
+p256 = { version = "0.13.2", default-features = false, features = ["ecdsa", "alloc", "pkcs8"], optional = true }
+x509-cert = { version = "0.2.5", default-features = false, features = ["std"], optional = true }
+der = { version = "0.7.10", optional = true }
+zeroize = { version = "1.8.1", optional = true }
+
+# This crate, on itself, to switch on `test-fixtures` for its own tests; ciborium reads
+# presentations independently of this workspace's CBOR code.
+[dev-dependencies]
+siros-zkp-req-nym-auth = { path = ".", features = ["test-fixtures"] }
+ciborium = { workspace = true }
+serde_json = { workspace = true }

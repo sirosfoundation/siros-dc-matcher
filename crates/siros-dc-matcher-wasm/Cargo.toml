@@ -17,4 +17,5 @@ path = "src/main.rs"
 android-credman = { workspace = true }
 siros-dc-matcher-core = { workspace = true }
 siros-dcql = { workspace = true }
+siros-zkp-req = { workspace = true }
 serde_json = { workspace = true }

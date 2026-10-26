@@ -8,6 +8,8 @@ members = [
     "crates/siros-dc-matcher-wasm",
     "crates/siros-dc-matcher-ffi",
     "crates/siros-dc-matcher-testhost",
+    "crates/siros-zkp-req",
+    "crates/siros-zkp-req-nym-auth",
 ]
 
 [workspace.package]
@@ -16,14 +18,16 @@ license = "BSD-2-Clause"
 repository = "https://github.com/sirosfoundation/siros-dc-matcher"
 authors = ["SIROS Foundation"]
 # Held by everything that ships inside the credential picker — siros-dcql,
-# -core, -wasm and the two android-credman crates — and checked on 1.82 in
-# CI. The -ffi and -testhost crates override this upward: uniffi's bindgen
-# chain and wasmtime both need more.
+# -core, -wasm, the two zkp_req crates and the two android-credman crates —
+# and checked on 1.82 in CI. The -ffi and -testhost crates override this
+# upward: uniffi's bindgen chain and wasmtime both need more.
 rust-version = "1.82"
 
 [workspace.dependencies]
 siros-dcql = { version = "0.11.0", path = "crates/siros-dcql" }
 siros-dc-matcher-core = { path = "crates/siros-dc-matcher-core" }
+siros-zkp-req = { path = "crates/siros-zkp-req" }
+siros-zkp-req-nym-auth = { path = "crates/siros-zkp-req-nym-auth", default-features = false }
 android-credman = { path = "crates/android-credman", version = "0.1.0" }
 
 # Strings that are UTF-8 and NUL-terminated at once: the string type of the
@@ -60,3 +64,20 @@ strip = "debuginfo"
 inherits = "release"
 panic = "abort"
 strip = true
+
+# The zkp_req tests sign and verify ES256 and X.509 by the hundred. Without
+# optimisation, these crates take most of the suite's time: the refusal table
+# runs in 1.00 s as built by default and in 0.21 s with this, measured back to
+# back on the same machine load.
+[profile.dev.package.p256]
+opt-level = 3
+[profile.dev.package.primeorder]
+opt-level = 3
+[profile.dev.package.elliptic-curve]
+opt-level = 3
+[profile.dev.package.crypto-bigint]
+opt-level = 3
+[profile.dev.package.ecdsa]
+opt-level = 3
+[profile.dev.package.sha2]
+opt-level = 3

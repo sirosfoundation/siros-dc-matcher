@@ -1,0 +1,208 @@
+//! `urn:circuits:longfellow:nym_auth:v1` on `longfellow-libzk-v1`: zk-cred-longfellow behind the
+//! system rulebook's artifact pins (Section 8) and its statement encoding (Section 4).
+//!
+//! The host fetches `circuits.zst`; [`LongfellowProver::load`] and [`LongfellowVerifier::load`]
+//! check it against the pin before they decompress or parse it.
+
+#![deny(missing_docs)]
+#![deny(unsafe_code)]
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
+
+use std::fmt;
+
+use siros_zkp_req_nym_auth::date::Date;
+use siros_zkp_req_nym_auth::prover::{
+    NymAuthProofVerifier, NymAuthProver, ProofFailure, ProofJob, ProofOutput, ProverFailure,
+    Statement,
+};
+use siros_zkp_req_nym_auth::system::{ArtifactPin, NymAuthSystem};
+use zk_cred_longfellow::nymauth::{
+    NymAuthCircuitParams, NymAuthError, NymAuthProver as Prover, NymAuthRequest,
+    NymAuthVerifier as Verifier, NymAuthWitnessInput,
+};
+
+const SYSTEM: NymAuthSystem = NymAuthSystem::LongfellowV1;
+
+/// `params.tsv` of Section 8: the Ligero `block_enc` and the ids of both circuits.
+fn params() -> NymAuthCircuitParams {
+    NymAuthCircuitParams {
+        block_enc_hash: 6983,
+        block_enc_sig: 4679,
+        hash_circuit_id: "5f8c75ae5c3893ef6ab6a079628cb385ba85e95a85437d58570c455289d75729".into(),
+        sig_circuit_id: "00513797c75b2eab1a9db75004977c15317d4e40c0db1d00674523431baa75cb".into(),
+    }
+}
+
+/// Why `circuits.zst` was not loaded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ArtifactError {
+    /// The bytes are not the pinned file.
+    Pin(ArtifactPin),
+    /// The pinned file does not decompress within its content's length.
+    Decompress,
+    /// zk-cred-longfellow refused the circuits.
+    Circuits(String),
+}
+
+impl fmt::Display for ArtifactError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Pin(pin) => write!(f, "not the pinned {} ({} bytes)", pin.name, pin.len),
+            Self::Decompress => f.write_str("the circuits do not decompress"),
+            Self::Circuits(detail) => write!(f, "circuits refused: {detail}"),
+        }
+    }
+}
+
+impl std::error::Error for ArtifactError {}
+
+/// The decompressed circuits of a `circuits.zst` that matches its pin.
+fn circuits(circuits_zst: &[u8]) -> Result<Vec<u8>, ArtifactError> {
+    let artifact = SYSTEM.circuit_artifact();
+    if !artifact.compressed.matches(circuits_zst) {
+        return Err(ArtifactError::Pin(artifact.compressed));
+    }
+    zstd::bulk::decompress(circuits_zst, artifact.content.len)
+        .map_err(|_| ArtifactError::Decompress)
+}
+
+/// The prover of the system.
+pub struct LongfellowProver(Prover);
+
+impl LongfellowProver {
+    /// Loads the prover from `circuits.zst`.
+    ///
+    /// # Errors
+    ///
+    /// [`ArtifactError`]: the bytes are not the pinned artifact.
+    pub fn load(circuits_zst: &[u8]) -> Result<Self, ArtifactError> {
+        let circuits = circuits(circuits_zst)?;
+        Prover::new(&circuits, &params())
+            .map(Self)
+            .map_err(|e| ArtifactError::Circuits(e.to_string()))
+    }
+}
+
+/// The verifier of the system.
+pub struct LongfellowVerifier(Verifier);
+
+impl LongfellowVerifier {
+    /// Loads the verifier from `circuits.zst`.
+    ///
+    /// # Errors
+    ///
+    /// [`ArtifactError`]: the bytes are not the pinned artifact.
+    pub fn load(circuits_zst: &[u8]) -> Result<Self, ArtifactError> {
+        let circuits = circuits(circuits_zst)?;
+        Verifier::new(&circuits, &params())
+            .map(Self)
+            .map_err(|e| ArtifactError::Circuits(e.to_string()))
+    }
+}
+
+/// Whether the statement is one of this system on this backend.
+fn serves(statement: &Statement) -> bool {
+    statement.system == SYSTEM
+        && SYSTEM
+            .backends()
+            .contains(&statement.proof_backend.as_str())
+}
+
+/// The text values of the hash circuit (Section 4): T, and E and C with their values for no
+/// bound.
+struct Dates {
+    time: String,
+    earliest: String,
+    cutoff: String,
+}
+
+impl Dates {
+    /// `None` for a date past the 10 characters of `YYYY-MM-DD`.
+    fn of(statement: &Statement) -> Option<Self> {
+        let bound = |date: Option<Date>, none: &str| match date {
+            Some(d) => Date::to_full_date(d),
+            None => Some(none.to_owned()),
+        };
+        Some(Self {
+            time: statement.proof_time.to_string(),
+            earliest: bound(statement.earliest, "0000-00-00")?,
+            cutoff: bound(statement.cutoff, "9999-12-31")?,
+        })
+    }
+
+    fn request<'a>(&'a self, statement: &'a Statement) -> NymAuthRequest<'a> {
+        NymAuthRequest {
+            issuer_key_x: &statement.issuer_key.x,
+            issuer_key_y: &statement.issuer_key.y,
+            time: &self.time,
+            earliest: &self.earliest,
+            cutoff: &self.cutoff,
+            challenge_digest: &statement.challenge_digest,
+            verifier_input: &statement.verifier_input,
+            transcript_seed: &statement.session_transcript,
+        }
+    }
+}
+
+impl NymAuthProver for LongfellowProver {
+    fn prove(&self, job: &ProofJob) -> Result<ProofOutput, ProverFailure> {
+        let statement = &job.statement;
+        if !serves(statement) {
+            return Err(ProverFailure::Unavailable);
+        }
+        let dates = Dates::of(statement).ok_or(ProverFailure::Failed)?;
+        let witness = NymAuthWitnessInput {
+            issuer_signed: &job.issuer_signed,
+            secret_seed: &job.secret_seed[..],
+            device_signature: &job.device_signature,
+        };
+        let proved = self
+            .0
+            .prove(&dates.request(statement), &witness)
+            .map_err(|e| match e {
+                NymAuthError::Credential(_) => ProverFailure::CredentialForm,
+                NymAuthError::InvalidInput(_)
+                | NymAuthError::Circuit(_)
+                | NymAuthError::UnsupportedCircuit(_)
+                | NymAuthError::Unsatisfied(_)
+                | NymAuthError::Prover(_)
+                | NymAuthError::ProofEncoding(_)
+                | NymAuthError::Verification(_) => ProverFailure::Failed,
+            })?;
+        Ok(ProofOutput {
+            zk_proof: proved.proof,
+            pseudonym: proved.pseudonym,
+        })
+    }
+}
+
+impl NymAuthProofVerifier for LongfellowVerifier {
+    fn verify(
+        &self,
+        statement: &Statement,
+        pseudonym: &[u8; 32],
+        zk_proof: &[u8],
+    ) -> Result<(), ProofFailure> {
+        if !serves(statement) {
+            return Err(ProofFailure::Internal);
+        }
+        let dates = Dates::of(statement).ok_or(ProofFailure::Internal)?;
+        self.0
+            .verify(&dates.request(statement), pseudonym, zk_proof)
+            .map_err(|e| match e {
+                NymAuthError::ProofEncoding(_) => ProofFailure::Encoding,
+                NymAuthError::Verification(_) => ProofFailure::Invalid,
+                NymAuthError::InvalidInput(_)
+                | NymAuthError::Circuit(_)
+                | NymAuthError::UnsupportedCircuit(_)
+                | NymAuthError::Credential(_)
+                | NymAuthError::Unsatisfied(_)
+                | NymAuthError::Prover(_) => ProofFailure::Internal,
+            })
+    }
+}

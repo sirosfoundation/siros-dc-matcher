@@ -656,6 +656,60 @@ internal open class UniffiForeignFutureStructVoid(
 internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
     fun callback(`callbackData`: Long,`result`: UniffiForeignFutureStructVoid.UniffiByValue,)
 }
+internal interface UniffiCallbackInterfaceFfiProofVerifierMethod0 : com.sun.jna.Callback {
+    fun callback(`uniffiHandle`: Long,`statement`: RustBuffer.ByValue,`pseudonym`: RustBuffer.ByValue,`zkProof`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,)
+}
+@Structure.FieldOrder("verify", "uniffiFree")
+internal open class UniffiVTableCallbackInterfaceFfiProofVerifier(
+    @JvmField internal var `verify`: UniffiCallbackInterfaceFfiProofVerifierMethod0? = null,
+    @JvmField internal var `uniffiFree`: UniffiCallbackInterfaceFree? = null,
+) : Structure() {
+    class UniffiByValue(
+        `verify`: UniffiCallbackInterfaceFfiProofVerifierMethod0? = null,
+        `uniffiFree`: UniffiCallbackInterfaceFree? = null,
+    ): UniffiVTableCallbackInterfaceFfiProofVerifier(`verify`,`uniffiFree`,), Structure.ByValue
+
+   internal fun uniffiSetValue(other: UniffiVTableCallbackInterfaceFfiProofVerifier) {
+        `verify` = other.`verify`
+        `uniffiFree` = other.`uniffiFree`
+    }
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -748,6 +802,7 @@ internal interface UniffiLib : Library {
             .also { lib: UniffiLib ->
                 uniffiCheckContractApiVersion(lib)
                 uniffiCheckApiChecksums(lib)
+                uniffiCallbackInterfaceFfiProofVerifier.register(lib)
                 }
         }
         
@@ -757,6 +812,36 @@ internal interface UniffiLib : Library {
         }
     }
 
+    fun uniffi_siros_dc_matcher_ffi_fn_clone_ffiprepared(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): Pointer
+    fun uniffi_siros_dc_matcher_ffi_fn_free_ffiprepared(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    fun uniffi_siros_dc_matcher_ffi_fn_method_ffiprepared_assemble(`ptr`: Pointer,`zkProof`: RustBuffer.ByValue,`pseudonym`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_siros_dc_matcher_ffi_fn_method_ffiprepared_data_to_sign(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_siros_dc_matcher_ffi_fn_method_ffiprepared_job(`ptr`: Pointer,`deviceSignature`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_siros_dc_matcher_ffi_fn_method_ffiprepared_key_id(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_siros_dc_matcher_ffi_fn_method_ffiprepared_statement(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_siros_dc_matcher_ffi_fn_clone_ffiproofverifier(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): Pointer
+    fun uniffi_siros_dc_matcher_ffi_fn_free_ffiproofverifier(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    fun uniffi_siros_dc_matcher_ffi_fn_init_callback_vtable_ffiproofverifier(`vtable`: UniffiVTableCallbackInterfaceFfiProofVerifier,
+    ): Unit
+    fun uniffi_siros_dc_matcher_ffi_fn_method_ffiproofverifier_verify(`ptr`: Pointer,`statement`: RustBuffer.ByValue,`pseudonym`: RustBuffer.ByValue,`zkProof`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_siros_dc_matcher_ffi_fn_clone_ffisession(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): Pointer
+    fun uniffi_siros_dc_matcher_ffi_fn_free_ffisession(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    fun uniffi_siros_dc_matcher_ffi_fn_method_ffisession_handover(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_siros_dc_matcher_ffi_fn_method_ffisession_verifier_id(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     fun uniffi_siros_dc_matcher_ffi_fn_clone_sirosblobbuilder(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Pointer
     fun uniffi_siros_dc_matcher_ffi_fn_free_sirosblobbuilder(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
@@ -781,7 +866,19 @@ internal interface UniffiLib : Library {
     ): RustBuffer.ByValue
     fun uniffi_siros_dc_matcher_ffi_fn_func_match_dcql_with_context(`blob`: RustBuffer.ByValue,`dcqlJson`: RustBuffer.ByValue,`clientMetadataJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_siros_dc_matcher_ffi_fn_func_zkp_req_plan(`credentialQueryJson`: RustBuffer.ByValue,`clientMetadataJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    fun uniffi_siros_dc_matcher_ffi_fn_func_zkp_req_jwk_thumbprint(`jwkJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_siros_dc_matcher_ffi_fn_func_zkp_req_match(`queryJson`: RustBuffer.ByValue,`clientMetadataJson`: RustBuffer.ByValue,`credentials`: RustBuffer.ByValue,`anchors`: RustBuffer.ByValue,`systems`: RustBuffer.ByValue,`now`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_siros_dc_matcher_ffi_fn_func_zkp_req_prepare(`candidate`: RustBuffer.ByValue,`queryJson`: RustBuffer.ByValue,`clientMetadataJson`: RustBuffer.ByValue,`session`: Pointer,`credential`: RustBuffer.ByValue,`secretSeed`: RustBuffer.ByValue,`anchors`: RustBuffer.ByValue,`now`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Pointer
+    fun uniffi_siros_dc_matcher_ffi_fn_func_zkp_req_session(`requestObjectJson`: RustBuffer.ByValue,`signed`: Byte,`channel`: RustBuffer.ByValue,`jwkThumbprint`: RustBuffer.ByValue,`verifierId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Pointer
+    fun uniffi_siros_dc_matcher_ffi_fn_func_zkp_req_verify(`queryJson`: RustBuffer.ByValue,`clientMetadataJson`: RustBuffer.ByValue,`session`: Pointer,`presentation`: RustBuffer.ByValue,`now`: Long,`toleranceFuture`: Long,`tolerancePast`: Long,`trustAnchors`: RustBuffer.ByValue,`verifier`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_siros_dc_matcher_ffi_fn_func_zkp_req_vp_token_cbor(`entries`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_siros_dc_matcher_ffi_fn_func_zkp_req_vp_token_json(`entries`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun ffi_siros_dc_matcher_ffi_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -901,7 +998,35 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_siros_dc_matcher_ffi_checksum_func_match_dcql_with_context(
     ): Short
-    fun uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_plan(
+    fun uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_jwk_thumbprint(
+    ): Short
+    fun uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_match(
+    ): Short
+    fun uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_prepare(
+    ): Short
+    fun uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_session(
+    ): Short
+    fun uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_verify(
+    ): Short
+    fun uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_vp_token_cbor(
+    ): Short
+    fun uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_vp_token_json(
+    ): Short
+    fun uniffi_siros_dc_matcher_ffi_checksum_method_ffiprepared_assemble(
+    ): Short
+    fun uniffi_siros_dc_matcher_ffi_checksum_method_ffiprepared_data_to_sign(
+    ): Short
+    fun uniffi_siros_dc_matcher_ffi_checksum_method_ffiprepared_job(
+    ): Short
+    fun uniffi_siros_dc_matcher_ffi_checksum_method_ffiprepared_key_id(
+    ): Short
+    fun uniffi_siros_dc_matcher_ffi_checksum_method_ffiprepared_statement(
+    ): Short
+    fun uniffi_siros_dc_matcher_ffi_checksum_method_ffiproofverifier_verify(
+    ): Short
+    fun uniffi_siros_dc_matcher_ffi_checksum_method_ffisession_handover(
+    ): Short
+    fun uniffi_siros_dc_matcher_ffi_checksum_method_ffisession_verifier_id(
     ): Short
     fun uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_add_credential(
     ): Short
@@ -940,10 +1065,52 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_siros_dc_matcher_ffi_checksum_func_match_dcql() != 1962.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_siros_dc_matcher_ffi_checksum_func_match_dcql_with_context() != 62278.toShort()) {
+    if (lib.uniffi_siros_dc_matcher_ffi_checksum_func_match_dcql_with_context() != 26825.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_plan() != 27818.toShort()) {
+    if (lib.uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_jwk_thumbprint() != 44324.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_match() != 50997.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_prepare() != 12649.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_session() != 31277.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_verify() != 17520.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_vp_token_cbor() != 9199.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_vp_token_json() != 3217.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_siros_dc_matcher_ffi_checksum_method_ffiprepared_assemble() != 17164.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_siros_dc_matcher_ffi_checksum_method_ffiprepared_data_to_sign() != 20262.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_siros_dc_matcher_ffi_checksum_method_ffiprepared_job() != 17581.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_siros_dc_matcher_ffi_checksum_method_ffiprepared_key_id() != 33064.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_siros_dc_matcher_ffi_checksum_method_ffiprepared_statement() != 39156.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_siros_dc_matcher_ffi_checksum_method_ffiproofverifier_verify() != 60481.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_siros_dc_matcher_ffi_checksum_method_ffisession_handover() != 43487.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_siros_dc_matcher_ffi_checksum_method_ffisession_verifier_id() != 15515.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_add_credential() != 64015.toShort()) {
@@ -1034,6 +1201,52 @@ public object FfiConverterUInt: FfiConverter<UInt, Int> {
 
     override fun write(value: UInt, buf: ByteBuffer) {
         buf.putInt(value.toInt())
+    }
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterULong: FfiConverter<ULong, Long> {
+    override fun lift(value: Long): ULong {
+        return value.toULong()
+    }
+
+    override fun read(buf: ByteBuffer): ULong {
+        return lift(buf.getLong())
+    }
+
+    override fun lower(value: ULong): Long {
+        return value.toLong()
+    }
+
+    override fun allocationSize(value: ULong) = 8UL
+
+    override fun write(value: ULong, buf: ByteBuffer) {
+        buf.putLong(value.toLong())
+    }
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterLong: FfiConverter<Long, Long> {
+    override fun lift(value: Long): Long {
+        return value
+    }
+
+    override fun read(buf: ByteBuffer): Long {
+        return buf.getLong()
+    }
+
+    override fun lower(value: Long): Long {
+        return value
+    }
+
+    override fun allocationSize(value: Long) = 8UL
+
+    override fun write(value: Long, buf: ByteBuffer) {
+        buf.putLong(value)
     }
 }
 
@@ -1298,6 +1511,935 @@ private class AndroidSystemCleanable(
 ) : UniffiCleaner.Cleanable {
     override fun clean() = cleanable.clean()
 }
+/**
+ * A presentation ready for the device signature, then for the prover.
+ */
+public interface FfiPreparedInterface {
+    
+    /**
+     * The `ZkpPresentation` (CBOR) of the prover's output.
+     *
+     * # Errors
+     *
+     * [`ZkpReqError::Host`] when the prover's pseudonym is not the catalogue's, or its
+     * `zk_proof` breaks the backend's length rules.
+     */
+    fun `assemble`(`zkProof`: kotlin.ByteArray, `pseudonym`: kotlin.ByteArray): kotlin.ByteArray
+    
+    /**
+     * The data the device key signs with ES256.
+     */
+    fun `dataToSign`(): kotlin.ByteArray
+    
+    /**
+     * The prover's job, once `device_signature` (`r ‖ s`) verifies under the MSO's device key.
+     *
+     * # Errors
+     *
+     * `device_binding`, or [`ZkpReqError::Host`] for a signature that is not 64 bytes.
+     */
+    fun `job`(`deviceSignature`: kotlin.ByteArray): FfiProofJob
+    
+    /**
+     * The identifier of the device key.
+     */
+    fun `keyId`(): kotlin.String
+    
+    /**
+     * The statement the proof establishes.
+     */
+    fun `statement`(): FfiStatement
+    
+    companion object
+}
+
+/**
+ * A presentation ready for the device signature, then for the prover.
+ */
+open class FfiPrepared: Disposable, AutoCloseable, FfiPreparedInterface {
+
+    constructor(pointer: Pointer) {
+        this.pointer = pointer
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(pointer))
+    }
+
+    /**
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noPointer: NoPointer) {
+        this.pointer = null
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(pointer))
+    }
+
+    protected val pointer: Pointer?
+    protected val cleanable: UniffiCleaner.Cleanable
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithPointer(block: (ptr: Pointer) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the pointer being freed concurrently.
+        try {
+            return block(this.uniffiClonePointer())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val pointer: Pointer?) : Runnable {
+        override fun run() {
+            pointer?.let { ptr ->
+                uniffiRustCall { status ->
+                    UniffiLib.INSTANCE.uniffi_siros_dc_matcher_ffi_fn_free_ffiprepared(ptr, status)
+                }
+            }
+        }
+    }
+
+    fun uniffiClonePointer(): Pointer {
+        return uniffiRustCall() { status ->
+            UniffiLib.INSTANCE.uniffi_siros_dc_matcher_ffi_fn_clone_ffiprepared(pointer!!, status)
+        }
+    }
+
+    
+    /**
+     * The `ZkpPresentation` (CBOR) of the prover's output.
+     *
+     * # Errors
+     *
+     * [`ZkpReqError::Host`] when the prover's pseudonym is not the catalogue's, or its
+     * `zk_proof` breaks the backend's length rules.
+     */
+    @Throws(ZkpReqException::class)override fun `assemble`(`zkProof`: kotlin.ByteArray, `pseudonym`: kotlin.ByteArray): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    callWithPointer {
+    uniffiRustCallWithError(ZkpReqException) { _status ->
+    UniffiLib.INSTANCE.uniffi_siros_dc_matcher_ffi_fn_method_ffiprepared_assemble(
+        it, FfiConverterByteArray.lower(`zkProof`),FfiConverterByteArray.lower(`pseudonym`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * The data the device key signs with ES256.
+     */override fun `dataToSign`(): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_siros_dc_matcher_ffi_fn_method_ffiprepared_data_to_sign(
+        it, _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * The prover's job, once `device_signature` (`r ‖ s`) verifies under the MSO's device key.
+     *
+     * # Errors
+     *
+     * `device_binding`, or [`ZkpReqError::Host`] for a signature that is not 64 bytes.
+     */
+    @Throws(ZkpReqException::class)override fun `job`(`deviceSignature`: kotlin.ByteArray): FfiProofJob {
+            return FfiConverterTypeFfiProofJob.lift(
+    callWithPointer {
+    uniffiRustCallWithError(ZkpReqException) { _status ->
+    UniffiLib.INSTANCE.uniffi_siros_dc_matcher_ffi_fn_method_ffiprepared_job(
+        it, FfiConverterByteArray.lower(`deviceSignature`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * The identifier of the device key.
+     */override fun `keyId`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_siros_dc_matcher_ffi_fn_method_ffiprepared_key_id(
+        it, _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * The statement the proof establishes.
+     */override fun `statement`(): FfiStatement {
+            return FfiConverterTypeFfiStatement.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_siros_dc_matcher_ffi_fn_method_ffiprepared_statement(
+        it, _status)
+}
+    }
+    )
+    }
+    
+
+    
+
+    
+    
+    companion object
+    
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFfiPrepared: FfiConverter<FfiPrepared, Pointer> {
+
+    override fun lower(value: FfiPrepared): Pointer {
+        return value.uniffiClonePointer()
+    }
+
+    override fun lift(value: Pointer): FfiPrepared {
+        return FfiPrepared(value)
+    }
+
+    override fun read(buf: ByteBuffer): FfiPrepared {
+        // The Rust code always writes pointers as 8 bytes, and will
+        // fail to compile if they don't fit.
+        return lift(Pointer(buf.getLong()))
+    }
+
+    override fun allocationSize(value: FfiPrepared) = 8UL
+
+    override fun write(value: FfiPrepared, buf: ByteBuffer) {
+        // The Rust code always expects pointers written as 8 bytes,
+        // and will fail to compile if they don't fit.
+        buf.putLong(Pointer.nativeValue(lower(value)))
+    }
+}
+
+
+// This template implements a class for working with a Rust struct via a Pointer/Arc<T>
+// to the live Rust struct on the other side of the FFI.
+//
+// Each instance implements core operations for working with the Rust `Arc<T>` and the
+// Kotlin Pointer to work with the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque pointer to the underlying Rust struct.
+//     Method calls need to read this pointer from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its pointer should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the pointer, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the pointer, but is interrupted
+//      before it can pass the pointer over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read pointer value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
+/**
+ * A system's verifier, implemented by the host.
+ */
+public interface FfiProofVerifier {
+    
+    /**
+     * Verifies `zk_proof` against `statement` and the pseudonym of `results`.
+     */
+    fun `verify`(`statement`: FfiStatement, `pseudonym`: kotlin.ByteArray, `zkProof`: kotlin.ByteArray): FfiProofCheck
+    
+    companion object
+}
+
+/**
+ * A system's verifier, implemented by the host.
+ */
+open class FfiProofVerifierImpl: Disposable, AutoCloseable, FfiProofVerifier {
+
+    constructor(pointer: Pointer) {
+        this.pointer = pointer
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(pointer))
+    }
+
+    /**
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noPointer: NoPointer) {
+        this.pointer = null
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(pointer))
+    }
+
+    protected val pointer: Pointer?
+    protected val cleanable: UniffiCleaner.Cleanable
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithPointer(block: (ptr: Pointer) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the pointer being freed concurrently.
+        try {
+            return block(this.uniffiClonePointer())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val pointer: Pointer?) : Runnable {
+        override fun run() {
+            pointer?.let { ptr ->
+                uniffiRustCall { status ->
+                    UniffiLib.INSTANCE.uniffi_siros_dc_matcher_ffi_fn_free_ffiproofverifier(ptr, status)
+                }
+            }
+        }
+    }
+
+    fun uniffiClonePointer(): Pointer {
+        return uniffiRustCall() { status ->
+            UniffiLib.INSTANCE.uniffi_siros_dc_matcher_ffi_fn_clone_ffiproofverifier(pointer!!, status)
+        }
+    }
+
+    
+    /**
+     * Verifies `zk_proof` against `statement` and the pseudonym of `results`.
+     */override fun `verify`(`statement`: FfiStatement, `pseudonym`: kotlin.ByteArray, `zkProof`: kotlin.ByteArray): FfiProofCheck {
+            return FfiConverterTypeFfiProofCheck.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_siros_dc_matcher_ffi_fn_method_ffiproofverifier_verify(
+        it, FfiConverterTypeFfiStatement.lower(`statement`),FfiConverterByteArray.lower(`pseudonym`),FfiConverterByteArray.lower(`zkProof`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+
+    
+    
+    companion object
+    
+}
+// Magic number for the Rust proxy to call using the same mechanism as every other method,
+// to free the callback once it's dropped by Rust.
+internal const val IDX_CALLBACK_FREE = 0
+// Callback return codes
+internal const val UNIFFI_CALLBACK_SUCCESS = 0
+internal const val UNIFFI_CALLBACK_ERROR = 1
+internal const val UNIFFI_CALLBACK_UNEXPECTED_ERROR = 2
+
+/**
+ * @suppress
+ */
+public abstract class FfiConverterCallbackInterface<CallbackInterface: Any>: FfiConverter<CallbackInterface, Long> {
+    internal val handleMap = UniffiHandleMap<CallbackInterface>()
+
+    internal fun drop(handle: Long) {
+        handleMap.remove(handle)
+    }
+
+    override fun lift(value: Long): CallbackInterface {
+        return handleMap.get(value)
+    }
+
+    override fun read(buf: ByteBuffer) = lift(buf.getLong())
+
+    override fun lower(value: CallbackInterface) = handleMap.insert(value)
+
+    override fun allocationSize(value: CallbackInterface) = 8UL
+
+    override fun write(value: CallbackInterface, buf: ByteBuffer) {
+        buf.putLong(lower(value))
+    }
+}
+
+// Put the implementation in an object so we don't pollute the top-level namespace
+internal object uniffiCallbackInterfaceFfiProofVerifier {
+    internal object `verify`: UniffiCallbackInterfaceFfiProofVerifierMethod0 {
+        override fun callback(`uniffiHandle`: Long,`statement`: RustBuffer.ByValue,`pseudonym`: RustBuffer.ByValue,`zkProof`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,) {
+            val uniffiObj = FfiConverterTypeFfiProofVerifier.handleMap.get(uniffiHandle)
+            val makeCall = { ->
+                uniffiObj.`verify`(
+                    FfiConverterTypeFfiStatement.lift(`statement`),
+                    FfiConverterByteArray.lift(`pseudonym`),
+                    FfiConverterByteArray.lift(`zkProof`),
+                )
+            }
+            val writeReturn = { value: FfiProofCheck -> uniffiOutReturn.setValue(FfiConverterTypeFfiProofCheck.lower(value)) }
+            uniffiTraitInterfaceCall(uniffiCallStatus, makeCall, writeReturn)
+        }
+    }
+
+    internal object uniffiFree: UniffiCallbackInterfaceFree {
+        override fun callback(handle: Long) {
+            FfiConverterTypeFfiProofVerifier.handleMap.remove(handle)
+        }
+    }
+
+    internal var vtable = UniffiVTableCallbackInterfaceFfiProofVerifier.UniffiByValue(
+        `verify`,
+        uniffiFree,
+    )
+
+    // Registers the foreign callback with the Rust side.
+    // This method is generated for each callback interface.
+    internal fun register(lib: UniffiLib) {
+        lib.uniffi_siros_dc_matcher_ffi_fn_init_callback_vtable_ffiproofverifier(vtable)
+    }
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFfiProofVerifier: FfiConverter<FfiProofVerifier, Pointer> {
+    internal val handleMap = UniffiHandleMap<FfiProofVerifier>()
+
+    override fun lower(value: FfiProofVerifier): Pointer {
+        return Pointer(handleMap.insert(value))
+    }
+
+    override fun lift(value: Pointer): FfiProofVerifier {
+        return FfiProofVerifierImpl(value)
+    }
+
+    override fun read(buf: ByteBuffer): FfiProofVerifier {
+        // The Rust code always writes pointers as 8 bytes, and will
+        // fail to compile if they don't fit.
+        return lift(Pointer(buf.getLong()))
+    }
+
+    override fun allocationSize(value: FfiProofVerifier) = 8UL
+
+    override fun write(value: FfiProofVerifier, buf: ByteBuffer) {
+        // The Rust code always expects pointers written as 8 bytes,
+        // and will fail to compile if they don't fit.
+        buf.putLong(Pointer.nativeValue(lower(value)))
+    }
+}
+
+
+// This template implements a class for working with a Rust struct via a Pointer/Arc<T>
+// to the live Rust struct on the other side of the FFI.
+//
+// Each instance implements core operations for working with the Rust `Arc<T>` and the
+// Kotlin Pointer to work with the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque pointer to the underlying Rust struct.
+//     Method calls need to read this pointer from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its pointer should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the pointer, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the pointer, but is interrupted
+//      before it can pass the pointer over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read pointer value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
+/**
+ * The session a presentation is bound to.
+ */
+public interface FfiSessionInterface {
+    
+    /**
+     * The CBOR `Handover` (OpenID4VP 1.0, B.2.6).
+     */
+    fun `handover`(): kotlin.ByteArray
+    
+    /**
+     * `verifier_id`.
+     */
+    fun `verifierId`(): kotlin.String
+    
+    companion object
+}
+
+/**
+ * The session a presentation is bound to.
+ */
+open class FfiSession: Disposable, AutoCloseable, FfiSessionInterface {
+
+    constructor(pointer: Pointer) {
+        this.pointer = pointer
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(pointer))
+    }
+
+    /**
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noPointer: NoPointer) {
+        this.pointer = null
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(pointer))
+    }
+
+    protected val pointer: Pointer?
+    protected val cleanable: UniffiCleaner.Cleanable
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithPointer(block: (ptr: Pointer) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the pointer being freed concurrently.
+        try {
+            return block(this.uniffiClonePointer())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val pointer: Pointer?) : Runnable {
+        override fun run() {
+            pointer?.let { ptr ->
+                uniffiRustCall { status ->
+                    UniffiLib.INSTANCE.uniffi_siros_dc_matcher_ffi_fn_free_ffisession(ptr, status)
+                }
+            }
+        }
+    }
+
+    fun uniffiClonePointer(): Pointer {
+        return uniffiRustCall() { status ->
+            UniffiLib.INSTANCE.uniffi_siros_dc_matcher_ffi_fn_clone_ffisession(pointer!!, status)
+        }
+    }
+
+    
+    /**
+     * The CBOR `Handover` (OpenID4VP 1.0, B.2.6).
+     */override fun `handover`(): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_siros_dc_matcher_ffi_fn_method_ffisession_handover(
+        it, _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * `verifier_id`.
+     */override fun `verifierId`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_siros_dc_matcher_ffi_fn_method_ffisession_verifier_id(
+        it, _status)
+}
+    }
+    )
+    }
+    
+
+    
+
+    
+    
+    companion object
+    
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFfiSession: FfiConverter<FfiSession, Pointer> {
+
+    override fun lower(value: FfiSession): Pointer {
+        return value.uniffiClonePointer()
+    }
+
+    override fun lift(value: Pointer): FfiSession {
+        return FfiSession(value)
+    }
+
+    override fun read(buf: ByteBuffer): FfiSession {
+        // The Rust code always writes pointers as 8 bytes, and will
+        // fail to compile if they don't fit.
+        return lift(Pointer(buf.getLong()))
+    }
+
+    override fun allocationSize(value: FfiSession) = 8UL
+
+    override fun write(value: FfiSession, buf: ByteBuffer) {
+        // The Rust code always expects pointers written as 8 bytes,
+        // and will fail to compile if they don't fit.
+        buf.putLong(Pointer.nativeValue(lower(value)))
+    }
+}
+
+
+// This template implements a class for working with a Rust struct via a Pointer/Arc<T>
+// to the live Rust struct on the other side of the FFI.
+//
+// Each instance implements core operations for working with the Rust `Arc<T>` and the
+// Kotlin Pointer to work with the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque pointer to the underlying Rust struct.
+//     Method calls need to read this pointer from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its pointer should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the pointer, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the pointer, but is interrupted
+//      before it can pass the pointer over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read pointer value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
 /**
  * Builds the blob a wallet registers with the platform.
  *
@@ -1667,6 +2809,68 @@ public object FfiConverterTypeSirosBlobBuilder: FfiConverter<SirosBlobBuilder, P
 
 
 /**
+ * A credential, option, system and proof backend that answer a query.
+ */
+data class FfiCandidate (
+    /**
+     * The wallet's identifier of the credential.
+     */
+    var `credentialId`: kotlin.String, 
+    /**
+     * The system of the pair.
+     */
+    var `systemId`: kotlin.String, 
+    /**
+     * The proof backend of the pair.
+     */
+    var `proofBackend`: kotlin.String, 
+    /**
+     * The option's index in `_req_sets`; `None` without them.
+     */
+    var `reqSet`: kotlin.ULong?, 
+    /**
+     * The `_req` indexes of the option.
+     */
+    var `items`: List<kotlin.ULong>
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFfiCandidate: FfiConverterRustBuffer<FfiCandidate> {
+    override fun read(buf: ByteBuffer): FfiCandidate {
+        return FfiCandidate(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterOptionalULong.read(buf),
+            FfiConverterSequenceULong.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: FfiCandidate) = (
+            FfiConverterString.allocationSize(value.`credentialId`) +
+            FfiConverterString.allocationSize(value.`systemId`) +
+            FfiConverterString.allocationSize(value.`proofBackend`) +
+            FfiConverterOptionalULong.allocationSize(value.`reqSet`) +
+            FfiConverterSequenceULong.allocationSize(value.`items`)
+    )
+
+    override fun write(value: FfiCandidate, buf: ByteBuffer) {
+            FfiConverterString.write(value.`credentialId`, buf)
+            FfiConverterString.write(value.`systemId`, buf)
+            FfiConverterString.write(value.`proofBackend`, buf)
+            FfiConverterOptionalULong.write(value.`reqSet`, buf)
+            FfiConverterSequenceULong.write(value.`items`, buf)
+    }
+}
+
+
+
+/**
  * Something this wallet can produce beyond what it stores, such as a ZK proof
  * over an mdoc.
  */
@@ -1913,6 +3117,47 @@ public object FfiConverterTypeFfiCredential: FfiConverterRustBuffer<FfiCredentia
 
 
 /**
+ * A credential that cannot answer, and why.
+ */
+data class FfiJudged (
+    /**
+     * The wallet's identifier of the credential.
+     */
+    var `credentialId`: kotlin.String, 
+    /**
+     * The failures, in the verifier's order of options.
+     */
+    var `errors`: List<FfiZkpError>
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFfiJudged: FfiConverterRustBuffer<FfiJudged> {
+    override fun read(buf: ByteBuffer): FfiJudged {
+        return FfiJudged(
+            FfiConverterString.read(buf),
+            FfiConverterSequenceTypeFfiZkpError.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: FfiJudged) = (
+            FfiConverterString.allocationSize(value.`credentialId`) +
+            FfiConverterSequenceTypeFfiZkpError.allocationSize(value.`errors`)
+    )
+
+    override fun write(value: FfiJudged, buf: ByteBuffer) {
+            FfiConverterString.write(value.`credentialId`, buf)
+            FfiConverterSequenceTypeFfiZkpError.write(value.`errors`, buf)
+    }
+}
+
+
+
+/**
  * The outcome of matching.
  */
 data class FfiMatchOutcome (
@@ -2021,15 +3266,18 @@ data class FfiMatchedCredential (
      */
     var `meta`: Map<kotlin.String, kotlin.String>, 
     /**
-     * For a `zkp_req` query: a JSON object `{"circuit": {...}, "plan":
-     * {...}}` holding the circuit this wallet chose (its registered
-     * capability: `system` and string `params`) and the request as the
-     * matcher normalised it. `None` for every other format.
+     * For a `zkp_req` query: a JSON object `{"circuit": {...},
+     * "proof_backend": "...", "req_set": n, "items": [...]}` holding the
+     * circuit this wallet chose (its registered capability: `system` and
+     * string `params`), the proof backend of the pair, and the answered
+     * option (`zkp_req`, Sections 1.3 and 2.1): its index in `_req_sets`,
+     * absent without them, and its `_req` indexes. `None` for every other
+     * format.
      *
-     * JSON strings, not records, so the planner's shape can follow the
-     * rulebook without a binding regeneration each time. The plan's `raw`
-     * member is the verifier's request as sent and is **not authenticated**
-     * here. A `zkp_req` match has an empty `claims`.
+     * A JSON string, not a record, so its shape can follow the draft without
+     * a binding regeneration each time. Everything in it comes from the
+     * verifier's request, which is **not authenticated** here. A `zkp_req`
+     * match has an empty `claims`.
      */
     var `zkpReq`: kotlin.String?
 ) {
@@ -2068,6 +3316,144 @@ public object FfiConverterTypeFfiMatchedCredential: FfiConverterRustBuffer<FfiMa
             FfiConverterSequenceTypeFfiCapability.write(value.`capabilities`, buf)
             FfiConverterMapStringString.write(value.`meta`, buf)
             FfiConverterOptionalString.write(value.`zkpReq`, buf)
+    }
+}
+
+
+
+/**
+ * An option without a usable pair.
+ */
+data class FfiOptionRefusal (
+    /**
+     * The option's index in `_req_sets`; `None` without them.
+     */
+    var `reqSet`: kotlin.ULong?, 
+    /**
+     * Each system's refusal.
+     */
+    var `systems`: List<FfiPairRefusal>
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFfiOptionRefusal: FfiConverterRustBuffer<FfiOptionRefusal> {
+    override fun read(buf: ByteBuffer): FfiOptionRefusal {
+        return FfiOptionRefusal(
+            FfiConverterOptionalULong.read(buf),
+            FfiConverterSequenceTypeFfiPairRefusal.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: FfiOptionRefusal) = (
+            FfiConverterOptionalULong.allocationSize(value.`reqSet`) +
+            FfiConverterSequenceTypeFfiPairRefusal.allocationSize(value.`systems`)
+    )
+
+    override fun write(value: FfiOptionRefusal, buf: ByteBuffer) {
+            FfiConverterOptionalULong.write(value.`reqSet`, buf)
+            FfiConverterSequenceTypeFfiPairRefusal.write(value.`systems`, buf)
+    }
+}
+
+
+
+/**
+ * Why a system forms no usable pair for an option.
+ */
+data class FfiPairRefusal (
+    /**
+     * The system.
+     */
+    var `systemId`: kotlin.String, 
+    /**
+     * `system_not_listed`, `no_listed_backend`, `credential_type`, or the system's
+     * `unsupported` reason.
+     */
+    var `code`: kotlin.String
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFfiPairRefusal: FfiConverterRustBuffer<FfiPairRefusal> {
+    override fun read(buf: ByteBuffer): FfiPairRefusal {
+        return FfiPairRefusal(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: FfiPairRefusal) = (
+            FfiConverterString.allocationSize(value.`systemId`) +
+            FfiConverterString.allocationSize(value.`code`)
+    )
+
+    override fun write(value: FfiPairRefusal, buf: ByteBuffer) {
+            FfiConverterString.write(value.`systemId`, buf)
+            FfiConverterString.write(value.`code`, buf)
+    }
+}
+
+
+
+/**
+ * What a system's prover needs.
+ */
+data class FfiProofJob (
+    /**
+     * The public values.
+     */
+    var `statement`: FfiStatement, 
+    /**
+     * The credential's `IssuerSigned`, as issued.
+     */
+    var `issuerSigned`: kotlin.ByteArray, 
+    /**
+     * The 16-byte `secret_seed`. The host zeroes its copy after proving.
+     */
+    var `secretSeed`: kotlin.ByteArray, 
+    /**
+     * The device signature, `r ‖ s`, verified under the MSO's device key.
+     */
+    var `deviceSignature`: kotlin.ByteArray
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFfiProofJob: FfiConverterRustBuffer<FfiProofJob> {
+    override fun read(buf: ByteBuffer): FfiProofJob {
+        return FfiProofJob(
+            FfiConverterTypeFfiStatement.read(buf),
+            FfiConverterByteArray.read(buf),
+            FfiConverterByteArray.read(buf),
+            FfiConverterByteArray.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: FfiProofJob) = (
+            FfiConverterTypeFfiStatement.allocationSize(value.`statement`) +
+            FfiConverterByteArray.allocationSize(value.`issuerSigned`) +
+            FfiConverterByteArray.allocationSize(value.`secretSeed`) +
+            FfiConverterByteArray.allocationSize(value.`deviceSignature`)
+    )
+
+    override fun write(value: FfiProofJob, buf: ByteBuffer) {
+            FfiConverterTypeFfiStatement.write(value.`statement`, buf)
+            FfiConverterByteArray.write(value.`issuerSigned`, buf)
+            FfiConverterByteArray.write(value.`secretSeed`, buf)
+            FfiConverterByteArray.write(value.`deviceSignature`, buf)
     }
 }
 
@@ -2116,6 +3502,374 @@ public object FfiConverterTypeFfiQueryMatch: FfiConverterRustBuffer<FfiQueryMatc
     override fun write(value: FfiQueryMatch, buf: ByteBuffer) {
             FfiConverterString.write(value.`queryId`, buf)
             FfiConverterSequenceTypeFfiMatchedCredential.write(value.`credentials`, buf)
+    }
+}
+
+
+
+/**
+ * One entry of `results`.
+ */
+data class FfiResult (
+    /**
+     * The `return` handle.
+     */
+    var `handle`: kotlin.String, 
+    /**
+     * The result, CBOR: a `bstr` pseudonym or `true`.
+     */
+    var `value`: kotlin.ByteArray
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFfiResult: FfiConverterRustBuffer<FfiResult> {
+    override fun read(buf: ByteBuffer): FfiResult {
+        return FfiResult(
+            FfiConverterString.read(buf),
+            FfiConverterByteArray.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: FfiResult) = (
+            FfiConverterString.allocationSize(value.`handle`) +
+            FfiConverterByteArray.allocationSize(value.`value`)
+    )
+
+    override fun write(value: FfiResult, buf: ByteBuffer) {
+            FfiConverterString.write(value.`handle`, buf)
+            FfiConverterByteArray.write(value.`value`, buf)
+    }
+}
+
+
+
+/**
+ * The public values of a proof (system rulebooks, Section 4).
+ */
+data class FfiStatement (
+    /**
+     * The system.
+     */
+    var `systemId`: kotlin.String, 
+    /**
+     * The proof backend.
+     */
+    var `proofBackend`: kotlin.String, 
+    /**
+     * The `docType` the circuits check.
+     */
+    var `docType`: kotlin.String, 
+    /**
+     * The Document Signer certificate, DER.
+     */
+    var `issuerCertificate`: kotlin.ByteArray, 
+    /**
+     * The issuer key Q: x, big-endian.
+     */
+    var `issuerKeyX`: kotlin.ByteArray, 
+    /**
+     * The issuer key Q: y, big-endian.
+     */
+    var `issuerKeyY`: kotlin.ByteArray, 
+    /**
+     * T: `YYYY-MM-DDThh:mm:ssZ`.
+     */
+    var `proofTime`: kotlin.String, 
+    /**
+     * E: `YYYY-MM-DD`; `None` for the system's widest value.
+     */
+    var `earliest`: kotlin.String?, 
+    /**
+     * C: `YYYY-MM-DD`; `None` for the system's widest value.
+     */
+    var `cutoff`: kotlin.String?, 
+    /**
+     * `verifier_input`.
+     */
+    var `verifierInput`: kotlin.ByteArray, 
+    /**
+     * The encoded `SessionTranscript`.
+     */
+    var `sessionTranscript`: kotlin.ByteArray, 
+    /**
+     * e2.
+     */
+    var `challengeDigest`: kotlin.ByteArray
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFfiStatement: FfiConverterRustBuffer<FfiStatement> {
+    override fun read(buf: ByteBuffer): FfiStatement {
+        return FfiStatement(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterByteArray.read(buf),
+            FfiConverterByteArray.read(buf),
+            FfiConverterByteArray.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterByteArray.read(buf),
+            FfiConverterByteArray.read(buf),
+            FfiConverterByteArray.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: FfiStatement) = (
+            FfiConverterString.allocationSize(value.`systemId`) +
+            FfiConverterString.allocationSize(value.`proofBackend`) +
+            FfiConverterString.allocationSize(value.`docType`) +
+            FfiConverterByteArray.allocationSize(value.`issuerCertificate`) +
+            FfiConverterByteArray.allocationSize(value.`issuerKeyX`) +
+            FfiConverterByteArray.allocationSize(value.`issuerKeyY`) +
+            FfiConverterString.allocationSize(value.`proofTime`) +
+            FfiConverterOptionalString.allocationSize(value.`earliest`) +
+            FfiConverterOptionalString.allocationSize(value.`cutoff`) +
+            FfiConverterByteArray.allocationSize(value.`verifierInput`) +
+            FfiConverterByteArray.allocationSize(value.`sessionTranscript`) +
+            FfiConverterByteArray.allocationSize(value.`challengeDigest`)
+    )
+
+    override fun write(value: FfiStatement, buf: ByteBuffer) {
+            FfiConverterString.write(value.`systemId`, buf)
+            FfiConverterString.write(value.`proofBackend`, buf)
+            FfiConverterString.write(value.`docType`, buf)
+            FfiConverterByteArray.write(value.`issuerCertificate`, buf)
+            FfiConverterByteArray.write(value.`issuerKeyX`, buf)
+            FfiConverterByteArray.write(value.`issuerKeyY`, buf)
+            FfiConverterString.write(value.`proofTime`, buf)
+            FfiConverterOptionalString.write(value.`earliest`, buf)
+            FfiConverterOptionalString.write(value.`cutoff`, buf)
+            FfiConverterByteArray.write(value.`verifierInput`, buf)
+            FfiConverterByteArray.write(value.`sessionTranscript`, buf)
+            FfiConverterByteArray.write(value.`challengeDigest`, buf)
+    }
+}
+
+
+
+/**
+ * A credential the wallet stores.
+ */
+data class FfiStoredCredential (
+    /**
+     * The wallet's identifier.
+     */
+    var `id`: kotlin.String, 
+    /**
+     * The credential format, `mso_mdoc`.
+     */
+    var `format`: kotlin.String, 
+    /**
+     * The credential as issued: base64url without padding of an `IssuerSigned`, a `Document`
+     * or a one-document `DeviceResponse`.
+     */
+    var `data`: kotlin.String, 
+    /**
+     * The identifier of the device key.
+     */
+    var `kid`: kotlin.String
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFfiStoredCredential: FfiConverterRustBuffer<FfiStoredCredential> {
+    override fun read(buf: ByteBuffer): FfiStoredCredential {
+        return FfiStoredCredential(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: FfiStoredCredential) = (
+            FfiConverterString.allocationSize(value.`id`) +
+            FfiConverterString.allocationSize(value.`format`) +
+            FfiConverterString.allocationSize(value.`data`) +
+            FfiConverterString.allocationSize(value.`kid`)
+    )
+
+    override fun write(value: FfiStoredCredential, buf: ByteBuffer) {
+            FfiConverterString.write(value.`id`, buf)
+            FfiConverterString.write(value.`format`, buf)
+            FfiConverterString.write(value.`data`, buf)
+            FfiConverterString.write(value.`kid`, buf)
+    }
+}
+
+
+
+/**
+ * What an accepted presentation establishes.
+ */
+data class FfiVerified (
+    /**
+     * The system.
+     */
+    var `systemId`: kotlin.String, 
+    /**
+     * The proof backend.
+     */
+    var `proofBackend`: kotlin.String, 
+    /**
+     * The answered option's index in `_req_sets`.
+     */
+    var `reqSet`: kotlin.ULong?, 
+    /**
+     * `results`: each handle and its result, CBOR.
+     */
+    var `results`: List<FfiResult>, 
+    /**
+     * The Document Signer certificate the proof was made against.
+     */
+    var `issuerCertificate`: kotlin.ByteArray, 
+    /**
+     * The proof time, `YYYY-MM-DDThh:mm:ssZ`.
+     */
+    var `proofTime`: kotlin.String
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFfiVerified: FfiConverterRustBuffer<FfiVerified> {
+    override fun read(buf: ByteBuffer): FfiVerified {
+        return FfiVerified(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterOptionalULong.read(buf),
+            FfiConverterSequenceTypeFfiResult.read(buf),
+            FfiConverterByteArray.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: FfiVerified) = (
+            FfiConverterString.allocationSize(value.`systemId`) +
+            FfiConverterString.allocationSize(value.`proofBackend`) +
+            FfiConverterOptionalULong.allocationSize(value.`reqSet`) +
+            FfiConverterSequenceTypeFfiResult.allocationSize(value.`results`) +
+            FfiConverterByteArray.allocationSize(value.`issuerCertificate`) +
+            FfiConverterString.allocationSize(value.`proofTime`)
+    )
+
+    override fun write(value: FfiVerified, buf: ByteBuffer) {
+            FfiConverterString.write(value.`systemId`, buf)
+            FfiConverterString.write(value.`proofBackend`, buf)
+            FfiConverterOptionalULong.write(value.`reqSet`, buf)
+            FfiConverterSequenceTypeFfiResult.write(value.`results`, buf)
+            FfiConverterByteArray.write(value.`issuerCertificate`, buf)
+            FfiConverterString.write(value.`proofTime`, buf)
+    }
+}
+
+
+
+/**
+ * The presentations of one answered query.
+ */
+data class FfiVpTokenEntry (
+    /**
+     * The Credential Query's `id`.
+     */
+    var `queryId`: kotlin.String, 
+    /**
+     * The CBOR presentations.
+     */
+    var `presentations`: List<kotlin.ByteArray>
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFfiVpTokenEntry: FfiConverterRustBuffer<FfiVpTokenEntry> {
+    override fun read(buf: ByteBuffer): FfiVpTokenEntry {
+        return FfiVpTokenEntry(
+            FfiConverterString.read(buf),
+            FfiConverterSequenceByteArray.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: FfiVpTokenEntry) = (
+            FfiConverterString.allocationSize(value.`queryId`) +
+            FfiConverterSequenceByteArray.allocationSize(value.`presentations`)
+    )
+
+    override fun write(value: FfiVpTokenEntry, buf: ByteBuffer) {
+            FfiConverterString.write(value.`queryId`, buf)
+            FfiConverterSequenceByteArray.write(value.`presentations`, buf)
+    }
+}
+
+
+
+/**
+ * Why a credential cannot answer: an item's failure, or the credential's.
+ */
+data class FfiZkpError (
+    /**
+     * The system rulebook's code (Section 9): `age_out_of_range`, `seed_mismatch`,
+     * `validity`, `issuer_signature`, `issuer_untrusted`, `device_binding`,
+     * `credential_form`.
+     */
+    var `code`: kotlin.String, 
+    /**
+     * The `_req` index of a failing item; `None` for the credential's own checks.
+     */
+    var `item`: kotlin.ULong?, 
+    /**
+     * The option's index in `_req_sets` of a failing item.
+     */
+    var `reqSet`: kotlin.ULong?
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFfiZkpError: FfiConverterRustBuffer<FfiZkpError> {
+    override fun read(buf: ByteBuffer): FfiZkpError {
+        return FfiZkpError(
+            FfiConverterString.read(buf),
+            FfiConverterOptionalULong.read(buf),
+            FfiConverterOptionalULong.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: FfiZkpError) = (
+            FfiConverterString.allocationSize(value.`code`) +
+            FfiConverterOptionalULong.allocationSize(value.`item`) +
+            FfiConverterOptionalULong.allocationSize(value.`reqSet`)
+    )
+
+    override fun write(value: FfiZkpError, buf: ByteBuffer) {
+            FfiConverterString.write(value.`code`, buf)
+            FfiConverterOptionalULong.write(value.`item`, buf)
+            FfiConverterOptionalULong.write(value.`reqSet`, buf)
     }
 }
 
@@ -2221,6 +3975,356 @@ public object FfiConverterTypeBlobError : FfiConverterRustBuffer<BlobException> 
     }
 
 }
+
+
+
+/**
+ * The channel a request arrived on.
+ */
+sealed class FfiChannel {
+    
+    /**
+     * The Digital Credentials API, with the calling origin the platform reports.
+     */
+    data class DcApi(
+        /**
+         * The origin.
+         */
+        val `origin`: kotlin.String) : FfiChannel() {
+        companion object
+    }
+    
+    /**
+     * Redirects, including a `request_uri` from a QR code or a link.
+     */
+    object Redirect : FfiChannel()
+    
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFfiChannel : FfiConverterRustBuffer<FfiChannel>{
+    override fun read(buf: ByteBuffer): FfiChannel {
+        return when(buf.getInt()) {
+            1 -> FfiChannel.DcApi(
+                FfiConverterString.read(buf),
+                )
+            2 -> FfiChannel.Redirect
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: FfiChannel) = when(value) {
+        is FfiChannel.DcApi -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`origin`)
+            )
+        }
+        is FfiChannel.Redirect -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+    }
+
+    override fun write(value: FfiChannel, buf: ByteBuffer) {
+        when(value) {
+            is FfiChannel.DcApi -> {
+                buf.putInt(1)
+                FfiConverterString.write(value.`origin`, buf)
+                Unit
+            }
+            is FfiChannel.Redirect -> {
+                buf.putInt(2)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+/**
+ * What a system's verifier says of a proof.
+ */
+
+enum class FfiProofCheck {
+    
+    /**
+     * The proof verifies.
+     */
+    ACCEPTED,
+    /**
+     * `zk_proof` breaks the backend's format.
+     */
+    ENCODING,
+    /**
+     * A circuit's proof fails.
+     */
+    INVALID,
+    /**
+     * The proof's public values differ from the statement.
+     */
+    PUBLIC_INPUT,
+    /**
+     * The verifier failed on its own inputs, artifacts or code, and judged nothing.
+     */
+    INTERNAL;
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFfiProofCheck: FfiConverterRustBuffer<FfiProofCheck> {
+    override fun read(buf: ByteBuffer) = try {
+        FfiProofCheck.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: FfiProofCheck) = 4UL
+
+    override fun write(value: FfiProofCheck, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+/**
+ * The form of `verifier_id` the trust framework fixes, with what it is made from.
+ */
+sealed class FfiVerifierIdForm {
+    
+    /**
+     * `semantic`: the end Relying Party's semantic identifier, from the registration
+     * certificate when present, else from the access certificate.
+     */
+    data class Semantic(
+        /**
+         * The semantic identifier.
+         */
+        val `semanticIdentifier`: kotlin.String) : FfiVerifierIdForm() {
+        companion object
+    }
+    
+    /**
+     * `x509_san_dns`: the Client Identifier.
+     */
+    data class X509SanDns(
+        /**
+         * Whether the registration certificate names an intermediary.
+         */
+        val `registrationNamesIntermediary`: kotlin.Boolean) : FfiVerifierIdForm() {
+        companion object
+    }
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFfiVerifierIdForm : FfiConverterRustBuffer<FfiVerifierIdForm>{
+    override fun read(buf: ByteBuffer): FfiVerifierIdForm {
+        return when(buf.getInt()) {
+            1 -> FfiVerifierIdForm.Semantic(
+                FfiConverterString.read(buf),
+                )
+            2 -> FfiVerifierIdForm.X509SanDns(
+                FfiConverterBoolean.read(buf),
+                )
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: FfiVerifierIdForm) = when(value) {
+        is FfiVerifierIdForm.Semantic -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`semanticIdentifier`)
+            )
+        }
+        is FfiVerifierIdForm.X509SanDns -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterBoolean.allocationSize(value.`registrationNamesIntermediary`)
+            )
+        }
+    }
+
+    override fun write(value: FfiVerifierIdForm, buf: ByteBuffer) {
+        when(value) {
+            is FfiVerifierIdForm.Semantic -> {
+                buf.putInt(1)
+                FfiConverterString.write(value.`semanticIdentifier`, buf)
+                Unit
+            }
+            is FfiVerifierIdForm.X509SanDns -> {
+                buf.putInt(2)
+                FfiConverterBoolean.write(value.`registrationNamesIntermediary`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+/**
+ * The outcome of matching one query.
+ */
+sealed class FfiZkpMatch {
+    
+    /**
+     * The credentials that can answer, best first: show the consent screen.
+     */
+    data class Candidates(
+        /**
+         * The candidates.
+         */
+        val `candidates`: List<FfiCandidate>) : FfiZkpMatch() {
+        companion object
+    }
+    
+    /**
+     * No credential can answer: send `access_denied`.
+     */
+    data class Rejected(
+        /**
+         * Each credential that matched the query's type, and why it cannot answer.
+         */
+        val `rejected`: List<FfiJudged>) : FfiZkpMatch() {
+        companion object
+    }
+    
+    /**
+     * No option has a usable pair: send `vp_formats_not_supported`.
+     */
+    data class Unsupported(
+        /**
+         * Each option and why.
+         */
+        val `options`: List<FfiOptionRefusal>) : FfiZkpMatch() {
+        companion object
+    }
+    
+    /**
+     * The query breaks a rule: send `invalid_request`.
+     */
+    data class Invalid(
+        /**
+         * The rule's identifier.
+         */
+        val `code`: kotlin.String) : FfiZkpMatch() {
+        companion object
+    }
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFfiZkpMatch : FfiConverterRustBuffer<FfiZkpMatch>{
+    override fun read(buf: ByteBuffer): FfiZkpMatch {
+        return when(buf.getInt()) {
+            1 -> FfiZkpMatch.Candidates(
+                FfiConverterSequenceTypeFfiCandidate.read(buf),
+                )
+            2 -> FfiZkpMatch.Rejected(
+                FfiConverterSequenceTypeFfiJudged.read(buf),
+                )
+            3 -> FfiZkpMatch.Unsupported(
+                FfiConverterSequenceTypeFfiOptionRefusal.read(buf),
+                )
+            4 -> FfiZkpMatch.Invalid(
+                FfiConverterString.read(buf),
+                )
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: FfiZkpMatch) = when(value) {
+        is FfiZkpMatch.Candidates -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterSequenceTypeFfiCandidate.allocationSize(value.`candidates`)
+            )
+        }
+        is FfiZkpMatch.Rejected -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterSequenceTypeFfiJudged.allocationSize(value.`rejected`)
+            )
+        }
+        is FfiZkpMatch.Unsupported -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterSequenceTypeFfiOptionRefusal.allocationSize(value.`options`)
+            )
+        }
+        is FfiZkpMatch.Invalid -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`code`)
+            )
+        }
+    }
+
+    override fun write(value: FfiZkpMatch, buf: ByteBuffer) {
+        when(value) {
+            is FfiZkpMatch.Candidates -> {
+                buf.putInt(1)
+                FfiConverterSequenceTypeFfiCandidate.write(value.`candidates`, buf)
+                Unit
+            }
+            is FfiZkpMatch.Rejected -> {
+                buf.putInt(2)
+                FfiConverterSequenceTypeFfiJudged.write(value.`rejected`, buf)
+                Unit
+            }
+            is FfiZkpMatch.Unsupported -> {
+                buf.putInt(3)
+                FfiConverterSequenceTypeFfiOptionRefusal.write(value.`options`, buf)
+                Unit
+            }
+            is FfiZkpMatch.Invalid -> {
+                buf.putInt(4)
+                FfiConverterString.write(value.`code`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
 
 
 
@@ -2358,40 +4462,109 @@ public object FfiConverterTypeMatchError : FfiConverterRustBuffer<MatchException
 
 
 /**
- * Why a `zkp_req` query could not be planned.
+ * Why a `zkp_req` call gave no result. `error_code` is what the wallet sends the verifier
+ * for the request (`zkp_req`, Section 5); the rest is for the user and the logs.
  */
-sealed class ZkpReqPlanException: kotlin.Exception() {
+sealed class ZkpReqException: kotlin.Exception() {
     
     /**
-     * The query is structurally broken: the planner's verdict, unchanged.
-     *
-     * This says the request is malformed, never that it cannot be served.
+     * The request breaks a rule of `zkp_req` or of the nym_auth catalogue.
      */
     class InvalidRequest(
         
         /**
-         * A stable identifier for the defect, the planner's own code:
-         * `query_not_parseable`, `req_missing_or_empty`, `req_ambiguous`,
-         * `item_missing_function_id`, `item_missing_handle`,
-         * `param_wrong_type`, `param_invalid_full_date`, `duplicate_handle`,
-         * `claims_present`, `claim_sets_present`, `req_sets_present`,
-         * `invalid_meta` or `invalid_client_metadata`. Match on this, not on
-         * `reason`.
+         * `invalid_request`.
+         */
+        val `errorCode`: kotlin.String, 
+        
+        /**
+         * The rule's identifier.
+         */
+        val `code`: kotlin.String
+        ) : ZkpReqException() {
+        override val message
+            get() = "errorCode=${ `errorCode` }, code=${ `code` }"
+    }
+    
+    /**
+     * The credential cannot answer the candidate's option.
+     */
+    class Rejected(
+        
+        /**
+         * `access_denied`.
+         */
+        val `errorCode`: kotlin.String, 
+        
+        /**
+         * Each failure, with the system rulebook's code.
+         */
+        val `errors`: List<FfiZkpError>
+        ) : ZkpReqException() {
+        override val message
+            get() = "errorCode=${ `errorCode` }, errors=${ `errors` }"
+    }
+    
+    /**
+     * The candidate's system and backend no longer form a usable pair for its option.
+     */
+    class Unsupported(
+        
+        /**
+         * `access_denied`.
+         */
+        val `errorCode`: kotlin.String, 
+        
+        /**
+         * Why the pair is not usable.
+         */
+        val `code`: kotlin.String
+        ) : ZkpReqException() {
+        override val message
+            get() = "errorCode=${ `errorCode` }, code=${ `code` }"
+    }
+    
+    /**
+     * An input of the host, or the prover's output, is not one the presenter can use.
+     */
+    class Host(
+        
+        /**
+         * `access_denied`.
+         */
+        val `errorCode`: kotlin.String, 
+        
+        /**
+         * What is wrong.
+         */
+        val `code`: kotlin.String
+        ) : ZkpReqException() {
+        override val message
+            get() = "errorCode=${ `errorCode` }, code=${ `code` }"
+    }
+    
+    /**
+     * The verifier refused a presentation.
+     */
+    class Refused(
+        
+        /**
+         * The system rulebook's code (Section 9), or the step of `zkp_req`, Section 4.1.
          */
         val `code`: kotlin.String, 
         
         /**
-         * The planner's message, for logs. Its wording may change.
+         * The failed check, for the logs. Its wording may change; match on `code`.
          */
-        val `reason`: kotlin.String
-        ) : ZkpReqPlanException() {
+        val `detail`: kotlin.String
+        ) : ZkpReqException() {
         override val message
-            get() = "code=${ `code` }, reason=${ `reason` }"
+            get() = "code=${ `code` }, detail=${ `detail` }"
     }
     
 
-    companion object ErrorHandler : UniffiRustCallStatusErrorHandler<ZkpReqPlanException> {
-        override fun lift(error_buf: RustBuffer.ByValue): ZkpReqPlanException = FfiConverterTypeZkpReqPlanError.lift(error_buf)
+    companion object ErrorHandler : UniffiRustCallStatusErrorHandler<ZkpReqException> {
+        override fun lift(error_buf: RustBuffer.ByValue): ZkpReqException = FfiConverterTypeZkpReqError.lift(error_buf)
     }
 
     
@@ -2400,12 +4573,28 @@ sealed class ZkpReqPlanException: kotlin.Exception() {
 /**
  * @suppress
  */
-public object FfiConverterTypeZkpReqPlanError : FfiConverterRustBuffer<ZkpReqPlanException> {
-    override fun read(buf: ByteBuffer): ZkpReqPlanException {
+public object FfiConverterTypeZkpReqError : FfiConverterRustBuffer<ZkpReqException> {
+    override fun read(buf: ByteBuffer): ZkpReqException {
         
 
         return when(buf.getInt()) {
-            1 -> ZkpReqPlanException.InvalidRequest(
+            1 -> ZkpReqException.InvalidRequest(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            2 -> ZkpReqException.Rejected(
+                FfiConverterString.read(buf),
+                FfiConverterSequenceTypeFfiZkpError.read(buf),
+                )
+            3 -> ZkpReqException.Unsupported(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            4 -> ZkpReqException.Host(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            5 -> ZkpReqException.Refused(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
@@ -2413,28 +4602,108 @@ public object FfiConverterTypeZkpReqPlanError : FfiConverterRustBuffer<ZkpReqPla
         }
     }
 
-    override fun allocationSize(value: ZkpReqPlanException): ULong {
+    override fun allocationSize(value: ZkpReqException): ULong {
         return when(value) {
-            is ZkpReqPlanException.InvalidRequest -> (
+            is ZkpReqException.InvalidRequest -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`errorCode`)
+                + FfiConverterString.allocationSize(value.`code`)
+            )
+            is ZkpReqException.Rejected -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`errorCode`)
+                + FfiConverterSequenceTypeFfiZkpError.allocationSize(value.`errors`)
+            )
+            is ZkpReqException.Unsupported -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`errorCode`)
+                + FfiConverterString.allocationSize(value.`code`)
+            )
+            is ZkpReqException.Host -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`errorCode`)
+                + FfiConverterString.allocationSize(value.`code`)
+            )
+            is ZkpReqException.Refused -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
                 4UL
                 + FfiConverterString.allocationSize(value.`code`)
-                + FfiConverterString.allocationSize(value.`reason`)
+                + FfiConverterString.allocationSize(value.`detail`)
             )
         }
     }
 
-    override fun write(value: ZkpReqPlanException, buf: ByteBuffer) {
+    override fun write(value: ZkpReqException, buf: ByteBuffer) {
         when(value) {
-            is ZkpReqPlanException.InvalidRequest -> {
+            is ZkpReqException.InvalidRequest -> {
                 buf.putInt(1)
+                FfiConverterString.write(value.`errorCode`, buf)
                 FfiConverterString.write(value.`code`, buf)
-                FfiConverterString.write(value.`reason`, buf)
+                Unit
+            }
+            is ZkpReqException.Rejected -> {
+                buf.putInt(2)
+                FfiConverterString.write(value.`errorCode`, buf)
+                FfiConverterSequenceTypeFfiZkpError.write(value.`errors`, buf)
+                Unit
+            }
+            is ZkpReqException.Unsupported -> {
+                buf.putInt(3)
+                FfiConverterString.write(value.`errorCode`, buf)
+                FfiConverterString.write(value.`code`, buf)
+                Unit
+            }
+            is ZkpReqException.Host -> {
+                buf.putInt(4)
+                FfiConverterString.write(value.`errorCode`, buf)
+                FfiConverterString.write(value.`code`, buf)
+                Unit
+            }
+            is ZkpReqException.Refused -> {
+                buf.putInt(5)
+                FfiConverterString.write(value.`code`, buf)
+                FfiConverterString.write(value.`detail`, buf)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
     }
 
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalULong: FfiConverterRustBuffer<kotlin.ULong?> {
+    override fun read(buf: ByteBuffer): kotlin.ULong? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterULong.read(buf)
+    }
+
+    override fun allocationSize(value: kotlin.ULong?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterULong.allocationSize(value)
+        }
+    }
+
+    override fun write(value: kotlin.ULong?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterULong.write(value, buf)
+        }
+    }
 }
 
 
@@ -2475,6 +4744,66 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
 /**
  * @suppress
  */
+public object FfiConverterOptionalSequenceByteArray: FfiConverterRustBuffer<List<kotlin.ByteArray>?> {
+    override fun read(buf: ByteBuffer): List<kotlin.ByteArray>? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterSequenceByteArray.read(buf)
+    }
+
+    override fun allocationSize(value: List<kotlin.ByteArray>?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterSequenceByteArray.allocationSize(value)
+        }
+    }
+
+    override fun write(value: List<kotlin.ByteArray>?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterSequenceByteArray.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceULong: FfiConverterRustBuffer<List<kotlin.ULong>> {
+    override fun read(buf: ByteBuffer): List<kotlin.ULong> {
+        val len = buf.getInt()
+        return List<kotlin.ULong>(len) {
+            FfiConverterULong.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<kotlin.ULong>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterULong.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<kotlin.ULong>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterULong.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceString: FfiConverterRustBuffer<List<kotlin.String>> {
     override fun read(buf: ByteBuffer): List<kotlin.String> {
         val len = buf.getInt()
@@ -2493,6 +4822,62 @@ public object FfiConverterSequenceString: FfiConverterRustBuffer<List<kotlin.Str
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterString.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceByteArray: FfiConverterRustBuffer<List<kotlin.ByteArray>> {
+    override fun read(buf: ByteBuffer): List<kotlin.ByteArray> {
+        val len = buf.getInt()
+        return List<kotlin.ByteArray>(len) {
+            FfiConverterByteArray.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<kotlin.ByteArray>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterByteArray.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<kotlin.ByteArray>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterByteArray.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeFfiCandidate: FfiConverterRustBuffer<List<FfiCandidate>> {
+    override fun read(buf: ByteBuffer): List<FfiCandidate> {
+        val len = buf.getInt()
+        return List<FfiCandidate>(len) {
+            FfiConverterTypeFfiCandidate.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<FfiCandidate>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeFfiCandidate.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<FfiCandidate>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeFfiCandidate.write(it, buf)
         }
     }
 }
@@ -2587,6 +4972,34 @@ public object FfiConverterSequenceTypeFfiCombination: FfiConverterRustBuffer<Lis
 /**
  * @suppress
  */
+public object FfiConverterSequenceTypeFfiJudged: FfiConverterRustBuffer<List<FfiJudged>> {
+    override fun read(buf: ByteBuffer): List<FfiJudged> {
+        val len = buf.getInt()
+        return List<FfiJudged>(len) {
+            FfiConverterTypeFfiJudged.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<FfiJudged>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeFfiJudged.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<FfiJudged>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeFfiJudged.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceTypeFfiMatchedCredential: FfiConverterRustBuffer<List<FfiMatchedCredential>> {
     override fun read(buf: ByteBuffer): List<FfiMatchedCredential> {
         val len = buf.getInt()
@@ -2615,6 +5028,62 @@ public object FfiConverterSequenceTypeFfiMatchedCredential: FfiConverterRustBuff
 /**
  * @suppress
  */
+public object FfiConverterSequenceTypeFfiOptionRefusal: FfiConverterRustBuffer<List<FfiOptionRefusal>> {
+    override fun read(buf: ByteBuffer): List<FfiOptionRefusal> {
+        val len = buf.getInt()
+        return List<FfiOptionRefusal>(len) {
+            FfiConverterTypeFfiOptionRefusal.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<FfiOptionRefusal>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeFfiOptionRefusal.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<FfiOptionRefusal>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeFfiOptionRefusal.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeFfiPairRefusal: FfiConverterRustBuffer<List<FfiPairRefusal>> {
+    override fun read(buf: ByteBuffer): List<FfiPairRefusal> {
+        val len = buf.getInt()
+        return List<FfiPairRefusal>(len) {
+            FfiConverterTypeFfiPairRefusal.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<FfiPairRefusal>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeFfiPairRefusal.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<FfiPairRefusal>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeFfiPairRefusal.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceTypeFfiQueryMatch: FfiConverterRustBuffer<List<FfiQueryMatch>> {
     override fun read(buf: ByteBuffer): List<FfiQueryMatch> {
         val len = buf.getInt()
@@ -2633,6 +5102,118 @@ public object FfiConverterSequenceTypeFfiQueryMatch: FfiConverterRustBuffer<List
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeFfiQueryMatch.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeFfiResult: FfiConverterRustBuffer<List<FfiResult>> {
+    override fun read(buf: ByteBuffer): List<FfiResult> {
+        val len = buf.getInt()
+        return List<FfiResult>(len) {
+            FfiConverterTypeFfiResult.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<FfiResult>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeFfiResult.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<FfiResult>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeFfiResult.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeFfiStoredCredential: FfiConverterRustBuffer<List<FfiStoredCredential>> {
+    override fun read(buf: ByteBuffer): List<FfiStoredCredential> {
+        val len = buf.getInt()
+        return List<FfiStoredCredential>(len) {
+            FfiConverterTypeFfiStoredCredential.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<FfiStoredCredential>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeFfiStoredCredential.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<FfiStoredCredential>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeFfiStoredCredential.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeFfiVpTokenEntry: FfiConverterRustBuffer<List<FfiVpTokenEntry>> {
+    override fun read(buf: ByteBuffer): List<FfiVpTokenEntry> {
+        val len = buf.getInt()
+        return List<FfiVpTokenEntry>(len) {
+            FfiConverterTypeFfiVpTokenEntry.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<FfiVpTokenEntry>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeFfiVpTokenEntry.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<FfiVpTokenEntry>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeFfiVpTokenEntry.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeFfiZkpError: FfiConverterRustBuffer<List<FfiZkpError>> {
+    override fun read(buf: ByteBuffer): List<FfiZkpError> {
+        val len = buf.getInt()
+        return List<FfiZkpError>(len) {
+            FfiConverterTypeFfiZkpError.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<FfiZkpError>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeFfiZkpError.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<FfiZkpError>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeFfiZkpError.write(it, buf)
         }
     }
 }
@@ -2759,9 +5340,8 @@ public object FfiConverterMapStringString: FfiConverterRustBuffer<Map<kotlin.Str
          *
          * What [`match_dcql`] does, for a caller that also has the verifier's
          * `client_metadata` (as JSON). A `zkp_req` query is matched against the
-         * circuit lists in its `vp_formats_supported`; with `None` those are absent
-         * and impose no constraint. A `zkp_req` query with `claims` as an object
-         * (the rulebook example shape) is accepted here although it is not DCQL.
+         * lists in its `vp_formats_supported.zkp_req`, which `zkp_req`, Section 1.2
+         * requires: with `None`, no `zkp_req` query matches.
          *
          * # Errors
          *
@@ -2779,50 +5359,133 @@ public object FfiConverterMapStringString: FfiConverterRustBuffer<Map<kotlin.Str
     
 
         /**
-         * Plan a `zkp_req` credential query, without a blob.
-         *
-         * `credential_query_json` is one Credential Query object (an element of
-         * `dcql_query.credentials`), not the whole `dcql_query`. In either rulebook
-         * shape: `req` beside `meta`, or `claims: {"_req": [...]}`.
-         * `client_metadata_json` is the request's `client_metadata`, if it has one.
-         *
-         * This is the function the matcher itself calls (`zkp_req::plan` in the
-         * core crate), so the plan a wallet reads here is the plan matching used. It
-         * judges structure only; whether the request can be served is the wallet's.
-         *
-         * # The plan JSON
-         *
-         * A JSON object with exactly these members; this shape is stable, and the
-         * same object is the `plan` member of [`FfiMatchedCredential::zkp_req`]:
-         *
-         * - `functions`: array, in request order, of `{function_id, handle, params}`.
-         * `function_id` is `id` in a `req` item and `fn_id` in a `_req` item;
-         * `handle` is `return` or `id` respectively. `params` is a flat object:
-         * the declared params that were present, plus every other param unchanged.
-         * Values of declared params are strings, and `full-date` ones are
-         * validated.
-         * - `system_filter`: `{proof_systems?, system_ids?}`, the verifier's
-         * `proof_system_values` and `system_id_values` (from either form of
-         * `vp_formats_supported.zkp_req`). A member is absent when the verifier
-         * did not send it; a present empty list is passed through, not rejected.
-         * - `meta_doctype`: `meta.doctype_value`, or `null`.
-         * - `raw`: the credential query exactly as parsed, so members this version
-         * does not know survive. It is verifier-supplied and unauthenticated.
-         *
-         * Normative cases for both the plan and every rejection are the vectors in
-         * `crates/siros-dc-matcher-core/tests/vectors/zkp_req/`.
+         * The JWK SHA-256 Thumbprint (RFC 7638) of an elliptic-curve JWK.
          *
          * # Errors
          *
-         * [`ZkpReqPlanError::InvalidRequest`] with the planner's code and reason
-         * (`ZkpReqPlanException` in Kotlin). Input that is not JSON is the
-         * `query_not_parseable` or `invalid_client_metadata` code.
+         * [`ZkpReqError::Host`] for text that is no EC JWK.
          */
-    @Throws(ZkpReqPlanException::class) fun `zkpReqPlan`(`credentialQueryJson`: kotlin.String, `clientMetadataJson`: kotlin.String?): kotlin.String {
+    @Throws(ZkpReqException::class) fun `zkpReqJwkThumbprint`(`jwkJson`: kotlin.String): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(ZkpReqException) { _status ->
+    UniffiLib.INSTANCE.uniffi_siros_dc_matcher_ffi_fn_func_zkp_req_jwk_thumbprint(
+        FfiConverterString.lower(`jwkJson`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Matches one `zkp_req` Credential Query against the wallet's credentials.
+         *
+         * `query_json` is the Credential Query, `client_metadata_json` the request's
+         * `client_metadata`. `credentials` are those of the query's format and type, a superset is
+         * fine. `anchors` are the DER certificates the query's `trusted_authorities` designate,
+         * required when it has some. `systems` are the system ids the host proves, in the wallet's
+         * order of preference. `now` is the wallet's clock in seconds since the epoch.
+         *
+         * # Errors
+         *
+         * [`ZkpReqError::Host`] for an input the presenter cannot use.
+         */
+    @Throws(ZkpReqException::class) fun `zkpReqMatch`(`queryJson`: kotlin.String, `clientMetadataJson`: kotlin.String, `credentials`: List<FfiStoredCredential>, `anchors`: List<kotlin.ByteArray>?, `systems`: List<kotlin.String>, `now`: kotlin.Long): FfiZkpMatch {
+            return FfiConverterTypeFfiZkpMatch.lift(
+    uniffiRustCallWithError(ZkpReqException) { _status ->
+    UniffiLib.INSTANCE.uniffi_siros_dc_matcher_ffi_fn_func_zkp_req_match(
+        FfiConverterString.lower(`queryJson`),FfiConverterString.lower(`clientMetadataJson`),FfiConverterSequenceTypeFfiStoredCredential.lower(`credentials`),FfiConverterOptionalSequenceByteArray.lower(`anchors`),FfiConverterSequenceString.lower(`systems`),FfiConverterLong.lower(`now`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Checks the consented candidate again and builds its statement (system rulebooks,
+         * Section 7). The same inputs as [`zkp_req_match`], with the session and the credential's
+         * delivered `secret_seed`.
+         *
+         * # Errors
+         *
+         * [`ZkpReqError`]: what fails, with the Section 9 codes.
+         */
+    @Throws(ZkpReqException::class) fun `zkpReqPrepare`(`candidate`: FfiCandidate, `queryJson`: kotlin.String, `clientMetadataJson`: kotlin.String, `session`: FfiSession, `credential`: FfiStoredCredential, `secretSeed`: kotlin.ByteArray, `anchors`: List<kotlin.ByteArray>?, `now`: kotlin.Long): FfiPrepared {
+            return FfiConverterTypeFfiPrepared.lift(
+    uniffiRustCallWithError(ZkpReqException) { _status ->
+    UniffiLib.INSTANCE.uniffi_siros_dc_matcher_ffi_fn_func_zkp_req_prepare(
+        FfiConverterTypeFfiCandidate.lower(`candidate`),FfiConverterString.lower(`queryJson`),FfiConverterString.lower(`clientMetadataJson`),FfiConverterTypeFfiSession.lower(`session`),FfiConverterTypeFfiStoredCredential.lower(`credential`),FfiConverterByteArray.lower(`secretSeed`),FfiConverterOptionalSequenceByteArray.lower(`anchors`),FfiConverterLong.lower(`now`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * The session of a validated Request Object: the policy of signed requests and encrypted
+         * responses, the `Handover` for the response-encryption key with this JWK thumbprint, and
+         * `verifier_id` in the trust framework's form.
+         *
+         * # Errors
+         *
+         * [`ZkpReqError::InvalidRequest`] for a rule of the policy or of the verifier identity, and
+         * [`ZkpReqError::Host`] for a thumbprint of no key in the request.
+         */
+    @Throws(ZkpReqException::class) fun `zkpReqSession`(`requestObjectJson`: kotlin.String, `signed`: kotlin.Boolean, `channel`: FfiChannel, `jwkThumbprint`: kotlin.ByteArray, `verifierId`: FfiVerifierIdForm): FfiSession {
+            return FfiConverterTypeFfiSession.lift(
+    uniffiRustCallWithError(ZkpReqException) { _status ->
+    UniffiLib.INSTANCE.uniffi_siros_dc_matcher_ffi_fn_func_zkp_req_session(
+        FfiConverterString.lower(`requestObjectJson`),FfiConverterBoolean.lower(`signed`),FfiConverterTypeFfiChannel.lower(`channel`),FfiConverterByteArray.lower(`jwkThumbprint`),FfiConverterTypeFfiVerifierIdForm.lower(`verifierId`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Verifies a presentation against the verifier's own query, session, clock and trust
+         * anchors, with the host's proof verifier.
+         *
+         * # Errors
+         *
+         * [`ZkpReqError::Refused`] with the system rulebook's code.
+         */
+    @Throws(ZkpReqException::class) fun `zkpReqVerify`(`queryJson`: kotlin.String, `clientMetadataJson`: kotlin.String, `session`: FfiSession, `presentation`: kotlin.ByteArray, `now`: kotlin.Long, `toleranceFuture`: kotlin.Long, `tolerancePast`: kotlin.Long, `trustAnchors`: List<kotlin.ByteArray>, `verifier`: FfiProofVerifier): FfiVerified {
+            return FfiConverterTypeFfiVerified.lift(
+    uniffiRustCallWithError(ZkpReqException) { _status ->
+    UniffiLib.INSTANCE.uniffi_siros_dc_matcher_ffi_fn_func_zkp_req_verify(
+        FfiConverterString.lower(`queryJson`),FfiConverterString.lower(`clientMetadataJson`),FfiConverterTypeFfiSession.lower(`session`),FfiConverterByteArray.lower(`presentation`),FfiConverterLong.lower(`now`),FfiConverterLong.lower(`toleranceFuture`),FfiConverterLong.lower(`tolerancePast`),FfiConverterSequenceByteArray.lower(`trustAnchors`),FfiConverterTypeFfiProofVerifier.lower(`verifier`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * The `vp_token` of `direct_post.cwt` (`zkp_req`, Section 6.1), CBOR: each presentation is
+         * the map itself.
+         *
+         * # Errors
+         *
+         * [`ZkpReqError::Host`] for bytes that are no presentation.
+         */
+    @Throws(ZkpReqException::class) fun `zkpReqVpTokenCbor`(`entries`: List<FfiVpTokenEntry>): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(ZkpReqException) { _status ->
+    UniffiLib.INSTANCE.uniffi_siros_dc_matcher_ffi_fn_func_zkp_req_vp_token_cbor(
+        FfiConverterSequenceTypeFfiVpTokenEntry.lower(`entries`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * The `vp_token` of JSON Response Modes (`zkp_req`, Section 6.1): each presentation is the
+         * base64url, without padding, of its CBOR.
+         *
+         * # Errors
+         *
+         * [`ZkpReqError::Host`] for bytes that are no presentation.
+         */
+    @Throws(ZkpReqException::class) fun `zkpReqVpTokenJson`(`entries`: List<FfiVpTokenEntry>): kotlin.String {
             return FfiConverterString.lift(
-    uniffiRustCallWithError(ZkpReqPlanException) { _status ->
-    UniffiLib.INSTANCE.uniffi_siros_dc_matcher_ffi_fn_func_zkp_req_plan(
-        FfiConverterString.lower(`credentialQueryJson`),FfiConverterOptionalString.lower(`clientMetadataJson`),_status)
+    uniffiRustCallWithError(ZkpReqException) { _status ->
+    UniffiLib.INSTANCE.uniffi_siros_dc_matcher_ffi_fn_func_zkp_req_vp_token_json(
+        FfiConverterSequenceTypeFfiVpTokenEntry.lower(`entries`),_status)
 }
     )
     }

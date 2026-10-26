@@ -52,8 +52,8 @@ use picker::{emit_set, Member};
 use siros_dc_matcher_core::db::CredentialDatabase;
 use siros_dc_matcher_core::evaluator::{credentials, resolve, ProfilePolicy};
 use siros_dc_matcher_core::request::{diagnose, first_supported_context};
-use siros_dc_matcher_core::zkp_req::{Params, Plan};
 use siros_dcql::execute;
+use siros_zkp_req::ReqItem;
 
 /// Prefix for the per-entry set ids.
 ///
@@ -262,7 +262,7 @@ fn run(input: &Input<'_>, sets: &mut impl SetSink) {
             // A `zkp_req` match discloses no claims, so its rows describe
             // the proof being asked for instead, from the plan.
             let fields = match zk {
-                Some(zk) => zkp_req_rows(&zk.plan),
+                Some(zk) => zkp_req_rows(zk.items()),
                 None => disclosed_fields(credential, candidate),
             };
             members.push(Member {
@@ -331,44 +331,29 @@ const ROW_MAX_CHARS: usize = 80;
 /// being asked, not facts.
 const UNVERIFIED: &str = "(unverified request)";
 
-/// Picker rows for a planned `zkp_req` request: one per requested
-/// function, no claim fields.
+/// Picker rows for the answered option of a `zkp_req` request: one per item, no claim
+/// fields.
 ///
-/// Text comes from the unverified request, so each row says so. Opaque values
-/// (`config`, dates, `verifier_context`) are shown as given and truncated, and
-/// nothing is judged: whether the request is acceptable is the wallet's call.
-fn zkp_req_rows(plan: &Plan) -> Vec<(String, String)> {
-    plan.functions
-        .iter()
-        .map(|function| {
-            let (label, detail) = match &function.params {
-                Params::AgeCheck { ge, le, .. } => (
-                    "Age check",
-                    match (ge.as_deref(), le.as_deref()) {
-                        (Some(ge), Some(le)) => format!("born {ge} to {le}"),
-                        (Some(ge), None) => format!("born on or after {ge}"),
-                        (None, Some(le)) => format!("born on or before {le}"),
-                        (None, None) => String::new(),
-                    },
-                ),
-                Params::Pseudonym { config, .. } => (
-                    "Pseudonym",
-                    config
-                        .as_deref()
-                        .map(|c| format!("config {c}"))
-                        .unwrap_or_default(),
-                ),
-                Params::Unknown(_) => (function.function_id.as_str(), String::new()),
+/// Text comes from the unverified request, so each row says so. Opaque values (`config`,
+/// `range`) are shown as given and truncated, and nothing is judged: whether the request is
+/// acceptable is the wallet's call.
+fn zkp_req_rows<'q>(items: impl Iterator<Item = &'q ReqItem>) -> Vec<(String, String)> {
+    items
+        .map(|item| {
+            let param = |name: &str| item.params.get(name).and_then(serde_json::Value::as_str);
+            let (label, detail) = match item.fn_id.as_str() {
+                "age_check" => ("Age check", param("range").map(|r| format!("age {r}"))),
+                "pseudonym" => ("Pseudonym", param("config").map(|c| format!("config {c}"))),
+                other => (other, None),
             };
             // Clip the detail, never the marker: the marker is the part that
             // must survive.
-            let value = if detail.is_empty() {
-                UNVERIFIED.to_string()
-            } else {
-                format!(
+            let value = match detail {
+                None => UNVERIFIED.to_string(),
+                Some(detail) => format!(
                     "{} {UNVERIFIED}",
                     clip(&detail, ROW_MAX_CHARS - UNVERIFIED.len() - 1)
-                )
+                ),
             };
             (clip(label, ROW_MAX_CHARS), value)
         })
@@ -608,9 +593,10 @@ mod tests {
         let nym = "eu.europa.ec.eudi.nym_auth.1";
         let queries = [
             serde_json::json!({"id": "q", "format": "zkp_req", "meta": {"source_format": "mso_mdoc", "doctype_value": nym},
-                "_req": [{"fn_id": "age_check", "return": "a", "params": {"ge": "2008-10-10"}},
+                "_req": [{"fn_id": "age_check", "return": "a", "params": {"range": "18+"}},
                         {"fn_id": "pseudonym", "return": "n", "params": {"config": "x".repeat(300)}},
-                        {"fn_id": "future", "return": "f"}]}),
+                        {"fn_id": "future", "return": "f"}],
+                "_req_sets": [[0, 1], [1]]}),
             serde_json::json!({"id": "q", "format": "zkp_req", "meta": {"source_format": "mso_mdoc", "doctype_value": nym},
                 "claims": {"_req": [{"fn_id": "age_check", "return": "a"}]}}),
             serde_json::json!({"id": "q", "format": "zkp_req", "meta": {"source_format": "mso_mdoc", "doctype_value": nym},
@@ -628,21 +614,18 @@ mod tests {
 
     #[test]
     fn zkp_req_rows_say_they_are_unverified_and_are_bounded() {
-        let plan = siros_dc_matcher_core::zkp_req::plan(
-            &serde_json::json!({"id": "q", "format": "zkp_req", "meta": {"source_format": "mso_mdoc"},
-                "_req": [
-                    {"fn_id": "age_check", "return": "a", "params": {"ge": "2008-10-10", "le": "2013-10-09"}},
-                    {"fn_id": "pseudonym", "return": "n", "params": {"config": "c".repeat(500)}},
-                    {"fn_id": "mystery", "return": "m"},
-                    {"fn_id": "age_check", "return": "b"}]})
-            .to_string(),
-            None,
-        )
+        let query = siros_zkp_req::ZkpReqQuery::parse(&serde_json::json!({"id": "q",
+            "format": "zkp_req", "meta": {"source_format": "mso_mdoc", "doctype_value": "d"},
+            "_req": [
+                {"fn_id": "age_check", "params": {"range": "13-17"}},
+                {"fn_id": "pseudonym", "return": "n", "params": {"config": "c".repeat(500)}},
+                {"fn_id": "mystery", "return": "m"},
+                {"fn_id": "age_check", "return": "b"}]}))
         .unwrap();
-        let rows = zkp_req_rows(&plan);
-        assert_eq!(rows.len(), 4, "one row per function");
+        let rows = zkp_req_rows(query.items.iter());
+        assert_eq!(rows.len(), 4, "one row per item");
         assert_eq!(rows[0].0, "Age check");
-        assert!(rows[0].1.starts_with("born 2008-10-10 to 2013-10-09"));
+        assert!(rows[0].1.starts_with("age 13-17"));
         assert_eq!(rows[2], ("mystery".to_string(), UNVERIFIED.to_string()));
         for (name, value) in &rows {
             assert!(value.ends_with(UNVERIFIED), "{name}: {value}");

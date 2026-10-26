@@ -11,3 +11,6 @@ disallowed-types = [
     { path = "std::collections::HashSet", reason = "its RandomState reads WASI random_get, which the Credential Manager host lacks; use rustc_hash::FxHashSet" },
     { path = "std::collections::hash_map::RandomState", reason = "reads WASI random_get, which the Credential Manager host lacks; use rustc_hash::FxBuildHasher" },
 ]
+
+# The zkp_req crates enable clippy::cognitive_complexity; each function stays within this.
+cognitive-complexity-threshold = 15

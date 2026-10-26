@@ -25,6 +25,7 @@ use siros_dc_matcher_core::db::{Claim, Credential, CredentialDatabase, IconRef};
 use siros_dc_matcher_core::profile::{Capability, MatchProfile, ZKP_REQ_CAPABILITY, ZK_CAPABILITY};
 
 pub mod matching;
+pub mod zkp_req;
 
 uniffi::setup_scaffolding!();
 
