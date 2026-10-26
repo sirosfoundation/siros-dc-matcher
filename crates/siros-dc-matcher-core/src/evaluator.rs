@@ -192,14 +192,6 @@ impl ZkpReqSelection<'_> {
         }
         out
     }
-
-    /// The `_req` items of the answered option, in the Verifier's order.
-    pub fn items(&self) -> impl Iterator<Item = &siros_zkp_req::ReqItem> {
-        self.option
-            .items
-            .iter()
-            .filter_map(|&i| self.query.items.get(i))
-    }
 }
 
 /// A registered circuit as `zkp_req`, Section 1.3 judges a system.

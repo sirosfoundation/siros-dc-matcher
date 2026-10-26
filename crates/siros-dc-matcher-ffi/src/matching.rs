@@ -397,7 +397,7 @@ fn evaluate(
             purposes: combination
                 .purposes
                 .iter()
-                .map(siros_dc_matcher_core::purpose::display)
+                .map(siros_display::purpose::display)
                 .collect(),
         })
         .collect();
