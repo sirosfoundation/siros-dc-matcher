@@ -172,7 +172,8 @@ impl Planned<'_> {
                 fitting.push((index, addition));
             }
         }
-        let queries: Vec<QueryIndex> = left.iter().map(|picked| picked.query).collect();
+        let mut queries: Vec<QueryIndex> = left.iter().map(|picked| picked.query).collect();
+        queries.sort_unstable();
         let mut chosen = cover(&fitting, &queries).ok_or(PickError::Additions)?;
         chosen.sort_unstable();
         Ok(Selection::new(
@@ -260,8 +261,8 @@ impl Planned<'_> {
     }
 }
 
-/// The additions among `fitting` that answer each query of `queries` once, at most one per
-/// optional set: the first such combination in the order of `fitting`.
+/// The additions among `fitting` that answer each query of `queries`, in the request's order,
+/// once, at most one per optional set: the first such combination in the order of `fitting`.
 fn cover(
     fitting: &[(AdditionIndex, &Addition)],
     queries: &[QueryIndex],
