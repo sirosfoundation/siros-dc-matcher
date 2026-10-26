@@ -84,11 +84,6 @@ impl<'a> Transactions<'a> {
         }))
     }
 
-    /// The entries, in the order of the request.
-    pub(crate) fn entries(&self) -> &[Entry] {
-        &self.entries
-    }
-
     /// Whether an entry names only Credential Queries no credential answers: its credentials are
     /// not available in the wallet (Section 8.5).
     pub(crate) fn unavailable(&self, answered: &Wallet<'a>) -> bool {
@@ -101,6 +96,23 @@ impl<'a> Transactions<'a> {
                     .all(|answers| answers.candidates().is_empty())
             })
         })
+    }
+
+    /// The positions in the request's `transaction_data` of the entries `binding` binds.
+    pub(crate) fn positions(
+        &self,
+        binding: &MemberBinding<'_, '_>,
+    ) -> Result<Vec<usize>, TransactionDataError> {
+        binding
+            .entries()
+            .iter()
+            .map(|bound| {
+                self.entries
+                    .iter()
+                    .position(|entry| std::ptr::eq(entry, *bound))
+                    .ok_or(TransactionDataError::CredentialUnavailable)
+            })
+            .collect()
     }
 
     /// Whether an entry names the Credential Query at `query` in its `credential_ids`.

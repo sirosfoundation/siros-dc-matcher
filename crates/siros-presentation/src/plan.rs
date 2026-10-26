@@ -157,7 +157,7 @@ pub fn plan<'a>(input: &PlanInput<'a>) -> Result<PlanStep<'a>, PresentationError
         Step::Fetch(fetch) => return Ok(PlanStep::Fetch(fetch)),
         Step::Done(view) => view,
     };
-    let digest = digest::digest(request, &answered, &offers, view.offers(), &transactions)?;
+    let digest = digest::digest(request, &answered, &offers, view.offers())?;
     let view = view.with_digest(base64url::encode(&digest));
     Ok(PlanStep::Ready(Box::new(Planned {
         input: *input,

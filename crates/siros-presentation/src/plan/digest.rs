@@ -5,9 +5,8 @@ use sha2::{Digest, Sha256};
 use siros_codec::cbor::Value;
 use siros_dcql::PathComponent;
 use siros_oid4vp::VerifiedRequest;
-use siros_transaction_data::Entry;
 
-use super::transactions::{Transactions, Wallet};
+use super::transactions::Wallet;
 use super::view::OfferView;
 use crate::display_rule::WalletDisplay;
 use crate::error::PresentationError;
@@ -19,14 +18,13 @@ const DOMAIN: &str = "siros-presentation plan 1";
 
 /// The digest of the plan of `request`: the request's response target, `nonce`, `state`,
 /// `dcql_query` as sent and `transaction_data`, and for each offer its members with their
-/// instances and answers, its additions, the entries bound to each member and whether it needs
-/// the wallet's display.
+/// instances and answers, its additions, the positions of the entries bound to each member, and
+/// whether it needs the wallet's display.
 pub(crate) fn digest(
     request: &VerifiedRequest,
     answered: &Wallet<'_>,
     offers: &Offers,
     views: &[OfferView],
-    transactions: &Transactions<'_>,
 ) -> Result<[u8; 32], PresentationError> {
     let text = |t: Option<&str>| t.map_or(Value::Null, Value::text);
     let verifier = request.verifier();
@@ -48,27 +46,19 @@ pub(crate) fn digest(
     ]);
     let mut offer_parts = Vec::with_capacity(offers.offers().len());
     for (offer, view) in offers.offers().iter().zip(views) {
-        let bindings = transactions
-            .bind(answered, offer.members())
-            .map_err(PresentationError::TransactionData)?;
-        let bound = bindings
+        let bound = view
+            .members()
             .iter()
-            .map(|(member, binding)| {
-                let indexes = binding
-                    .entries()
-                    .iter()
-                    .map(|entry| {
-                        entry_index(transactions.entries(), entry)
-                            .map(Value::Unsigned)
-                            .ok_or(PresentationError::AnswerMismatch)
-                    })
-                    .collect::<Result<_, _>>()?;
-                Ok(Value::Array(vec![
-                    Value::Unsigned(*member as u64),
-                    Value::Array(indexes),
-                ]))
+            .map(|member| {
+                Value::Array(
+                    member
+                        .entries()
+                        .iter()
+                        .map(|&at| Value::Unsigned(at as u64))
+                        .collect(),
+                )
             })
-            .collect::<Result<_, PresentationError>>()?;
+            .collect();
         let additions = offer
             .additions()
             .iter()
@@ -92,14 +82,6 @@ pub(crate) fn digest(
         Value::Array(offer_parts),
     ]);
     Ok(Sha256::digest(plan.encode()).into())
-}
-
-/// The position of `entry` in `entries`.
-fn entry_index(entries: &[Entry], entry: &Entry) -> Option<u64> {
-    entries
-        .iter()
-        .position(|e| std::ptr::eq(e, entry))
-        .map(|at| at as u64)
 }
 
 /// Each member's query id, instance and answer.

@@ -97,6 +97,7 @@ fn sd_jwt_over_redirect_direct_post_jwt() {
 
     let planned = ready(&input).unwrap();
     let offer = &planned.view().offers()[0];
+    assert_eq!(offer.members()[0].entries(), [0]);
     assert_eq!(offer.members()[0].transactions().len(), 1);
     assert_eq!(offer.wallet_display(), WalletDisplay::Needed);
 

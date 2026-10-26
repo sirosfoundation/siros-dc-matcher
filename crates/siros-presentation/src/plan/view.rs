@@ -42,6 +42,7 @@ pub struct MemberView {
     query_id: String,
     card: Card,
     shown: Shown,
+    entries: Vec<usize>,
     transactions: Vec<TransactionView>,
 }
 
@@ -130,7 +131,13 @@ impl MemberView {
         &self.shown
     }
 
-    /// The transactions the credential authorizes.
+    /// The positions in the request's `transaction_data` of the entries bound to the credential
+    /// (T4), in the order of the request.
+    pub fn entries(&self) -> &[usize] {
+        &self.entries
+    }
+
+    /// The transactions the credential authorizes: the display of each of its entries.
     pub fn transactions(&self) -> &[TransactionView] {
         &self.transactions
     }
@@ -186,17 +193,20 @@ fn offer_view(
         .map_err(PresentationError::TransactionData)?;
     let mut members = Vec::with_capacity(offer.members().len());
     for (at, member) in offer.members().iter().enumerate() {
+        let mut entries = Vec::new();
         let mut transactions = Vec::new();
         for (_, binding) in bindings.iter().filter(|(bound, _)| *bound == at) {
+            let fail = PresentationError::TransactionData;
             match binding
                 .views(sources.fetched, sources.locales)
-                .map_err(PresentationError::TransactionData)?
+                .map_err(fail)?
             {
                 Step::Fetch(fetch) => return Ok(Step::Fetch(fetch)),
                 Step::Done(views) => transactions.extend(views),
             }
+            entries.extend(sources.transactions.positions(binding).map_err(fail)?);
         }
-        members.push(member_view(member, transactions, sources)?);
+        members.push(member_view(member, (entries, transactions), sources)?);
     }
     let additions = offer
         .additions()
@@ -209,7 +219,7 @@ fn offer_view(
                 members: addition
                     .members()
                     .iter()
-                    .map(|member| member_view(member, Vec::new(), sources))
+                    .map(|member| member_view(member, (Vec::new(), Vec::new()), sources))
                     .collect::<Result<_, PresentationError>>()?,
             })
         })
@@ -242,9 +252,10 @@ fn credential_id(answered: &Wallet<'_>, member: &Member) -> Option<CredentialId>
     Some(candidate.credential().credential().entry().credential_id())
 }
 
+/// The view of `member`, with the positions and the views of the entries bound to it.
 fn member_view(
     member: &Member,
-    transactions: Vec<TransactionView>,
+    (entries, transactions): (Vec<usize>, Vec<TransactionView>),
     sources: &Sources<'_, '_>,
 ) -> Result<MemberView, PresentationError> {
     let answers = sources
@@ -280,6 +291,7 @@ fn member_view(
             .card(credential, sources.locales)
             .map_err(display)?,
         shown,
+        entries,
         transactions,
     })
 }
