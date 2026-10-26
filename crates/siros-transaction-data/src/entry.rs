@@ -36,7 +36,7 @@ impl Entry {
         query: &DcqlQuery,
         now: DateTime,
     ) -> Result<Self, TransactionDataError> {
-        let bytes = base64url::decode(raw).ok_or(TransactionDataError::NotBase64url)?;
+        let bytes = base64url::decode(raw).map_err(|_| TransactionDataError::NotBase64url)?;
         let text = String::from_utf8(bytes).map_err(|_| TransactionDataError::NotJsonObject)?;
         let object = match Json::parse(&text) {
             Ok(Json::Object(object)) => object,

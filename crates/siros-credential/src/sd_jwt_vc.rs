@@ -102,7 +102,7 @@ fn p256_jwk(cnf: &Object) -> Result<P256Key, HolderKeyError> {
     }
     let coordinate = |name: &str| -> Result<[u8; 32], HolderKeyError> {
         text(name)
-            .and_then(base64url::decode)
+            .and_then(|text| base64url::decode(text).ok())
             .and_then(|bytes| <[u8; 32]>::try_from(bytes).ok())
             .ok_or(HolderKeyError::Coordinate)
     };

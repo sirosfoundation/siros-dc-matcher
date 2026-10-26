@@ -145,8 +145,8 @@ impl Partial {
         match key.as_text() {
             Some("system_id") => self.system_id = Some(text(value, Member::SystemId)?),
             Some("proof_backend") => self.proof_backend = Some(text(value, Member::ProofBackend)?),
-            Some("req_set") => match value.kind {
-                Kind::Unsigned(n) => self.req_set = Some(n),
+            Some("req_set") => match value.kind() {
+                Kind::Unsigned(n) => self.req_set = Some(*n),
                 _ => return Err(wrong(Member::ReqSet)),
             },
             Some("proof") => {
@@ -255,7 +255,7 @@ pub fn vp_token_json(answers: &[(String, Vec<ZkpPresentation>)]) -> serde_json::
         .map(|(query_id, presentations)| {
             let list = presentations
                 .iter()
-                .map(|p| serde_json::Value::String(base64url::encode(&p.encode())))
+                .map(|p| serde_json::Value::String(base64url::encode(&p.encode()).into()))
                 .collect();
             (query_id.clone(), serde_json::Value::Array(list))
         })

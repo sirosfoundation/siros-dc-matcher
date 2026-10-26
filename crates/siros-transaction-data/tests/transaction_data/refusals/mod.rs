@@ -141,7 +141,7 @@ fn claims(claims: Value) -> Value {
 
 /// The base64url of the text `text`.
 fn text(text: &str) -> Input {
-    Input::Entry(base64url::encode(text.as_bytes()))
+    Input::Entry(base64url::encode(text.as_bytes()).into())
 }
 
 /// An honest payment entry with `changes`.

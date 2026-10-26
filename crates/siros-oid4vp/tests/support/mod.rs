@@ -71,12 +71,15 @@ pub fn key(byte: u8) -> SigningKey {
 }
 
 pub fn b64(bytes: &[u8]) -> String {
-    base64url::encode(bytes)
+    base64url::encode(bytes).into_string()
 }
 
 /// base64 with padding, as `x5c` carries certificates.
 pub fn b64_padded(bytes: &[u8]) -> String {
-    let mut text = base64url::encode(bytes).replace('-', "+").replace('_', "/");
+    let mut text = base64url::encode(bytes)
+        .into_string()
+        .replace('-', "+")
+        .replace('_', "/");
     while text.len() % 4 != 0 {
         text.push('=');
     }

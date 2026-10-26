@@ -216,7 +216,7 @@ fn is_data_url(text: &str) -> bool {
         None => true,
     };
     let data_fits = if base64 {
-        base64::decode(data).is_some()
+        base64::decode(data).is_ok()
     } else {
         data.bytes().all(|b| b.is_ascii_graphic())
     };

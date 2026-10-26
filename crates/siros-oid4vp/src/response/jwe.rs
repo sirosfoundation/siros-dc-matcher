@@ -53,8 +53,14 @@ pub(super) fn encrypt(
     let mut epk = Map::new();
     epk.insert("kty".into(), "EC".into());
     epk.insert("crv".into(), "P-256".into());
-    epk.insert("x".into(), base64url::encode(&agreement.x).into());
-    epk.insert("y".into(), base64url::encode(&agreement.y).into());
+    epk.insert(
+        "x".into(),
+        base64url::encode(&agreement.x).into_string().into(),
+    );
+    epk.insert(
+        "y".into(),
+        base64url::encode(&agreement.y).into_string().into(),
+    );
     let mut header = Map::new();
     header.insert("alg".into(), "ECDH-ES".into());
     header.insert("enc".into(), encryption.enc.as_str().into());
@@ -65,7 +71,13 @@ pub(super) fn encrypt(
     let protected = base64url::encode(Value::Object(header).to_string().as_bytes());
     let iv = aead::iv(rng);
     // RFC 7516, Section 5.1, step 14: the AAD is the encoded protected header.
-    let (ciphertext, tag) = aead::seal(encryption.enc, &cek, iv, protected.as_bytes(), payload)?;
+    let (ciphertext, tag) = aead::seal(
+        encryption.enc,
+        &cek,
+        iv,
+        protected.as_str().as_bytes(),
+        payload,
+    )?;
     // The JWE Encrypted Key is empty in Direct Key Agreement (RFC 7518, Section 4.6).
     Ok(format!(
         "{protected}..{}.{}.{}",

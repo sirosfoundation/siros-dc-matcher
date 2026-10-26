@@ -129,7 +129,7 @@ fn opening(entry: &Value) -> Result<SecretSeed, NoSeed> {
     let decoded = entry
         .get("opening")
         .and_then(Value::as_str)
-        .and_then(base64url::decode)
+        .and_then(|text| base64url::decode(text).ok())
         .map(Zeroizing::new)
         .ok_or(NoSeed::Opening)?;
     let mut seed = Zeroizing::new([0u8; 16]);

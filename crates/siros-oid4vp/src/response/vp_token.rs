@@ -45,7 +45,7 @@ impl Presentation {
     fn json(&self) -> Value {
         match &self.0 {
             Form::Text(text) => Value::String(text.clone()),
-            Form::Cbor(encoded) => Value::String(base64url::encode(encoded)),
+            Form::Cbor(encoded) => Value::String(base64url::encode(encoded).into()),
         }
     }
 

@@ -38,9 +38,9 @@ impl HashAlg {
     pub fn hash(self, entry: &str) -> String {
         let bytes = entry.as_bytes();
         match self {
-            Self::Sha256 => base64url::encode(&Sha256::digest(bytes)),
-            Self::Sha384 => base64url::encode(&Sha384::digest(bytes)),
-            Self::Sha512 => base64url::encode(&Sha512::digest(bytes)),
+            Self::Sha256 => base64url::encode(&Sha256::digest(bytes)).into(),
+            Self::Sha384 => base64url::encode(&Sha384::digest(bytes)).into(),
+            Self::Sha512 => base64url::encode(&Sha512::digest(bytes)).into(),
         }
     }
 

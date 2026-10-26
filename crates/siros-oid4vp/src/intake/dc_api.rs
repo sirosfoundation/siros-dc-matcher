@@ -67,8 +67,8 @@ pub(super) fn intake(
                 .get("payload")
                 .and_then(Value::as_str)
                 .ok_or(IntakeError::JwsMalformed)?;
-            let payload =
-                siros_codec::base64url::decode(payload_b64).ok_or(IntakeError::JwsMalformed)?;
+            let payload = siros_codec::base64url::decode(payload_b64)
+                .map_err(|_| IntakeError::JwsMalformed)?;
             let params = request_object(&payload)?;
             // A.3.2.2: `client_id` travels in each signature's protected header only.
             if params.contains_key("client_id") {

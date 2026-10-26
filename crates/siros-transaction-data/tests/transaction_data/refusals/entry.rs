@@ -29,7 +29,7 @@ pub(super) fn rows() -> Vec<Row> {
         ),
         (
             "bytes that are not UTF-8",
-            Input::Entry(base64url::encode(&[0x7b, 0xff, 0x7d])),
+            Input::Entry(base64url::encode(&[0x7b, 0xff, 0x7d]).into()),
             Err("transaction_data_not_json_object"),
         ),
         (

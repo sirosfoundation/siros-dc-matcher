@@ -16,7 +16,7 @@ fn unhex(text: &str) -> Vec<u8> {
 }
 
 fn annex_d() -> Mdoc {
-    Mdoc::parse(&base64url::encode(&unhex(DEVICE_RESPONSE.trim()))).unwrap()
+    Mdoc::parse(&base64url::encode(&unhex(DEVICE_RESPONSE.trim())).into_string()).unwrap()
 }
 
 /// The standard's statements about its example: the mDL `docType`, six items of
@@ -52,7 +52,7 @@ fn disclosed_pairs_read_back_as_issued() {
             });
             let disclosure = mdoc.disclose(&selection, Vec::new()).unwrap();
             let response = disclosure.device_response(&[0x5a; 64]);
-            let read = Mdoc::parse(&base64url::encode(&response)).unwrap();
+            let read = Mdoc::parse(&base64url::encode(&response).into_string()).unwrap();
             let disclosed: Vec<(&str, &[u8])> = read
                 .name_spaces()
                 .iter()

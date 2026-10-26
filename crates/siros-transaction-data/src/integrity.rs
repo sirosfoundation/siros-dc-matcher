@@ -71,6 +71,7 @@ impl Integrity {
                 continue;
             };
             let digest = base64::decode(value)
+                .ok()
                 .filter(|d| d.len() == alg.len())
                 .ok_or(TransactionDataError::IntegrityMalformed)?;
             expressions.push((alg, digest));

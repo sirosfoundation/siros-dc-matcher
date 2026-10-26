@@ -73,7 +73,7 @@ impl RngCore for Rng {
 impl CryptoRng for Rng {}
 
 pub fn b64(bytes: &[u8]) -> String {
-    base64url::encode(bytes)
+    base64url::encode(bytes).into_string()
 }
 
 /// The verifier's response encryption key.
@@ -253,7 +253,10 @@ impl Signer {
     /// The protected header of a Request Object, with `x5c`.
     fn header(self) -> Value {
         let (_, der) = certificate(self);
-        let mut x5c = base64url::encode(&der).replace('-', "+").replace('_', "/");
+        let mut x5c = base64url::encode(&der)
+            .into_string()
+            .replace('-', "+")
+            .replace('_', "/");
         while x5c.len() % 4 != 0 {
             x5c.push('=');
         }

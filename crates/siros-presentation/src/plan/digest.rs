@@ -57,7 +57,7 @@ impl PlanDigest {
     ///
     /// [`DigestError`]: text that is not unpadded base64url, or not of 32 bytes.
     pub fn parse(text: &str) -> Result<Self, DigestError> {
-        let bytes = base64url::decode(text).ok_or(DigestError::Encoding)?;
+        let bytes = base64url::decode(text).map_err(|_| DigestError::Encoding)?;
         let length = bytes.len();
         <[u8; 32]>::try_from(bytes)
             .map(Self)
@@ -88,7 +88,7 @@ impl PlanDigest {
 
 impl fmt::Display for PlanDigest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&base64url::encode(&self.0))
+        f.write_str(base64url::encode(&self.0).as_str())
     }
 }
 

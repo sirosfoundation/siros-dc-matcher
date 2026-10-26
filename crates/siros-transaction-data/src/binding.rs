@@ -148,7 +148,7 @@ impl Jti {
     /// base64url.
     #[must_use]
     pub fn new(random: [u8; 16]) -> Self {
-        Self(base64url::encode(&random))
+        Self(base64url::encode(&random).into())
     }
 
     /// The identifier.

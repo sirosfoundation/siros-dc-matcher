@@ -118,9 +118,9 @@ fn credential() -> Credential {
     });
     let sd_jwt = format!(
         "{}.{}.{}~",
-        base64url::encode(br#"{"alg":"ES256","typ":"dc+sd-jwt"}"#),
-        base64url::encode(payload.to_string().as_bytes()),
-        base64url::encode(&[7; 64]),
+        base64url::encode(br#"{"alg":"ES256","typ":"dc+sd-jwt"}"#).into_string(),
+        base64url::encode(payload.to_string().as_bytes()).into_string(),
+        base64url::encode(&[7; 64]).into_string(),
     );
     let state = json!({
         "schemaVersion": 4,

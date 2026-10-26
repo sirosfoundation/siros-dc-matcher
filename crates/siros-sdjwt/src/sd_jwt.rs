@@ -85,7 +85,7 @@ fn issuer_payload(issuer_jwt: &str) -> Result<Vec<(String, Json)>, ParseError> {
     ) else {
         return Err(ParseError::IssuerJwt);
     };
-    if signature.is_empty() || base64url::decode(signature).is_none() {
+    if signature.is_empty() || base64url::decode(signature).is_err() {
         return Err(ParseError::IssuerJwt);
     }
     if segment_object(header).is_none() {
@@ -96,7 +96,7 @@ fn issuer_payload(issuer_jwt: &str) -> Result<Vec<(String, Json)>, ParseError> {
 
 /// The members of the JSON object the base64url `segment` encodes.
 fn segment_object(segment: &str) -> Option<Vec<(String, Json)>> {
-    match Json::parse(&base64url::decode(segment)?)? {
+    match Json::parse(&base64url::decode(segment).ok()?)? {
         Json::Object(members) => Some(members),
         _ => None,
     }
@@ -115,7 +115,10 @@ fn sd_alg(payload: &[(String, Json)]) -> Result<HashAlg, ParseError> {
 
 /// What the disclosure `encoded` reveals (Sections 4.2.1 and 4.2.2).
 fn disclosure_content(encoded: &str) -> Result<Content, ParseError> {
-    let Some(Json::Array(items)) = base64url::decode(encoded).and_then(|b| Json::parse(&b)) else {
+    let Some(Json::Array(items)) = base64url::decode(encoded)
+        .ok()
+        .and_then(|b| Json::parse(&b))
+    else {
         return Err(ParseError::Disclosure);
     };
     let mut items = items.into_iter();

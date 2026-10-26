@@ -46,12 +46,12 @@ pub fn encode_payload(transaction_type: &str, payload: &str) -> String {
         r#"{{"type":{},"credential_ids":["pay"],"transaction_data_hashes_alg":["sha-256"],"payload":{payload}}}"#,
         Value::from(transaction_type)
     );
-    base64url::encode(text.as_bytes())
+    base64url::encode(text.as_bytes()).into()
 }
 
 /// base64url of the JSON text of `entry`, as a verifier sends it.
 pub fn encode(entry: &Value) -> String {
-    base64url::encode(entry.to_string().as_bytes())
+    base64url::encode(entry.to_string().as_bytes()).into()
 }
 
 /// An entry of `transaction_type` with `payload`, naming `pay` and accepting SHA-256.
@@ -208,7 +208,11 @@ pub fn mdoc() -> Credential {
             ]),
         ),
     ]);
-    credentials(&[("mso_mdoc", base64url::encode(&issuer_signed.encode()))]).remove(0)
+    credentials(&[(
+        "mso_mdoc",
+        base64url::encode(&issuer_signed.encode()).into(),
+    )])
+    .remove(0)
 }
 
 /// Claim metadata of `path` below `payload`, labelled in English, at `visualisation` when

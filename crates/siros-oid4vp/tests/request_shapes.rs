@@ -3,7 +3,7 @@
 //! Appendix A). The payloads follow the specification; a capture from a real
 //! verifier belongs in the device pass.
 
-use siros_codec::base64url::encode as b64;
+use siros_codec::base64url;
 use siros_oid4vp::{diagnose, NoQuery, UnverifiedRequest};
 
 /// The protocols SIROS wallets register: the three of OpenID4VP 1.0, A.1.
@@ -55,6 +55,10 @@ fn envelope(protocol: &str, data: serde_json::Value) -> Vec<u8> {
     serde_json::json!({"requests": [{"protocol": protocol, "data": data}]})
         .to_string()
         .into_bytes()
+}
+
+fn b64(bytes: &[u8]) -> String {
+    base64url::encode(bytes).into()
 }
 
 fn compact_jws(payload: &str) -> String {

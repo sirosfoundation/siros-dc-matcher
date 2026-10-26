@@ -26,9 +26,9 @@ impl HashAlg {
     /// The base64url digest of `input` (Section 4.2.3).
     pub(crate) fn digest(self, input: &[u8]) -> String {
         match self {
-            Self::Sha256 => base64url::encode(&Sha256::digest(input)),
-            Self::Sha384 => base64url::encode(&Sha384::digest(input)),
-            Self::Sha512 => base64url::encode(&Sha512::digest(input)),
+            Self::Sha256 => base64url::encode(&Sha256::digest(input)).into(),
+            Self::Sha384 => base64url::encode(&Sha384::digest(input)).into(),
+            Self::Sha512 => base64url::encode(&Sha512::digest(input)).into(),
         }
     }
 }

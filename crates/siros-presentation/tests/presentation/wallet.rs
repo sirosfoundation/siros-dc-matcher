@@ -176,7 +176,7 @@ pub fn mdoc(doc_type: &str, name_space: &str, items: &[(&str, Cbor)]) -> String 
             ]),
         ),
     ]);
-    base64url::encode(&issuer_signed.encode())
+    base64url::encode(&issuer_signed.encode()).into_string()
 }
 
 /// A nym_auth attestation of nym_auth's test issuer, with its seed delivered.

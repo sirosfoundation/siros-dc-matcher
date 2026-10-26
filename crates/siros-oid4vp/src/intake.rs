@@ -93,7 +93,7 @@ impl IntakeState {
             start: Start::Redirect {
                 uri: uri.to_owned(),
                 vp_formats_supported,
-                wallet_nonce: base64url::encode(&nonce),
+                wallet_nonce: base64url::encode(&nonce).into_string(),
             },
             now_unix,
             answers: Vec::new(),

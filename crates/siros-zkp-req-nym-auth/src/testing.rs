@@ -262,7 +262,7 @@ pub fn issue(issuer: &Issuer, spec: &Spec) -> String {
             ]),
         ),
     ]);
-    base64url::encode(&issuer_signed.encode())
+    base64url::encode(&issuer_signed.encode()).into()
 }
 
 pub fn stored(id: &str, data: String) -> StoredCredential {

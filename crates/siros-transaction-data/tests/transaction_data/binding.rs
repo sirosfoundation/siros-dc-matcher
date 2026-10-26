@@ -56,7 +56,7 @@ fn an_entry_binds_to_one_credential() {
             "card",
         ),
     ];
-    let hash = base64url::encode(&Sha256::digest(raw.as_bytes()));
+    let hash = base64url::encode(&Sha256::digest(raw.as_bytes())).into_string();
     let amr = Amr::new(vec![
         Factor::Knowledge(Knowledge::Pin6OrMoreDigits),
         Factor::Inherence(Inherence::FingerprintDevice),
@@ -71,7 +71,7 @@ fn an_entry_binds_to_one_credential() {
         let expected: Vec<(String, Value)> = [
             ("transaction_data_hashes", json!([hash])),
             ("transaction_data_hashes_alg", json!("sha-256")),
-            ("jti", json!(base64url::encode(&[9; 16]))),
+            ("jti", json!(base64url::encode(&[9; 16]).as_str())),
             ("response_mode", json!("direct_post")),
             (
                 "amr",

@@ -57,7 +57,7 @@ impl Chain {
             .filter(|chain| !chain.is_empty())
             .ok_or(IntakeError::CertificateChainInvalid)?
             .iter()
-            .map(|c| c.as_str().and_then(base64::decode))
+            .map(|c| c.as_str().and_then(|c| base64::decode(c).ok()))
             .collect::<Option<Vec<_>>>()
             .ok_or(IntakeError::CertificateChainInvalid)?;
         let leaf = der

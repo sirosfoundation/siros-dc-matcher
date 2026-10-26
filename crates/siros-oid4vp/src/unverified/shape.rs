@@ -101,5 +101,5 @@ fn decode_payload(payload: &str) -> Result<Vec<u8>, NoQuery> {
     if payload.len() > MAX_PAYLOAD {
         return Err(NoQuery::PayloadNotBase64url);
     }
-    base64url::decode(payload).ok_or(NoQuery::PayloadNotBase64url)
+    base64url::decode(payload).map_err(|_| NoQuery::PayloadNotBase64url)
 }

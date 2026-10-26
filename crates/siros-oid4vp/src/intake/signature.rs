@@ -86,7 +86,7 @@ pub(super) fn authenticate(
         ClientIdPrefix::X509Hash => {
             let chain = Chain::parse(signed.header().get("x5c"))?;
             let hash = base64url::encode(&Sha256::digest(chain.leaf()));
-            if hash != client_id.value() {
+            if hash.as_str() != client_id.value() {
                 return Err(IntakeError::CertificateHashMismatch.into());
             }
             signed.verify(chain.key())?;

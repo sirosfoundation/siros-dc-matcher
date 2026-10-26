@@ -3,7 +3,7 @@
 
 use sha2::{Digest, Sha256};
 use siros_codec::base64url;
-use siros_codec::cbor::{CborError, Value};
+use siros_codec::cbor::{CborError, Unsupported, Value};
 use siros_mdoc::{DeviceSignedElement, DisclosureError, ElementId, Mdoc, MdocError};
 
 const DOC_TYPE: &str = "org.example.doc.1";
@@ -152,7 +152,7 @@ fn assemble(parts: &Parts) -> String {
         ("documents", Value::Array(vec![document; parts.documents])),
         ("status", Value::Unsigned(0)),
     ]);
-    base64url::encode(&response.encode())
+    base64url::encode(&response.encode()).into_string()
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -206,8 +206,10 @@ fn each_rule_refuses_its_fixture() {
         ),
         (
             "cbor",
-            read(&base64url::encode(&[0x9f, 0xff])),
-            Got::Mdoc(MdocError::Cbor(CborError::Unsupported)),
+            read(&base64url::encode(&[0x9f, 0xff]).into_string()),
+            Got::Mdoc(MdocError::Cbor(CborError::Unsupported(
+                Unsupported::IndefiniteLength,
+            ))),
         ),
         (
             "envelope",

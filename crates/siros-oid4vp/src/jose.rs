@@ -81,7 +81,7 @@ impl Signed {
 }
 
 fn decode(segment: &str) -> Result<Vec<u8>, IntakeError> {
-    base64url::decode(segment).ok_or(IntakeError::JwsMalformed)
+    base64url::decode(segment).map_err(|_| IntakeError::JwsMalformed)
 }
 
 /// The key of a public JWK with `kty` `EC` and `crv` `P-256`, its coordinates 32 bytes each.
@@ -90,7 +90,11 @@ pub(crate) fn p256_key(jwk: &Value) -> Option<PublicKey> {
     if text("kty")? != "EC" || text("crv")? != "P-256" {
         return None;
     }
-    let coordinate = |name: &str| base64url::decode(text(name)?).filter(|c| c.len() == 32);
+    let coordinate = |name: &str| {
+        base64url::decode(text(name)?)
+            .ok()
+            .filter(|c| c.len() == 32)
+    };
     let point = [vec![0x04], coordinate("x")?, coordinate("y")?].concat();
     PublicKey::from_sec1_bytes(&point).ok()
 }
