@@ -4,6 +4,7 @@
 use serde_json::Value;
 use siros_codec::base64url;
 use siros_credential::Credential;
+use siros_dcql::QueryId;
 use siros_display::Locale;
 use siros_oid4vp::ResponseMode;
 
@@ -40,20 +41,20 @@ const CLAIM_ORDER: [KbJwtClaim; 3] = [KbJwtClaim::Jti, KbJwtClaim::ResponseMode,
 /// metadata.
 #[derive(Clone, Copy)]
 pub struct Presented<'a> {
-    query_id: &'a str,
+    query_id: &'a QueryId,
     metadata: &'a ScaMetadata<'a>,
 }
 
 impl<'a> Presented<'a> {
     /// The credential of `metadata`, presented for the Credential Query `query_id`.
     #[must_use]
-    pub fn new(query_id: &'a str, metadata: &'a ScaMetadata<'a>) -> Self {
+    pub fn new(query_id: &'a QueryId, metadata: &'a ScaMetadata<'a>) -> Self {
         Self { query_id, metadata }
     }
 
     /// The Credential Query id.
     #[must_use]
-    pub fn query_id(&self) -> &'a str {
+    pub fn query_id(&self) -> &'a QueryId {
         self.query_id
     }
 
@@ -133,10 +134,7 @@ impl Entry {
     /// (OpenID4VP 1.0, Section 5.1; EC TS12 v1.0.1, Section 4.1).
     #[must_use]
     pub fn carried_by(&self, presented: &Presented<'_>) -> bool {
-        self.credential_ids()
-            .iter()
-            .any(|id| id == presented.query_id)
-            && self.body().authorizes(presented.metadata)
+        self.names(presented.query_id) && self.body().authorizes(presented.metadata)
     }
 }
 

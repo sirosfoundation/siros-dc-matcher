@@ -28,6 +28,7 @@ impl Fetches {
     ) -> Result<(), PresentationError> {
         self.0
             .insert_first(fetch, response)
+            .map(drop)
             .map_err(|_| PresentationError::FetchRepeated(fetch.url().clone()))
     }
 

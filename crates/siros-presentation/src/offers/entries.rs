@@ -1,6 +1,8 @@
 //! The `transaction_data` entries as the offers see them (A3, T4): the Credential Queries each
 //! names, and the candidates whose credentials can carry it.
 
+use siros_dcql::QueryId;
+
 use super::Member;
 use crate::ids::{CandidateIndex, QueryIndex};
 use crate::matching::{Answered, Answers, Candidate};
@@ -25,15 +27,12 @@ pub struct EntryCarriers {
 }
 
 impl<'r, C, R> Answered<'r, C, R> {
-    /// The Credential Queries of the request that `credential_ids`, an entry's, name.
-    pub fn entry_queries<'i>(
-        &self,
-        credential_ids: impl IntoIterator<Item = &'i str>,
-    ) -> EntryQueries {
+    /// The Credential Queries of the request whose `id` an entry `names`.
+    pub fn entry_queries(&self, mut names: impl FnMut(&QueryId) -> bool) -> EntryQueries {
         EntryQueries(
-            credential_ids
-                .into_iter()
-                .filter_map(|id| self.index_of(id))
+            self.indexed()
+                .filter(|(_, answers)| names(answers.id()))
+                .map(|(query, _)| query)
                 .collect(),
         )
     }

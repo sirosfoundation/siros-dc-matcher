@@ -148,8 +148,10 @@ against the 307,200-byte budget (303,914 before).
 - `siros-credential`: `least_used` takes any `Instance`. `Credential::holder_key` gives the
   holder's P-256 key, an SD-JWT VC's `cnf.jwk` or an mdoc's `deviceKey`; an SD-JWT VC whose
   `cnf` holds no P-256 `jwk` does not parse (`CredentialError::HolderKey`). `siros-mdoc` gains
-  `P256Key::new`. `siros-transaction-data` gains `Entry::carried_by`, `Fetched::insert_first`
-  and `Fetched::response`. `siros-wallet-state`: `CredentialId::new` is public, for the ids
+  `P256Key::new`. `siros-transaction-data` gains `Entry::carried_by` and `Entry::names`, the
+  one rule of an entry naming a Credential Query, with `Entry::credential_ids` and
+  `Presented::query_id` as `QueryId`s; `Fetched::insert_first` records the first response to
+  a URL, and `Fetched::response` reads it. `siros-wallet-state`: `CredentialId::new` is public, for the ids
   picker entries carry, and `InstanceId` displays its decimal form.
 - `siros-transaction-data`, the `transaction_data` request parameter (OpenID4VP 1.0, Section
   5.1) for the wallet core. It parses entries of the four EC TS12 v1.0.1 types into typed

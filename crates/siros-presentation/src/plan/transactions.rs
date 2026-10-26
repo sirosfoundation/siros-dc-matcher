@@ -138,8 +138,7 @@ impl<'a> Transactions<'a> {
             .map(|entry| {
                 named(answered, entry).carriers(answered, |answers, candidate| {
                     self.metadata_of(candidate).is_some_and(|metadata| {
-                        let query_id = answers.query().id.as_str();
-                        entry.carried_by(&Presented::new(query_id, metadata))
+                        entry.carried_by(&Presented::new(answers.id(), metadata))
                     })
                 })
             })
@@ -180,9 +179,8 @@ impl<'a> Transactions<'a> {
             .flat_map(|member| {
                 member.candidates.iter().filter_map(|&(_, candidate)| {
                     let metadata = self.metadata_of(candidate)?;
-                    let query_id = member.answers.query().id.as_str();
                     let bound = Bound::of(member.answers, candidate);
-                    Some((bound, Presented::new(query_id, metadata)))
+                    Some((bound, Presented::new(&member.answers.query().id, metadata)))
                 })
             })
             .collect();
@@ -207,7 +205,7 @@ impl<'a> Transactions<'a> {
 
 /// The Credential Queries `entry` names among `answered`'s.
 fn named(answered: &Wallet<'_>, entry: &Entry) -> EntryQueries {
-    answered.entry_queries(entry.credential_ids().iter().map(String::as_str))
+    answered.entry_queries(|id| entry.names(id))
 }
 
 /// The SD-JWT VCs that answer a query an entry of `entries` names, each once.
