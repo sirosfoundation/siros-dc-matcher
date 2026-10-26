@@ -2637,6 +2637,7 @@ dependencies = [
  "siros-codec",
  "siros-mdoc",
  "siros-oid4vp",
+ "siros-wallet-state",
  "siros-zkp-req",
  "siros-zkp-req-nym-auth",
  "x509-cert",

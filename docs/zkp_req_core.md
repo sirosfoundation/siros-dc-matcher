@@ -150,7 +150,8 @@ artifacts from their reference copies.
 * `attestation::UsableAttestation::of(mdoc, anchors, proof_time)` tests an mdoc `siros-mdoc`
   parsed.
 * `presenter::Answer::new(pair, attestation, secret_seed)` holds when the seed opens `ssc` and the
-  option's assertions hold.
+  option's assertions hold; `Prepared::new(answer, &NymAuthRequest, key_id)` gives the `Prepared`
+  of the answer in the request's session.
 * `presenter::prepare(&ProveInput)` gives `Prepared`: `data_to_sign`, `key_id`, `statement`,
   `job(device_signature)`, `assemble(&ProofOutput)`, and `prove(device_signature, prover)` for
   a linked prover. `presenter::present` runs the phases with a `Signer` and a `NymAuthProver`.

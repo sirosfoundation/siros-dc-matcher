@@ -23,6 +23,11 @@ use crate::prover::{NymAuthProver, ProofJob, ProofOutput, ProverFailure, Stateme
 use crate::system::{pair_code, NymAuthSystem, Unsupported};
 use crate::verifier_id::{pseudonym_sha256, sha256, verifier_input, VerifierId};
 
+#[cfg(feature = "request")]
+use crate::request::NymAuthRequest;
+#[cfg(feature = "request")]
+use siros_wallet_state::KeyId;
+
 /// The session a presentation is bound to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Session {
@@ -186,6 +191,23 @@ pub fn prepare(input: &ProveInput<'_>) -> Result<Prepared, ProveError> {
     let anchors = anchors_for(&parsed.query, input.anchors)?;
     let answer = answer(pair, input.credential, anchors, proof_time, &seed)?;
     build(answer, input.session, &input.credential.kid)
+}
+
+impl Prepared {
+    /// The statement of `answer` in the session of `request`, for the device key `key_id`
+    /// (system rulebooks, Section 7).
+    ///
+    /// # Errors
+    ///
+    /// [`ProveError::NotUsable`] for an `age_check` bound the system does not encode.
+    #[cfg(feature = "request")]
+    pub fn new(
+        answer: Answer<'_>,
+        request: &NymAuthRequest<'_>,
+        key_id: &KeyId,
+    ) -> Result<Self, ProveError> {
+        build(answer, request.session(), key_id.as_str())
+    }
 }
 
 /// The statement of `answer` in `session`, and the data the device key `kid` signs.
