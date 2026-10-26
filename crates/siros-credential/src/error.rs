@@ -1,9 +1,7 @@
-//! Why a credential, a claim, a pointer or a validity witness is refused. Each error has a
-//! stable code.
+//! Why a credential, a pointer or a validity witness is refused. Each error has a stable code.
 
 use std::fmt;
 
-use siros_dcql::PathError;
 use siros_mdoc::MdocError;
 use siros_sdjwt::ParseError;
 
@@ -27,6 +25,17 @@ pub enum CredentialError {
     /// The SD-JWT VC's `nbf` or `exp` is not a NumericDate of years 0000 to 9999 (RFC 7519,
     /// Section 2).
     NumericDate(&'static str),
+    /// An mdoc value holds a tag other than 0 (`tdate`) and 1004 (`full-date`).
+    Tag,
+    /// An mdoc `tdate` is not tag 0 over text `YYYY-MM-DDThh:mm:ssZ` of a real UTC second
+    /// (ISO/IEC 18013-5, 7.2.1).
+    Tdate,
+    /// An mdoc `full-date` is not tag 1004 over text `YYYY-MM-DD` of a real date (RFC 8943).
+    FullDate,
+    /// An mdoc map value has a key other than text.
+    MapKey,
+    /// An mdoc value holds `undefined`.
+    Undefined,
 }
 
 impl CredentialError {
@@ -40,6 +49,11 @@ impl CredentialError {
             Self::SelectivelyDisclosed(_) => "claim_selectively_disclosed",
             Self::Cnf => "cnf_malformed",
             Self::NumericDate(_) => "numeric_date_malformed",
+            Self::Tag => "claim_tag_unsupported",
+            Self::Tdate => "tdate_malformed",
+            Self::FullDate => "full_date_malformed",
+            Self::MapKey => "map_key_not_text",
+            Self::Undefined => "claim_undefined",
         }
     }
 }
@@ -66,42 +80,6 @@ impl From<ParseError> for CredentialError {
 impl From<MdocError> for CredentialError {
     fn from(e: MdocError) -> Self {
         Self::Mdoc(e)
-    }
-}
-
-/// Why the claims a pointer selects cannot be read.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ClaimError {
-    /// The pointer selects nothing, or does not fit the credential (OpenID4VP 1.0, Section 7).
-    /// The code is its own.
-    Path(PathError),
-    /// A value has none of the ten types: an mdoc value under a tag other than 0 and 1004, a
-    /// tag 0 or 1004 over text that is no `tdate` or `full-date`, a map key other than text,
-    /// `undefined`, or a JSON number outside the range of `f64`.
-    Untyped,
-}
-
-impl ClaimError {
-    /// A stable identifier.
-    pub fn code(&self) -> &'static str {
-        match self {
-            Self::Path(e) => e.code(),
-            Self::Untyped => "claim_value_untyped",
-        }
-    }
-}
-
-impl fmt::Display for ClaimError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
-
-impl std::error::Error for ClaimError {}
-
-impl From<PathError> for ClaimError {
-    fn from(e: PathError) -> Self {
-        Self::Path(e)
     }
 }
 

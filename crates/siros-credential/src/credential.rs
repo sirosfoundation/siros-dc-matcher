@@ -9,6 +9,7 @@ use siros_wallet_state::{
 use crate::error::CredentialError;
 use crate::sd_jwt_vc::SdJwtVc;
 use crate::usable::Validity;
+use crate::value;
 
 /// The `metadata` type of the data an issuer delivers with a credential (privatedata 3.1,
 /// Section 5A.2).
@@ -91,7 +92,10 @@ impl Credential {
     /// `format` selects the reader: `dc+sd-jwt` and `vc+sd-jwt` read as SD-JWT VC, `mso_mdoc`
     /// as mdoc. An SD-JWT VC has a string `vct`; `iss`, `nbf`, `exp`, `cnf`, `vct`,
     /// `vct#integrity`, `aka_vcts` and `status` are permanently disclosed; `cnf`, when present,
-    /// is a JSON object; `nbf` and `exp` are NumericDates.
+    /// is a JSON object; `nbf` and `exp` are NumericDates. Every mdoc element value, at every
+    /// depth, has one of the ten types of [`TypedValue`](crate::TypedValue): its tags are 0
+    /// over a `tdate` and 1004 over a `full-date`, its map keys are text, and it holds no
+    /// `undefined`.
     ///
     /// # Errors
     ///
@@ -105,6 +109,7 @@ impl Credential {
             }
             "mso_mdoc" => {
                 let mdoc = Box::new(Mdoc::parse(entry.data())?);
+                value::typed(&mdoc)?;
                 let mso = mdoc.mso().validity();
                 let validity = Validity::new(Some(mso.valid_from()), Some(mso.valid_until()));
                 (Body::Mdoc(mdoc), validity)

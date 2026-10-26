@@ -7,15 +7,13 @@ use siros_credential::{ClaimPointer, Credential};
 use siros_dcql::PathComponent;
 use siros_wallet_state::WalletState;
 
-use crate::common::{disclosure, entry, mdoc, sd_jwt, state, tdate, NAME_SPACE};
+use crate::common::{disclosure, entry, mdoc, sd_jwt, sd_jwt_text, state, tdate};
 
 enum Input {
     /// An `S`, parsed, and each of its credentials read.
     State(String),
     /// Pointer components.
     Pointer(Vec<PathComponent>),
-    /// An `S` of one credential, and a pointer whose claims are read.
-    Claim(String, Vec<PathComponent>),
 }
 
 fn outcome(input: &Input) -> Result<(), &'static str> {
@@ -30,20 +28,7 @@ fn outcome(input: &Input) -> Result<(), &'static str> {
         Input::Pointer(components) => ClaimPointer::parse(components.clone())
             .map(|_| ())
             .map_err(|e| e.code()),
-        Input::Claim(text, components) => {
-            let state = WalletState::parse(text).unwrap();
-            let credential = Credential::parse(&state.credentials()[0]).unwrap();
-            let pointer = ClaimPointer::parse(components.clone()).unwrap();
-            credential
-                .claims(&pointer)
-                .map(|_| ())
-                .map_err(|e| e.code())
-        }
     }
-}
-
-fn key(k: &str) -> PathComponent {
-    PathComponent::Key(k.to_owned())
 }
 
 /// The payload of an honest SD-JWT VC, with `given_name` selectively disclosed.
@@ -109,20 +94,30 @@ fn each_rule_refuses_its_input() {
         let data = mdoc(elements, valid.0, valid.1);
         state(vec![entry(1, 1, 0, "mso_mdoc", &data)], vec![])
     };
-    let element = vec![key(NAME_SPACE), key("issue_date")];
     let data = sd_jwt(&honest, &[&given_name]);
+    let full_date = |t: &str| Cbor::Tag(1004, Box::new(Cbor::text(t)));
+    let privileges = |key: Cbor| {
+        Cbor::Array(vec![Cbor::Map(vec![
+            (key, Cbor::text("B")),
+            (Cbor::text("issue_date"), full_date("2024-02-29")),
+        ])])
+    };
 
     let accepted = [
         Input::State(edited_state(|_| {})),
         Input::State(entry_state(&data, |_| {})),
-        Input::State(mdoc_state(vec![("given_name", Cbor::text("Ada"))])),
-        Input::Claim(
-            mdoc_state(vec![(
-                "issue_date",
-                Cbor::Tag(1004, Box::new(Cbor::text("2024-02-29"))),
-            )]),
-            element.clone(),
-        ),
+        Input::State(mdoc_state(vec![
+            ("given_name", Cbor::text("Ada")),
+            ("issue_date", full_date("2024-02-29")),
+            ("expiry_date", tdate("2027-01-01T00:00:00Z")),
+            (
+                "driving_privileges",
+                privileges(Cbor::text("vehicle_category_code")),
+            ),
+            ("portrait", Cbor::Bytes(vec![0xff, 0xd8])),
+            ("age_in_years", Cbor::Unsigned(40)),
+            ("age_over_18", Cbor::Bool(true)),
+        ])),
     ];
     for input in &accepted {
         assert_eq!(outcome(input), Ok(()));
@@ -318,25 +313,57 @@ fn each_rule_refuses_its_input() {
                 &[&given_name],
             )),
         ),
+        (
+            "a number beyond f64",
+            "issuer_jwt_malformed",
+            Input::State(state(
+                vec![entry(
+                    1,
+                    1,
+                    0,
+                    "dc+sd-jwt",
+                    &sd_jwt_text(
+                        &honest.to_string().replacen('{', r#"{"weight":1e400,"#, 1),
+                        &[&given_name],
+                    ),
+                )],
+                vec![],
+            )),
+        ),
         // C2
         (
             "a full-date of 2023-02-29",
-            "claim_value_untyped",
-            Input::Claim(
-                mdoc_state(vec![(
-                    "issue_date",
-                    Cbor::Tag(1004, Box::new(Cbor::text("2023-02-29"))),
-                )]),
-                element.clone(),
-            ),
+            "full_date_malformed",
+            Input::State(mdoc_state(vec![("issue_date", full_date("2023-02-29"))])),
         ),
         (
             "a tdate with a fraction of a second",
-            "claim_value_untyped",
-            Input::Claim(
-                mdoc_state(vec![("issue_date", tdate("2024-02-29T00:00:00.5Z"))]),
-                element,
-            ),
+            "tdate_malformed",
+            Input::State(mdoc_state(vec![(
+                "expiry_date",
+                tdate("2027-01-01T00:00:00.5Z"),
+            )])),
+        ),
+        (
+            "a value under tag 24",
+            "claim_tag_unsupported",
+            Input::State(mdoc_state(vec![(
+                "portrait",
+                Cbor::Tag(24, Box::new(Cbor::Bytes(vec![0xf6]))),
+            )])),
+        ),
+        (
+            "an integer map key inside an array",
+            "map_key_not_text",
+            Input::State(mdoc_state(vec![(
+                "driving_privileges",
+                privileges(Cbor::Unsigned(1)),
+            )])),
+        ),
+        (
+            "undefined",
+            "claim_undefined",
+            Input::State(mdoc_state(vec![("given_name", Cbor::Encoded(vec![0xf7]))])),
         ),
         // C3
         ("an empty pointer", "pointer_empty", Input::Pointer(vec![])),

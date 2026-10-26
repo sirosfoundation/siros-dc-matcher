@@ -3,7 +3,7 @@
 //! | Requirement | API |
 //! | --- | --- |
 //! | C1: constructible only by parsing a wallet state entry through the format components | [`Credential::parse`] |
-//! | C2: claim values keep their type; the credential reads them from the format's own tree | [`TypedValue`], [`Array`], [`Object`] |
+//! | C2: claim values keep their type; the credential reads them from the format's own tree | [`Credential::parse`] refuses a value of none of the ten types; [`TypedValue`], [`Array`], [`Object`] |
 //! | C3: claims path pointers, through Q4 for SD-JWT VC and as `[namespace, element]` for mdoc | [`ClaimPointer`], [`Credential::claims`], `impl siros_dcql::Credential` |
 //! | C4: validity at a given time | [`UsableCredential::at`] |
 //! | C5: the instance used for a batch | [`least_used`] |
@@ -34,7 +34,7 @@ mod usable;
 mod value;
 
 pub use credential::{Credential, EntryRef, Format, Parsed};
-pub use error::{ClaimError, CredentialError, PointerError, ValidityError};
+pub use error::{CredentialError, PointerError, ValidityError};
 pub use instance::least_used;
 pub use pointer::ClaimPointer;
 pub use usable::{UsableCredential, Validity};

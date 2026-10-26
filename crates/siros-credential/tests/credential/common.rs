@@ -67,10 +67,15 @@ pub fn disclosure(array: &Value) -> (String, String) {
 
 /// The compact SD-JWT of `payload` and `disclosures`, with a placeholder signature.
 pub fn sd_jwt(payload: &Value, disclosures: &[&str]) -> String {
+    sd_jwt_text(&payload.to_string(), disclosures)
+}
+
+/// The compact SD-JWT of the payload text `payload` and `disclosures`.
+pub fn sd_jwt_text(payload: &str, disclosures: &[&str]) -> String {
     let mut out = format!(
         "{}.{}.{}~",
         base64url::encode(br#"{"alg":"ES256","typ":"dc+sd-jwt"}"#),
-        base64url::encode(payload.to_string().as_bytes()),
+        base64url::encode(payload.as_bytes()),
         base64url::encode(&[7; 64]),
     );
     for d in disclosures {
@@ -173,15 +178,14 @@ pub fn json(value: TypedValue<'_>) -> Value {
         TypedValue::Null => Value::Null,
         TypedValue::Bool(b) => json!(b),
         TypedValue::Integer(i) => json!(i64::try_from(i).unwrap()),
-        TypedValue::Number(n) => json!(n),
+        TypedValue::Number(n) => Value::Number(n.clone()),
         TypedValue::Text(t) => json!(t),
         TypedValue::Bytes(b) => json!({"bytes": base64url::encode(b)}),
         TypedValue::FullDate(d) => json!({"full-date": d.to_string()}),
         TypedValue::DateTime(t) => json!({"date-time": t.to_string()}),
-        TypedValue::Array(a) => a.elements().map(|e| json(e.unwrap())).collect(),
+        TypedValue::Array(a) => a.elements().map(json).collect(),
         TypedValue::Object(o) => Value::Object(
             o.members()
-                .map(|m| m.unwrap())
                 .map(|(name, value)| (name.to_owned(), json(value)))
                 .collect(),
         ),

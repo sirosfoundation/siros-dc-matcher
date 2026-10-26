@@ -3,9 +3,10 @@
 use serde_json::Number;
 use siros_codec::cbor::Value as Cbor;
 use siros_codec::date::{Date, DateTime};
+use siros_mdoc::Mdoc;
 use siros_sdjwt::{Claim, ClaimValue, Element};
 
-use crate::error::ClaimError;
+use crate::error::CredentialError;
 
 /// A claim value with its type.
 #[derive(Clone, Copy)]
@@ -16,8 +17,8 @@ pub enum TypedValue<'a> {
     Bool(bool),
     /// A JSON number without a fraction or exponent that fits 64 bits, or a CBOR integer.
     Integer(i128),
-    /// Any other JSON number.
-    Number(f64),
+    /// Any other JSON number, as the credential writes it.
+    Number(&'a Number),
     /// A JSON string, a CBOR text string.
     Text(&'a str),
     /// A CBOR byte string.
@@ -28,7 +29,7 @@ pub enum TypedValue<'a> {
     DateTime(DateTime),
     /// An array.
     Array(Array<'a>),
-    /// An object, or a CBOR map whose keys are text.
+    /// An object, or a CBOR map.
     Object(Object<'a>),
 }
 
@@ -82,9 +83,9 @@ enum ElementsOf<'a> {
 }
 
 impl<'a> Iterator for Elements<'a> {
-    type Item = Result<TypedValue<'a>, ClaimError>;
+    type Item = TypedValue<'a>;
 
-    fn next(&mut self) -> Option<Self::Item> {
+    fn next(&mut self) -> Option<TypedValue<'a>> {
         match &mut self.0 {
             ElementsOf::Json(elements) => elements
                 .find_map(|element| match element {
@@ -106,16 +107,17 @@ enum MembersOf<'a> {
 }
 
 impl<'a> Iterator for Members<'a> {
-    type Item = Result<(&'a str, TypedValue<'a>), ClaimError>;
+    type Item = (&'a str, TypedValue<'a>);
 
-    fn next(&mut self) -> Option<Self::Item> {
+    fn next(&mut self) -> Option<(&'a str, TypedValue<'a>)> {
         match &mut self.0 {
             MembersOf::Json(members) => members
                 .next()
-                .map(|(name, claim)| Ok((name, json(claim.value())?))),
-            MembersOf::Cbor(entries) => entries.next().map(|(key, value)| match key {
-                Cbor::Text(name) => Ok((name.as_str(), cbor(value)?)),
-                _ => Err(ClaimError::Untyped),
+                .map(|(name, claim)| (name, json(claim.value()))),
+            // Construction refuses a map with a key other than text.
+            MembersOf::Cbor(entries) => entries.find_map(|(key, value)| match key {
+                Cbor::Text(name) => Some((name.as_str(), cbor(value))),
+                _ => None,
             }),
         }
     }
@@ -127,49 +129,83 @@ pub(crate) fn payload(object: &siros_sdjwt::Object) -> TypedValue<'_> {
 }
 
 /// The SD-JWT claim value `value`.
-pub(crate) fn json(value: &ClaimValue) -> Result<TypedValue<'_>, ClaimError> {
-    Ok(match value {
+pub(crate) fn json(value: &ClaimValue) -> TypedValue<'_> {
+    match value {
         ClaimValue::Null => TypedValue::Null,
         ClaimValue::Bool(b) => TypedValue::Bool(*b),
-        ClaimValue::Number(n) => number(n)?,
+        ClaimValue::Number(n) => match (n.as_i64(), n.as_u64()) {
+            (Some(i), _) => TypedValue::Integer(i128::from(i)),
+            (None, Some(u)) => TypedValue::Integer(i128::from(u)),
+            (None, None) => TypedValue::Number(n),
+        },
         ClaimValue::String(s) => TypedValue::Text(s),
         ClaimValue::Array(elements) => TypedValue::Array(Array(ArrayOf::Json(elements))),
         ClaimValue::Object(object) => payload(object),
-    })
+    }
 }
 
-fn number(n: &Number) -> Result<TypedValue<'static>, ClaimError> {
-    if let Some(i) = n.as_i64() {
-        return Ok(TypedValue::Integer(i128::from(i)));
-    }
-    if let Some(u) = n.as_u64() {
-        return Ok(TypedValue::Integer(i128::from(u)));
-    }
-    n.as_f64()
-        .map(TypedValue::Number)
-        .ok_or(ClaimError::Untyped)
+/// The mdoc element value `value`.
+pub(crate) fn cbor(value: &Cbor) -> TypedValue<'_> {
+    classify(value).0
 }
 
-/// The mdoc element value `value` (ISO/IEC 18013-5, 7.2.1: `tdate` is tag 0, `full-date` tag
-/// 1004).
-pub(crate) fn cbor(value: &Cbor) -> Result<TypedValue<'_>, ClaimError> {
-    Ok(match value {
+/// Every element value of `mdoc`, at every depth, has one of the ten types.
+pub(crate) fn typed(mdoc: &Mdoc) -> Result<(), CredentialError> {
+    mdoc.name_spaces()
+        .iter()
+        .flat_map(|name_space| name_space.items())
+        .try_for_each(|item| check(item.value()))
+}
+
+fn check(value: &Cbor) -> Result<(), CredentialError> {
+    if let (_, Some(broken)) = classify(value) {
+        return Err(broken);
+    }
+    match value {
+        Cbor::Array(items) => items.iter().try_for_each(check),
+        Cbor::Map(entries) => entries.iter().try_for_each(|(_, value)| check(value)),
+        _ => Ok(()),
+    }
+}
+
+/// The type of `value`, and the rule `value` breaks when it has none of the ten types
+/// (ISO/IEC 18013-5, 7.2.1: `tdate` is tag 0, `full-date` tag 1004). Such a value reads as
+/// RFC 8949, Section 6.1 converts it to JSON: a tag as its content, `undefined` as `null`.
+/// [`typed`] refuses it at construction.
+fn classify(value: &Cbor) -> (TypedValue<'_>, Option<CredentialError>) {
+    let typed = match value {
         Cbor::Unsigned(n) => TypedValue::Integer(i128::from(*n)),
         Cbor::Negative(n) => TypedValue::Integer(-1 - i128::from(*n)),
         Cbor::Bytes(b) => TypedValue::Bytes(b),
         Cbor::Text(t) => TypedValue::Text(t),
         Cbor::Array(items) => TypedValue::Array(Array(ArrayOf::Cbor(items))),
-        Cbor::Map(entries) => TypedValue::Object(Object(ObjectOf::Cbor(entries))),
-        Cbor::Tag(1004, inner) => match inner.as_ref() {
-            Cbor::Text(t) => TypedValue::FullDate(Date::parse(t).ok_or(ClaimError::Untyped)?),
-            _ => return Err(ClaimError::Untyped),
-        },
-        Cbor::Tag(0, inner) => match inner.as_ref() {
-            Cbor::Text(t) => TypedValue::DateTime(DateTime::parse(t).ok_or(ClaimError::Untyped)?),
-            _ => return Err(ClaimError::Untyped),
-        },
+        Cbor::Map(entries) => {
+            let object = TypedValue::Object(Object(ObjectOf::Cbor(entries)));
+            let keys = entries.iter().all(|(key, _)| matches!(key, Cbor::Text(_)));
+            return (object, (!keys).then_some(CredentialError::MapKey));
+        }
+        Cbor::Tag(1004, inner) => {
+            return match inner.as_ref() {
+                Cbor::Text(t) => Date::parse(t).map_or(
+                    (TypedValue::Text(t), Some(CredentialError::FullDate)),
+                    |d| (TypedValue::FullDate(d), None),
+                ),
+                other => (cbor(other), Some(CredentialError::FullDate)),
+            }
+        }
+        Cbor::Tag(0, inner) => {
+            return match inner.as_ref() {
+                Cbor::Text(t) => DateTime::parse(t)
+                    .map_or((TypedValue::Text(t), Some(CredentialError::Tdate)), |d| {
+                        (TypedValue::DateTime(d), None)
+                    }),
+                other => (cbor(other), Some(CredentialError::Tdate)),
+            }
+        }
+        Cbor::Tag(_, inner) => return (cbor(inner), Some(CredentialError::Tag)),
         Cbor::Bool(b) => TypedValue::Bool(*b),
         Cbor::Null => TypedValue::Null,
-        Cbor::Tag(..) | Cbor::Encoded(_) => return Err(ClaimError::Untyped),
-    })
+        Cbor::Encoded(_) => return (TypedValue::Null, Some(CredentialError::Undefined)),
+    };
+    (typed, None)
 }

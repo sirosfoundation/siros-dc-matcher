@@ -6,10 +6,9 @@ use siros_codec::base64url;
 use siros_codec::cbor::Value as Cbor;
 use siros_dcql::{mdoc_components, resolve, PathComponent, PathError};
 use siros_mdoc::{IssuerSignedItem, Mdoc};
-use siros_sdjwt::{ClaimValue, Element, Node, NodeValue};
+use siros_sdjwt::{Node, NodeValue};
 
 use crate::credential::{Body, Credential};
-use crate::error::ClaimError;
 use crate::pointer::ClaimPointer;
 use crate::usable::UsableCredential;
 use crate::value::{self, TypedValue};
@@ -18,6 +17,18 @@ use crate::value::{self, TypedValue};
 enum Found<'a> {
     SdJwt(Node<'a>),
     Mdoc(&'a Cbor),
+}
+
+impl<'a> Found<'a> {
+    fn typed(self) -> TypedValue<'a> {
+        match self {
+            Found::SdJwt(node) => match node.value() {
+                NodeValue::Payload(object) => value::payload(object),
+                NodeValue::Claim(claim) => value::json(claim.value()),
+            },
+            Found::Mdoc(value) => value::cbor(value),
+        }
+    }
 }
 
 impl Credential {
@@ -30,19 +41,13 @@ impl Credential {
     ///
     /// # Errors
     ///
-    /// [`ClaimError::Path`] when the pointer does not fit the credential or selects nothing;
-    /// [`ClaimError::Untyped`] when a selected value has none of the ten types.
-    pub fn claims(&self, pointer: &ClaimPointer) -> Result<Vec<TypedValue<'_>>, ClaimError> {
-        self.select(pointer.components())?
+    /// [`PathError`] when the pointer does not fit the credential or selects nothing.
+    pub fn claims(&self, pointer: &ClaimPointer) -> Result<Vec<TypedValue<'_>>, PathError> {
+        Ok(self
+            .select(pointer.components())?
             .into_iter()
-            .map(|found| match found {
-                Found::SdJwt(node) => match node.value() {
-                    NodeValue::Payload(object) => Ok(value::payload(object)),
-                    NodeValue::Claim(claim) => value::json(claim.value()),
-                },
-                Found::Mdoc(value) => value::cbor(value),
-            })
-            .collect()
+            .map(Found::typed)
+            .collect())
     }
 
     fn select(&self, path: &[PathComponent]) -> Result<Vec<Found<'_>>, PathError> {
@@ -71,10 +76,9 @@ fn element<'a>(mdoc: &'a Mdoc, path: &[PathComponent]) -> Result<&'a Cbor, PathE
 /// DCQL evaluation (OpenID4VP 1.0, Section 6.4) over the credential.
 ///
 /// [`claim`](siros_dcql::Credential::claim) gives each selected value as JSON for the
-/// comparison with `values` (Section 6.3). An mdoc value converts as RFC 8949, Section 6.1
-/// converts CBOR to JSON: a tag gives its content, so a `full-date` compares as
-/// `"YYYY-MM-DD"`; a byte string gives its base64url text; `undefined` gives `null`; a map key
-/// other than text gives the JSON text of its conversion.
+/// comparison with `values` (Section 6.3). A `full-date` compares as `"YYYY-MM-DD"`, a `tdate`
+/// as `"YYYY-MM-DDThh:mm:ssZ"`, and a byte string as its base64url text, as RFC 8949, Section
+/// 6.1 converts CBOR to JSON.
 impl siros_dcql::Credential for Credential {
     /// The decimal `credentialId`.
     fn id(&self) -> &str {
@@ -90,13 +94,7 @@ impl siros_dcql::Credential for Credential {
         Ok(self
             .select(path)?
             .into_iter()
-            .map(|found| match found {
-                Found::SdJwt(node) => match node.value() {
-                    NodeValue::Payload(object) => sd_jwt_object(object),
-                    NodeValue::Claim(claim) => sd_jwt_json(claim.value()),
-                },
-                Found::Mdoc(value) => cbor_json(value),
-            })
+            .map(|found| json(found.typed()))
             .collect())
     }
 
@@ -128,60 +126,33 @@ impl siros_dcql::Credential for UsableCredential<'_> {
     }
 }
 
-fn sd_jwt_object(object: &siros_sdjwt::Object) -> Json {
-    Json::Object(
-        object
-            .members()
-            .map(|(name, claim)| (name.to_owned(), sd_jwt_json(claim.value())))
-            .collect::<Map<String, Json>>(),
-    )
-}
-
-/// The present claims of `value` as JSON.
-fn sd_jwt_json(value: &ClaimValue) -> Json {
+/// `value` as JSON.
+fn json(value: TypedValue<'_>) -> Json {
     match value {
-        ClaimValue::Null => Json::Null,
-        ClaimValue::Bool(b) => Json::Bool(*b),
-        ClaimValue::Number(n) => Json::Number(n.clone()),
-        ClaimValue::String(s) => Json::String(s.clone()),
-        ClaimValue::Array(elements) => Json::Array(
-            elements
-                .iter()
-                .filter_map(|element| match element {
-                    Element::Present(claim) => Some(sd_jwt_json(claim.value())),
-                    Element::Withheld => None,
-                })
-                .collect(),
-        ),
-        ClaimValue::Object(object) => sd_jwt_object(object),
-    }
-}
-
-/// `value` as JSON (RFC 8949, Section 6.1).
-fn cbor_json(value: &Cbor) -> Json {
-    match value {
-        Cbor::Unsigned(n) => Json::from(*n),
-        // Below -2^63 JSON holds the integer as a float only.
-        Cbor::Negative(n) => {
-            i64::try_from(*n).map_or(Json::from(-1.0 - *n as f64), |n| Json::from(-1 - n))
-        }
-        Cbor::Bytes(b) => Json::String(base64url::encode(b)),
-        Cbor::Text(t) => Json::String(t.clone()),
-        Cbor::Array(items) => Json::Array(items.iter().map(cbor_json).collect()),
-        Cbor::Map(entries) => Json::Object(
-            entries
-                .iter()
-                .map(|(key, value)| {
-                    let key = match key {
-                        Cbor::Text(t) => t.clone(),
-                        other => cbor_json(other).to_string(),
-                    };
-                    (key, cbor_json(value))
-                })
+        TypedValue::Null => Json::Null,
+        TypedValue::Bool(b) => Json::Bool(b),
+        TypedValue::Integer(i) => integer(i),
+        TypedValue::Number(n) => Json::Number(n.clone()),
+        TypedValue::Text(t) => Json::String(t.to_owned()),
+        TypedValue::Bytes(b) => Json::String(base64url::encode(b)),
+        TypedValue::FullDate(d) => Json::String(d.to_string()),
+        TypedValue::DateTime(t) => Json::String(t.to_string()),
+        TypedValue::Array(a) => Json::Array(a.elements().map(json).collect()),
+        TypedValue::Object(o) => Json::Object(
+            o.members()
+                .map(|(name, value)| (name.to_owned(), json(value)))
                 .collect::<Map<String, Json>>(),
         ),
-        Cbor::Tag(_, inner) => cbor_json(inner),
-        Cbor::Bool(b) => Json::Bool(*b),
-        Cbor::Null | Cbor::Encoded(_) => Json::Null,
     }
+}
+
+fn integer(i: i128) -> Json {
+    if let Ok(i) = i64::try_from(i) {
+        return Json::from(i);
+    }
+    if let Ok(u) = u64::try_from(i) {
+        return Json::from(u);
+    }
+    // Below -2^63 JSON holds the integer as a float only.
+    Json::from(i as f64)
 }
