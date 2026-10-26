@@ -5,6 +5,7 @@ members = [
     "crates/android-credman",
     "crates/siros-codec",
     "crates/siros-dcql",
+    "crates/siros-mdoc",
     "crates/siros-dc-matcher-core",
     "crates/siros-dc-matcher-wasm",
     "crates/siros-dc-matcher-ffi",
@@ -28,6 +29,7 @@ rust-version = "1.82"
 [workspace.dependencies]
 siros-codec = { path = "crates/siros-codec" }
 siros-dcql = { version = "0.12.0", path = "crates/siros-dcql" }
+siros-mdoc = { path = "crates/siros-mdoc" }
 siros-sdjwt = { path = "crates/siros-sdjwt" }
 siros-dc-matcher-core = { path = "crates/siros-dc-matcher-core" }
 siros-zkp-req = { path = "crates/siros-zkp-req" }

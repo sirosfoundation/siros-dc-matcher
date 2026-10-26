@@ -2025,6 +2025,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "siros-mdoc"
+version = "0.11.0"
+dependencies = [
+ "der",
+ "p256",
+ "rustc-hash",
+ "sha2",
+ "siros-codec",
+ "x509-cert",
+]
+
+[[package]]
 name = "siros-sdjwt"
 version = "0.11.0"
 dependencies = [
