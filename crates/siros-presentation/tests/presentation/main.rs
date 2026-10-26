@@ -8,6 +8,11 @@
     dead_code
 )]
 
+mod display;
+mod mdoc;
+mod offers;
+mod refusals;
 mod sd_jwt;
 mod verifier;
 mod wallet;
+mod zkp;

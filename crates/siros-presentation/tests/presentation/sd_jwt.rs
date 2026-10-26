@@ -16,7 +16,7 @@ use crate::wallet::{disclosed, holder_signed, ready, respond, sd_jwt, Held, Wall
 const PAYMENT: &str = "urn:eudi:sca:payment:1";
 
 /// The payment entry of `transaction_data`, as the verifier sends it.
-fn payment() -> String {
+pub fn payment() -> String {
     let entry = json!({
         "type": PAYMENT,
         "credential_ids": ["pid"],
@@ -32,7 +32,7 @@ fn payment() -> String {
 }
 
 /// The SCA Attestation type metadata of [`VCT`], listing the payment type with its labels.
-fn type_metadata() -> FetchResponse {
+pub fn type_metadata() -> FetchResponse {
     let claim = |path: &[&str], label: &str| {
         let mut full = vec!["payload"];
         full.extend_from_slice(path);

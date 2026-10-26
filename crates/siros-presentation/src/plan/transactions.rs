@@ -89,6 +89,20 @@ impl<'a> Transactions<'a> {
         &self.entries
     }
 
+    /// Whether an entry names only Credential Queries no credential answers: its credentials are
+    /// not available in the wallet (Section 8.5).
+    pub(crate) fn unavailable(&self, answered: &Wallet<'a>) -> bool {
+        self.entries.iter().any(|entry| {
+            entry.credential_ids().iter().all(|id| {
+                answered
+                    .queries()
+                    .iter()
+                    .filter(|answers| &answers.query().id == id)
+                    .all(|answers| answers.candidates().is_empty())
+            })
+        })
+    }
+
     /// Whether an entry names the Credential Query at `query` in its `credential_ids`.
     pub(crate) fn names(&self, query: usize) -> bool {
         self.named.contains(&query)

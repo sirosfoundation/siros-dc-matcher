@@ -385,23 +385,19 @@ pub fn decrypt_cwt(submission: &Submission) -> Cbor {
     ciborium::from_reader(&plaintext[..]).unwrap()
 }
 
-/// The encoded `SessionTranscript = [null, null, Handover]` of OpenID4VP 1.0, B.2.6, built from
-/// the verifier's own values.
-pub fn session_transcript(handover_name: &str, info: Vec<Cbor>) -> Vec<u8> {
+/// The encoded `Handover` of OpenID4VP 1.0, B.2.6: `[name, SHA-256(cbor(info))]`, built from the
+/// verifier's own values.
+pub fn handover(name: &str, info: Vec<Cbor>) -> Vec<u8> {
     let digest = Sha256::digest(cbor(&Cbor::Array(info)));
     cbor(&Cbor::Array(vec![
-        Cbor::Null,
-        Cbor::Null,
-        Cbor::Array(vec![
-            Cbor::Text(handover_name.into()),
-            Cbor::Bytes(digest.to_vec()),
-        ]),
+        Cbor::Text(name.into()),
+        Cbor::Bytes(digest.to_vec()),
     ]))
 }
 
-/// The SessionTranscript of a DC API request from [`ORIGIN`] encrypted to the verifier's key.
-pub fn dc_api_transcript() -> Vec<u8> {
-    session_transcript(
+/// The `Handover` of a DC API request from [`ORIGIN`] encrypted to the verifier's key (B.2.6.2).
+pub fn dc_api_handover() -> Vec<u8> {
+    handover(
         "OpenID4VPDCAPIHandover",
         vec![
             Cbor::Text(ORIGIN.into()),
@@ -411,9 +407,9 @@ pub fn dc_api_transcript() -> Vec<u8> {
     )
 }
 
-/// The SessionTranscript of a signed redirect request encrypted to the verifier's key.
-pub fn redirect_transcript() -> Vec<u8> {
-    session_transcript(
+/// The `Handover` of a signed redirect request encrypted to the verifier's key (B.2.6.1).
+pub fn redirect_handover() -> Vec<u8> {
+    handover(
         "OpenID4VPHandover",
         vec![
             Cbor::Text(signed_client_id()),
@@ -422,4 +418,15 @@ pub fn redirect_transcript() -> Vec<u8> {
             Cbor::Text(RESPONSE_URI.into()),
         ],
     )
+}
+
+/// The encoded `SessionTranscript = [null, null, Handover]` of `handover`.
+pub fn transcript(handover: &[u8]) -> Vec<u8> {
+    let handover: Cbor = ciborium::from_reader(handover).unwrap();
+    cbor(&Cbor::Array(vec![Cbor::Null, Cbor::Null, handover]))
+}
+
+/// The SessionTranscript of a DC API request from [`ORIGIN`] encrypted to the verifier's key.
+pub fn dc_api_transcript() -> Vec<u8> {
+    transcript(&dc_api_handover())
 }

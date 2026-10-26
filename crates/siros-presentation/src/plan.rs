@@ -13,13 +13,14 @@ use siros_codec::date::DateTime;
 use siros_credential::{Parsed, UsableCredential};
 use siros_display::{DisplayCache, Locale};
 use siros_oid4vp::{ErrorCode, Fetch, Submission, VerifiedRequest};
-use siros_transaction_data::{Amr, Step};
+use siros_transaction_data::{Amr, Step, TransactionDataError};
 use siros_wallet_state::{CredentialId, KeyId, PresentationRecord};
 use siros_zkp_req_nym_auth::attestation::UsableAttestation;
 use siros_zkp_req_nym_auth::presenter::Answer as NymAnswer;
 use siros_zkp_req_nym_auth::request::NymAuthRequest;
 use siros_zkp_req_nym_auth::system::NymAuthSystem;
 use siros_zkp_req_nym_auth::verifier_id::VerifierIdForm;
+use zeroize::Zeroizing;
 
 use crate::error::PresentationError;
 use crate::matching::{Asked, Matching, ProofChoice, ZkpQuery};
@@ -109,9 +110,11 @@ pub fn plan<'a>(input: &PlanInput<'a>) -> Result<PlanStep<'a>, PresentationError
         policy,
     )
     .answer(|credential, zkp| {
-        zkp.choices()
-            .iter()
-            .position(|choice| nym_answer(credential, zkp, choice, input.now).is_some())
+        let (attestation, seed) = tested(credential, input.now)?;
+        zkp.choices().iter().position(|choice| {
+            zkp.pair(choice)
+                .is_some_and(|pair| NymAnswer::new(pair, attestation.clone(), &seed).is_ok())
+        })
     });
     let transactions = match Transactions::read(request, &answered, input.fetches, input.now)? {
         Step::Fetch(fetch) => return Ok(PlanStep::Fetch(fetch)),
@@ -134,6 +137,9 @@ pub fn plan<'a>(input: &PlanInput<'a>) -> Result<PlanStep<'a>, PresentationError
     if offers.offers().is_empty() {
         return Err(match refused {
             Some(error) => PresentationError::TransactionData(error),
+            None if transactions.unavailable(&answered) => {
+                PresentationError::TransactionData(TransactionDataError::CredentialUnavailable)
+            }
             None => PresentationError::NoOffer(error_code(answered.failure())),
         });
     }
@@ -200,20 +206,30 @@ pub fn refusal(
         .map_err(PresentationError::Response)
 }
 
-/// The answer of `choice` by `credential` at `now`: a usable attestation of its mdoc, and the
-/// `secret_seed` its issuer delivered, which opens the attestation's `ssc` for this use.
+/// The answer of `choice` by `credential` at `now`, which opens the attestation's `ssc` for
+/// this use.
 pub(crate) fn nym_answer<'z>(
     credential: &UsableCredential<'_>,
     zkp: &'z ZkpQuery,
     choice: &ProofChoice,
     now: DateTime,
 ) -> Option<NymAnswer<'z>> {
+    let (attestation, seed) = tested(credential, now)?;
+    NymAnswer::new(zkp.pair(choice)?, attestation, &seed).ok()
+}
+
+/// The usable attestation of `credential`'s mdoc at `now`, and the `secret_seed` its issuer
+/// delivered.
+fn tested(
+    credential: &UsableCredential<'_>,
+    now: DateTime,
+) -> Option<(UsableAttestation, Zeroizing<[u8; 16]>)> {
     let Parsed::Mdoc(mdoc) = credential.credential().parsed() else {
         return None;
     };
     let attestation = UsableAttestation::of(mdoc, None, now).ok()?;
     let seed = seed::delivered(credential.credential()).ok()?;
-    NymAnswer::new(zkp.pair(choice)?, attestation, &seed).ok()
+    Some((attestation, seed))
 }
 
 /// The OpenID4VP 1.0, Section 8.5 code of a `zkp_req.md`, Section 5 code.

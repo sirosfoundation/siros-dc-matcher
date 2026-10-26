@@ -345,12 +345,21 @@ impl Wallet {
     }
 }
 
-/// The plan of `input`, which needs no further fetch.
+/// The plan of `input`, which needs no further fetch. Its view shows neither the seed nym_auth's
+/// test issuer delivers nor the picker's marker of an unverified request.
 pub fn ready<'a>(input: &PlanInput<'a>) -> Result<Planned<'a>, PresentationError> {
-    match plan(input)? {
-        PlanStep::Ready(planned) => Ok(*planned),
+    let planned = match plan(input)? {
+        PlanStep::Ready(planned) => *planned,
         PlanStep::Fetch(fetch) => panic!("unanswered fetch {}", fetch.url().as_str()),
-    }
+    };
+    let texts = view_texts(planned.view());
+    let opening = b64(&SEED);
+    assert!(texts.iter().all(|t| !t.contains(&opening)), "{texts:?}");
+    assert!(
+        texts.iter().all(|t| !t.contains("(unverified request)")),
+        "{texts:?}"
+    );
+    Ok(planned)
 }
 
 /// The host's signatures for every `Sign` effect of `prepared`, with the holder's key.
@@ -395,4 +404,63 @@ pub fn holder_signed(message: &[u8], signature: &[u8]) -> bool {
 /// The CBOR item of `bytes`, read with ciborium.
 pub fn ciborium(bytes: &[u8]) -> Ciborium {
     ciborium::from_reader(bytes).unwrap()
+}
+
+/// Every text a consent view shows, the digest included.
+pub fn view_texts(view: &siros_presentation::ConsentView<'_>) -> Vec<String> {
+    use siros_display::{ClaimRow, DisplayValue};
+    use siros_presentation::{MemberView, Shown};
+    use siros_transaction_data::RowValue;
+
+    fn value(shown: &DisplayValue, out: &mut Vec<String>) {
+        match shown {
+            DisplayValue::Text(text) => out.push(text.clone()),
+            DisplayValue::List(values) => values.iter().for_each(|v| value(v, out)),
+            DisplayValue::Group(rows) => rows.iter().for_each(|r| row(r, out)),
+            _ => {}
+        }
+    }
+    fn row(claim: &ClaimRow, out: &mut Vec<String>) {
+        out.push(claim.label().as_str().to_owned());
+        value(claim.value(), out);
+    }
+    fn member(member: &MemberView, out: &mut Vec<String>) {
+        out.push(member.query_id().to_owned());
+        let card = member.card();
+        out.push(card.title().as_str().to_owned());
+        out.extend(card.issuer().map(|i| i.as_str().to_owned()));
+        match member.shown() {
+            Shown::Claims(rows) => rows.iter().for_each(|r| row(r, out)),
+            Shown::Proof(rows) => {
+                for proof in rows {
+                    out.push(proof.label().to_owned());
+                    out.push(proof.value().to_owned());
+                }
+            }
+        }
+        for transaction in member.transactions() {
+            out.push(transaction.affirmative_action_label().as_str().to_owned());
+            for row in transaction.rows() {
+                out.push(row.label().as_str().to_owned());
+                match row.value() {
+                    RowValue::Text(t) | RowValue::Number(t) => out.push(t.as_str().to_owned()),
+                    RowValue::Image(url) => out.push(url.clone()),
+                    _ => {}
+                }
+            }
+        }
+    }
+    let mut out = vec![
+        view.verifier().display().to_owned(),
+        view.digest().to_owned(),
+    ];
+    for offer in view.offers() {
+        out.extend(offer.purpose().map(str::to_owned));
+        offer.members().iter().for_each(|m| member(m, &mut out));
+        for addition in offer.additions() {
+            out.extend(addition.purpose().map(str::to_owned));
+            addition.members().iter().for_each(|m| member(m, &mut out));
+        }
+    }
+    out
 }
