@@ -82,6 +82,13 @@ against the 307,200-byte budget (303,914 before).
 
 ### Added
 
+- `siros-transaction-data`, the `transaction_data` request parameter (OpenID4VP 1.0, Section
+  5.1) for the wallet core. It parses entries of the four EC TS12 v1.0.1 types into typed
+  payloads, binds each entry to one credential of an offer, gives the KB-JWT claims
+  (`transaction_data_hashes`, `transaction_data_hashes_alg`, `jti`, `response_mode`, `amr`)
+  and the consent display, and asks the host to fetch the SD-JWT VC type metadata and the
+  documents it references. It builds with Rust 1.82. `siros-oid4vp` gains `Fetch::get`,
+  `FetchResponse::status` and `FetchResponse::body`.
 - `siros-oid4vp`, OpenID4VP 1.0 for the wallet core. With the `crypto` feature: sans-IO intake
   of redirect requests (by value, `request`, `request_uri` with `get` or `post`) and DC API
   requests (unsigned, signed, multisigned) into a `VerifiedRequest`, with `Fetch` and `Trust`
