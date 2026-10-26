@@ -33,6 +33,7 @@ use crate::profile::{
 };
 use siros_oid4vp::UnverifiedQuery;
 use siros_zkp_req::{usable_backend, CredentialType, QueryOption, ZkpFormats, ZkpReqQuery};
+use siros_zkp_req_nym_auth::catalogue::NymAuthQuery;
 
 /// A credential from the registered blob, wrapped so DCQL can evaluate it.
 ///
@@ -264,7 +265,8 @@ impl<'a> ProfilePolicy<'a> {
         let parsed = ZkpReqQuery::parse(raw).ok()?;
         // zkp_req, Section 1.2: the Verifier MUST send both lists.
         let formats = ZkpFormats::from_client_metadata(context.client_metadata?).ok()?;
-        siros_zkp_req_nym_auth::catalogue::validate(&parsed).ok()?;
+        // The nym_auth catalogue's rules, for a query of its credential type.
+        let parsed = NymAuthQuery::from_query(parsed).ok()?.into_query();
         let held = self.profile.capabilities.get(ZKP_REQ_CAPABILITY)?;
         // zkp_req, Section 2.1: the first option the wallet can answer.
         let (capability, option, proof_backend) = parsed.options.iter().find_map(|option| {

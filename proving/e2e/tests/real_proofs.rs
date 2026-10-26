@@ -106,7 +106,7 @@ fn prove(backend: &Backend<'_>, range: &str) -> Proved {
         presentation: prepared.assemble(&output).unwrap().encode(),
         query,
         anchors,
-        statement: job.statement.clone(),
+        statement: job.statement().clone(),
         zk_proof: output.zk_proof,
     }
 }

@@ -585,10 +585,10 @@ impl FfiPrepared {
     pub fn job(&self, device_signature: Vec<u8>) -> Result<FfiProofJob, ZkpReqError> {
         let job = self.0.job(&device_signature).map_err(prove_error)?;
         Ok(FfiProofJob {
-            statement: (&job.statement).into(),
-            issuer_signed: job.issuer_signed.clone(),
-            secret_seed: job.secret_seed.to_vec(),
-            device_signature: job.device_signature.to_vec(),
+            statement: job.statement().into(),
+            issuer_signed: job.issuer_signed().to_vec(),
+            secret_seed: job.secret_seed().to_vec(),
+            device_signature: job.device_signature().to_vec(),
         })
     }
 

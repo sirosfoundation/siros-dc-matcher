@@ -116,15 +116,15 @@ impl Dates {
 
 impl NymAuthProver for VegaNymAuth {
     fn prove(&self, job: &ProofJob) -> Result<ProofOutput, ProverFailure> {
-        let statement = &job.statement;
+        let statement = job.statement();
         if !serves(statement) {
             return Err(ProverFailure::Unavailable);
         }
         let dates = Dates::of(statement).ok_or(ProverFailure::Failed)?;
         let holder = Holder {
-            issuer_signed: &job.issuer_signed,
-            secret_seed: &job.secret_seed[..],
-            device_signature: &job.device_signature,
+            issuer_signed: job.issuer_signed(),
+            secret_seed: job.secret_seed(),
+            device_signature: job.device_signature(),
         };
         // `Input` and `Refused(Credential)` hold a credential outside the system's form together
         // with other causes, so neither is `credential_form`.

@@ -77,35 +77,87 @@ impl std::error::Error for FormError {}
 /// A signed data element and the bytes its digest covers.
 #[derive(Clone, PartialEq, Eq)]
 pub struct SignedElement<T> {
+    value: T,
+    bytes: Vec<u8>,
+}
+
+impl<T> SignedElement<T> {
     /// The element's value.
-    pub value: T,
+    pub fn value(&self) -> &T {
+        &self.value
+    }
+
     /// `IssuerSignedItemBytes`: the tag-24 item, as issued.
-    pub bytes: Vec<u8>,
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
 }
 
 /// A nym_auth attestation in the ISO/IEC 18013-5 form.
 #[derive(Clone, PartialEq, Eq)]
 pub struct NymAuthMdoc {
+    issuer_signed: Vec<u8>,
+    sig_structure: Vec<u8>,
+    issuer_signature: [u8; 64],
+    document_signer: Vec<u8>,
+    device_key: P256Key,
+    valid_from: DateTime,
+    valid_until: DateTime,
+    birth_date: SignedElement<Date>,
+    ssc: SignedElement<[u8; 32]>,
+    psc: Option<SignedElement<[u8; 32]>>,
+}
+
+impl NymAuthMdoc {
     /// The `IssuerSigned` structure, as issued.
-    pub issuer_signed: Vec<u8>,
+    pub fn issuer_signed(&self) -> &[u8] {
+        &self.issuer_signed
+    }
+
     /// The COSE `Sig_structure` the issuer signed.
-    pub sig_structure: Vec<u8>,
+    pub fn sig_structure(&self) -> &[u8] {
+        &self.sig_structure
+    }
+
     /// The issuer's ES256 signature, `r ‖ s`.
-    pub issuer_signature: [u8; 64],
+    pub fn issuer_signature(&self) -> &[u8; 64] {
+        &self.issuer_signature
+    }
+
     /// The Document Signer certificate, DER: the first of `x5chain`.
-    pub document_signer: Vec<u8>,
+    pub fn document_signer(&self) -> &[u8] {
+        &self.document_signer
+    }
+
     /// `deviceKeyInfo.deviceKey`.
-    pub device_key: P256Key,
+    pub fn device_key(&self) -> &P256Key {
+        &self.device_key
+    }
+
     /// `validityInfo.validFrom`.
-    pub valid_from: DateTime,
+    pub fn valid_from(&self) -> DateTime {
+        self.valid_from
+    }
+
     /// `validityInfo.validUntil`.
-    pub valid_until: DateTime,
+    pub fn valid_until(&self) -> DateTime {
+        self.valid_until
+    }
+
     /// `birth_date`.
-    pub birth_date: SignedElement<Date>,
+    pub fn birth_date(&self) -> &SignedElement<Date> {
+        &self.birth_date
+    }
+
     /// `ssc`.
-    pub ssc: SignedElement<[u8; 32]>,
+    pub fn ssc(&self) -> &SignedElement<[u8; 32]> {
+        &self.ssc
+    }
+
     /// `psc`, when issued.
-    pub psc: Option<SignedElement<[u8; 32]>>,
+    pub fn psc(&self) -> Option<&SignedElement<[u8; 32]>> {
+        self.psc.as_ref()
+    }
 }
 
 /// Shows nothing: `birth_date`, `ssc` and `psc` are undisclosable.

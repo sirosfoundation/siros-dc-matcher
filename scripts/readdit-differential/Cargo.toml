@@ -23,5 +23,6 @@ nym-vega = { git = "https://github.com/AltmannPeter/readdit-demo", rev = "1cf3f2
 vega-age = { git = "https://github.com/AltmannPeter/readdit-demo", rev = "1cf3f2610318e896b0a1cde4b30d6b15d94ccfd0" }
 siros-zkp-req-nym-auth = { path = "../../crates/siros-zkp-req-nym-auth", features = ["test-fixtures"] }
 siros-zkp-req = { path = "../../crates/siros-zkp-req" }
+siros-oid4vp = { path = "../../crates/siros-oid4vp" }
 serde_json = "1"
 hex = "0.4"

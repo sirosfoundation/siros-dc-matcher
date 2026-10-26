@@ -6,13 +6,13 @@
 //!
 //! | Module | Defines | Source |
 //! | --- | --- | --- |
-//! | [`catalogue`] | `pseudonym`, `age_check`, the query rules | Function catalogue |
+//! | [`catalogue`] | `pseudonym`, `age_check`, the nym_auth query | Function catalogue |
 //! | [`age`] | `range`, E and C | `age_check` |
 //! | [`verifier_id`] | `verifier_id`, `verifier_input`, the `sha-256` pseudonym | `pseudonym` |
 //! | [`system`] | The systems and the options each supports | System rulebooks, Sections 1 to 3 |
 //! | [`policy`] | Signed requests, encrypted responses | Binding, Response confidentiality |
 //! | [`mdoc`] | The nym_auth form of the ISO/IEC 18013-5 attestation | Attestation |
-//! | [`checks`] | The Wallet's tests of a credential | System rulebooks, Section 7 |
+//! | [`attestation`] | The usable attestation and the opened seed | System rulebooks, Section 7 |
 //! | [`presenter`] | `match`, then `prove` in phases | `zkp_req`, Sections 1.3, 2.1, 3, 4 |
 //! | [`prover`] | The statement and the prover interface | System rulebooks, Sections 3, 4, 7 |
 //! | [`verify`] | The Verifier's checks | `zkp_req`, Section 4.1; system rulebooks, Section 9 |
@@ -50,7 +50,7 @@ pub mod system;
 pub mod verifier_id;
 
 #[cfg(feature = "credential")]
-pub mod checks;
+pub mod attestation;
 #[cfg(feature = "credential")]
 pub mod mdoc;
 #[cfg(feature = "credential")]
