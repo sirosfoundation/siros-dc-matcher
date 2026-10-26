@@ -17,10 +17,11 @@
 use serde::{Deserialize, Serialize};
 use serde_bytes::ByteBuf;
 use serde_json::Value;
+use siros_codec::date::Date;
+use siros_oid4vp::{ClientId, SemanticIdentifier};
 use siros_zkp_backend_longfellow::{self as longfellow, LongfellowProver};
 use siros_zkp_backend_vega::{self as vega, VegaNymAuth};
 use siros_zkp_req::{Candidate, ErrorCode, Match, ZkpPresentation};
-use siros_zkp_req_nym_auth::date::Date;
 use siros_zkp_req_nym_auth::mdoc::StoredCredential;
 use siros_zkp_req_nym_auth::outcome::ZkpError;
 use siros_zkp_req_nym_auth::policy::{check_request, Channel};
@@ -31,7 +32,7 @@ use siros_zkp_req_nym_auth::prover::{
     NymAuthProver, ProofJob, ProofOutput, ProverFailure, Statement,
 };
 use siros_zkp_req_nym_auth::system::{pair_code, NymAuthSystem};
-use siros_zkp_req_nym_auth::verifier_id::VerifierId;
+use siros_zkp_req_nym_auth::verifier_id::{Intermediary, VerifierId};
 use wasm_bindgen::prelude::*;
 
 /// A refusal, as thrown to JavaScript.
@@ -359,12 +360,22 @@ pub fn session(input: JsValue) -> Result<ZkpSession, JsValue> {
     let verifier_id = match input.verifier_id {
         JsVerifierIdForm::Semantic {
             semantic_identifier,
-        } => VerifierId::semantic(&semantic_identifier),
+        } => VerifierId::semantic(
+            &SemanticIdentifier::parse_stated(&semantic_identifier)
+                .map_err(|e| invalid(e.code()))?,
+        ),
         JsVerifierIdForm::X509SanDns {
             registration_names_intermediary,
-        } => VerifierId::x509_san_dns(&checked.client_id, registration_names_intermediary),
-    }
-    .map_err(|r| invalid(r.code()))?;
+        } => {
+            let client_id = ClientId::parse(&checked.client_id).map_err(|e| invalid(e.code()))?;
+            let intermediary = if registration_names_intermediary {
+                Intermediary::Named
+            } else {
+                Intermediary::Absent
+            };
+            VerifierId::x509_san_dns(&client_id, intermediary).map_err(|r| invalid(r.code()))?
+        }
+    };
     Ok(ZkpSession(Session {
         handover,
         verifier_id,
@@ -409,8 +420,8 @@ impl From<&Statement> for JsStatement {
             proof_backend: s.proof_backend.clone(),
             doc_type: s.doc_type,
             issuer_certificate: ByteBuf::from(s.issuer_certificate.clone()),
-            issuer_key_x: ByteBuf::from(s.issuer_key.x.to_vec()),
-            issuer_key_y: ByteBuf::from(s.issuer_key.y.to_vec()),
+            issuer_key_x: ByteBuf::from(s.issuer_key.x().to_vec()),
+            issuer_key_y: ByteBuf::from(s.issuer_key.y().to_vec()),
             proof_time: s.proof_time.to_string(),
             earliest: s.earliest.and_then(Date::to_full_date),
             cutoff: s.cutoff.and_then(Date::to_full_date),
@@ -568,7 +579,7 @@ impl ZkpProvers {
 
 impl NymAuthProver for ZkpProvers {
     fn prove(&self, job: &ProofJob) -> Result<ProofOutput, ProverFailure> {
-        match job.statement.system {
+        match job.statement().system {
             NymAuthSystem::LongfellowV1 => self.longfellow.as_ref().map(|p| p.prove(job)),
             NymAuthSystem::VegaV1 => self.vega.as_ref().map(|p| p.prove(job)),
         }

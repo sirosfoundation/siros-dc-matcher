@@ -5,7 +5,9 @@ use std::fmt;
 
 use serde_json::Value;
 
-use crate::session::{ec_jwk_thumbprint, Handover};
+use siros_oid4vp::{ec_jwk_thumbprint, Handover, JwkThumbprint};
+
+use crate::verifier_id::VerifierIdRule;
 
 /// The channel a request arrived on.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,6 +26,12 @@ pub enum Channel {
 pub enum PolicyRule {
     /// The request is not signed.
     Unsigned,
+    /// A Digital Credentials API request arrived as `openid4vp-v1-multisigned`: the catalogue
+    /// requires `openid4vp-v1-signed`.
+    Multisigned,
+    /// The host's trust verdict on the Client Identifier is negative: the Wallet Unit validates
+    /// the Request Object's certificate chain for its Client Identifier Prefix.
+    Untrusted,
     /// The Request Object is not a JSON object.
     NotObject,
     /// `client_id` is missing or not a string.
@@ -46,6 +54,8 @@ impl PolicyRule {
     pub fn code(self) -> &'static str {
         match self {
             Self::Unsigned => "unsigned",
+            Self::Multisigned => "multisigned",
+            Self::Untrusted => "untrusted",
             Self::NotObject => "request_object_not_object",
             Self::ClientIdMissing => "client_id_missing",
             Self::NonceMissing => "nonce_missing",
@@ -64,6 +74,34 @@ impl fmt::Display for PolicyRule {
 }
 
 impl std::error::Error for PolicyRule {}
+
+/// Why a verified request is no nym_auth request: a rule of the policy, or of the Verifier
+/// identity. Each makes a nym_auth query invalid.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RequestRefusal {
+    /// A rule of the signed-request and encrypted-response policy.
+    Policy(PolicyRule),
+    /// A rule of the `verifier_id` of the trust framework's form.
+    VerifierId(VerifierIdRule),
+}
+
+impl RequestRefusal {
+    /// The rule's stable identifier.
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Policy(rule) => rule.code(),
+            Self::VerifierId(rule) => rule.code(),
+        }
+    }
+}
+
+impl fmt::Display for RequestRefusal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.code())
+    }
+}
+
+impl std::error::Error for RequestRefusal {}
 
 /// The channel's own value in the `Handover`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -166,17 +204,17 @@ impl CheckedRequest {
     /// [`KeyNotInRequest`] when no key of `client_metadata.jwks` has that thumbprint: the
     /// session binds only values of the validated Request Object.
     pub fn handover(&self, jwk_thumbprint: &[u8; 32]) -> Result<Handover, KeyNotInRequest> {
-        let known = self
-            .encryption_keys
-            .iter()
-            .any(|k| ec_jwk_thumbprint(k).as_ref() == Some(jwk_thumbprint));
+        let known = self.encryption_keys.iter().any(|k| {
+            ec_jwk_thumbprint(k).as_ref().map(JwkThumbprint::as_bytes) == Some(jwk_thumbprint)
+        });
         if !known {
             return Err(KeyNotInRequest);
         }
+        let thumbprint = JwkThumbprint::new(*jwk_thumbprint);
         Ok(match &self.endpoint {
-            Endpoint::Origin(origin) => Handover::dc_api(origin, &self.nonce, jwk_thumbprint),
+            Endpoint::Origin(origin) => Handover::dc_api(origin, &self.nonce, Some(&thumbprint)),
             Endpoint::ResponseUri(uri) => {
-                Handover::redirect(&self.client_id, &self.nonce, jwk_thumbprint, uri)
+                Handover::redirect(&self.client_id, &self.nonce, Some(&thumbprint), uri)
             }
         })
     }

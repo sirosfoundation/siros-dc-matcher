@@ -13,7 +13,7 @@ use std::path::PathBuf;
 
 use serde_json::{json, Value};
 use siros_zkp_req::{ZkpFormats, ZkpReqQuery};
-use siros_zkp_req_nym_auth::catalogue::{validate, CatalogueRule};
+use siros_zkp_req_nym_auth::catalogue::{CatalogueRule, Catalogued, NymAuthQuery};
 
 fn member(vector: &Value, value_key: &str, text_key: &str) -> Value {
     match (vector.get(value_key), vector.get(text_key)) {
@@ -54,8 +54,8 @@ fn verdict(vector: &Value) -> Value {
     if let Err(rule) = ZkpFormats::from_client_metadata(&metadata) {
         return json!({"error": rule.code()});
     }
-    match validate(&parsed) {
-        Ok(applies) => json!({"valid": {"catalogue": applies.is_some()}}),
+    match NymAuthQuery::from_query(parsed) {
+        Ok(applies) => json!({"valid": {"catalogue": matches!(applies, Catalogued::NymAuth(_))}}),
         Err(rule) => rule_json(rule),
     }
 }

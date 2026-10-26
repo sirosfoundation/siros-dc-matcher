@@ -6,7 +6,11 @@
 use std::fmt;
 
 use serde_json::Value;
-use siros_zkp_req::cbor::Value as Cbor;
+use siros_codec::cbor::Value as Cbor;
+use siros_codec::date::{Date, DateTime};
+use siros_mdoc::{
+    chains_to, device_signing_digest, CertificateError, DeviceNameSpaces, P256Certificate,
+};
 use siros_zkp_req::{
     answered_option, EncodingError, ProofEnvelope, QueryOption, StructureRejection, ZkpFormats,
     ZkpPresentation, ZkpReqQuery,
@@ -14,14 +18,11 @@ use siros_zkp_req::{
 
 use crate::age::{Bound, Bounds};
 use crate::catalogue::{has_result, Function, NymAuthQuery, MDOC_DOCTYPE};
-use crate::date::{Date, DateTime};
 use crate::outcome::InvalidRequest;
 use crate::presenter::{Session, MAX_ZK_PROOF};
 use crate::prover::{NymAuthProofVerifier, ProofFailure, Statement};
-use crate::session::device_message;
 use crate::system::{NymAuthSystem, Unsupported};
-use crate::verifier_id::{sha256, verifier_input};
-use crate::x509::{chains_to, CertificateError, P256Certificate};
+use crate::verifier_id::verifier_input;
 
 /// How far `proof_time` may lie from the Verifier's clock.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -169,7 +170,7 @@ pub fn check_presentation(
     let (query, formats) = own_query(query, client_metadata)?;
     let presentation = ZkpPresentation::decode(presentation).map_err(Rejection::Presentation)?;
     let option = answered_option(
-        &query.query,
+        query.query(),
         &formats,
         &presentation,
         |system, backend| {
@@ -227,13 +228,17 @@ pub fn verify(
         return Err(Rejection::IssuerKeySet(IssuerKeySetError::Untrusted));
     }
     let session_transcript = input.session.handover.session_transcript();
-    let challenge_digest = sha256(&device_message(&session_transcript, MDOC_DOCTYPE));
+    let challenge_digest = device_signing_digest(
+        &session_transcript,
+        MDOC_DOCTYPE,
+        &DeviceNameSpaces::empty(),
+    );
     let statement = Statement {
         system: checked.system,
         proof_backend: checked.presentation.proof_backend.clone(),
         doc_type: MDOC_DOCTYPE,
-        issuer_certificate: checked.certificate.der.clone(),
-        issuer_key: checked.certificate.key,
+        issuer_certificate: checked.certificate.der().to_vec(),
+        issuer_key: *checked.certificate.key(),
         proof_time: checked.proof_time,
         earliest: bound(checked.bounds.earliest)?,
         cutoff: bound(checked.bounds.cutoff)?,
@@ -249,7 +254,7 @@ pub fn verify(
         proof_backend: checked.presentation.proof_backend,
         req_set: checked.option.req_set,
         results: checked.presentation.results,
-        issuer_certificate: checked.certificate.der,
+        issuer_certificate: checked.certificate.der().to_vec(),
         proof_time: checked.proof_time,
     })
 }
@@ -273,6 +278,7 @@ fn own_query(
         ZkpFormats::from_client_metadata(client_metadata).map_err(|r| invalid(r.into()))?;
     let query = NymAuthQuery::from_query(parsed)
         .map_err(|r| invalid(r.into()))?
+        .nym_auth()
         .ok_or(Rejection::Request(None))?;
     Ok((query, formats))
 }
@@ -320,13 +326,7 @@ fn own_bounds(
     system: NymAuthSystem,
     d: Date,
 ) -> Result<Bounds, Rejection> {
-    let bounds = query
-        .option_items(option)
-        .find_map(|(_, item)| match &item.function {
-            Function::AgeCheck(age) => Some(age.range.bounds(d)),
-            Function::Pseudonym(_) => None,
-        })
-        .unwrap_or(Bounds::WIDEST);
+    let bounds = query.option_bounds(option, d);
     system
         .supports(query.option_items(option).map(|(_, i)| i), &bounds)
         .map_err(Rejection::Unsupported)?;

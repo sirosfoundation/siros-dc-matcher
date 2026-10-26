@@ -15,7 +15,7 @@
 
 use std::fmt;
 
-use siros_zkp_req_nym_auth::date::Date;
+use siros_codec::date::Date;
 use siros_zkp_req_nym_auth::prover::{
     NymAuthProofVerifier, NymAuthProver, ProofFailure, ProofJob, ProofOutput, ProverFailure,
     Statement,
@@ -137,8 +137,8 @@ impl Dates {
 
     fn request<'a>(&'a self, statement: &'a Statement) -> NymAuthRequest<'a> {
         NymAuthRequest {
-            issuer_key_x: &statement.issuer_key.x,
-            issuer_key_y: &statement.issuer_key.y,
+            issuer_key_x: statement.issuer_key.x(),
+            issuer_key_y: statement.issuer_key.y(),
             time: &self.time,
             earliest: &self.earliest,
             cutoff: &self.cutoff,
@@ -151,15 +151,15 @@ impl Dates {
 
 impl NymAuthProver for LongfellowProver {
     fn prove(&self, job: &ProofJob) -> Result<ProofOutput, ProverFailure> {
-        let statement = &job.statement;
+        let statement = job.statement();
         if !serves(statement) {
             return Err(ProverFailure::Unavailable);
         }
         let dates = Dates::of(statement).ok_or(ProverFailure::Failed)?;
         let witness = NymAuthWitnessInput {
-            issuer_signed: &job.issuer_signed,
-            secret_seed: &job.secret_seed[..],
-            device_signature: &job.device_signature,
+            issuer_signed: job.issuer_signed(),
+            secret_seed: job.secret_seed(),
+            device_signature: job.device_signature(),
         };
         let proved = self
             .0

@@ -5,11 +5,11 @@
 
 use std::fmt;
 
+use siros_codec::date::Date;
 use siros_zkp_req::{CredentialType, PairRefusal};
 
 use crate::age::Bounds;
 use crate::catalogue::{Config, Form, Function, Item, Prf, MDOC_DOCTYPE};
-use crate::date::Date;
 use crate::verifier_id::sha256;
 
 /// A nym_auth system.

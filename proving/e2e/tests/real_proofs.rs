@@ -16,9 +16,9 @@
 use std::path::PathBuf;
 
 use serde_json::Value;
+use siros_codec::cbor::Value as Cbor;
 use siros_zkp_backend_longfellow::{LongfellowProver, LongfellowVerifier};
 use siros_zkp_backend_vega::VegaNymAuth;
-use siros_zkp_req::cbor::Value as Cbor;
 use siros_zkp_req::Match;
 use siros_zkp_req_nym_auth::presenter::{match_query, prepare, MatchInput, ProveInput, Signer};
 use siros_zkp_req_nym_auth::prover::{
@@ -106,7 +106,7 @@ fn prove(backend: &Backend<'_>, range: &str) -> Proved {
         presentation: prepared.assemble(&output).unwrap().encode(),
         query,
         anchors,
-        statement: job.statement.clone(),
+        statement: job.statement().clone(),
         zk_proof: output.zk_proof,
     }
 }

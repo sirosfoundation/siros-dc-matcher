@@ -10,6 +10,7 @@ authors.workspace = true
 rust-version.workspace = true
 
 [dev-dependencies]
+siros-codec = { workspace = true }
 siros-zkp-req = { workspace = true }
 siros-zkp-req-nym-auth = { workspace = true, features = ["test-fixtures"] }
 siros-zkp-backend-longfellow = { workspace = true }

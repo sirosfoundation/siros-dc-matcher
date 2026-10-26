@@ -8,11 +8,15 @@
 )]
 
 use serde_json::Value;
+use siros_codec::date::Date;
+use siros_mdoc::{device_signing_digest, DeviceNameSpaces};
+use siros_oid4vp::ClientId;
+use siros_oid4vp::{Handover, JwkThumbprint};
 use siros_zkp_req_nym_auth::age::{AgeRange, Bound, Bounds};
 use siros_zkp_req_nym_auth::catalogue::{Config, Prf, Pseudonym};
-use siros_zkp_req_nym_auth::date::Date;
-use siros_zkp_req_nym_auth::session::{challenge_digest, Handover};
-use siros_zkp_req_nym_auth::verifier_id::{pseudonym_sha256, verifier_input, VerifierId};
+use siros_zkp_req_nym_auth::verifier_id::{
+    pseudonym_sha256, verifier_input, Intermediary, VerifierId,
+};
 
 /// A range, D, E, C, and where the case comes from.
 type AgeCase = (
@@ -32,6 +36,11 @@ fn hex(text: &str) -> Vec<u8> {
         .step_by(2)
         .map(|i| u8::from_str_radix(&text[i..i + 2], 16).unwrap())
         .collect()
+}
+
+/// e2: the digest of the data the device key signs, with no `DeviceSigned` element.
+fn challenge_digest(session_transcript: &[u8], doc_type: &str) -> [u8; 32] {
+    device_signing_digest(session_transcript, doc_type, &DeviceNameSpaces::empty())
 }
 
 fn vectors(name: &str) -> Value {
@@ -168,7 +177,8 @@ fn pseudonym_vectors() {
     };
     for verifier in v["verifiers"].as_array().unwrap() {
         let client_id = verifier["client_id"].as_str().unwrap();
-        let id = VerifierId::x509_san_dns(client_id, false).unwrap();
+        let client = ClientId::parse(client_id).unwrap();
+        let id = VerifierId::x509_san_dns(&client, Intermediary::Absent).unwrap();
         let vi = verifier_input(&pseudonym, &id);
         assert_eq!(
             vi.to_vec(),
@@ -191,9 +201,13 @@ fn session_vectors() {
     let v = vectors("session.json");
     for e in v["redirect"].as_array().unwrap() {
         let s = |k: &str| e[k].as_str().unwrap();
-        let thumbprint: [u8; 32] = hex(s("jwk_thumbprint_hex")).try_into().unwrap();
-        let handover =
-            Handover::redirect(s("client_id"), s("nonce"), &thumbprint, s("response_uri"));
+        let thumbprint = JwkThumbprint::new(hex(s("jwk_thumbprint_hex")).try_into().unwrap());
+        let handover = Handover::redirect(
+            s("client_id"),
+            s("nonce"),
+            Some(&thumbprint),
+            s("response_uri"),
+        );
         let transcript = handover.session_transcript();
         assert_eq!(
             transcript,
@@ -218,8 +232,8 @@ fn session_vectors() {
             s("name")
         );
         if let Some(thumbprint) = e["jwk_thumbprint_hex"].as_str() {
-            let thumbprint: [u8; 32] = hex(thumbprint).try_into().unwrap();
-            let handover = Handover::dc_api(s("origin"), s("nonce"), &thumbprint);
+            let thumbprint = JwkThumbprint::new(hex(thumbprint).try_into().unwrap());
+            let handover = Handover::dc_api(s("origin"), s("nonce"), Some(&thumbprint));
             assert_eq!(handover.session_transcript(), transcript, "{}", s("name"));
         }
     }

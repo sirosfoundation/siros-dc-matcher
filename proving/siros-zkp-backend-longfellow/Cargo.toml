@@ -10,6 +10,7 @@ authors.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+siros-codec = { workspace = true }
 siros-zkp-req-nym-auth = { workspace = true }
 zk-cred-longfellow = { workspace = true }
 sha2 = { workspace = true }

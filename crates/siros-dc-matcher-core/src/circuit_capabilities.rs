@@ -178,7 +178,7 @@ impl Constraint {
             Self::Type(ParamKind::String) => value.is_string(),
             Self::Type(ParamKind::FullDate) => value
                 .as_str()
-                .is_some_and(|d| siros_zkp_req_nym_auth::date::Date::parse(d).is_some()),
+                .is_some_and(|d| siros_codec::date::Date::parse(d).is_some()),
             // A JSON number with no fractional part. 2^53 is where f64 stops
             // being exact; the catalog's reference implementation draws the
             // same line.

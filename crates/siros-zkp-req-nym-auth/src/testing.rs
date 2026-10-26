@@ -21,7 +21,6 @@
 use std::str::FromStr;
 use std::time::Duration;
 
-use crate::date::DateTime;
 use crate::mdoc::StoredCredential;
 use crate::policy::{check_request, Channel};
 use crate::presenter::{Session, SignFailure, Signer};
@@ -29,17 +28,18 @@ use crate::prover::{
     NymAuthProofVerifier, NymAuthProver, ProofFailure, ProofJob, ProofOutput, ProverFailure,
     Statement,
 };
-use crate::session::ec_jwk_thumbprint;
 use crate::system::NymAuthSystem;
-use crate::verifier_id::VerifierId;
+use crate::verifier_id::{Intermediary, VerifierId};
 use der::asn1::{GeneralizedTime, UtcTime};
 use der::Encode;
 use p256::ecdsa::signature::Signer as _;
 use p256::ecdsa::{DerSignature, Signature, SigningKey};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use siros_zkp_req::base64url;
-use siros_zkp_req::cbor::Value as Cbor;
+use siros_codec::base64url;
+use siros_codec::cbor::Value as Cbor;
+use siros_codec::date::DateTime;
+use siros_oid4vp::{ec_jwk_thumbprint, ClientId};
 use x509_cert::builder::{Builder, CertificateBuilder, Profile};
 use x509_cert::name::Name;
 use x509_cert::serial_number::SerialNumber;
@@ -262,7 +262,7 @@ pub fn issue(issuer: &Issuer, spec: &Spec) -> String {
             ]),
         ),
     ]);
-    base64url::encode(&issuer_signed.encode())
+    base64url::encode(&issuer_signed.encode()).into()
 }
 
 pub fn stored(id: &str, data: String) -> StoredCredential {
@@ -323,8 +323,12 @@ pub fn session(query: &Value, nonce: &str) -> Session {
     let checked = check_request(&request_object(query, nonce), true, Channel::Redirect).unwrap();
     let thumbprint = ec_jwk_thumbprint(&encryption_jwk()).unwrap();
     Session {
-        handover: checked.handover(&thumbprint).unwrap(),
-        verifier_id: VerifierId::x509_san_dns(&checked.client_id, false).unwrap(),
+        handover: checked.handover(thumbprint.as_bytes()).unwrap(),
+        verifier_id: VerifierId::x509_san_dns(
+            &ClientId::parse(&checked.client_id).unwrap(),
+            Intermediary::Absent,
+        )
+        .unwrap(),
     }
 }
 
@@ -351,15 +355,15 @@ pub fn expected_pseudonym(seed: &[u8; 16], verifier_id: &str) -> [u8; 32] {
 /// A digest of every public value and the pseudonym: a test proof binds them as a real proof
 /// does, so a verifier with any other value refuses it.
 fn binding(statement: &Statement, pseudonym: &[u8; 32]) -> [u8; 32] {
-    let date = |d: Option<crate::date::Date>| d.map_or("-".to_owned(), |d| d.to_string());
+    let date = |d: Option<siros_codec::date::Date>| d.map_or("-".to_owned(), |d| d.to_string());
     let mut h = Sha256::new();
     for part in [
         statement.system.id().as_bytes(),
         statement.proof_backend.as_bytes(),
         statement.doc_type.as_bytes(),
         &statement.issuer_certificate,
-        &statement.issuer_key.x,
-        &statement.issuer_key.y,
+        statement.issuer_key.x(),
+        statement.issuer_key.y(),
         statement.proof_time.to_string().as_bytes(),
         date(statement.earliest).as_bytes(),
         date(statement.cutoff).as_bytes(),
@@ -379,7 +383,7 @@ fn proof_len(system: NymAuthSystem) -> usize {
     system.zk_proof_len().unwrap_or(1024)
 }
 
-/// A test prover: its `zk_proof` repeats [`binding`] to the system's length.
+/// A test prover: its `zk_proof` repeats `binding` to the system's length.
 pub struct TestProver {
     /// What the prover answers instead of a proof.
     pub fail: Option<ProverFailure>,
@@ -392,17 +396,17 @@ impl NymAuthProver for TestProver {
         }
         let pseudonym = {
             let mut message = b"nym_auth/v1/known-offender-matching-ssc".to_vec();
-            message.extend_from_slice(&job.secret_seed[..]);
+            message.extend_from_slice(job.secret_seed());
             message.extend_from_slice(&[0; 32]);
-            message.extend_from_slice(&job.statement.verifier_input);
+            message.extend_from_slice(&job.statement().verifier_input);
             sha256(&message)
         };
-        let digest = binding(&job.statement, &pseudonym);
+        let digest = binding(job.statement(), &pseudonym);
         let zk_proof = digest
             .iter()
             .copied()
             .cycle()
-            .take(proof_len(job.statement.system))
+            .take(proof_len(job.statement().system))
             .collect();
         Ok(ProofOutput {
             zk_proof,

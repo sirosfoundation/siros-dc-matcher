@@ -4,10 +4,10 @@
 
 use std::fmt;
 
-use crate::cbor::Value;
 use crate::formats::ZkpFormats;
 use crate::presentation::ZkpPresentation;
 use crate::query::{QueryOption, ReqItem, ZkpReqQuery};
+use siros_codec::cbor::Value;
 
 /// Why a presentation breaks steps 1 to 5 of Section 4.1.
 #[derive(Debug, Clone, PartialEq, Eq)]

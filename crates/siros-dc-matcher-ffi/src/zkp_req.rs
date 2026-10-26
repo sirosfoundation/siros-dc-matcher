@@ -12,9 +12,10 @@
 use std::sync::Arc;
 
 use serde_json::Value;
-use siros_zkp_req::cbor::Value as Cbor;
+use siros_codec::cbor::Value as Cbor;
+use siros_codec::date::Date;
+use siros_oid4vp::{ec_jwk_thumbprint, ClientId, SemanticIdentifier};
 use siros_zkp_req::{Candidate, ErrorCode, Match, ZkpPresentation};
-use siros_zkp_req_nym_auth::date::Date;
 use siros_zkp_req_nym_auth::mdoc::StoredCredential;
 use siros_zkp_req_nym_auth::outcome::ZkpError;
 use siros_zkp_req_nym_auth::policy::{check_request, Channel};
@@ -22,9 +23,8 @@ use siros_zkp_req_nym_auth::presenter::{
     match_query, prepare, MatchInput, NymAuthMatch, Prepared, ProveError, ProveInput, Session,
 };
 use siros_zkp_req_nym_auth::prover::{NymAuthProofVerifier, ProofFailure, ProofOutput, Statement};
-use siros_zkp_req_nym_auth::session::ec_jwk_thumbprint;
 use siros_zkp_req_nym_auth::system::{pair_code, NymAuthSystem};
-use siros_zkp_req_nym_auth::verifier_id::VerifierId;
+use siros_zkp_req_nym_auth::verifier_id::{Intermediary, VerifierId};
 use siros_zkp_req_nym_auth::verify::{verify, Rejection, Tolerance, VerifyInput};
 
 /// Why a `zkp_req` call gave no result. `error_code` is what the wallet sends the verifier
@@ -406,12 +406,22 @@ pub fn zkp_req_session(
     let verifier_id = match verifier_id {
         FfiVerifierIdForm::Semantic {
             semantic_identifier,
-        } => VerifierId::semantic(&semantic_identifier),
+        } => VerifierId::semantic(
+            &SemanticIdentifier::parse_stated(&semantic_identifier)
+                .map_err(|e| invalid(e.code()))?,
+        ),
         FfiVerifierIdForm::X509SanDns {
             registration_names_intermediary,
-        } => VerifierId::x509_san_dns(&checked.client_id, registration_names_intermediary),
-    }
-    .map_err(|r| invalid(r.code()))?;
+        } => {
+            let client_id = ClientId::parse(&checked.client_id).map_err(|e| invalid(e.code()))?;
+            let intermediary = if registration_names_intermediary {
+                Intermediary::Named
+            } else {
+                Intermediary::Absent
+            };
+            VerifierId::x509_san_dns(&client_id, intermediary).map_err(|r| invalid(r.code()))?
+        }
+    };
     Ok(Arc::new(FfiSession(Session {
         handover,
         verifier_id,
@@ -427,7 +437,7 @@ pub fn zkp_req_session(
 pub fn zkp_req_jwk_thumbprint(jwk_json: String) -> Result<Vec<u8>, ZkpReqError> {
     let jwk = json(&jwk_json, "jwk_not_json")?;
     ec_jwk_thumbprint(&jwk)
-        .map(|t| t.to_vec())
+        .map(|t| t.as_bytes().to_vec())
         .ok_or_else(|| host("jwk_not_ec"))
 }
 
@@ -471,8 +481,8 @@ impl From<&Statement> for FfiStatement {
             proof_backend: s.proof_backend.clone(),
             doc_type: s.doc_type.to_owned(),
             issuer_certificate: s.issuer_certificate.clone(),
-            issuer_key_x: s.issuer_key.x.to_vec(),
-            issuer_key_y: s.issuer_key.y.to_vec(),
+            issuer_key_x: s.issuer_key.x().to_vec(),
+            issuer_key_y: s.issuer_key.y().to_vec(),
             proof_time: s.proof_time.to_string(),
             earliest: full_date(s.earliest),
             cutoff: full_date(s.cutoff),
@@ -585,10 +595,10 @@ impl FfiPrepared {
     pub fn job(&self, device_signature: Vec<u8>) -> Result<FfiProofJob, ZkpReqError> {
         let job = self.0.job(&device_signature).map_err(prove_error)?;
         Ok(FfiProofJob {
-            statement: (&job.statement).into(),
-            issuer_signed: job.issuer_signed.clone(),
-            secret_seed: job.secret_seed.to_vec(),
-            device_signature: job.device_signature.to_vec(),
+            statement: job.statement().into(),
+            issuer_signed: job.issuer_signed().to_vec(),
+            secret_seed: job.secret_seed().to_vec(),
+            device_signature: job.device_signature().to_vec(),
         })
     }
 
