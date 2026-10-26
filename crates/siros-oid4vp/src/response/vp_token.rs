@@ -100,6 +100,23 @@ impl VerifiedRequest {
     }
 }
 
+impl VpToken<'_> {
+    /// The `vp_token` in JSON (Section 8.1): each presentation a string, a CBOR map as the
+    /// base64url of its encoding.
+    #[must_use]
+    pub fn json(&self) -> Value {
+        Value::Object(
+            self.entries
+                .iter()
+                .map(|(id, presentations)| {
+                    let list = presentations.iter().map(Presentation::json).collect();
+                    (id.clone(), Value::Array(list))
+                })
+                .collect(),
+        )
+    }
+}
+
 /// What an Authorization Response answers (Section 8.1, 8.5): a `vp_token` or an error.
 pub(super) enum Answer<'a> {
     VpToken(&'a VpToken<'a>),
@@ -112,15 +129,7 @@ impl Answer<'_> {
         let mut parameters = Map::new();
         match self {
             Self::VpToken(token) => {
-                let token = token
-                    .entries
-                    .iter()
-                    .map(|(id, presentations)| {
-                        let list = presentations.iter().map(Presentation::json).collect();
-                        (id.clone(), Value::Array(list))
-                    })
-                    .collect();
-                parameters.insert("vp_token".into(), Value::Object(token));
+                parameters.insert("vp_token".into(), token.json());
             }
             Self::Error(code) => {
                 parameters.insert("error".into(), code.as_str().into());
