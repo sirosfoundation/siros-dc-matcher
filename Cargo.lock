@@ -2051,6 +2051,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "siros-wallet-state"
+version = "0.11.0"
+dependencies = [
+ "rustc-hash",
+ "serde",
+ "serde_json",
+ "siros-codec",
+]
+
+[[package]]
 name = "siros-zkp-req"
 version = "0.11.0"
 dependencies = [
