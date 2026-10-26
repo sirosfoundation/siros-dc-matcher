@@ -1,23 +1,24 @@
 //! The semantics identifier of a Wallet-Relying Party (ETSI TS 119 475, Clauses 5.1.3 and
 //! 5.1.5).
 //!
-//! "GEN-5.1.3-01: The organizationIdentifier shall follow the semantics defined in ETSI
-//! EN 319 412-1 \[1\], clause 5.1.4." "GEN-5.1.5-01: The serialNumber with shall follow the
-//! semantics defined in ETSI EN 319 412-1 \[1\], clause 5.1.3." Both clauses of EN 319 412-1
-//! (LEG-5.1.4-02, NAT-5.1.3-02) give the value "the following structure in the presented order:
-//! 3 character [...] identity type reference; 2 character ISO 3166-1 country code; hyphen-minus
-//! "-" [...]; and identifier", where the type reference may instead be two characters of a local
-//! scheme followed by ":" (LEG-5.1.4-03 point 5, NAT-5.1.3-03 point 6).
+//! The access certificate's policy says whom it is issued to (ETSI TS 119 411-8, Clause 5.3):
+//! a natural person under NCP-n-eudiwrp or QCP-n-eudiwrp, a legal person under NCP-l-eudiwrp or
+//! QCP-l-eudiwrp. A natural person's identifier is its `serialNumber` (GEN-5.1.5-01), a legal
+//! person's its `organizationIdentifier` (GEN-5.1.3-01). Both follow ETSI EN 319 412-1, Clauses
+//! 5.1.3 and 5.1.4: "3 character [...] identity type reference; 2 character ISO 3166-1 country
+//! code; hyphen-minus "-" [...]; and identifier", the type references of TS 119 475 Tables 2
+//! and 4 (GEN-5.1.3-02, GEN-5.1.5-02).
 
 use std::fmt;
 
-/// The legal person identity type references of ETSI EN 319 412-1, LEG-5.1.4-03, and those
-/// ETSI TS 119 475, Table 2 adds.
-const LEGAL_TYPES: [&str; 6] = ["VAT", "NTR", "PSD", "LEI", "EOR", "EXC"];
-/// The natural person identity type references of ETSI EN 319 412-1, NAT-5.1.3-03.
-const NATURAL_TYPES: [&str; 5] = ["PAS", "IDC", "PNO", "TAX", "TIN"];
+/// The identity type references of a legal person (ETSI TS 119 475, Table 2).
+const LEGAL_TYPES: [&str; 5] = ["VAT", "NTR", "LEI", "EOR", "EXC"];
+/// The identity type references of a natural person: TIN (ETSI TS 119 475, Table 4), and the
+/// national schemes of ETSI EN 319 412-1, NAT-5.1.3-03: passport, identity card, personal
+/// number and personal tax reference.
+const NATURAL_TYPES: [&str; 5] = ["TIN", "PAS", "IDC", "PNO", "TAX"];
 
-/// The person a semantics identifier names, and the subject attribute that carries it.
+/// Whom a Wallet-Relying Party access certificate is issued to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Person {
     /// A legal person: `organizationIdentifier`.
@@ -37,22 +38,28 @@ impl Person {
 }
 
 /// A semantics identifier, such as `VATBE-0876866142`: an identity type reference of the
-/// person, or two characters of a local scheme and `:`, two uppercase letters of an ISO 3166-1
-/// country code, `-`, and a non-empty identifier.
+/// person, two uppercase letters of an ISO 3166-1 country code, `-`, and an identifier of
+/// printable ASCII without leading or trailing space.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SemanticIdentifier(String);
 
-/// Why a certificate subject gives no semantics identifier.
+/// Why a certificate gives no semantics identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SemanticIdError {
-    /// The subject holds neither an `organizationIdentifier` nor a `serialNumber`.
+    /// The certificate policies extension does not decode.
+    Policies,
+    /// No certificate policy says whether the subject is a natural or a legal person.
+    Unclassified,
+    /// The certificate policies say both.
+    Contradictory,
+    /// The subject holds no attribute of its identifier.
     Absent,
     /// The subject holds the attribute more than once.
     Repeated,
-    /// The value is neither a `UTF8String` nor a `PrintableString`.
+    /// A `serialNumber` that is not a `PrintableString`, or an `organizationIdentifier` that is
+    /// no `DirectoryString` of UTF-8 or printable text.
     Encoding,
-    /// The value starts with neither an identity type reference of the person nor two
-    /// characters and `:`.
+    /// The value starts with no identity type reference of the person.
     TypeReference,
     /// The country code is not two uppercase letters.
     Country,
@@ -60,6 +67,9 @@ pub enum SemanticIdError {
     Separator,
     /// The identifier after `-` is empty.
     Identifier,
+    /// The identifier holds a character other than printable ASCII, or starts or ends with a
+    /// space.
+    Character,
 }
 
 impl SemanticIdError {
@@ -67,6 +77,9 @@ impl SemanticIdError {
     #[must_use]
     pub fn code(self) -> &'static str {
         match self {
+            Self::Policies => "semantic_id_policies",
+            Self::Unclassified => "semantic_id_unclassified",
+            Self::Contradictory => "semantic_id_contradictory",
             Self::Absent => "semantic_id_absent",
             Self::Repeated => "semantic_id_repeated",
             Self::Encoding => "semantic_id_encoding",
@@ -74,6 +87,7 @@ impl SemanticIdError {
             Self::Country => "semantic_id_country",
             Self::Separator => "semantic_id_separator",
             Self::Identifier => "semantic_id_identifier",
+            Self::Character => "semantic_id_character",
         }
     }
 }
@@ -93,12 +107,11 @@ impl SemanticIdentifier {
     ///
     /// [`SemanticIdError`]: the first part of the structure `text` breaks.
     pub fn parse(text: &str, person: Person) -> Result<Self, SemanticIdError> {
-        let rest = match text.get(..3) {
-            Some(head) if person.types().contains(&head) => text.get(3..),
-            Some(head) if head.ends_with(':') && head.is_ascii() => text.get(3..),
-            _ => None,
-        }
-        .ok_or(SemanticIdError::TypeReference)?;
+        let rest = text
+            .get(..3)
+            .filter(|reference| person.types().contains(reference))
+            .and_then(|_| text.get(3..))
+            .ok_or(SemanticIdError::TypeReference)?;
         rest.get(..2)
             .filter(|country| country.bytes().all(|b| b.is_ascii_uppercase()))
             .ok_or(SemanticIdError::Country)?;
@@ -108,6 +121,10 @@ impl SemanticIdentifier {
             .ok_or(SemanticIdError::Separator)?;
         if identifier.is_empty() {
             return Err(SemanticIdError::Identifier);
+        }
+        let printable = identifier.bytes().all(|b| (0x20..=0x7E).contains(&b));
+        if !printable || identifier.starts_with(' ') || identifier.ends_with(' ') {
+            return Err(SemanticIdError::Character);
         }
         Ok(Self(text.to_owned()))
     }

@@ -14,8 +14,8 @@ use siros_zkp_req_nym_auth::testing::query;
 use siros_zkp_req_nym_auth::verifier_id::{VerifierIdForm, VerifierIdRule};
 
 use crate::verifier::{
-    client_metadata, dc_api_signed_state, intake_with, redirect_signed_state, Signer, NONCE,
-    ORIGIN, SIGNER,
+    client_metadata, dc_api_signed_state, intake_with, redirect_signed_state, SignedPrefix, Signer,
+    NATURAL_POLICY, NONCE, ORIGIN, SIGNER,
 };
 
 /// A request for a nym_auth proof in `mode`, with the members of `extra`.
@@ -52,17 +52,19 @@ enum Outcome {
 #[test]
 fn nym_auth_requests_meet_the_policy() {
     let cwt = || params("direct_post.cwt", json!({}));
+    // A natural person, whose employer's organizationIdentifier names no Relying Party.
     let natural = Signer {
-        subject: "CN=Jane Doe,2.5.4.5=PNOSE-200007292386",
-        hash: false,
+        subject: "CN=Jane Doe,O=Employer AB,2.5.4.97=VATSE-556000000101,2.5.4.5=PNOSE-200007292386",
+        policy: NATURAL_POLICY,
+        prefix: SignedPrefix::X509SanDns,
     };
     let anonymous = Signer {
         subject: "CN=Test verifier,O=Test only",
-        hash: false,
+        ..SIGNER
     };
     let hashed = Signer {
-        subject: SIGNER.subject,
-        hash: true,
+        prefix: SignedPrefix::X509Hash,
+        ..SIGNER
     };
     let policy = |rule| Outcome::Refused(RequestRefusal::Policy(rule));
     let identity = |rule| Outcome::Refused(RequestRefusal::VerifierId(rule));

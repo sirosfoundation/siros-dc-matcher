@@ -20,9 +20,12 @@ use siros_oid4vp::{
     Method, Step, Submission, TrustAnswer, VerifiedRequest,
 };
 use x509_cert::builder::{Builder, CertificateBuilder, Profile};
+use x509_cert::der::asn1::ObjectIdentifier;
 use x509_cert::der::asn1::{Ia5String, UtcTime};
 use x509_cert::der::Encode;
+use x509_cert::ext::pkix::certpolicy::PolicyInformation;
 use x509_cert::ext::pkix::name::GeneralName;
+use x509_cert::ext::pkix::CertificatePolicies;
 use x509_cert::ext::pkix::SubjectAltName;
 use x509_cert::name::Name;
 use x509_cert::serial_number::SerialNumber;
@@ -165,24 +168,38 @@ pub fn redirect_unsigned(params: &Value) -> VerifiedRequest {
     ))
 }
 
-/// How the verifier signs its Request Object: the subject of its access certificate, and
-/// whether its Client Identifier is `x509_hash` rather than `x509_san_dns`.
+/// How the verifier signs its Request Object: the subject and the certificate policy of its
+/// access certificate, and its Client Identifier Prefix.
 #[derive(Clone, Copy)]
 pub struct Signer {
     pub subject: &'static str,
-    pub hash: bool,
+    pub policy: &'static str,
+    pub prefix: SignedPrefix,
 }
+
+/// The Client Identifier Prefix of a signed request.
+#[derive(Clone, Copy)]
+pub enum SignedPrefix {
+    X509SanDns,
+    X509Hash,
+}
+
+/// NCP-n-eudiwrp: an access certificate issued to a natural person (ETSI TS 119 411-8).
+pub const NATURAL_POLICY: &str = "0.4.0.194118.1.1";
+/// NCP-l-eudiwrp: an access certificate issued to a legal person (ETSI TS 119 411-8).
+pub const LEGAL_POLICY: &str = "0.4.0.194118.1.2";
 
 /// An `x509_san_dns` client whose access certificate names a legal person by its VAT number
 /// (ETSI EN 319 412-1, LEG-5.1.4).
 pub const SIGNER: Signer = Signer {
     subject: "CN=Test verifier,O=Test only,2.5.4.97=VATBE-0876866142",
-    hash: false,
+    policy: LEGAL_POLICY,
+    prefix: SignedPrefix::X509SanDns,
 };
 
-/// The verifier's signing key and its self-signed certificate of `subject`, with the dNSName
-/// SAN [`DNS`].
-fn certificate(subject: &str) -> (SigningKey, Vec<u8>) {
+/// The verifier's signing key and its self-signed certificate of `signer`'s subject and policy,
+/// with the dNSName SAN [`DNS`].
+fn certificate(signer: Signer) -> (SigningKey, Vec<u8>) {
     let key = SigningKey::from_bytes(&[5; 32].into()).unwrap();
     let at =
         |unix: u64| Time::UtcTime(UtcTime::from_unix_duration(Duration::from_secs(unix)).unwrap());
@@ -195,7 +212,7 @@ fn certificate(subject: &str) -> (SigningKey, Vec<u8>) {
         Profile::Root,
         SerialNumber::new(&[1]).unwrap(),
         validity,
-        Name::from_str(subject).unwrap(),
+        Name::from_str(signer.subject).unwrap(),
         spki,
         &key,
     )
@@ -204,6 +221,13 @@ fn certificate(subject: &str) -> (SigningKey, Vec<u8>) {
         .add_extension(&SubjectAltName(vec![GeneralName::DnsName(
             Ia5String::new(DNS).unwrap(),
         )]))
+        .unwrap();
+    let policy = PolicyInformation {
+        policy_identifier: ObjectIdentifier::new(signer.policy).unwrap(),
+        policy_qualifiers: None,
+    };
+    builder
+        .add_extension(&CertificatePolicies(vec![policy]))
         .unwrap();
     let der = builder.build::<DerSignature>().unwrap().to_der().unwrap();
     (key, der)
@@ -217,17 +241,18 @@ pub fn signed_client_id() -> String {
 impl Signer {
     /// The Client Identifier.
     pub fn client_id(self) -> String {
-        if self.hash {
-            let (_, der) = certificate(self.subject);
-            format!("x509_hash:{}", b64(&Sha256::digest(&der)))
-        } else {
-            signed_client_id()
+        match self.prefix {
+            SignedPrefix::X509Hash => {
+                let (_, der) = certificate(self);
+                format!("x509_hash:{}", b64(&Sha256::digest(&der)))
+            }
+            SignedPrefix::X509SanDns => signed_client_id(),
         }
     }
 
     /// The protected header of a Request Object, with `x5c`.
     fn header(self) -> Value {
-        let (_, der) = certificate(self.subject);
+        let (_, der) = certificate(self);
         let mut x5c = base64url::encode(&der).replace('-', "+").replace('_', "/");
         while x5c.len() % 4 != 0 {
             x5c.push('=');
@@ -237,7 +262,7 @@ impl Signer {
 
     /// The signature of `input`, `r ‖ s`, base64url.
     fn sign(self, input: &str) -> String {
-        let (key, _) = certificate(self.subject);
+        let (key, _) = certificate(self);
         let signature: Signature = key.sign(input.as_bytes());
         b64(&signature.to_bytes())
     }

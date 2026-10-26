@@ -10,9 +10,9 @@ use p256::PublicKey;
 use serde_json::Value;
 use siros_codec::base64;
 use x509_cert::ext::pkix::name::GeneralName;
-use x509_cert::ext::pkix::SubjectAltName;
+use x509_cert::ext::pkix::{CertificatePolicies, SubjectAltName};
 use x509_cert::name::Name;
-use x509_cert::Certificate;
+use x509_cert::{Certificate, TbsCertificate};
 
 use crate::intake::IntakeError;
 use crate::semantic::{Person, SemanticIdError, SemanticIdentifier};
@@ -26,6 +26,18 @@ const PRIME256V1: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045
 const ORGANIZATION_IDENTIFIER: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.4.97");
 /// `id-at-serialNumber` (Recommendation ITU-T X.520).
 const SERIAL_NUMBER: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.4.5");
+/// The access certificate policies for natural persons, NCP-n-eudiwrp and QCP-n-eudiwrp (ETSI
+/// TS 119 411-8, Clause 5.3).
+const NATURAL_POLICIES: [ObjectIdentifier; 2] = [
+    ObjectIdentifier::new_unwrap("0.4.0.194118.1.1"),
+    ObjectIdentifier::new_unwrap("0.4.0.194118.1.3"),
+];
+/// The access certificate policies for legal persons, NCP-l-eudiwrp and QCP-l-eudiwrp (ETSI
+/// TS 119 411-8, Clause 5.3).
+const LEGAL_POLICIES: [ObjectIdentifier; 2] = [
+    ObjectIdentifier::new_unwrap("0.4.0.194118.1.2"),
+    ObjectIdentifier::new_unwrap("0.4.0.194118.1.4"),
+];
 
 /// An `x5c` chain whose leaf has a P-256 key.
 #[derive(Debug, Clone)]
@@ -79,7 +91,7 @@ impl Chain {
             Ok(None) => Vec::new(),
             Err(_) => return Err(IntakeError::CertificateChainInvalid),
         };
-        let semantic_identifier = semantic_identifier(&tbs.subject);
+        let semantic_identifier = semantic_identifier(tbs);
         Ok(Self {
             der,
             key,
@@ -120,38 +132,73 @@ impl Chain {
     }
 }
 
-/// The semantics identifier of `subject`: the one `organizationIdentifier` of a legal person,
-/// or without one, the one `serialNumber` of a natural person.
-fn semantic_identifier(subject: &Name) -> Result<SemanticIdentifier, SemanticIdError> {
-    let values = |oid: ObjectIdentifier| -> Vec<&Any> {
-        subject
-            .0
+/// The semantics identifier of the subject of `tbs`: under a natural-person policy its one
+/// `serialNumber`; under a legal-person policy its one `organizationIdentifier`, or without
+/// one its one `serialNumber`.
+fn semantic_identifier(tbs: &TbsCertificate) -> Result<SemanticIdentifier, SemanticIdError> {
+    let person = person(tbs)?;
+    let organization = values(&tbs.subject, ORGANIZATION_IDENTIFIER);
+    let text = match person {
+        Person::Legal if !organization.is_empty() => directory_string(one(&organization)?)?,
+        Person::Legal | Person::Natural => {
+            printable_string(one(&values(&tbs.subject, SERIAL_NUMBER))?)?
+        }
+    };
+    SemanticIdentifier::parse(&text, person)
+}
+
+/// Whom the certificate of `tbs` is issued to, by its access certificate policies.
+fn person(tbs: &TbsCertificate) -> Result<Person, SemanticIdError> {
+    let policies = match tbs.get::<CertificatePolicies>() {
+        Ok(Some((_, policies))) => policies.0,
+        Ok(None) => Vec::new(),
+        Err(_) => return Err(SemanticIdError::Policies),
+    };
+    let names = |listed: &[ObjectIdentifier]| {
+        policies
             .iter()
-            .flat_map(|rdn| rdn.0.iter())
-            .filter(|attribute| attribute.oid == oid)
-            .map(|attribute| &attribute.value)
-            .collect()
+            .any(|policy| listed.contains(&policy.policy_identifier))
     };
-    let (person, found) = match values(ORGANIZATION_IDENTIFIER) {
-        organization if !organization.is_empty() => (Person::Legal, organization),
-        _ => (Person::Natural, values(SERIAL_NUMBER)),
-    };
-    match found.as_slice() {
+    match (names(&NATURAL_POLICIES), names(&LEGAL_POLICIES)) {
+        (true, true) => Err(SemanticIdError::Contradictory),
+        (true, false) => Ok(Person::Natural),
+        (false, true) => Ok(Person::Legal),
+        (false, false) => Err(SemanticIdError::Unclassified),
+    }
+}
+
+/// The values of the attribute `oid` in `subject`.
+fn values(subject: &Name, oid: ObjectIdentifier) -> Vec<&Any> {
+    subject
+        .0
+        .iter()
+        .flat_map(|rdn| rdn.0.iter())
+        .filter(|attribute| attribute.oid == oid)
+        .map(|attribute| &attribute.value)
+        .collect()
+}
+
+/// The one value of `values`.
+fn one<'v>(values: &[&'v Any]) -> Result<&'v Any, SemanticIdError> {
+    match values {
         [] => Err(SemanticIdError::Absent),
-        [value] => SemanticIdentifier::parse(&directory_string(value)?, person),
+        [value] => Ok(value),
         _ => Err(SemanticIdError::Repeated),
     }
 }
 
-/// The text of a `DirectoryString` (or `PrintableString`) value: UTF-8 or printable.
+/// The text of a `DirectoryString` value: UTF-8 or printable.
 fn directory_string(value: &Any) -> Result<String, SemanticIdError> {
     value
         .decode_as::<Utf8StringRef<'_>>()
         .map(|text| text.as_str().to_owned())
-        .or_else(|_| {
-            value
-                .decode_as::<PrintableStringRef<'_>>()
-                .map(|text| text.as_str().to_owned())
-        })
+        .or_else(|_| printable_string(value))
+}
+
+/// The text of a `PrintableString` value.
+fn printable_string(value: &Any) -> Result<String, SemanticIdError> {
+    value
+        .decode_as::<PrintableStringRef<'_>>()
+        .map(|text| text.as_str().to_owned())
         .map_err(|_| SemanticIdError::Encoding)
 }

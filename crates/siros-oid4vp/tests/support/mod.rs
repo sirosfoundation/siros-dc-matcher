@@ -24,8 +24,9 @@ use siros_oid4vp::{
 use x509_cert::builder::{Builder, CertificateBuilder, Profile};
 use x509_cert::der::asn1::{Ia5String, UtcTime};
 use x509_cert::der::Encode;
+use x509_cert::ext::pkix::certpolicy::PolicyInformation;
 use x509_cert::ext::pkix::name::GeneralName;
-use x509_cert::ext::pkix::SubjectAltName;
+use x509_cert::ext::pkix::{CertificatePolicies, SubjectAltName};
 use x509_cert::name::Name;
 use x509_cert::serial_number::SerialNumber;
 use x509_cert::spki::SubjectPublicKeyInfoOwned;
@@ -95,6 +96,55 @@ pub fn jwk(key: &VerifyingKey) -> Value {
 
 /// A self-signed certificate of `key` with the dNSName SANs `dns`.
 pub fn certificate(key: &SigningKey, dns: &[&str]) -> Vec<u8> {
+    subject_certificate(
+        key,
+        dns,
+        "CN=Test verifier,O=Test only",
+        Policies::Listed(&[]),
+    )
+}
+
+/// The certificate policies extension of a certificate.
+#[derive(Clone, Copy)]
+pub enum Policies {
+    /// These policy identifiers; no extension for none.
+    Listed(&'static [&'static str]),
+    /// An extension whose value is no `CertificatePolicies`.
+    Malformed,
+}
+
+/// The certificatePolicies extension with a value that does not decode.
+struct MalformedPolicies;
+
+impl x509_cert::der::oid::AssociatedOid for MalformedPolicies {
+    const OID: x509_cert::der::oid::ObjectIdentifier =
+        x509_cert::der::oid::ObjectIdentifier::new_unwrap("2.5.29.32");
+}
+
+impl x509_cert::der::Encode for MalformedPolicies {
+    fn encoded_len(&self) -> x509_cert::der::Result<x509_cert::der::Length> {
+        x509_cert::der::asn1::Null.encoded_len()
+    }
+
+    fn encode(&self, encoder: &mut impl x509_cert::der::Writer) -> x509_cert::der::Result<()> {
+        x509_cert::der::asn1::Null.encode(encoder)
+    }
+}
+
+impl x509_cert::ext::AsExtension for MalformedPolicies {
+    fn critical(&self, _: &Name, _: &[x509_cert::ext::Extension]) -> bool {
+        false
+    }
+}
+
+/// A self-signed certificate of `key` for `subject` (RFC 4514), with the dNSName SANs `dns`
+/// and the certificate policies `policies`.
+pub fn subject_certificate(
+    key: &SigningKey,
+    dns: &[&str],
+    subject: &str,
+    policies: Policies,
+) -> Vec<u8> {
     let at =
         |unix: u64| Time::UtcTime(UtcTime::from_unix_duration(Duration::from_secs(unix)).unwrap());
     let validity = Validity {
@@ -106,7 +156,7 @@ pub fn certificate(key: &SigningKey, dns: &[&str]) -> Vec<u8> {
         Profile::Root,
         SerialNumber::new(&[1]).unwrap(),
         validity,
-        Name::from_str("CN=Test verifier,O=Test only").unwrap(),
+        Name::from_str(subject).unwrap(),
         spki,
         key,
     )
@@ -117,6 +167,20 @@ pub fn certificate(key: &SigningKey, dns: &[&str]) -> Vec<u8> {
             .map(|d| GeneralName::DnsName(Ia5String::new(d).unwrap()))
             .collect();
         builder.add_extension(&SubjectAltName(names)).unwrap();
+    }
+    match policies {
+        Policies::Listed([]) => {}
+        Policies::Listed(oids) => {
+            let listed = oids
+                .iter()
+                .map(|oid| PolicyInformation {
+                    policy_identifier: x509_cert::der::oid::ObjectIdentifier::new(oid).unwrap(),
+                    policy_qualifiers: None,
+                })
+                .collect();
+            builder.add_extension(&CertificatePolicies(listed)).unwrap();
+        }
+        Policies::Malformed => builder.add_extension(&MalformedPolicies).unwrap(),
     }
     builder.build::<DerSignature>().unwrap().to_der().unwrap()
 }
