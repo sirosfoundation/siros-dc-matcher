@@ -1,6 +1,8 @@
 //! Offers (A3): the combinations of credentials the user chooses from, and the optional
 //! additions to each.
 
+use std::num::NonZeroUsize;
+
 use serde_json::Value;
 use siros_dcql::{CredentialSetQuery, Dropped};
 
@@ -149,52 +151,23 @@ impl Offers {
             Some(sets) => {
                 let joined = joined(&space, sets, entries);
                 for (index, set) in sets.iter().enumerate() {
-                    let choices = Choices::of_set(&space, index, set);
+                    let choices = Choices::of_set(&space, set);
                     if set.required || joined.contains(&index) {
                         required.push(choices);
                     } else {
-                        optional.push(choices);
+                        optional.push(Optional {
+                            set: index,
+                            choices,
+                        });
                     }
                 }
             }
         }
         let mut found = Found::default();
         if required.is_empty() {
-            // Every set is optional: each option is an offer.
-            for (at, choices) in optional.iter().enumerate() {
-                let others: Vec<&Choices> = optional
-                    .iter()
-                    .enumerate()
-                    .filter(|(other, _)| *other != at)
-                    .map(|(_, other)| other)
-                    .collect();
-                let mut n = 0;
-                while found.room() && choices.count.is_none_or(|count| n < count) {
-                    let members = choices.choice(&space, n);
-                    n += 1;
-                    found.consider(members, choices.purposes(), &mut accept, |members| {
-                        additions(&space, &others, members, &named)
-                    });
-                }
-            }
-            found.unexamined = remaining(optional.iter().map(|c| c.count), found.examined);
+            found.offer_each_option(&optional, &mut accept, &named);
         } else {
-            let total = product(required.iter().map(|c| c.count));
-            let purposes: Vec<Value> = required.iter().flat_map(Choices::purposes).collect();
-            let optional: Vec<&Choices> = optional.iter().collect();
-            let mut n = 0;
-            while found.room() && total.is_none_or(|total| n < total) {
-                let combined = combine(&space, &required, n);
-                n += 1;
-                let Some(members) = combined else {
-                    found.examined += 1;
-                    continue;
-                };
-                found.consider(members, purposes.clone(), &mut accept, |members| {
-                    additions(&space, &optional, members, &named)
-                });
-            }
-            found.unexamined = remaining(std::iter::once(total), found.examined);
+            found.offer_each_combination(&required, &optional, &mut accept, &named);
         }
         Self {
             offers: found.offers,
@@ -281,28 +254,83 @@ impl Found {
             unexamined,
         });
     }
+
+    /// Each option of each set of `optional` as an offer, the options of the other sets its
+    /// additions: the request whose every set is optional.
+    fn offer_each_option(
+        &mut self,
+        optional: &[Optional],
+        accept: &mut impl FnMut(&[Member]) -> bool,
+        named: &impl Fn(usize) -> bool,
+    ) {
+        for (at, offered) in optional.iter().enumerate() {
+            let others: Vec<&Optional> = optional
+                .iter()
+                .enumerate()
+                .filter(|(other, _)| *other != at)
+                .map(|(_, other)| other)
+                .collect();
+            let mut n = 0;
+            while self.room() {
+                let Some(members) = offered.choices.choice(n) else {
+                    break;
+                };
+                n += 1;
+                self.consider(members, offered.choices.purposes(), accept, |members| {
+                    additions(&others, members, named)
+                });
+            }
+        }
+        let counts = optional.iter().map(|o| o.choices.count);
+        self.unexamined = remaining(counts, self.examined);
+    }
+
+    /// Each combination of an option of every set of `required` as an offer, the options of
+    /// `optional` its additions.
+    fn offer_each_combination(
+        &mut self,
+        required: &[Choices],
+        optional: &[Optional],
+        accept: &mut impl FnMut(&[Member]) -> bool,
+        named: &impl Fn(usize) -> bool,
+    ) {
+        let purposes: Vec<Value> = required.iter().flat_map(Choices::purposes).collect();
+        let optional: Vec<&Optional> = optional.iter().collect();
+        let mut n = 0;
+        while self.room() {
+            let Some(combination) = combine(required, n) else {
+                break;
+            };
+            n += 1;
+            match combination {
+                Combination::Conflict => self.examined += 1,
+                Combination::Members(members) => {
+                    self.consider(members, purposes.clone(), accept, |members| {
+                        additions(&optional, members, named)
+                    });
+                }
+            }
+        }
+        let total = product(required.iter().map(|c| c.count));
+        self.unexamined = remaining(std::iter::once(total), self.examined);
+    }
 }
 
-/// The additions to the offer of `members` from the option choices of `optional`, none
-/// answering a query `named` names.
+/// The additions to the offer of `members` from the options of `optional`, none answering a
+/// query `named` names.
 fn additions(
-    space: &Space,
-    optional: &[&Choices],
+    optional: &[&Optional],
     members: &[Member],
     named: &impl Fn(usize) -> bool,
 ) -> (Vec<Addition>, Dropped) {
     let mut found = Vec::new();
     let mut examined = 0;
-    for choices in optional {
-        let Some(set) = choices.set else {
-            continue;
-        };
+    for optional in optional {
         let mut n = 0;
-        while found.len() < MAX_ADDITIONS
-            && examined < MAX_EXAMINED
-            && choices.count.is_none_or(|count| n < count)
-        {
-            let added = choices.choice(space, n);
+        while found.len() < MAX_ADDITIONS && examined < MAX_EXAMINED {
+            let Some(added) = optional.choices.choice(n) else {
+                break;
+            };
             n += 1;
             examined += 1;
             if added
@@ -312,13 +340,13 @@ fn additions(
                 continue;
             }
             found.push(Addition {
-                set,
-                purpose: choices.purpose.clone(),
+                set: optional.set,
+                purpose: optional.choices.purpose.clone(),
                 members: added,
             });
         }
     }
-    let counts = optional.iter().map(|c| c.count);
+    let counts = optional.iter().map(|o| o.choices.count);
     (found, remaining(counts, examined))
 }
 
@@ -327,23 +355,38 @@ fn answers(members: &[Member], query: usize) -> bool {
     members.iter().any(|m| m.query == query)
 }
 
-/// The members of combination `n` of `dimensions`: a choice of each, a query answered once.
-/// `None` when two choices answer one query with different candidates.
-fn combine(space: &Space, dimensions: &[Choices], mut n: usize) -> Option<Vec<Member>> {
+/// A combination of the required sets.
+enum Combination {
+    /// A query answered once.
+    Members(Vec<Member>),
+    /// Two choices answer one query with different candidates.
+    Conflict,
+}
+
+/// Combination `n` of `dimensions`, a choice of each in mixed radix, the first dimension
+/// least significant. `None` past the last combination.
+fn combine(dimensions: &[Choices], mut n: usize) -> Option<Combination> {
     let mut members: Vec<Member> = Vec::new();
+    let mut conflict = false;
     for choices in dimensions {
         let count = choices.count.unwrap_or(usize::MAX);
-        let chosen = choices.choice(space, n.checked_rem(count)?);
+        let chosen = choices.choice(n.checked_rem(count)?)?;
         n = n.checked_div(count)?;
         for member in chosen {
             match members.iter().find(|m| m.query == member.query) {
-                Some(same) if *same == member => {}
-                Some(_) => return None,
+                Some(same) => conflict |= *same != member,
                 None => members.push(member),
             }
         }
     }
-    Some(members)
+    if n > 0 {
+        return None;
+    }
+    Some(if conflict {
+        Combination::Conflict
+    } else {
+        Combination::Members(members)
+    })
 }
 
 /// The candidate counts of each query.
@@ -358,14 +401,13 @@ struct QuerySpace {
 }
 
 impl QuerySpace {
-    /// The ways to answer the query in one combination: one per candidate, or one for a
-    /// `multiple` query with candidates, which takes them all.
-    fn width(&self) -> usize {
-        if self.multiple {
-            usize::from(self.candidates > 0)
-        } else {
-            self.candidates
-        }
+    /// The slot of the query at `query`; `None` without a candidate.
+    fn slot(&self, query: usize) -> Option<Slot> {
+        NonZeroUsize::new(self.candidates).map(|candidates| Slot {
+            query,
+            multiple: self.multiple,
+            candidates,
+        })
     }
 }
 
@@ -387,62 +429,113 @@ impl Space {
     fn index(&self, id: &str) -> Option<usize> {
         self.queries.iter().position(|q| q.id == id)
     }
+
+    /// The slot of the query `id`; `None` when no query has the id or the query has no
+    /// candidate.
+    fn slot(&self, id: &str) -> Option<Slot> {
+        let (query, found) = self.queries.iter().enumerate().find(|(_, q)| q.id == id)?;
+        found.slot(query)
+    }
+}
+
+/// A query of an option and its candidates.
+#[derive(Clone, Copy)]
+struct Slot {
+    query: usize,
+    multiple: bool,
+    candidates: NonZeroUsize,
+}
+
+impl Slot {
+    /// The ways to answer the query in one combination: one per candidate, or one for a
+    /// `multiple` query, which takes them all.
+    fn width(&self) -> usize {
+        if self.multiple {
+            1
+        } else {
+            self.candidates.get()
+        }
+    }
+
+    /// The member of way `n`, and what remains of `n` for the next slots.
+    fn member(&self, n: usize) -> (Member, usize) {
+        if self.multiple {
+            let candidates = (0..self.candidates.get()).collect();
+            (self.of(candidates), n)
+        } else {
+            (self.of(vec![n % self.candidates]), n / self.candidates)
+        }
+    }
+
+    fn of(&self, candidates: Vec<usize>) -> Member {
+        Member {
+            query: self.query,
+            candidates,
+        }
+    }
 }
 
 /// The ways to satisfy a credential set, or the whole request: an option and a candidate per
 /// query of the option.
 struct Choices {
-    set: Option<usize>,
     purpose: Option<Value>,
     options: Vec<OptionChoices>,
     /// `None` when the count overflows.
     count: Option<usize>,
 }
 
+/// An optional credential set: its index in `credential_sets`, and its choices.
+struct Optional {
+    set: usize,
+    choices: Choices,
+}
+
+/// An option whose every query has a candidate.
 struct OptionChoices {
-    queries: Vec<usize>,
+    slots: Vec<Slot>,
+    /// `None` when the count overflows.
     count: Option<usize>,
 }
 
 impl Choices {
     /// Every query at once: the request without `credential_sets`.
     fn all(space: &Space) -> Self {
-        Self::of_options(space, None, None, [(0..space.queries.len()).collect()])
+        let slots = space
+            .queries
+            .iter()
+            .enumerate()
+            .map(|(query, q)| q.slot(query))
+            .collect();
+        Self::of_options(None, [slots])
     }
 
-    /// The options of `set`, at `index` in `credential_sets`, whose every query has a candidate.
-    fn of_set(space: &Space, index: usize, set: &CredentialSetQuery) -> Self {
-        let options = set.options.iter().filter_map(|ids| {
-            ids.iter()
-                .map(|id| space.index(id))
-                .collect::<Option<Vec<usize>>>()
-        });
-        Self::of_options(space, Some(index), set.purpose.clone(), options)
+    /// The options of `set` whose every query has a candidate.
+    fn of_set(space: &Space, set: &CredentialSetQuery) -> Self {
+        let options = set
+            .options
+            .iter()
+            .map(|ids| ids.iter().map(|id| space.slot(id)).collect());
+        Self::of_options(set.purpose.clone(), options)
     }
 
+    /// The choices of the `options` that have a slot per query, `None` for the others.
     fn of_options(
-        space: &Space,
-        set: Option<usize>,
         purpose: Option<Value>,
-        options: impl IntoIterator<Item = Vec<usize>>,
+        options: impl IntoIterator<Item = Option<Vec<Slot>>>,
     ) -> Self {
         let options: Vec<OptionChoices> = options
             .into_iter()
-            .map(|queries| OptionChoices {
-                count: product(
-                    queries
-                        .iter()
-                        .map(|&q| Some(space.queries.get(q).map_or(0, QuerySpace::width))),
-                ),
-                queries,
+            .flatten()
+            .filter(|slots| !slots.is_empty())
+            .map(|slots| OptionChoices {
+                count: product(slots.iter().map(|slot| Some(slot.width()))),
+                slots,
             })
-            .filter(|o| o.count != Some(0) && !o.queries.is_empty())
             .collect();
         let count = options
             .iter()
             .try_fold(0usize, |sum, o| o.count.and_then(|c| sum.checked_add(c)));
         Self {
-            set,
             purpose,
             options,
             count,
@@ -454,37 +547,30 @@ impl Choices {
     }
 
     /// The members of choice `n`: the option it falls in, then a mixed-radix reading of the
-    /// rest across the option's queries.
-    fn choice(&self, space: &Space, mut n: usize) -> Vec<Member> {
+    /// rest across the option's slots. `None` past the last choice.
+    fn choice(&self, mut n: usize) -> Option<Vec<Member>> {
         for option in &self.options {
             let count = option.count.unwrap_or(usize::MAX);
-            if n >= count {
-                n -= count;
-                continue;
+            if n < count {
+                return Some(option.choice(n));
             }
-            let mut members = Vec::new();
-            for &query in &option.queries {
-                let Some(q) = space.queries.get(query) else {
-                    continue;
-                };
-                if q.multiple {
-                    members.push(Member {
-                        query,
-                        candidates: (0..q.candidates).collect(),
-                    });
-                } else if let (Some(candidate), Some(rest)) =
-                    (n.checked_rem(q.candidates), n.checked_div(q.candidates))
-                {
-                    members.push(Member {
-                        query,
-                        candidates: vec![candidate],
-                    });
-                    n = rest;
-                }
-            }
-            return members;
+            n -= count;
         }
-        Vec::new()
+        None
+    }
+}
+
+impl OptionChoices {
+    /// The members of choice `n` of the option, `n` below its count.
+    fn choice(&self, mut n: usize) -> Vec<Member> {
+        self.slots
+            .iter()
+            .map(|slot| {
+                let (member, rest) = slot.member(n);
+                n = rest;
+                member
+            })
+            .collect()
     }
 }
 

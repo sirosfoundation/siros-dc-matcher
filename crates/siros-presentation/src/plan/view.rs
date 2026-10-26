@@ -1,17 +1,18 @@
 //! The consent view: the verifier, and per offer its purposes, its credentials with their
 //! claim or proof statement rows, its additions and its transactions.
 
+use siros_credential::UsableCredential;
 use siros_dcql::Dropped;
 use siros_display::proof::{verified_rows, ProofRow};
 use siros_display::{purpose, Card, ClaimRow, DisplayCache, Locale};
 use siros_oid4vp::VerifierView;
-use siros_transaction_data::{Fetched, Step, TransactionView};
+use siros_transaction_data::{Fetched, MemberBinding, Step, TransactionView};
 use siros_wallet_state::CredentialId;
 
-use super::transactions::{Transactions, Wallet};
+use super::transactions::{Bound, Transactions, Wallet};
 use crate::display_rule::{DisplayFacts, WalletDisplay};
 use crate::error::PresentationError;
-use crate::matching::Answer;
+use crate::matching::{Answer, Answers, Candidate};
 use crate::offers::{Member, Offer, Offers};
 
 /// What the user consents to. It holds no delivered secret and no undisclosable attribute.
@@ -33,6 +34,7 @@ pub struct OfferView {
 
 /// An addition as the user sees it.
 pub struct AdditionView {
+    set: usize,
     purpose: Option<String>,
     members: Vec<MemberView>,
 }
@@ -46,6 +48,8 @@ pub struct MemberView {
 
 /// A credential of a member as the user sees it.
 pub struct CredentialView {
+    credential_id: CredentialId,
+    answer: Answer,
     card: Card,
     shown: Shown,
     entries: Vec<usize>,
@@ -110,6 +114,11 @@ impl OfferView {
 }
 
 impl AdditionView {
+    /// The index of the addition's credential set in `credential_sets`.
+    pub(super) fn set(&self) -> usize {
+        self.set
+    }
+
     /// The purpose of the addition's credential set.
     pub fn purpose(&self) -> Option<&str> {
         self.purpose.as_deref()
@@ -135,6 +144,16 @@ impl MemberView {
 }
 
 impl CredentialView {
+    /// The instance presented.
+    pub(super) fn credential_id(&self) -> CredentialId {
+        self.credential_id
+    }
+
+    /// What the instance presents.
+    pub(super) fn answer(&self) -> &Answer {
+        &self.answer
+    }
+
     /// The credential's card.
     pub fn card(&self) -> &Card {
         &self.card
@@ -206,49 +225,33 @@ fn offer_view(
         .bind(sources.answered, offer.members())?;
     let mut members = Vec::with_capacity(offer.members().len());
     for (at, member) in offer.members().iter().enumerate() {
-        let mut bound = Vec::with_capacity(member.candidates().len());
-        for &candidate in member.candidates() {
-            let mut entries = Vec::new();
-            let mut transactions = Vec::new();
-            let fail = PresentationError::TransactionData;
-            for (_, binding) in bindings.iter().filter(|(key, _)| *key == (at, candidate)) {
-                match binding
-                    .views(sources.fetched, sources.locales)
-                    .map_err(fail)?
-                {
-                    Step::Fetch(fetch) => return Ok(Step::Fetch(fetch)),
-                    Step::Done(views) => transactions.extend(views),
-                }
-                entries.extend(sources.transactions.positions(binding).map_err(fail)?);
-            }
-            bound.push((entries, transactions));
+        match member_view(member, at, &bindings, sources)? {
+            Step::Fetch(fetch) => return Ok(Step::Fetch(fetch)),
+            Step::Done(view) => members.push(view),
         }
-        members.push(member_view(member, bound, sources)?);
     }
-    let additions = offer
-        .additions()
-        .iter()
-        .map(|addition| {
-            Ok(AdditionView {
-                purpose: addition
-                    .purpose()
-                    .and_then(|p| purpose::line(std::slice::from_ref(p))),
-                members: addition
-                    .members()
-                    .iter()
-                    .map(|member| member_view(member, Vec::new(), sources))
-                    .collect::<Result<_, PresentationError>>()?,
-            })
-        })
-        .collect::<Result<Vec<_>, PresentationError>>()?;
-    let mut presentable = true;
-    for member in offer.members() {
-        for id in credential_ids(sources.answered, member)? {
-            presentable &= sources.background.contains(&id);
+    let mut additions = Vec::with_capacity(offer.additions().len());
+    for addition in offer.additions() {
+        let mut views = Vec::with_capacity(addition.members().len());
+        for (at, member) in addition.members().iter().enumerate() {
+            match member_view(member, at, &[], sources)? {
+                Step::Fetch(fetch) => return Ok(Step::Fetch(fetch)),
+                Step::Done(view) => views.push(view),
+            }
         }
+        additions.push(AdditionView {
+            set: addition.set(),
+            purpose: addition
+                .purpose()
+                .and_then(|p| purpose::line(std::slice::from_ref(p))),
+            members: views,
+        });
     }
     let facts = DisplayFacts {
-        presentable_without_ui: presentable,
+        presentable_without_ui: members
+            .iter()
+            .flat_map(MemberView::credentials)
+            .all(|c| sources.background.contains(&c.credential_id)),
         transaction_data: sources.transaction_data,
         // Each disclosed claim and each proof statement has a row of `DisplayText`, which holds
         // its text whole.
@@ -265,76 +268,82 @@ fn offer_view(
     }))
 }
 
-/// The `credentialId` of each instance `member` presents.
-fn credential_ids(
-    answered: &Wallet<'_>,
-    member: &Member,
-) -> Result<Vec<CredentialId>, PresentationError> {
-    let answers = answered
-        .queries()
-        .get(member.query())
-        .ok_or(PresentationError::AnswerMismatch)?;
-    member
-        .candidates()
-        .iter()
-        .map(|&index| {
-            let candidate = answers
-                .candidates()
-                .get(index)
-                .ok_or(PresentationError::AnswerMismatch)?;
-            Ok(candidate.credential().credential().entry().credential_id())
-        })
-        .collect()
-}
-
-/// The view of `member`, with the positions and the views of the entries bound to each of its
-/// credentials; none bound when `bound` is empty.
+/// The view of `member`, at position `at` of its offer, with the entries `bindings` bind to
+/// each of its credentials.
 fn member_view(
     member: &Member,
-    mut bound: Vec<(Vec<usize>, Vec<TransactionView>)>,
+    at: usize,
+    bindings: &[(Bound, MemberBinding<'_, '_>)],
     sources: &Sources<'_, '_>,
-) -> Result<MemberView, PresentationError> {
+) -> Result<Step<MemberView>, PresentationError> {
     let answers = sources
         .answered
         .queries()
         .get(member.query())
         .ok_or(PresentationError::AnswerMismatch)?;
-    bound.resize_with(member.candidates().len(), Default::default);
     let mut credentials = Vec::with_capacity(member.candidates().len());
-    for (&index, (entries, transactions)) in member.candidates().iter().zip(bound) {
+    for &index in member.candidates() {
         let candidate = answers
             .candidates()
             .get(index)
             .ok_or(PresentationError::AnswerMismatch)?;
-        let credential = candidate.credential().credential();
-        let display = PresentationError::Display;
-        let shown = match candidate.answer() {
-            Answer::Claims(claims) => Shown::Claims(
-                sources
-                    .display
-                    .claim_rows(credential, claims.pointers(), sources.locales)
-                    .map_err(display)?,
-            ),
-            Answer::Proof(choice) => {
-                let zkp = answers.zkp().ok_or(PresentationError::AnswerMismatch)?;
-                let option = zkp
-                    .option(choice)
-                    .ok_or(PresentationError::AnswerMismatch)?;
-                Shown::Proof(verified_rows(zkp.query().query(), option).map_err(display)?)
+        let mut entries = Vec::new();
+        let mut transactions = Vec::new();
+        let fail = PresentationError::TransactionData;
+        for (_, binding) in bindings.iter().filter(|(key, _)| *key == (at, index)) {
+            match binding
+                .views(sources.fetched, sources.locales)
+                .map_err(fail)?
+            {
+                Step::Fetch(fetch) => return Ok(Step::Fetch(fetch)),
+                Step::Done(views) => transactions.extend(views),
             }
-        };
+            entries.extend(sources.transactions.positions(binding).map_err(fail)?);
+        }
+        let credential = candidate.credential().credential();
         credentials.push(CredentialView {
+            credential_id: credential.entry().credential_id(),
+            answer: candidate.answer().clone(),
             card: sources
                 .display
                 .card(credential, sources.locales)
-                .map_err(display)?,
-            shown,
+                .map_err(PresentationError::Display)?,
+            shown: shown(answers, candidate, sources)?,
             entries,
             transactions,
         });
     }
-    Ok(MemberView {
+    Ok(Step::Done(MemberView {
         query_id: answers.query().id.clone(),
         credentials,
+    }))
+}
+
+/// What `candidate`, a candidate of `answers`, shows: its claim rows or its proof statement
+/// rows.
+fn shown<'a>(
+    answers: &Answers<'a, UsableCredential<'a>>,
+    candidate: &Candidate<UsableCredential<'a>>,
+    sources: &Sources<'_, 'a>,
+) -> Result<Shown, PresentationError> {
+    let display = PresentationError::Display;
+    Ok(match candidate.answer() {
+        Answer::Claims(claims) => Shown::Claims(
+            sources
+                .display
+                .claim_rows(
+                    candidate.credential().credential(),
+                    claims.pointers(),
+                    sources.locales,
+                )
+                .map_err(display)?,
+        ),
+        Answer::Proof(choice) => {
+            let zkp = answers.zkp().ok_or(PresentationError::AnswerMismatch)?;
+            let option = zkp
+                .option(choice)
+                .ok_or(PresentationError::AnswerMismatch)?;
+            Shown::Proof(verified_rows(zkp.query().query(), option).map_err(display)?)
+        }
     })
 }

@@ -169,7 +169,7 @@ pub fn plan<'a>(input: &PlanInput<'a>) -> Result<PlanStep<'a>, PresentationError
         .as_ref()
         .ok()
         .map(|nym_auth| nym_auth.session().verifier_id.as_str());
-    let digest = digest::digest(request, verifier_id, &answered, &offers, view.offers())?;
+    let digest = digest::digest(request, verifier_id, view.offers());
     let view = view.with_digest(base64url::encode(&digest));
     Ok(PlanStep::Ready(Box::new(Planned {
         input: *input,

@@ -6,17 +6,15 @@ use siros_codec::cbor::Value;
 use siros_dcql::PathComponent;
 use siros_oid4vp::VerifiedRequest;
 
-use super::transactions::Wallet;
-use super::view::OfferView;
+use super::view::{MemberView, OfferView};
 use crate::display_rule::WalletDisplay;
-use crate::error::PresentationError;
 use crate::matching::Answer;
-use crate::offers::{Member, Offers};
 
 /// The domain of the digest, which names this encoding.
 const DOMAIN: &str = "siros-presentation plan 2";
 
-/// The digest of the plan of `request`, whose nym_auth `verifier_id` is `verifier_id`.
+/// The digest of the plan of `request`, whose nym_auth `verifier_id` is `verifier_id`, and
+/// whose offers the user sees as `views`.
 ///
 /// It covers the request's response mode, Client Identifier, trust verdict, origin, response
 /// URI, `nonce`, `state`, `dcql_query` as sent, `transaction_data` and the nym_auth
@@ -26,10 +24,8 @@ const DOMAIN: &str = "siros-presentation plan 2";
 pub(crate) fn digest(
     request: &VerifiedRequest,
     verifier_id: Option<&str>,
-    answered: &Wallet<'_>,
-    offers: &Offers,
     views: &[OfferView],
-) -> Result<[u8; 32], PresentationError> {
+) -> [u8; 32] {
     let text = |t: Option<&str>| t.map_or(Value::Null, Value::text);
     let verifier = request.verifier();
     let request_part = Value::Array(vec![
@@ -50,83 +46,63 @@ pub(crate) fn digest(
         ),
         text(verifier_id),
     ]);
-    let mut offer_parts = Vec::with_capacity(offers.offers().len());
-    for (offer, view) in offers.offers().iter().zip(views) {
-        let bound: Vec<Vec<&[usize]>> = view
-            .members()
-            .iter()
-            .map(|member| member.credentials().iter().map(|c| c.entries()).collect())
-            .collect();
-        let additions = offer
-            .additions()
-            .iter()
-            .map(|addition| {
-                Ok(Value::Array(vec![
-                    Value::Unsigned(addition.set() as u64),
-                    members(answered, addition.members(), &[])?,
-                ]))
-            })
-            .collect::<Result<_, PresentationError>>()?;
-        offer_parts.push(Value::Array(vec![
-            members(answered, offer.members(), &bound)?,
-            Value::Array(additions),
-            Value::Bool(view.wallet_display() == WalletDisplay::Needed),
-        ]));
-    }
+    let offers = views
+        .iter()
+        .map(|view| {
+            let additions = view
+                .additions()
+                .iter()
+                .map(|addition| {
+                    Value::Array(vec![
+                        Value::Unsigned(addition.set() as u64),
+                        members(addition.members()),
+                    ])
+                })
+                .collect();
+            Value::Array(vec![
+                members(view.members()),
+                Value::Array(additions),
+                Value::Bool(view.wallet_display() == WalletDisplay::Needed),
+            ])
+        })
+        .collect();
     let plan = Value::Array(vec![
         Value::text(DOMAIN),
         request_part,
-        Value::Array(offer_parts),
+        Value::Array(offers),
     ]);
-    Ok(Sha256::digest(plan.encode()).into())
+    Sha256::digest(plan.encode()).into()
 }
 
-/// Each member's query id, and each of its candidates' instance, answer and bound entries;
-/// `bound` holds the positions of the entries per member and candidate, none when empty.
-fn members(
-    answered: &Wallet<'_>,
-    members: &[Member],
-    bound: &[Vec<&[usize]>],
-) -> Result<Value, PresentationError> {
-    members
-        .iter()
-        .enumerate()
-        .map(|(at, member)| {
-            let answers = answered
-                .queries()
-                .get(member.query())
-                .ok_or(PresentationError::AnswerMismatch)?;
-            let candidates = member
-                .candidates()
-                .iter()
-                .enumerate()
-                .map(|(position, &index)| {
-                    let candidate = answers
-                        .candidates()
-                        .get(index)
-                        .ok_or(PresentationError::AnswerMismatch)?;
-                    let entry = candidate.credential().credential().entry();
-                    let entries = bound
-                        .get(at)
-                        .and_then(|member| member.get(position))
-                        .map_or(&[][..], |entries| *entries)
-                        .iter()
-                        .map(|&e| Value::Unsigned(e as u64))
-                        .collect();
-                    Ok(Value::Array(vec![
-                        Value::text(&entry.credential_id().to_string()),
-                        answer(candidate.answer()),
-                        Value::Array(entries),
-                    ]))
-                })
-                .collect::<Result<Vec<_>, PresentationError>>()?;
-            Ok(Value::Array(vec![
-                Value::text(&answers.query().id),
-                Value::Array(candidates),
-            ]))
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .map(Value::Array)
+/// Each member's query id, and each of its credentials' instance, answer and bound entries.
+fn members(members: &[MemberView]) -> Value {
+    Value::Array(
+        members
+            .iter()
+            .map(|member| {
+                let credentials = member
+                    .credentials()
+                    .iter()
+                    .map(|credential| {
+                        let entries = credential
+                            .entries()
+                            .iter()
+                            .map(|&e| Value::Unsigned(e as u64))
+                            .collect();
+                        Value::Array(vec![
+                            Value::text(&credential.credential_id().to_string()),
+                            answer(credential.answer()),
+                            Value::Array(entries),
+                        ])
+                    })
+                    .collect();
+                Value::Array(vec![
+                    Value::text(member.query_id()),
+                    Value::Array(credentials),
+                ])
+            })
+            .collect(),
+    )
 }
 
 fn answer(answer: &Answer) -> Value {
