@@ -76,7 +76,11 @@ Dependencies point downward through the layers:
 | L3 | presentation |
 | L4 | wallet (provers), facades, picker |
 
-A component MUST NOT depend on a component of its own or a higher layer, except where this section names the dependency.
+A component MUST NOT depend on a component of its own or a higher layer, except these:
+- SD-JWT and OpenID4VP depend on DCQL, for its claims path components and query.
+- nym_auth depends on `zkp_req`, mdoc and OpenID4VP.
+- Transaction data depends on credential and display.
+- Display depends on credential.
 
 ### 4.1 Host (each platform)
 
