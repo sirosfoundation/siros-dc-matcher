@@ -230,10 +230,9 @@ fn offer_view(
                 .is_some_and(|id| sources.background.contains(&id))
         }),
         transaction_data: sources.transaction_data,
-        rows_whole: members.iter().all(|m| match &m.shown {
-            Shown::Claims(_) => true,
-            Shown::Proof(rows) => rows.iter().all(|row| !row.clipped()),
-        }),
+        // Each disclosed claim and each proof statement has a row of `DisplayText`, which holds
+        // its text whole.
+        rows_whole: true,
         additions: !additions.is_empty(),
     };
     Ok(Step::Done(OfferView {

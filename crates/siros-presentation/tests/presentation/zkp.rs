@@ -84,12 +84,15 @@ fn zkp_req_over_redirect_direct_post_cwt() {
     let Shown::Proof(rows) = planned.view().offers()[0].members()[0].shown() else {
         panic!("proof statement rows")
     };
-    let rows: Vec<(&str, &str)> = rows.iter().map(|r| (r.label(), r.value())).collect();
+    let rows: Vec<(&str, Option<&str>)> = rows
+        .iter()
+        .map(|r| (r.label().as_str(), r.value().map(|v| v.as_str())))
+        .collect();
     assert_eq!(
         rows,
         [
-            ("Pseudonym", "config known-offender-matching-ssc"),
-            ("Age check", "age 18+")
+            ("Pseudonym", Some("config known-offender-matching-ssc")),
+            ("Age check", Some("age 18+"))
         ]
     );
 

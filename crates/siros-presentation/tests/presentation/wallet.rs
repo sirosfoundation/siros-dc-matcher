@@ -433,8 +433,8 @@ pub fn view_texts(view: &siros_presentation::ConsentView<'_>) -> Vec<String> {
             Shown::Claims(rows) => rows.iter().for_each(|r| row(r, out)),
             Shown::Proof(rows) => {
                 for proof in rows {
-                    out.push(proof.label().to_owned());
-                    out.push(proof.value().to_owned());
+                    out.push(proof.label().as_str().to_owned());
+                    out.extend(proof.value().map(|v| v.as_str().to_owned()));
                 }
             }
         }

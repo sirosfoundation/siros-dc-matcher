@@ -91,8 +91,6 @@ fn error_of(request: &VerifiedRequest, refusal: &Submission) -> String {
 fn an_offer_needs_the_wallet_display_unless_a9_holds() {
     let mdl = json!({"id": "mdl", "format": "mso_mdoc", "meta": {"doctype_value": MDL},
         "claims": [{"path": [MDL_NS, "family_name"]}]});
-    // 60 digits that read as 18: the proof statement row clips.
-    let long_range = format!("{}18+", "0".repeat(58));
     // (case, background, request, display)
     let cases = [
         (
@@ -128,12 +126,6 @@ fn an_offer_needs_the_wallet_display_unless_a9_holds() {
             true,
             proof("18+"),
             WalletDisplay::NotNeeded,
-        ),
-        (
-            "a clipped proof statement",
-            true,
-            proof(&long_range),
-            WalletDisplay::Needed,
         ),
     ];
     for (case, background, request, display) in cases {
