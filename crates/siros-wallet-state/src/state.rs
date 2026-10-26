@@ -3,8 +3,8 @@
 use rustc_hash::FxHashSet;
 use serde_json::value::RawValue;
 
-use crate::entry::{array, known, object, CredentialEntry, Members};
-use crate::error::WalletStateError;
+use crate::entry::{array, object, CredentialEntry, Members};
+use crate::error::{FoundVersion, PresentationsFault, WalletStateError};
 use crate::ids::KeyId;
 use crate::presentation::PresentationRecord;
 
@@ -28,11 +28,9 @@ impl WalletState {
     pub fn parse(text: &str) -> Result<Self, WalletStateError> {
         let members: Members<'_> =
             serde_json::from_str(text).map_err(|_| WalletStateError::Malformed)?;
-        let version = members
-            .get("schemaVersion")
-            .and_then(|raw| serde_json::from_str::<u64>(raw.get()).ok());
-        if !matches!(version, Some(3 | 4)) {
-            return Err(WalletStateError::UnsupportedSchemaVersion);
+        match schema_version(&members) {
+            FoundVersion::Version(3 | 4) => {}
+            found => return Err(WalletStateError::UnsupportedSchemaVersion(found)),
         }
         let credentials = elements(&members, "credentials", WalletStateError::Credentials)?
             .into_iter()
@@ -46,10 +44,14 @@ impl WalletState {
             .into_iter()
             .filter_map(key_id)
             .collect();
-        let presentations = elements(&members, "presentations", WalletStateError::Presentations)?
-            .into_iter()
-            .map(PresentationRecord::parse)
-            .collect::<Result<Vec<_>, _>>()?;
+        let presentations = elements(
+            &members,
+            "presentations",
+            WalletStateError::Presentations(PresentationsFault::NotArray),
+        )?
+        .into_iter()
+        .map(PresentationRecord::parse)
+        .collect::<Result<Vec<_>, _>>()?;
         Ok(Self {
             credentials,
             presentations,
@@ -73,6 +75,16 @@ impl WalletState {
     }
 }
 
+/// The `schemaVersion` of the state.
+fn schema_version(members: &Members<'_>) -> FoundVersion {
+    match members.get("schemaVersion") {
+        None => FoundVersion::Absent,
+        Some(raw) => {
+            serde_json::from_str(raw.get()).map_or(FoundVersion::NotAVersion, FoundVersion::Version)
+        }
+    }
+}
+
 /// The elements of the array member `name`.
 fn elements<'a>(
     members: &Members<'a>,
@@ -86,6 +98,5 @@ fn elements<'a>(
 /// parse; those name no key.
 fn key_id(entry: &RawValue) -> Option<KeyId> {
     let kid = object(entry)?.get("kid").copied()?;
-    let kid: String = serde_json::from_str(kid.get()).ok()?;
-    known(kid).map(KeyId::new)
+    KeyId::known(serde_json::from_str(kid.get()).ok()?)
 }

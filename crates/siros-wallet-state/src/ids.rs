@@ -1,4 +1,7 @@
 //! The identifiers of the wallet state.
+//!
+//! A string identifier the wallet does not know is the empty string in the wallet state, and
+//! `None` here.
 
 use std::fmt;
 
@@ -50,13 +53,63 @@ impl fmt::Display for InstanceId {
     }
 }
 
-/// `kid`: the identifier of a key pair of the wallet.
+/// `format`: a credential format identifier, `dc+sd-jwt` for one.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FormatIdentifier(String);
+
+impl FormatIdentifier {
+    pub(crate) fn new(format: String) -> Self {
+        Self(format)
+    }
+
+    /// The identifier as the wallet state writes it.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// `credentialIssuerIdentifier`: the Credential Issuer Identifier of the issuance (OpenID4VCI
+/// 1.0, Section 12.2.1). Never empty.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct IssuerIdentifier(String);
+
+impl IssuerIdentifier {
+    /// The identifier `text`; `None` for the empty string of an unknown one.
+    pub(crate) fn known(text: String) -> Option<Self> {
+        known(text).map(Self)
+    }
+
+    /// The identifier as the wallet state writes it.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// `credentialConfigurationId`: the credential configuration of the issuance (OpenID4VCI 1.0,
+/// Section 12.2.4). Never empty.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ConfigurationId(String);
+
+impl ConfigurationId {
+    /// The identifier `text`; `None` for the empty string of an unknown one.
+    pub(crate) fn known(text: String) -> Option<Self> {
+        known(text).map(Self)
+    }
+
+    /// The identifier as the wallet state writes it.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// `kid`: the identifier of a key pair of the wallet. Never empty.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct KeyId(String);
 
 impl KeyId {
-    pub(crate) fn new(kid: String) -> Self {
-        Self(kid)
+    /// The identifier `text`; `None` for the empty string of an unknown one.
+    pub(crate) fn known(text: String) -> Option<Self> {
+        known(text).map(Self)
     }
 
     /// The identifier as the wallet state writes it.
@@ -88,4 +141,9 @@ impl TransactionId {
     pub fn new(id: u64) -> Self {
         Self(id)
     }
+}
+
+/// `text`, or `None` for the empty string the wallet writes when it does not know a value.
+pub(crate) fn known(text: String) -> Option<String> {
+    (!text.is_empty()).then_some(text)
 }

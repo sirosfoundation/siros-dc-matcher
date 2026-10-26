@@ -4,8 +4,11 @@ use rustc_hash::FxHashMap;
 use serde::de::DeserializeOwned;
 use serde_json::value::RawValue;
 
-use crate::error::WalletStateError;
-use crate::ids::{BatchId, CredentialId, InstanceId, KeyId};
+use crate::error::{Member, MemberFault, MetadataFault, WalletStateError};
+use crate::ids::{
+    known, BatchId, ConfigurationId, CredentialId, FormatIdentifier, InstanceId, IssuerIdentifier,
+    KeyId,
+};
 
 /// The members of a JSON object, each as its text. A repeated name keeps its last value, as
 /// JavaScript's `JSON.parse` in `wallet-frontend` does.
@@ -21,37 +24,44 @@ pub(crate) fn array(raw: &RawValue) -> Option<Vec<&RawValue>> {
     serde_json::from_str(raw.get()).ok()
 }
 
-/// `text`, or `None` for the empty string the wallet writes when it does not know a value.
-pub(crate) fn known(text: String) -> Option<String> {
-    (!text.is_empty()).then_some(text)
-}
-
 /// A credential entry: the eight members of Section 6.0 and its `metadata`.
 pub struct CredentialEntry {
     credential_id: CredentialId,
-    format: String,
-    data: String,
+    format: FormatIdentifier,
+    data: CredentialData,
     key_id: Option<KeyId>,
     instance_id: InstanceId,
     batch_id: BatchId,
-    issuer: Option<String>,
-    configuration_id: Option<String>,
+    issuer: Option<IssuerIdentifier>,
+    configuration_id: Option<ConfigurationId>,
     metadata: Vec<MetadataEntry>,
+}
+
+/// `data`: the stored credential, in the serialization of its format. It holds the claim
+/// values (R-G6).
+pub struct CredentialData(String);
+
+impl CredentialData {
+    /// The serialization.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 impl CredentialEntry {
     /// The entry `raw` holds: the members of Section 6.0 and `metadata`.
     pub(crate) fn parse(raw: &RawValue) -> Result<Self, WalletStateError> {
         let members = object(raw).ok_or(WalletStateError::CredentialEntry)?;
+        let text = |name: Member| member::<String>(&members, name);
         Ok(Self {
-            credential_id: CredentialId::new(member(&members, "credentialId")?),
-            format: member(&members, "format")?,
-            data: member(&members, "data")?,
-            key_id: known(member(&members, "kid")?).map(KeyId::new),
-            instance_id: InstanceId::new(member(&members, "instanceId")?),
-            batch_id: BatchId::new(member(&members, "batchId")?),
-            issuer: known(member(&members, "credentialIssuerIdentifier")?),
-            configuration_id: known(member(&members, "credentialConfigurationId")?),
+            credential_id: CredentialId::new(member(&members, Member::CredentialId)?),
+            format: FormatIdentifier::new(text(Member::Format)?),
+            data: CredentialData(text(Member::Data)?),
+            key_id: KeyId::known(text(Member::Kid)?),
+            instance_id: InstanceId::new(member(&members, Member::InstanceId)?),
+            batch_id: BatchId::new(member(&members, Member::BatchId)?),
+            issuer: IssuerIdentifier::known(text(Member::CredentialIssuerIdentifier)?),
+            configuration_id: ConfigurationId::known(text(Member::CredentialConfigurationId)?),
             metadata: match members.get("metadata") {
                 Some(raw) => metadata(raw)?,
                 None => Vec::new(),
@@ -64,13 +74,13 @@ impl CredentialEntry {
         self.credential_id
     }
 
-    /// `format`: the credential format identifier, for example `dc+sd-jwt`.
-    pub fn format(&self) -> &str {
+    /// `format`.
+    pub fn format(&self) -> &FormatIdentifier {
         &self.format
     }
 
-    /// `data`: the stored credential, in the serialization of its format.
-    pub fn data(&self) -> &str {
+    /// `data`.
+    pub fn data(&self) -> &CredentialData {
         &self.data
     }
 
@@ -90,13 +100,13 @@ impl CredentialEntry {
     }
 
     /// `credentialIssuerIdentifier`. `None` when the wallet did not know it.
-    pub fn issuer(&self) -> Option<&str> {
-        self.issuer.as_deref()
+    pub fn issuer(&self) -> Option<&IssuerIdentifier> {
+        self.issuer.as_ref()
     }
 
     /// `credentialConfigurationId`. `None` when the wallet did not know it.
-    pub fn configuration_id(&self) -> Option<&str> {
-        self.configuration_id.as_deref()
+    pub fn configuration_id(&self) -> Option<&ConfigurationId> {
+        self.configuration_id.as_ref()
     }
 
     /// `metadata`, in its order. An absent member and an empty array both give no entry.
@@ -106,31 +116,52 @@ impl CredentialEntry {
 }
 
 /// The member `name` of `members`, as a `T`.
-fn member<T: DeserializeOwned>(
-    members: &Members<'_>,
-    name: &'static str,
-) -> Result<T, WalletStateError> {
-    members
-        .get(name)
-        .and_then(|raw| serde_json::from_str(raw.get()).ok())
-        .ok_or(WalletStateError::CredentialMember(name))
+fn member<T: DeserializeOwned>(members: &Members<'_>, name: Member) -> Result<T, WalletStateError> {
+    let fault = |fault| WalletStateError::CredentialMember(name, fault);
+    let raw = members
+        .get(name.name())
+        .ok_or_else(|| fault(MemberFault::Absent))?;
+    serde_json::from_str(raw.get()).map_err(|_| fault(MemberFault::WrongType))
 }
 
 /// An entry of `metadata`: data a counterparty supplied for this credential entry.
 pub struct MetadataEntry {
-    kind: String,
+    kind: MetadataType,
     value: MetadataValue,
 }
 
 impl MetadataEntry {
     /// `type`. Its consumer defines the meaning of `value`.
-    pub fn kind(&self) -> &str {
+    pub fn kind(&self) -> &MetadataType {
         &self.kind
     }
 
     /// `value`.
     pub fn value(&self) -> &MetadataValue {
         &self.value
+    }
+}
+
+/// The `type` of a `metadata` entry. Never empty.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct MetadataType(String);
+
+impl MetadataType {
+    /// The type as the entry writes it.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl PartialEq<str> for MetadataType {
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other
+    }
+}
+
+impl PartialEq<&str> for MetadataType {
+    fn eq(&self, other: &&str) -> bool {
+        self.0 == *other
     }
 }
 
@@ -148,17 +179,19 @@ impl MetadataValue {
 
 /// The entries of the `metadata` member `raw`.
 fn metadata(raw: &RawValue) -> Result<Vec<MetadataEntry>, WalletStateError> {
-    let entries = array(raw).ok_or(WalletStateError::Metadata)?;
+    let fault = WalletStateError::Metadata;
+    let entries = array(raw).ok_or(fault(MetadataFault::NotArray))?;
     entries
         .into_iter()
         .map(|entry| {
-            let members = object(entry).ok_or(WalletStateError::Metadata)?;
+            let members = object(entry).ok_or(fault(MetadataFault::EntryNotObject))?;
             let kind = members
                 .get("type")
                 .and_then(|kind| serde_json::from_str::<String>(kind.get()).ok())
                 .and_then(known)
-                .ok_or(WalletStateError::Metadata)?;
-            let value = members.get("value").ok_or(WalletStateError::Metadata)?;
+                .map(MetadataType)
+                .ok_or(fault(MetadataFault::Type))?;
+            let value = members.get("value").ok_or(fault(MetadataFault::Value))?;
             Ok(MetadataEntry {
                 kind,
                 value: MetadataValue((*value).to_owned()),

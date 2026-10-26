@@ -30,8 +30,13 @@ mod ids;
 mod presentation;
 mod state;
 
-pub use entry::{CredentialEntry, MetadataEntry, MetadataValue};
-pub use error::WalletStateError;
-pub use ids::{BatchId, CredentialId, InstanceId, KeyId, PresentationId, TransactionId};
+pub use entry::{CredentialData, CredentialEntry, MetadataEntry, MetadataType, MetadataValue};
+pub use error::{
+    FoundVersion, Member, MemberFault, MetadataFault, PresentationsFault, WalletStateError,
+};
+pub use ids::{
+    BatchId, ConfigurationId, CredentialId, FormatIdentifier, InstanceId, IssuerIdentifier, KeyId,
+    PresentationId, TransactionId,
+};
 pub use presentation::PresentationRecord;
 pub use state::WalletState;
