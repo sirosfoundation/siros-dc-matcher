@@ -1,0 +1,210 @@
+//! The display of a TS12 entry (EC TS12 v1.0.1, Sections 3.3.1 to 3.3.3).
+
+use serde_json::Value as JsonValue;
+use siros_display::{choose, DisplayText, Locale};
+
+use crate::error::TransactionDataError;
+use crate::json::{Json, Number};
+use crate::labels::{DisplayMetadata, Label};
+use crate::view::{Frequency, Labels, Level, Row, RowValue, TransactionView};
+
+/// The leaf parameters of a payload, each with its path in the entry.
+pub(crate) struct Leaves {
+    path: Vec<String>,
+    leaves: Vec<Leaf>,
+}
+
+/// A leaf parameter.
+struct Leaf {
+    path: Vec<String>,
+    value: LeafValue,
+    /// The least prominent level the type allows, whatever the metadata sets: for a member its
+    /// schema requires and the user must see.
+    floor: Option<Level>,
+}
+
+enum LeafValue {
+    Text(String),
+    Number(String),
+    Boolean(bool),
+    Frequency(Frequency),
+}
+
+impl Leaves {
+    /// The leaves below `payload`.
+    pub(crate) fn payload() -> Self {
+        Self {
+            path: vec!["payload".to_owned()],
+            leaves: Vec::new(),
+        }
+    }
+
+    fn push(&mut self, name: &str, value: LeafValue, floor: Option<Level>) {
+        let mut path = self.path.clone();
+        path.push(name.to_owned());
+        self.leaves.push(Leaf { path, value, floor });
+    }
+
+    /// The string member `name`.
+    pub(crate) fn text(&mut self, name: &str, value: &str, floor: Option<Level>) {
+        self.push(name, LeafValue::Text(value.to_owned()), floor);
+    }
+
+    /// The string member `name`, when present.
+    pub(crate) fn optional_text(&mut self, name: &str, value: Option<&str>) {
+        if let Some(value) = value {
+            self.text(name, value, None);
+        }
+    }
+
+    /// The number member `name`.
+    pub(crate) fn number(&mut self, name: &str, value: &Number, floor: Option<Level>) {
+        self.push(name, LeafValue::Number(value.text().to_owned()), floor);
+    }
+
+    /// The number member `name`, when present.
+    pub(crate) fn optional_number(&mut self, name: &str, value: Option<&Number>) {
+        if let Some(value) = value {
+            self.number(name, value, None);
+        }
+    }
+
+    /// The boolean member `name`, when present.
+    pub(crate) fn optional_boolean(&mut self, name: &str, value: Option<bool>) {
+        if let Some(value) = value {
+            self.push(name, LeafValue::Boolean(value), None);
+        }
+    }
+
+    /// The frequency member `name`.
+    pub(crate) fn frequency(&mut self, name: &str, value: Frequency) {
+        self.push(name, LeafValue::Frequency(value), None);
+    }
+
+    /// The leaves of the object member `name`, which `leaves` adds.
+    pub(crate) fn object(&mut self, name: &str, leaves: impl FnOnce(&mut Self)) {
+        let depth = self.path.len();
+        self.path.push(name.to_owned());
+        leaves(self);
+        self.path.truncate(depth);
+    }
+
+    /// The members the schema of an object leaves open: an object's leaves, or the value of any
+    /// other member as one leaf.
+    pub(crate) fn rest(&mut self, members: &[(String, Json)]) {
+        for (name, value) in members {
+            match value {
+                Json::Object(object) => {
+                    self.object(name, |leaves| leaves.rest(object.members()));
+                }
+                Json::String(text) => self.text(name, text, None),
+                Json::Number(number) => self.number(name, number, None),
+                Json::Bool(b) => self.push(name, LeafValue::Boolean(*b), None),
+                Json::Null | Json::Array(_) => {
+                    let mut text = String::new();
+                    compact(value, &mut text);
+                    self.push(name, LeafValue::Text(text), None);
+                }
+            }
+        }
+    }
+}
+
+/// Appends the compact JSON text of `value` to `out`.
+fn compact(value: &Json, out: &mut String) {
+    match value {
+        Json::Null => out.push_str("null"),
+        Json::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+        Json::Number(number) => out.push_str(number.text()),
+        Json::String(text) => out.push_str(&JsonValue::from(text.as_str()).to_string()),
+        Json::Array(items) => {
+            out.push('[');
+            for (i, item) in items.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                compact(item, out);
+            }
+            out.push(']');
+        }
+        Json::Object(object) => {
+            out.push('{');
+            for (i, (name, item)) in object.members().iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                out.push_str(&JsonValue::from(name.as_str()).to_string());
+                out.push(':');
+                compact(item, out);
+            }
+            out.push('}');
+        }
+    }
+}
+
+/// The view of an entry of type `transaction_type` with `leaves`.
+///
+/// A leaf takes the `visualisation` of its claim metadata, 3 when unset, raised to its floor.
+/// It needs a localised name, except one the metadata marks 4, which is left out without one
+/// (Section 3.3.1). The rows go by level, in schema order within a level.
+pub(crate) fn view(
+    transaction_type: &'static str,
+    leaves: Leaves,
+    metadata: &DisplayMetadata,
+    preferences: &[Locale],
+) -> Result<TransactionView, TransactionDataError> {
+    let mut rows = Vec::with_capacity(leaves.leaves.len());
+    for leaf in leaves.leaves {
+        let claim = metadata.claims.get(&leaf.path);
+        let set = claim
+            .and_then(|c| c.level())
+            .unwrap_or(Level::Supplementary);
+        let level = leaf.floor.map_or(set, |floor| set.min(floor));
+        let Some(label) = claim.and_then(|c| choose(preferences, c.labels())) else {
+            if claim.is_some() && level == Level::Omittable {
+                continue;
+            }
+            return Err(TransactionDataError::LabelMissing);
+        };
+        rows.push(Row::new(shown(label)?, leaf.value.shown()?, level));
+    }
+    rows.sort_by_key(Row::level);
+    let ui = &metadata.ui_labels;
+    let labels = Labels {
+        affirmative: choose(preferences, &ui.affirmative)
+            .ok_or(TransactionDataError::AffirmativeLabelMissing)
+            .and_then(shown)?,
+        denial: optional(preferences, &ui.denial)?,
+        title: optional(preferences, &ui.title)?,
+        security_hint: optional(preferences, &ui.security_hint)?,
+    };
+    Ok(TransactionView::new(transaction_type, labels, rows))
+}
+
+/// The label for `preferences` among `labels`, when there is one.
+fn optional(
+    preferences: &[Locale],
+    labels: &[Label],
+) -> Result<Option<DisplayText>, TransactionDataError> {
+    choose(preferences, labels).map(shown).transpose()
+}
+
+/// `label` as display text.
+fn shown(label: &Label) -> Result<DisplayText, TransactionDataError> {
+    DisplayText::label(label.text()).map_err(|_| TransactionDataError::LabelNotDisplayable)
+}
+
+impl LeafValue {
+    /// The value of a row.
+    fn shown(self) -> Result<RowValue, TransactionDataError> {
+        let text = |text: &str| {
+            DisplayText::value(text).map_err(|_| TransactionDataError::ValueNotDisplayable)
+        };
+        Ok(match self {
+            Self::Text(value) => RowValue::Text(text(&value)?),
+            Self::Number(value) => RowValue::Number(text(&value)?),
+            Self::Boolean(b) => RowValue::Boolean(b),
+            Self::Frequency(f) => RowValue::Frequency(f),
+        })
+    }
+}
