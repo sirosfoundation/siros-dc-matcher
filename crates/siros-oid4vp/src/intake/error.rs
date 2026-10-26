@@ -115,6 +115,10 @@ pub enum IntakeError {
     ClientMetadataInvalid,
     /// `transaction_data` is not a non-empty array of strings (Section 5.1).
     TransactionDataInvalid,
+    /// `verifier_info` is not a non-empty array of objects with a string `format`, a `data`
+    /// object or string, and `credential_ids` naming Credential Queries when present (Section
+    /// 5.1).
+    VerifierInfoInvalid,
     /// An encrypted Response Mode, and no key of `jwks` is a P-256 `ECDH-ES` encryption key.
     EncryptionKeyMissing,
     /// `encrypted_response_enc_values_supported` names no `enc` of the Response Mode's
@@ -184,6 +188,7 @@ impl IntakeError {
             Self::DcqlQueryInvalid => "dcql_query_invalid",
             Self::ClientMetadataInvalid => "client_metadata_invalid",
             Self::TransactionDataInvalid => "transaction_data_invalid",
+            Self::VerifierInfoInvalid => "verifier_info_invalid",
             Self::EncryptionKeyMissing => "encryption_key_missing",
             Self::EncryptionUnsupported => "encryption_unsupported",
             Self::AnswerMismatch => "answer_mismatch",

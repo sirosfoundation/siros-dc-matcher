@@ -9,6 +9,7 @@ use super::trust::{self, KeyMaterial, TrustSubject};
 use super::{attestation, Answers, Halt, IntakeError};
 use crate::client_id::{ClientId, ClientIdPrefix};
 use crate::jose::Signed;
+use crate::verified::AccessCertificate;
 use crate::x509::Chain;
 
 /// The `typ` of a Request Object (RFC 9101, Section 10.8).
@@ -18,6 +19,8 @@ const REQUEST_OBJECT_TYP: &str = "oauth-authz-req+jwt";
 pub(super) struct Verifier {
     pub(super) client_id: ClientId,
     pub(super) trusted: bool,
+    /// The access certificate of an `x509_san_dns` or `x509_hash` client.
+    pub(super) certificate: Option<AccessCertificate>,
     pub(super) metadata: Metadata,
     pub(super) response_uri: UriRule,
 }
@@ -62,6 +65,7 @@ pub(super) fn authenticate(
             }
             signed.verify(chain.key())?;
             let dns = client_id.value().to_owned();
+            let certificate = chain.access_certificate();
             let trusted = trust::verdict(
                 answers,
                 TrustSubject::Client(client_id.clone()),
@@ -74,7 +78,10 @@ pub(super) fn authenticate(
             } else {
                 UriRule::Host(dns)
             };
-            Ok(by_request(client_id, trusted, response_uri))
+            Ok(Verifier {
+                certificate: Some(certificate),
+                ..by_request(client_id, trusted, response_uri)
+            })
         }
         ClientIdPrefix::X509Hash => {
             let chain = Chain::parse(signed.header().get("x5c"))?;
@@ -83,12 +90,16 @@ pub(super) fn authenticate(
                 return Err(IntakeError::CertificateHashMismatch.into());
             }
             signed.verify(chain.key())?;
+            let certificate = chain.access_certificate();
             let trusted = trust::verdict(
                 answers,
                 TrustSubject::Client(client_id.clone()),
                 KeyMaterial::X509Chain(chain.into_der()),
             )?;
-            Ok(by_request(client_id, trusted, UriRule::Any))
+            Ok(Verifier {
+                certificate: Some(certificate),
+                ..by_request(client_id, trusted, UriRule::Any)
+            })
         }
         ClientIdPrefix::DecentralizedIdentifier => {
             // The key is a verification method of the DID: `kid` is a DID URL of it.
@@ -129,6 +140,7 @@ pub(super) fn authenticate(
             Ok(Verifier {
                 client_id,
                 trusted: resolved.trusted,
+                certificate: None,
                 metadata: Metadata::TrustChain(resolved.metadata),
                 response_uri: UriRule::Any,
             })
@@ -141,6 +153,7 @@ pub(super) fn by_request(client_id: ClientId, trusted: bool, response_uri: UriRu
     Verifier {
         client_id,
         trusted,
+        certificate: None,
         metadata: Metadata::Request,
         response_uri,
     }

@@ -50,7 +50,11 @@ pub(super) fn intake(
                 signature::authenticate(&signed, ClientId::parse(client_id)?, now_unix, answers)?;
             Ok(request::verified(
                 &params,
-                Arrival::DcApiSigned { origin, verifier },
+                Arrival::DcApiSigned {
+                    origin,
+                    protocol,
+                    verifier,
+                },
             )?)
         }
         Protocol::Multisigned => {
@@ -77,7 +81,11 @@ pub(super) fn intake(
             let verifier = first_qualifying(signatures, payload_b64, now_unix, answers)?;
             Ok(request::verified(
                 &params,
-                Arrival::DcApiSigned { origin, verifier },
+                Arrival::DcApiSigned {
+                    origin,
+                    protocol,
+                    verifier,
+                },
             )?)
         }
     }

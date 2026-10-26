@@ -26,6 +26,12 @@ pub enum Channel {
 pub enum PolicyRule {
     /// The request is not signed.
     Unsigned,
+    /// A Digital Credentials API request arrived as `openid4vp-v1-multisigned`: the catalogue
+    /// requires `openid4vp-v1-signed`.
+    Multisigned,
+    /// The host's trust verdict on the Client Identifier is negative: the Wallet Unit validates
+    /// the Request Object's certificate chain for its Client Identifier Prefix.
+    Untrusted,
     /// The Request Object is not a JSON object.
     NotObject,
     /// `client_id` is missing or not a string.
@@ -48,6 +54,8 @@ impl PolicyRule {
     pub fn code(self) -> &'static str {
         match self {
             Self::Unsigned => "unsigned",
+            Self::Multisigned => "multisigned",
+            Self::Untrusted => "untrusted",
             Self::NotObject => "request_object_not_object",
             Self::ClientIdMissing => "client_id_missing",
             Self::NonceMissing => "nonce_missing",

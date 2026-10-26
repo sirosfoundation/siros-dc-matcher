@@ -137,9 +137,11 @@ artifacts from their reference copies.
   `SHA-256(secret_seed) = ssc`; `prepare` opens it again for each presentation.
 * `policy::check_request(request_object, signed, channel)` and `CheckedRequest::handover(jwk
   thumbprint)`, with `VerifierId::x509_san_dns` or `VerifierId::semantic`, give the `Session`.
-* `request::NymAuthRequest::new(&VerifiedRequest, &VerifierIdForm)` (feature `request`) gives the
-  `Session` of a verified request that is signed and asks for an encrypted response, or the
-  `RequestRefusal`.
+* `request::NymAuthRequest::new(&VerifiedRequest, VerifierIdForm)` (feature `request`) gives the
+  `Session` of a verified request that is signed (`openid4vp-v1-signed` over the DC API),
+  trusted, asks for an encrypted response and carries no registration certificate, or the
+  `RequestRefusal`. Its `verifier_id` is the Client Identifier, or `semantic_id:` and the
+  access certificate's semantic identifier.
 * `NymAuthQuery::options()` gives each option; `NymAuthOption::pair(formats, system, date)` gives
   its `UsablePair` or the `PairRefusal` of Section 1.3.
 * `attestation::UsableAttestation::of(mdoc, anchors, proof_time)` tests an mdoc `siros-mdoc`

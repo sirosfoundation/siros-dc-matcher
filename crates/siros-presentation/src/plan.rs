@@ -48,7 +48,7 @@ pub struct PlanInput<'a> {
     /// preference.
     pub systems: &'a [NymAuthSystem],
     /// The form of `verifier_id` the Verifier's trust framework fixes, for a nym_auth query.
-    pub verifier_id: &'a VerifierIdForm,
+    pub verifier_id: VerifierIdForm,
     /// The credentials the wallet declares presentable without its UI (A9).
     pub background: &'a [CredentialId],
     /// The authentication factors of each signing key the host reported (H3).
