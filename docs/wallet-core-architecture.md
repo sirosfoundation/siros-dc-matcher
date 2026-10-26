@@ -252,7 +252,7 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
 **Requirements:**
 - **D1.** It is the only metadata merger: it MUST remove `auxiliary_data` before any merge (privatedata §5A.3).
 - **D2.** Locale choice MUST be: exact tag, then primary language, then the first entry.
-- **D3.** OpenID4VCI display wins over type metadata display for the same locale.
+- **D3.** Format-specific display (SD-JWT VC type metadata) wins over OpenID4VCI `credential_metadata`, which is the fallback (OpenID4VCI 1.0 §12.2.4).
 - **D4.** Values MUST be typed for display (text, boolean, integer, number, date, date-time, image, list, group). The UI formats dates and numbers for its locale.
 - **D5.** Bytes are shown only by length, except a claim the metadata declares as an image.
 
