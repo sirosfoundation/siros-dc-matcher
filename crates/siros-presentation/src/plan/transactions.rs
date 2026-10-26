@@ -50,22 +50,16 @@ impl<'a> Transactions<'a> {
             .map(|raw| Entry::parse(raw, request.dcql_query(), now))
             .collect::<Result<Vec<_>, _>>()
             .map_err(PresentationError::TransactionData)?;
-        let named: Vec<usize> = answered
+        let mut metadata: Vec<(CredentialId, ScaMetadata<'a>)> = Vec::new();
+        let mut judged: Vec<CredentialId> = Vec::new();
+        let credentials = answered
             .queries()
             .iter()
-            .enumerate()
-            .filter(|(_, answers)| {
+            .filter(|answers| {
                 entries
                     .iter()
                     .any(|e| e.credential_ids().contains(&answers.query().id))
             })
-            .map(|(index, _)| index)
-            .collect();
-        let mut metadata: Vec<(CredentialId, ScaMetadata<'a>)> = Vec::new();
-        let mut judged: Vec<CredentialId> = Vec::new();
-        let credentials = named
-            .iter()
-            .filter_map(|&query| answered.queries().get(query))
             .flat_map(|answers| answers.candidates())
             .map(|candidate| candidate.credential().credential())
             .filter(|credential| credential.format() == Format::SdJwtVc);
