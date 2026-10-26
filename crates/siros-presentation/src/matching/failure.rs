@@ -4,10 +4,12 @@
 use std::fmt;
 
 use siros_credential::PointerError;
+use siros_dcql::QueryId;
+use siros_trust::AuthorityError;
 use siros_zkp_req::ErrorCode;
 
 use super::{Answered, ZkpRefusal};
-use siros_dcql::QueryId;
+use crate::credential::MatchCredential;
 
 /// Why a request cannot be matched: the query as sent lacks a Credential Query of the parsed
 /// one. The request is invalid (`invalid_request`).
@@ -37,6 +39,8 @@ impl std::error::Error for AskedError {}
 /// Why a Credential Query has no candidate whatever the wallet holds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QueryRefusal {
+    /// `trusted_authorities` holds an `aki` value that encodes no keyIdentifier (TR3).
+    Authorities(AuthorityError),
     /// A claims path the query selects is no claims path pointer (OpenID4VP 1.0, Section 7).
     ClaimPath(PointerError),
     /// The `zkp_req` query is refused.
@@ -47,15 +51,17 @@ impl QueryRefusal {
     /// A stable identifier.
     pub fn code(&self) -> &'static str {
         match self {
+            Self::Authorities(error) => error.code(),
             Self::ClaimPath(error) => error.code(),
             Self::Zkp(refusal) => refusal.code(),
         }
     }
 
-    /// The `zkp_req.md`, Section 5 code: `invalid_request` for a claims path.
+    /// The `zkp_req.md`, Section 5 code: `invalid_request` for `trusted_authorities` and a
+    /// claims path.
     pub fn error_code(&self) -> ErrorCode {
         match self {
-            Self::ClaimPath(_) => ErrorCode::InvalidRequest,
+            Self::Authorities(_) | Self::ClaimPath(_) => ErrorCode::InvalidRequest,
             Self::Zkp(refusal) => refusal.error_code(),
         }
     }
@@ -109,7 +115,7 @@ impl<R> Failure<R> {
     }
 }
 
-impl<C, R: Clone> Answered<'_, C, R> {
+impl<C: MatchCredential, R: Clone> Answered<'_, C, R> {
     /// Why the request has no offer (`zkp_req.md`, Section 5): the first refused query whose
     /// code comes first of `invalid_request` and `vp_formats_not_supported`; else the first
     /// `zkp_req` query whose matched credentials all fail; else no combination.

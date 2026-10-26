@@ -1,5 +1,5 @@
 //! A test issuer, holder, requests and host, shared by this crate's tests and those of the
-//! bindings.
+//! bindings and the provers.
 //!
 //! The issuer writes credentials in the compact profile, with the readdit issuer's layout
 //! (`native/vega/issuer`): `birth_date` and `ssc` items, 16-byte salts, digestIDs 0 and 1, the
@@ -18,12 +18,15 @@
     missing_docs
 )]
 
+mod presenting;
+
+pub use presenting::{nym_query, prepared, present, usable, verified_request, Presenting};
+
 use std::str::FromStr;
 use std::time::Duration;
 
-use crate::mdoc::StoredCredential;
 use crate::policy::{check_request, Channel};
-use crate::presenter::{Session, SignFailure, Signer};
+use crate::presenter::Session;
 use crate::prover::{
     NymAuthProofVerifier, NymAuthProver, ProofFailure, ProofJob, ProofOutput, ProverFailure,
     Statement,
@@ -265,15 +268,6 @@ pub fn issue(issuer: &Issuer, spec: &Spec) -> String {
     base64url::encode(&issuer_signed.encode())
 }
 
-pub fn stored(id: &str, data: String) -> StoredCredential {
-    StoredCredential {
-        id: id.to_owned(),
-        format: "mso_mdoc".to_owned(),
-        data,
-        kid: format!("key-{id}"),
-    }
-}
-
 /// A pseudonym item and, unless `range` is `None`, an age_check item.
 pub fn query(range: Option<&str>, age_return: bool) -> Value {
     let mut req = vec![json!({"fn_id": "pseudonym", "return": "nym",
@@ -332,15 +326,10 @@ pub fn session(query: &Value, nonce: &str) -> Session {
     }
 }
 
-/// The device key of a holder.
-pub struct DeviceSigner(pub u8);
-
-impl Signer for DeviceSigner {
-    fn sign(&self, _kid: &str, alg: &str, data: &[u8]) -> Result<Vec<u8>, SignFailure> {
-        assert_eq!(alg, "ES256");
-        let signature: Signature = key(self.0).sign(data);
-        Ok(signature.to_bytes().to_vec())
-    }
+/// The ES256 signature, `r ‖ s`, of `data` by the device key of scalar `device`.
+pub fn device_signature(device: u8, data: &[u8]) -> Vec<u8> {
+    let signature: Signature = key(device).sign(data);
+    signature.to_bytes().to_vec()
 }
 
 /// The pseudonym of `SHA256(DST ‖ seed ‖ 0^32 ‖ SHA256(verifier_id))`, written out.

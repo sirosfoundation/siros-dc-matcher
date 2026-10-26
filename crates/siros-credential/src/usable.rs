@@ -36,6 +36,7 @@ impl Validity {
 #[derive(Clone, Copy)]
 pub struct UsableCredential<'c> {
     credential: &'c Credential,
+    time: DateTime,
 }
 
 impl<'c> UsableCredential<'c> {
@@ -53,12 +54,20 @@ impl<'c> UsableCredential<'c> {
         if validity.not_after.is_some_and(|t| now >= t) {
             return Err(ValidityError::Expired);
         }
-        Ok(Self { credential })
+        Ok(Self {
+            credential,
+            time: now,
+        })
     }
 
     /// The credential.
     pub fn credential(&self) -> &'c Credential {
         self.credential
+    }
+
+    /// The time the credential is valid at.
+    pub fn time(&self) -> DateTime {
+        self.time
     }
 }
 

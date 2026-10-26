@@ -7,9 +7,9 @@ use crate::attestation::{Credential, OpenedSeed, SecretSeed, SeedMismatch, Usabl
 use crate::outcome::{ItemCode, ZkpError};
 use crate::pair::{failed_assertions, UsablePair};
 
-/// What the proof of an option needs: a usable pair for it, a usable attestation at the pair's
-/// proof date, and the `secret_seed` that opens the attestation's `ssc`. Every assertion of the
-/// option holds for the attestation.
+/// What the proof of an option needs: a usable pair for it, an attestation usable for its query
+/// at the pair's proof date, and the `secret_seed` that opens the attestation's `ssc`. Every
+/// assertion of the option holds for the attestation.
 #[derive(Debug, Clone)]
 pub struct Answer<'q> {
     pair: UsablePair<'q>,
@@ -20,6 +20,8 @@ pub struct Answer<'q> {
 /// Why an attestation does not answer an option.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Unanswerable {
+    /// The attestation is usable for another query than the pair's.
+    OtherQuery,
     /// The attestation was tested at another date than the pair's proof date.
     ProofDate,
     /// Items of the option fail for the attestation: an assertion, or the `pseudonym`'s seed.
@@ -27,10 +29,11 @@ pub enum Unanswerable {
 }
 
 impl Unanswerable {
-    /// A stable identifier: `proof_date`, or `credential` for failed items, with their codes in
-    /// the variant.
+    /// A stable identifier: `other_query`, `proof_date`, or `credential` for failed items, with
+    /// their codes in the variant.
     pub fn code(&self) -> &'static str {
         match self {
+            Self::OtherQuery => "other_query",
             Self::ProofDate => "proof_date",
             Self::Failed(_) => "credential",
         }
@@ -51,14 +54,18 @@ impl<'q> Answer<'q> {
     ///
     /// # Errors
     ///
-    /// [`Unanswerable::ProofDate`] for an attestation tested at another date than the pair's,
-    /// and [`Unanswerable::Failed`] with the `age_check` that fails and `seed_mismatch` for a
-    /// seed that does not open `ssc`.
+    /// [`Unanswerable::OtherQuery`] for an attestation usable for another query,
+    /// [`Unanswerable::ProofDate`] for one tested at another date than the pair's, and
+    /// [`Unanswerable::Failed`] with the `age_check` that fails and `seed_mismatch` for a seed
+    /// that does not open `ssc`.
     pub fn new(
         pair: UsablePair<'q>,
         attestation: UsableAttestation,
         secret_seed: &SecretSeed,
     ) -> Result<Self, Unanswerable> {
+        if *attestation.issuer().query() != pair.option().query().query().id {
+            return Err(Unanswerable::OtherQuery);
+        }
         if attestation.proof_time().date() != pair.date() {
             return Err(Unanswerable::ProofDate);
         }
@@ -92,7 +99,7 @@ impl<'q> Answer<'q> {
 ///
 /// The items that fail: the `age_check` assertion, then the `pseudonym` whose `secret_seed`
 /// does not open `ssc`.
-pub(crate) fn opened_seed(
+fn opened_seed(
     pair: &UsablePair<'_>,
     credential: &Credential,
     secret_seed: &SecretSeed,

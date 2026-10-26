@@ -49,6 +49,7 @@ pub struct ProofJob {
 
 impl ProofJob {
     /// The job for `statement`. `device_signature` verifies under the MSO's device key.
+    #[cfg(feature = "request")]
     pub(crate) fn new(
         statement: Statement,
         attestation: UsableAttestation,

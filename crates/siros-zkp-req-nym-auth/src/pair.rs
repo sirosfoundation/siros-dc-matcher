@@ -6,7 +6,7 @@ use siros_zkp_req::{usable_backend, PairRefusal, QueryOption, ZkpFormats};
 
 use crate::age::Bounds;
 use crate::catalogue::{Function, NymAuthQuery, Pseudonym};
-#[cfg(feature = "credential")]
+#[cfg(feature = "request")]
 use crate::outcome::{ItemCode, ZkpError};
 use crate::system::{NymAuthSystem, Unsupported};
 
@@ -136,7 +136,7 @@ impl<'q> UsablePair<'q> {
 }
 
 /// The assertions of `option` that fail for `birth_date` under `bounds`: its `age_check`.
-#[cfg(feature = "credential")]
+#[cfg(feature = "request")]
 pub(crate) fn failed_assertions(
     query: &NymAuthQuery,
     option: &QueryOption,

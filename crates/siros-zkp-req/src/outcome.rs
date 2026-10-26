@@ -37,7 +37,8 @@ impl fmt::Display for ErrorCode {
 pub enum RequestRule {
     /// The Credential Query is not a JSON object.
     QueryNotObject,
-    /// `id` is missing, empty or not a string (OpenID4VP 1.0, Section 6.1).
+    /// `id` is missing, not a string, or breaks OpenID4VP 1.0, Section 6.1: a non-empty string
+    /// of ASCII letters, digits, `_` and `-`.
     QueryIdInvalid,
     /// `format` is not `zkp_req`.
     FormatNotZkpReq,
@@ -90,8 +91,6 @@ pub enum RequestRule {
         /// The option's index.
         option: usize,
     },
-    /// `trusted_authorities` is malformed (OpenID4VP 1.0, Section 6.1.1).
-    TrustedAuthoritiesInvalid,
     /// `require_cryptographic_holder_binding` is not a boolean (OpenID4VP 1.0, Section 6.1).
     HolderBindingInvalid,
     /// `multiple` is not a boolean (OpenID4VP 1.0, Section 6.1).
@@ -125,7 +124,6 @@ impl RequestRule {
             Self::ReturnRepeated { .. } => "return_repeated",
             Self::ReqSetsInvalid => "req_sets_invalid",
             Self::OptionInvalid { .. } => "option_invalid",
-            Self::TrustedAuthoritiesInvalid => "trusted_authorities_invalid",
             Self::HolderBindingInvalid => "holder_binding_invalid",
             Self::MultipleInvalid => "multiple_invalid",
             Self::FormatsMissing => "formats_missing",

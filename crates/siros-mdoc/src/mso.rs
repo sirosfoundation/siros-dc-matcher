@@ -153,6 +153,30 @@ fn non_empty_map<'i, 'a>(item: Option<&'i Item<'a>>) -> Option<&'i [(Item<'a>, I
         .filter(|entries| !entries.is_empty())
 }
 
+/// Why bytes are no P-256 key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PointError {
+    /// The bytes are not an uncompressed SEC 1 point of 32-byte coordinates.
+    NotUncompressed,
+}
+
+impl PointError {
+    /// A stable identifier.
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::NotUncompressed => "point_not_uncompressed",
+        }
+    }
+}
+
+impl std::fmt::Display for PointError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.code())
+    }
+}
+
+impl std::error::Error for PointError {}
+
 /// A P-256 public key: its coordinates, big-endian.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct P256Key {
@@ -174,6 +198,22 @@ impl P256Key {
     /// The y-coordinate.
     pub fn y(&self) -> &[u8; 32] {
         &self.y
+    }
+
+    /// The key of the uncompressed SEC 1 point `point`: `0x04`, then x and y.
+    ///
+    /// # Errors
+    ///
+    /// [`PointError::NotUncompressed`] for another encoding.
+    pub fn from_sec1(point: &[u8]) -> Result<Self, PointError> {
+        let [0x04, coordinates @ ..] = point else {
+            return Err(PointError::NotUncompressed);
+        };
+        let (x, y) = coordinates
+            .split_first_chunk::<32>()
+            .and_then(|(x, y)| Some((*x, <[u8; 32]>::try_from(y).ok()?)))
+            .ok_or(PointError::NotUncompressed)?;
+        Ok(Self { x, y })
     }
 
     /// The uncompressed SEC 1 point.

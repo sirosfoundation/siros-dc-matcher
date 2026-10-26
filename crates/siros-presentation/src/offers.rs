@@ -9,6 +9,7 @@ use itertools::{Either, Itertools};
 use serde_json::Value;
 use siros_dcql::{CredentialSetQuery, Dropped, SetRequirement};
 
+use crate::credential::MatchCredential;
 use crate::ids::{CandidateIndex, QueryIndex, SetIndex};
 use crate::matching::Answered;
 use choices::{product, sum, Capped, Choices, Examining, Space};
@@ -159,7 +160,7 @@ impl Offers {
     /// order, the last set varying fastest, each followed by its joins; up to [`MAX_EXAMINED`]
     /// combinations and joins are examined, and at most [`MAX_OFFERS`] offers and
     /// [`MAX_ADDITIONS`] additions per offer are kept.
-    pub fn of<C, R, E>(
+    pub fn of<C: MatchCredential, R, E>(
         answered: &Answered<'_, C, R>,
         entries: &[EntryCarriers],
         mut accept: impl FnMut(&[Member]) -> Result<(), E>,

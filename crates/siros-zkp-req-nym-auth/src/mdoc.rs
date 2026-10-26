@@ -5,32 +5,16 @@ use std::fmt;
 
 use siros_codec::cbor::Value;
 use siros_codec::date::{Date, DateTime};
-use siros_mdoc::{DigestAlgorithm, IssuerSignedItem, Mdoc, MdocError, P256Key};
+use siros_mdoc::{DigestAlgorithm, IssuerSignedItem, Mdoc, P256Key};
 
 use crate::catalogue::MDOC_DOCTYPE;
 
 /// ES256 (RFC 9053, Section 2.1).
 const ES256: i64 = -7;
 
-/// A credential as the Wallet stores it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StoredCredential {
-    /// The Wallet's identifier.
-    pub id: String,
-    /// The credential format, `mso_mdoc` here.
-    pub format: String,
-    /// The credential as issued: base64url, without padding, of an `IssuerSigned`, of a
-    /// `Document`, or of a `DeviceResponse` with one document.
-    pub data: String,
-    /// The identifier of the device key, for `sign`.
-    pub kid: String,
-}
-
-/// Why an `mso_mdoc` is unreadable, or out of the nym_auth form.
+/// Why an mdoc is out of the nym_auth form.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FormError {
-    /// The credential is no mdoc.
-    Mdoc(MdocError),
     /// The issuer does not sign with ES256 (`{1: -7}`).
     Algorithm,
     /// The issuer's signature is not 64 bytes.
@@ -48,10 +32,9 @@ pub enum FormError {
 }
 
 impl FormError {
-    /// A stable identifier: the mdoc's, or the rule of the nym_auth form.
+    /// A stable identifier: the rule of the nym_auth form.
     pub fn code(&self) -> &'static str {
         match self {
-            Self::Mdoc(e) => e.code(),
             Self::Algorithm => "issuer_algorithm",
             Self::Signature => "issuer_signature_length",
             Self::DigestAlgorithm => "nym_auth_digest_algorithm",
@@ -65,10 +48,7 @@ impl FormError {
 
 impl fmt::Display for FormError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Mdoc(e) => e.fmt(f),
-            _ => write!(f, "nym_auth mdoc: {}", self.code()),
-        }
+        write!(f, "nym_auth mdoc: {}", self.code())
     }
 }
 
@@ -188,15 +168,6 @@ pub enum Reading {
     OtherDocType,
 }
 
-/// Reads `data` of a stored `mso_mdoc` credential.
-///
-/// # Errors
-///
-/// [`FormError`]: what makes the credential unreadable or puts it out of the nym_auth form.
-pub fn read(data: &str) -> Result<Reading, FormError> {
-    read_mdoc(&Mdoc::parse(data).map_err(FormError::Mdoc)?)
-}
-
 /// Reads an mdoc `siros-mdoc` parsed.
 ///
 /// # Errors
@@ -228,7 +199,7 @@ pub fn read_mdoc(mdoc: &Mdoc) -> Result<Reading, FormError> {
         issuer_signed: mdoc.issuer_signed().to_vec(),
         sig_structure: auth.sig_structure().to_vec(),
         issuer_signature,
-        document_signer: auth.document_signer().to_vec(),
+        document_signer: auth.x5chain().document_signer().to_vec(),
         device_key: *mso.device_key(),
         valid_from: mso.validity().valid_from(),
         valid_until: mso.validity().valid_until(),

@@ -126,15 +126,37 @@ impl fmt::Display for CertificateError {
 
 impl std::error::Error for CertificateError {}
 
-/// Why a certificate's signature does not hold under its signer's key.
+/// Why a certificate is not issued by another.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum SignatureRefusal {
-    /// The signature algorithm with the signer's key is neither ECDSA P-256 with SHA-256 nor
+pub enum IssuanceRefusal {
+    /// The certificate names another issuer than the other's subject.
+    IssuerName,
+    /// The signature algorithm with the issuer's key is neither ECDSA P-256 with SHA-256 nor
     /// P-384 with SHA-384.
     Algorithm,
-    /// The signature does not verify.
-    Invalid,
+    /// The signature does not verify under the issuer's key.
+    Signature,
 }
+
+impl IssuanceRefusal {
+    /// A stable identifier.
+    #[must_use]
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::IssuerName => "issuer_name",
+            Self::Algorithm => "signature_algorithm",
+            Self::Signature => "signature",
+        }
+    }
+}
+
+impl fmt::Display for IssuanceRefusal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.code())
+    }
+}
+
+impl std::error::Error for IssuanceRefusal {}
 
 impl Certificate {
     /// The certificate `der`.
@@ -212,10 +234,18 @@ impl Certificate {
         self.issuer == signer.subject
     }
 
-    /// Whether `signer`'s key verifies the certificate's signature, with ECDSA P-256 and
-    /// SHA-256 or P-384 and SHA-384.
-    pub(crate) fn signed_by(&self, signer: &Self) -> Result<(), SignatureRefusal> {
-        let verified = match (self.algorithm, &signer.key) {
+    /// Whether `issuer` issued the certificate: the certificate names `issuer`'s subject as its
+    /// issuer, and `issuer`'s key verifies its signature with ECDSA P-256 and SHA-256 or P-384
+    /// and SHA-384.
+    ///
+    /// # Errors
+    ///
+    /// [`IssuanceRefusal`]: the first of these that fails.
+    pub fn issued_by(&self, issuer: &Self) -> Result<(), IssuanceRefusal> {
+        if !self.names_as_issuer(issuer) {
+            return Err(IssuanceRefusal::IssuerName);
+        }
+        let verified = match (self.algorithm, &issuer.key) {
             (SignatureAlgorithm::EcdsaSha256, SubjectKey::P256(key, _)) => {
                 p256::ecdsa::DerSignature::from_bytes(&self.signature)
                     .is_ok_and(|signature| key.verify(&self.tbs, &signature).is_ok())
@@ -224,12 +254,12 @@ impl Certificate {
                 p384::ecdsa::DerSignature::from_bytes(&self.signature)
                     .is_ok_and(|signature| key.verify(&self.tbs, &signature).is_ok())
             }
-            _ => return Err(SignatureRefusal::Algorithm),
+            _ => return Err(IssuanceRefusal::Algorithm),
         };
         if verified {
             Ok(())
         } else {
-            Err(SignatureRefusal::Invalid)
+            Err(IssuanceRefusal::Signature)
         }
     }
 }

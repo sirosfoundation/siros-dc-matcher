@@ -47,10 +47,7 @@ pub use outcome::{ErrorCode, RequestRule};
 pub use presentation::{
     vp_token_cbor, vp_token_json, EncodingError, ProofEnvelope, ZkpPresentation,
 };
-pub use query::{
-    AuthorityKind, CredentialType, QueryOption, ReqItem, ReturnHandle, TrustedAuthority,
-    ZkpReqQuery,
-};
+pub use query::{CredentialType, QueryOption, ReqItem, ReturnHandle, ZkpReqQuery};
 pub use select::{usable_backend, PairRefusal, System};
 pub use structure::{answered_option, StructureRejection};
 pub use vp_token::{presentations_of, VpTokenError};

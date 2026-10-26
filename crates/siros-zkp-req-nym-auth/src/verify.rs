@@ -8,15 +8,15 @@ use std::fmt;
 use serde_json::Value;
 use siros_codec::cbor::Value as Cbor;
 use siros_codec::date::{Date, DateTime};
-use siros_mdoc::{
-    chains_to, device_signing_digest, CertificateError, DeviceNameSpaces, P256Certificate,
-};
+use siros_mdoc::{device_signing_digest, DeviceNameSpaces};
+use siros_trust::Certificate;
 use siros_zkp_req::{
     answered_option, EncodingError, ProofEnvelope, QueryOption, StructureRejection, ZkpFormats,
     ZkpPresentation, ZkpReqQuery,
 };
 
 use crate::age::{Bound, Bounds};
+use crate::attestation::{DocumentSigner, DocumentSignerError};
 use crate::catalogue::{has_result, Function, NymAuthQuery, MDOC_DOCTYPE};
 use crate::outcome::InvalidRequest;
 use crate::presenter::{Session, MAX_ZK_PROOF};
@@ -48,8 +48,8 @@ pub struct VerifyInput<'a> {
     pub now: i64,
     /// Its tolerance for `proof_time`.
     pub tolerance: Tolerance,
-    /// Its trust configuration: DER certificates of the anchors it trusts for this query.
-    pub trust_anchors: &'a [Vec<u8>],
+    /// Its trust configuration: the certificates it trusts for this query.
+    pub trust_anchors: &'a [Certificate],
 }
 
 /// What an accepted presentation establishes.
@@ -75,7 +75,7 @@ pub enum IssuerKeySetError {
     /// It holds zero or several certificates.
     Count,
     /// The certificate is not one of the systems' form.
-    Certificate(CertificateError),
+    Certificate(DocumentSignerError),
     /// The certificate chains to no trust anchor, or is not valid at the Verifier's clock.
     Untrusted,
 }
@@ -150,7 +150,7 @@ pub struct CheckedPresentation {
     option: QueryOption,
     system: NymAuthSystem,
     presentation: ZkpPresentation,
-    certificate: P256Certificate,
+    signer: DocumentSigner,
     proof_time: DateTime,
     bounds: Bounds,
     pseudonym: [u8; 32],
@@ -191,7 +191,7 @@ pub fn check_presentation(
     if !length_ok || envelope.inputs.len() != 2 {
         return Err(Rejection::ProofEncoding);
     }
-    let certificate = issuer_certificate(input_of(&envelope, "issuer_key_set")?)?;
+    let signer = issuer_certificate(input_of(&envelope, "issuer_key_set")?)?;
     let proof_time = proof_time(input_of(&envelope, "proof_time")?)?;
     let bounds = own_bounds(&query, &option, system, proof_time.date())?;
     let pseudonym = pseudonym_result(&query, &option, &presentation)?;
@@ -200,7 +200,7 @@ pub fn check_presentation(
         option,
         system,
         presentation,
-        certificate,
+        signer,
         proof_time,
         bounds,
         pseudonym,
@@ -222,8 +222,8 @@ pub fn verify(
     if !input.tolerance.admits(now, checked.proof_time) {
         return Err(Rejection::ProofTime(ProofTimeError::Tolerance));
     }
-    let trusted = chains_to(&checked.certificate, input.trust_anchors)
-        && checked.certificate.valid_at(now.unix());
+    let certificate = checked.signer.certificate();
+    let trusted = chains_to(certificate, input.trust_anchors) && certificate.valid_at(now);
     if !trusted {
         return Err(Rejection::IssuerKeySet(IssuerKeySetError::Untrusted));
     }
@@ -237,8 +237,8 @@ pub fn verify(
         system: checked.system,
         proof_backend: checked.presentation.proof_backend.clone(),
         doc_type: MDOC_DOCTYPE,
-        issuer_certificate: checked.certificate.der().to_vec(),
-        issuer_key: *checked.certificate.key(),
+        issuer_certificate: certificate.der().to_vec(),
+        issuer_key: *checked.signer.key(),
         proof_time: checked.proof_time,
         earliest: bound(checked.bounds.earliest)?,
         cutoff: bound(checked.bounds.cutoff)?,
@@ -254,7 +254,7 @@ pub fn verify(
         proof_backend: checked.presentation.proof_backend,
         req_set: checked.option.req_set,
         results: checked.presentation.results,
-        issuer_certificate: checked.certificate.der().to_vec(),
+        issuer_certificate: checked.signer.certificate().der().to_vec(),
         proof_time: checked.proof_time,
     })
 }
@@ -293,8 +293,15 @@ fn input_of<'e>(envelope: &'e ProofEnvelope, name: &str) -> Result<&'e Cbor, Rej
         .ok_or(Rejection::ProofEncoding)
 }
 
+/// Whether the Verifier's `trust_anchors` hold `certificate`, or one of them issued it.
+fn chains_to(certificate: &Certificate, trust_anchors: &[Certificate]) -> bool {
+    trust_anchors
+        .iter()
+        .any(|anchor| anchor == certificate || certificate.issued_by(anchor).is_ok())
+}
+
 /// `issuer_key_set`: `[ bstr ]`, exactly one DER certificate with a P-256 key.
-fn issuer_certificate(value: &Cbor) -> Result<P256Certificate, Rejection> {
+fn issuer_certificate(value: &Cbor) -> Result<DocumentSigner, Rejection> {
     let Cbor::Array(set) = value else {
         return Err(Rejection::ProofEncoding);
     };
@@ -304,7 +311,7 @@ fn issuer_certificate(value: &Cbor) -> Result<P256Certificate, Rejection> {
     let [Cbor::Bytes(der)] = set.as_slice() else {
         return Err(Rejection::IssuerKeySet(IssuerKeySetError::Count));
     };
-    P256Certificate::parse(der)
+    DocumentSigner::parse(der)
         .map_err(|e| Rejection::IssuerKeySet(IssuerKeySetError::Certificate(e)))
 }
 

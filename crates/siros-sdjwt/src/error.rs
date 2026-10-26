@@ -30,6 +30,9 @@ pub enum ParseError {
     UnreferencedDisclosure,
     /// The claims nest deeper than [`MAX_DEPTH`](crate::MAX_DEPTH), disclosures included.
     TooDeep,
+    /// The issuer JWT's `x5c` header parameter is not a non-empty array of base64 strings with
+    /// padding (RFC 7515, Section 4.1.6).
+    X5c,
 }
 
 impl ParseError {
@@ -45,6 +48,7 @@ impl ParseError {
             Self::ClaimNameExists => "claim_name_exists",
             Self::UnreferencedDisclosure => "disclosure_unreferenced",
             Self::TooDeep => "claims_too_deep",
+            Self::X5c => "issuer_jwt_x5c_malformed",
         }
     }
 }

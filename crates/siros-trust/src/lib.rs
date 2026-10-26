@@ -53,7 +53,7 @@ mod store;
 #[cfg(feature = "chain")]
 pub use admitted::{AdmittedIssuer, ChainRefusal};
 #[cfg(feature = "chain")]
-pub use certificate::{Certificate, CertificateError, CertificateRole};
+pub use certificate::{Certificate, CertificateError, CertificateRole, IssuanceRefusal};
 #[cfg(feature = "chain")]
 pub use chain::{ChainError, IssuerChain};
 #[cfg(feature = "chain")]

@@ -4,6 +4,7 @@
 use siros_dcql::QueryId;
 
 use super::Member;
+use crate::credential::MatchCredential;
 use crate::ids::{CandidateIndex, QueryIndex};
 use crate::matching::{Answered, Answers, Candidate};
 
@@ -26,7 +27,7 @@ pub struct EntryCarriers {
     carriers: Vec<Carrier>,
 }
 
-impl<'r, C, R> Answered<'r, C, R> {
+impl<'r, C: MatchCredential, R> Answered<'r, C, R> {
     /// The Credential Queries of the request whose `id` an entry `names`.
     pub fn entry_queries(&self, mut names: impl FnMut(&QueryId) -> bool) -> EntryQueries {
         EntryQueries(
@@ -51,7 +52,7 @@ impl EntryQueries {
 
     /// The entry with its carriers among `answered`'s candidates of the queries it names: those
     /// `carries` accepts.
-    pub fn carriers<'r, C, R>(
+    pub fn carriers<'r, C: MatchCredential, R>(
         self,
         answered: &Answered<'r, C, R>,
         mut carries: impl FnMut(&Answers<'r, C, R>, &Candidate<C>) -> bool,

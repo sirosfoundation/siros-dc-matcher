@@ -1,6 +1,7 @@
 //! A `zkp_req` Credential Query (`zkp_req`, Sections 1.1, 2 and 2.1).
 
 use serde_json::{Map, Value};
+use siros_dcql::QueryId;
 
 use crate::outcome::RequestRule;
 
@@ -89,33 +90,11 @@ impl CredentialType {
     }
 }
 
-/// One entry of `trusted_authorities` (OpenID4VP 1.0, Section 6.1.1).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TrustedAuthority {
-    /// `type`.
-    pub kind: AuthorityKind,
-    /// `values`, non-empty.
-    pub values: Vec<String>,
-}
-
-/// The `type` of a trusted authority (OpenID4VP 1.0, Section 6.1.1).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AuthorityKind {
-    /// `aki`: base64url KeyIdentifiers of an Authority Key Identifier.
-    Aki,
-    /// `etsi_tl`: ETSI Trusted List identifiers.
-    EtsiTl,
-    /// `openid_federation`: OpenID Federation Entity Identifiers.
-    OpenidFederation,
-    /// A type this version does not define.
-    Other(String),
-}
-
 /// A parsed `zkp_req` Credential Query.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ZkpReqQuery {
     /// `id`.
-    pub id: String,
+    pub id: QueryId,
     /// `meta`, read for its source format.
     pub credential_type: CredentialType,
     /// `_req`, in order. An item's index identifies it.
@@ -124,8 +103,6 @@ pub struct ZkpReqQuery {
     pub options: Vec<QueryOption>,
     /// Whether the query has `_req_sets`.
     pub has_req_sets: bool,
-    /// `trusted_authorities`, when present.
-    pub trusted_authorities: Option<Vec<TrustedAuthority>>,
     /// `require_cryptographic_holder_binding`; `true` when absent (OpenID4VP 1.0, Section 6.1).
     pub require_holder_binding: bool,
     /// `multiple`: whether several presentations may answer; `false` when absent (OpenID4VP
@@ -141,10 +118,11 @@ impl ZkpReqQuery {
     /// [`RequestRule`]: the first rule of Sections 1.1, 2 and 2.1 the query breaks.
     pub fn parse(query: &Value) -> Result<Self, RequestRule> {
         let query = query.as_object().ok_or(RequestRule::QueryNotObject)?;
-        let id = match query.get("id") {
-            Some(Value::String(id)) if !id.is_empty() => id.clone(),
-            _ => return Err(RequestRule::QueryIdInvalid),
-        };
+        let id = query
+            .get("id")
+            .and_then(Value::as_str)
+            .and_then(|id| QueryId::parse(id).ok())
+            .ok_or(RequestRule::QueryIdInvalid)?;
         if query.get("format").and_then(Value::as_str) != Some(FORMAT) {
             return Err(RequestRule::FormatNotZkpReq);
         }
@@ -163,7 +141,6 @@ impl ZkpReqQuery {
             items,
             options,
             has_req_sets,
-            trusted_authorities: read_authorities(query.get("trusted_authorities"))?,
             require_holder_binding: read_bool(
                 query.get("require_cryptographic_holder_binding"),
                 true,
@@ -329,30 +306,6 @@ fn read_option(set: &Value, index: usize, items: usize) -> Result<QueryOption, R
         req_set: Some(index),
         items: out,
     })
-}
-
-fn read_authorities(value: Option<&Value>) -> Result<Option<Vec<TrustedAuthority>>, RequestRule> {
-    let Some(value) = value else {
-        return Ok(None);
-    };
-    let read = |entry: &Value| -> Option<TrustedAuthority> {
-        let entry = entry.as_object()?;
-        let kind = match entry.get("type")?.as_str()? {
-            "aki" => AuthorityKind::Aki,
-            "etsi_tl" => AuthorityKind::EtsiTl,
-            "openid_federation" => AuthorityKind::OpenidFederation,
-            other => AuthorityKind::Other(other.to_owned()),
-        };
-        Some(TrustedAuthority {
-            kind,
-            values: strings(entry.get("values"))?,
-        })
-    };
-    let list: Option<Vec<TrustedAuthority>> = value
-        .as_array()
-        .filter(|a| !a.is_empty())
-        .and_then(|a| a.iter().map(read).collect());
-    list.map(Some).ok_or(RequestRule::TrustedAuthoritiesInvalid)
 }
 
 /// A boolean member, `default` when absent.

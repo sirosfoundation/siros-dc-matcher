@@ -10,6 +10,7 @@ use siros_codec::cbor::Value as Cbor;
 use siros_oid4vp::ClientId;
 use siros_oid4vp::Handover;
 use siros_presentation::WalletDisplay;
+use siros_trust::Certificate;
 use siros_zkp_req::ZkpPresentation;
 use siros_zkp_req_nym_auth::presenter::Session;
 use siros_zkp_req_nym_auth::testing::{query, Spec, TestVerifier};
@@ -65,7 +66,7 @@ fn accepted(query: &Value, presentation: &[u8], handover: &[u8]) {
                 future: 60,
                 past: 600,
             },
-            trust_anchors: &[nym_auth_issuer()],
+            trust_anchors: &[Certificate::parse(&nym_auth_issuer()).unwrap()],
         },
         &TestVerifier,
     )

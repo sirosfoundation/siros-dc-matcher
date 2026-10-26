@@ -13,6 +13,7 @@ use siros_dcql::{
     CredentialQuery, CredentialSetQuery, CryptographicBinding, DcqlQuery, HolderBinding,
     PathComponent, PathError, QueryId,
 };
+use siros_trust::QueryAuthorities;
 use siros_wallet_state::PresentationRecord;
 use siros_zkp_req_nym_auth::catalogue::{BBS_SCHEMA_ID, MDOC_DOCTYPE};
 use siros_zkp_req_nym_auth::policy::RequestRefusal;
@@ -115,18 +116,25 @@ impl Claims {
 
 /// The credentials that can answer each Credential Query, before the `zkp_req` credential
 /// tests.
-pub struct Matching<'r, C> {
+pub struct Matching<'r, C: MatchCredential> {
     credential_sets: Option<&'r [CredentialSetQuery]>,
     queries: Vec<(AskedQuery<'r>, Outcome<C>)>,
 }
 
-enum Outcome<C> {
-    Claims(Vec<(C, Claims)>),
+enum Outcome<C: MatchCredential> {
+    Claims(Vec<Admitted<C, Claims>>),
     Proof {
         zkp: Box<ZkpQuery>,
-        credentials: Vec<C>,
+        credentials: Vec<Admitted<C, ()>>,
     },
     Refused(QueryRefusal),
+}
+
+/// A credential that matched a query, what it answers, and the admission of its issuer.
+struct Admitted<C: MatchCredential, T> {
+    credential: C,
+    found: T,
+    admission: C::Admission,
 }
 
 impl<'r, C: MatchCredential + Clone> Matching<'r, C> {
@@ -147,9 +155,13 @@ impl<'r, C: MatchCredential + Clone> Matching<'r, C> {
     /// are selected by DCQL (OpenID4VP 1.0, Section 6.4.1); a selected claims path that is no
     /// pointer refuses the query. `policy` says whether the request meets the nym_auth policy;
     /// a nym_auth query of a request that does not is refused.
+    ///
+    /// A credential whose issuer the query's `trusted_authorities` do not admit through `trust`
+    /// matches nothing (TR3); a query with a malformed `aki` value is refused.
     pub fn new(
         asked: Asked<'r>,
         credentials: &[C],
+        trust: &C::Trust,
         records: &[PresentationRecord],
         systems: &[NymAuthSystem],
         date: Date,
@@ -161,18 +173,31 @@ impl<'r, C: MatchCredential + Clone> Matching<'r, C> {
             .queries
             .into_iter()
             .map(|asked| {
+                let authorities = match QueryAuthorities::of(asked.query) {
+                    Ok(authorities) => authorities,
+                    Err(error) => {
+                        return (asked, Outcome::Refused(QueryRefusal::Authorities(error)))
+                    }
+                };
                 let outcome = match asked.query.format().as_str() {
                     "zkp_req" => {
                         match ZkpQuery::read(asked.sent, client_metadata, policy, systems, date) {
                             Ok(zkp) => Outcome::Proof {
-                                credentials: zkp.provable(&instances),
+                                credentials: admitted(
+                                    zkp.provable(&instances)
+                                        .into_iter()
+                                        .map(|c| (c, ()))
+                                        .collect(),
+                                    &authorities,
+                                    trust,
+                                ),
                                 zkp: Box::new(zkp),
                             },
                             Err(refusal) => Outcome::Refused(QueryRefusal::Zkp(refusal)),
                         }
                     }
                     _ => match answering(asked.query, &instances) {
-                        Ok(found) => Outcome::Claims(found),
+                        Ok(found) => Outcome::Claims(admitted(found, &authorities, trust)),
                         Err(error) => Outcome::Refused(QueryRefusal::ClaimPath(error)),
                     },
                 };
@@ -186,12 +211,12 @@ impl<'r, C: MatchCredential + Clone> Matching<'r, C> {
     }
 
     /// The answers of every query: `choose` gives the [`ProofChoice`] of each `zkp_req`
-    /// candidate, one of [`ZkpQuery::choices`], or the reason the candidate answers none. The
-    /// wallet applies the credential tests there (A2); the picker, which cannot, takes the
-    /// first.
+    /// candidate, admitted as it is, one of [`ZkpQuery::choices`], or the reason the candidate
+    /// answers none. The wallet applies the credential tests there (A2); the picker, which
+    /// cannot, takes the first.
     pub fn answer<R>(
         self,
-        mut choose: impl FnMut(&C, &ZkpQuery) -> Result<ProofChoice, R>,
+        mut choose: impl FnMut(&C, &C::Admission, &ZkpQuery) -> Result<ProofChoice, R>,
     ) -> Answered<'r, C, R> {
         let queries = self
             .queries
@@ -201,21 +226,26 @@ impl<'r, C: MatchCredential + Clone> Matching<'r, C> {
                     Outcome::Claims(found) => QueryOutcome::Claims(
                         found
                             .into_iter()
-                            .map(|(credential, claims)| Candidate {
-                                credential,
-                                answer: Answer::Claims(claims),
+                            .map(|found| Candidate {
+                                credential: found.credential,
+                                answer: Answer::Claims(found.found),
+                                admission: found.admission,
                             })
                             .collect(),
                     ),
                     Outcome::Proof { zkp, credentials } => {
                         let (candidates, excluded) =
-                            credentials.into_iter().partition_map(|credential| {
-                                match choose(&credential, &zkp) {
+                            credentials.into_iter().partition_map(|found| {
+                                match choose(&found.credential, &found.admission, &zkp) {
                                     Ok(choice) => Either::Left(Candidate {
-                                        credential,
+                                        credential: found.credential,
                                         answer: Answer::Proof(choice),
+                                        admission: found.admission,
                                     }),
-                                    Err(reason) => Either::Right(Excluded { credential, reason }),
+                                    Err(reason) => Either::Right(Excluded {
+                                        credential: found.credential,
+                                        reason,
+                                    }),
                                 }
                             });
                         QueryOutcome::Proof {
@@ -234,6 +264,26 @@ impl<'r, C: MatchCredential + Clone> Matching<'r, C> {
             queries,
         }
     }
+}
+
+/// The credentials of `found` whose issuer `authorities` admit through `trust`, each with its
+/// admission (TR3). Another credential matches nothing (A1).
+fn admitted<C: MatchCredential, T>(
+    found: Vec<(C, T)>,
+    authorities: &QueryAuthorities,
+    trust: &C::Trust,
+) -> Vec<Admitted<C, T>> {
+    found
+        .into_iter()
+        .filter_map(|(credential, found)| {
+            let admission = credential.admission(authorities, trust)?;
+            Some(Admitted {
+                credential,
+                found,
+                admission,
+            })
+        })
+        .collect()
 }
 
 /// The instances of `instances` that answer `query`, each with the claims it discloses.
@@ -341,19 +391,19 @@ impl<C: MatchCredential> siros_dcql::Credential for Held<'_, C> {
 
 /// The candidates of every Credential Query, each with its answer. `R` is why a `zkp_req`
 /// candidate answers no option.
-pub struct Answered<'r, C, R> {
+pub struct Answered<'r, C: MatchCredential, R> {
     credential_sets: Option<&'r [CredentialSetQuery]>,
     queries: Vec<Answers<'r, C, R>>,
 }
 
 /// The candidates of one Credential Query.
-pub struct Answers<'r, C, R> {
+pub struct Answers<'r, C: MatchCredential, R> {
     asked: AskedQuery<'r>,
     outcome: QueryOutcome<C, R>,
 }
 
 /// What the matching gives a Credential Query.
-enum QueryOutcome<C, R> {
+enum QueryOutcome<C: MatchCredential, R> {
     /// The credentials that disclose the claims it asks.
     Claims(Vec<Candidate<C>>),
     /// The nym_auth query of a `zkp_req` query, the credentials that answer an option, and
@@ -367,10 +417,12 @@ enum QueryOutcome<C, R> {
     Refused(QueryRefusal),
 }
 
-/// A credential that answers a Credential Query, and its answer.
-pub struct Candidate<C> {
+/// A credential that answers a Credential Query, its answer, and the admission of its issuer
+/// for the query.
+pub struct Candidate<C: MatchCredential> {
     credential: C,
     answer: Answer,
+    admission: C::Admission,
 }
 
 /// A credential that matched a `zkp_req` query and answers none of its options, and why.
@@ -379,7 +431,7 @@ pub struct Excluded<C, R> {
     reason: R,
 }
 
-impl<'r, C, R> Answered<'r, C, R> {
+impl<'r, C: MatchCredential, R> Answered<'r, C, R> {
     /// The candidates of each Credential Query, in the order of the DCQL query.
     pub fn queries(&self) -> &[Answers<'r, C, R>] {
         &self.queries
@@ -411,7 +463,7 @@ impl<'r, C, R> Answered<'r, C, R> {
     }
 }
 
-impl<'r, C, R> Answers<'r, C, R> {
+impl<'r, C: MatchCredential, R> Answers<'r, C, R> {
     /// The Credential Query's `id`.
     pub fn id(&self) -> &QueryId {
         &self.asked.id
@@ -460,7 +512,7 @@ impl<'r, C, R> Answers<'r, C, R> {
     }
 }
 
-impl<C> Candidate<C> {
+impl<C: MatchCredential> Candidate<C> {
     /// The credential.
     pub fn credential(&self) -> &C {
         &self.credential
@@ -469,6 +521,11 @@ impl<C> Candidate<C> {
     /// The answer.
     pub fn answer(&self) -> &Answer {
         &self.answer
+    }
+
+    /// The admission of the credential's issuer for the query (TR3).
+    pub fn admission(&self) -> &C::Admission {
+        &self.admission
     }
 }
 

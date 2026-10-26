@@ -6,7 +6,10 @@ use std::fmt;
 use itertools::Itertools;
 use siros_codec::date::DateTime;
 use siros_credential::{Parsed, UsableCredential};
-use siros_zkp_req_nym_auth::attestation::{SecretSeed, Unreadable, Unusable, UsableAttestation};
+use siros_trust::AdmittedIssuer;
+use siros_zkp_req_nym_auth::attestation::{
+    OtherIssuer, SecretSeed, TestedAttestation, Unreadable, Unusable, UsableAttestation,
+};
 use siros_zkp_req_nym_auth::outcome::CredentialCode;
 use siros_zkp_req_nym_auth::presenter::{Answer as NymAnswer, Unanswerable};
 
@@ -23,8 +26,8 @@ pub enum Unproven {
     OtherDocType,
     /// The credential cannot be read in the nym_auth form: `credential_form`.
     Unreadable(Unreadable),
-    /// The MSO lists another digest of an element, or none: `issuer_signature`.
-    Unlisted,
+    /// The admission of the credential's issuer is for another certificate or query.
+    Issuer(OtherIssuer),
     /// The credential fails these tests at the proof time.
     Fails(Vec<CredentialCode>),
     /// The issuer delivered no usable `secret_seed`.
@@ -50,7 +53,7 @@ impl Unproven {
             Self::NotAnMdoc => "not_an_mdoc",
             Self::OtherDocType => "other_doc_type",
             Self::Unreadable(_) => CredentialCode::CredentialForm.code(),
-            Self::Unlisted => CredentialCode::IssuerSignature.code(),
+            Self::Issuer(e) => e.code(),
             Self::Fails(_) => "credential",
             Self::Seed(e) => e.code(),
             Self::Options(_) => "no_option_answered",
@@ -71,9 +74,14 @@ impl From<Unusable> for Unproven {
         match unusable {
             Unusable::OtherDocType => Self::OtherDocType,
             Unusable::Unreadable(unreadable) => Self::Unreadable(unreadable),
-            Unusable::Unlisted => Self::Unlisted,
             Unusable::Fails(failures) => Self::Fails(failures.codes().to_vec()),
         }
+    }
+}
+
+impl From<OtherIssuer> for Unproven {
+    fn from(error: OtherIssuer) -> Self {
+        Self::Issuer(error)
     }
 }
 
@@ -83,17 +91,19 @@ impl From<NoSeed> for Unproven {
     }
 }
 
-/// The first of `zkp`'s choices `credential` answers at `now`, in the Verifier's order.
+/// The first of `zkp`'s choices `credential`, whose issuer `issuer` admits, answers at `now`, in
+/// the Verifier's order.
 ///
 /// # Errors
 ///
 /// [`Unproven`]: the credential's failed tests, its seed, or the refusal of every option.
 pub(super) fn first_answered(
     credential: &UsableCredential<'_>,
+    issuer: &AdmittedIssuer,
     zkp: &ZkpQuery,
     now: DateTime,
 ) -> Result<ProofChoice, Unproven> {
-    let (attestation, seed) = tested(credential, zkp, now)?;
+    let (attestation, seed) = tested(credential, issuer, zkp, now)?;
     let (answered, refusals): (Vec<ProofChoice>, Vec<OptionRefusal>) = zkp
         .choices()
         .iter()
@@ -110,8 +120,8 @@ pub(super) fn first_answered(
         .ok_or(Unproven::Options(refusals))
 }
 
-/// The answer of `choice` by `credential` at `now`, which opens the attestation's `ssc` again
-/// for this use.
+/// The answer of `choice` by `credential`, whose issuer `issuer` admits, at `now`, which opens
+/// the attestation's `ssc` again for this use.
 ///
 /// # Errors
 ///
@@ -119,33 +129,28 @@ pub(super) fn first_answered(
 /// pair, or an item of the option that fails.
 pub(crate) fn nym_answer<'z>(
     credential: &UsableCredential<'_>,
+    issuer: &AdmittedIssuer,
     zkp: &'z ZkpQuery,
     choice: &ProofChoice,
     now: DateTime,
 ) -> Result<NymAnswer<'z>, PresentationError> {
-    let (attestation, seed) = tested(credential, zkp, now)?;
+    let (attestation, seed) = tested(credential, issuer, zkp, now)?;
     Ok(NymAnswer::new(zkp.pair(choice)?, attestation, &seed)?)
 }
 
-/// The usable attestation of `credential`'s mdoc for `zkp` at `now`, and the `secret_seed` its
-/// issuer delivered.
+/// The attestation of `credential`'s mdoc tested at `now`, usable for `zkp` because `issuer`
+/// admits its Document Signer, and the `secret_seed` its issuer delivered.
 fn tested(
     credential: &UsableCredential<'_>,
+    issuer: &AdmittedIssuer,
     zkp: &ZkpQuery,
     now: DateTime,
 ) -> Result<(UsableAttestation, SecretSeed), Unproven> {
     let Parsed::Mdoc(mdoc) = credential.credential().parsed() else {
         return Err(Unproven::NotAnMdoc);
     };
-    // No input resolves `trusted_authorities` to anchors: a query that names authorities finds
-    // every issuer untrusted.
-    let anchors = zkp
-        .query()
-        .query()
-        .trusted_authorities
-        .as_ref()
-        .map(|_| &[][..]);
-    let attestation = UsableAttestation::of(mdoc, anchors, now)?;
+    let tested = TestedAttestation::of(mdoc, now)?;
+    let attestation = UsableAttestation::new(tested, issuer.clone(), zkp.query())?;
     let seed = seed::delivered(credential.credential())?;
     Ok((attestation, seed))
 }

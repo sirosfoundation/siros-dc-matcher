@@ -10,6 +10,9 @@ use siros_wallet_state::WalletState;
 pub const NAME_SPACE: &str = "org.example.1";
 pub const DOC_TYPE: &str = "org.example.doc.1";
 
+/// The issuer chain of the test mdocs: one certificate, which `vectors/issuer.sh` wrote.
+pub const ISSUER: &[u8] = include_bytes!("vectors/issuer.der");
+
 /// An `S` of version 4.
 pub fn state(credentials: Vec<Value>, presentations: Vec<Value>) -> String {
     json!({
@@ -157,7 +160,7 @@ pub fn mdoc(elements: Vec<(&str, Cbor)>, valid_from: &str, valid_until: &str) ->
     ]);
     let issuer_auth = Cbor::Array(vec![
         Cbor::Bytes(vec![0xa1, 0x01, 0x26]),
-        Cbor::Map(vec![(Cbor::Unsigned(33), Cbor::Bytes(vec![0x30, 0x00]))]),
+        Cbor::Map(vec![(Cbor::Unsigned(33), Cbor::Bytes(ISSUER.to_vec()))]),
         Cbor::Bytes(tagged_bytes(&mso).encode()),
         Cbor::Bytes(vec![0; 64]),
     ]);

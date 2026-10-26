@@ -2,7 +2,7 @@
 //!
 //! | Requirement | API |
 //! | --- | --- |
-//! | C1: constructible only by parsing a wallet state entry through the format components | [`Credential::parse`] |
+//! | C1: constructible only by parsing a wallet state entry through the format components, the issuer chain included (TR2) | [`Credential::parse`], [`Credential::issuer_chain`] |
 //! | C2: claim values keep their type; the credential reads them from the format's own tree | [`Credential::parse`] refuses a value of none of the ten types; [`TypedValue`], [`Array`], [`Object`] |
 //! | C3: claims path pointers, through Q4 for SD-JWT VC and as `[namespace, element]` for mdoc | [`ClaimPointer`], [`Credential::claims`], `impl siros_dcql::Credential` |
 //! | C4: validity at a given time | [`UsableCredential::at`] |

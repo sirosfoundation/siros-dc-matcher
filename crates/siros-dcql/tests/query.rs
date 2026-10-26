@@ -4,9 +4,10 @@
 // says what broke when it stops succeeding.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 
-use serde_json::Value;
+use serde_json::{json, Value};
 use siros_dcql::{
     DcqlQuery, HolderBinding, Multiplicity, QueryError, QueryId, QueryIdError, SetRequirement,
+    TrustedAuthorityError,
 };
 
 /// Defaults the spec states explicitly, all of which change behaviour if
@@ -200,4 +201,54 @@ fn realistic_query_round_trips() {
 
     let back: DcqlQuery = serde_json::from_str(&serde_json::to_string(&q).unwrap()).unwrap();
     assert_eq!(back, q);
+}
+
+/// §6.1.1: `trusted_authorities` is a non-empty array of objects, each with a string `type` and
+/// a non-empty array of string `values`. One rule per row; `null` reads as an absent member.
+#[test]
+fn trusted_authorities_follow_section_6_1_1() {
+    let cases = [
+        (
+            json!([{"type": "aki", "values": ["s9tIpPmhxdiuNkHMEWNpYim8S8Y"]}]),
+            None,
+        ),
+        (Value::Null, None),
+        (
+            json!({"type": "aki"}),
+            Some(TrustedAuthorityError::NotArray),
+        ),
+        (json!([]), Some(TrustedAuthorityError::Empty)),
+        (json!(["aki"]), Some(TrustedAuthorityError::EntryNotObject)),
+        (
+            json!([{"values": ["a"]}]),
+            Some(TrustedAuthorityError::Type),
+        ),
+        (
+            json!([{"type": "aki"}]),
+            Some(TrustedAuthorityError::Values),
+        ),
+        (
+            json!([{"type": "aki", "values": []}]),
+            Some(TrustedAuthorityError::Values),
+        ),
+        (
+            json!([{"type": "aki", "values": [1]}]),
+            Some(TrustedAuthorityError::Values),
+        ),
+    ];
+    for (authorities, expected) in cases {
+        let query = json!({"credentials": [{"id": "pid", "format": "mso_mdoc",
+            "trusted_authorities": authorities}]});
+        let got = DcqlQuery::parse(&query).map(drop).map_err(|e| match e {
+            QueryError::TrustedAuthorities { credential, error } if credential == "pid" => {
+                Some(error)
+            }
+            _ => None,
+        });
+        assert_eq!(
+            got,
+            expected.map_or(Ok(()), |e| Err(Some(e))),
+            "{authorities}"
+        );
+    }
 }

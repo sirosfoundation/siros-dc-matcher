@@ -8,8 +8,9 @@
 //! | Select disclosures | [`SdJwt::select`] gives a [`Presentation`] | S3 |
 //! | Bind the presentation to a key | [`Presentation::key_binding`] gives a [`KeyBinding`] | S4 |
 //!
-//! The issuer JWT is kept verbatim. Its signature and the validity claims (Section 7.1, steps
-//! 2.a to 2.c and 6) are the caller's to check.
+//! The issuer JWT is kept verbatim, with its `x5c` header parameter ([`SdJwt::x5c`]). Its
+//! signature and the validity claims (Section 7.1, steps 2.a to 2.c and 6) are the caller's to
+//! check.
 //!
 //! The host signs [`KeyBinding::signing_input`] with ES256 and returns the raw `r ‖ s`
 //! signature, which [`KeyBinding::assemble`] turns into the SD-JWT+KB.
@@ -45,5 +46,5 @@ pub use error::{KeyBindingError, ParseError};
 pub use key_binding::{KeyBinding, Presentation};
 pub use node::{Children, Node, NodeValue};
 pub use process::MAX_DEPTH;
-pub use sd_jwt::SdJwt;
+pub use sd_jwt::{SdJwt, X5c};
 pub use tree::{Claim, ClaimValue, DisclosureId, Element, Object};

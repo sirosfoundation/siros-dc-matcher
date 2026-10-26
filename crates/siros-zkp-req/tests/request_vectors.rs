@@ -61,7 +61,7 @@ fn request_vectors() {
         .filter(|p| p.extension().is_some_and(|e| e == "json"))
         .collect();
     paths.sort();
-    assert_eq!(paths.len(), 50, "the vector set changed size");
+    assert_eq!(paths.len(), 49, "the vector set changed size");
     let failures: Vec<String> = paths
         .iter()
         .filter_map(|path| {

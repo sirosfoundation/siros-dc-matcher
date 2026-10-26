@@ -11,7 +11,7 @@ use std::fmt;
 
 use siros_codec::date::DateTime;
 
-use crate::certificate::{Certificate, CertificateRole, SignatureRefusal};
+use crate::certificate::{Certificate, CertificateRole, IssuanceRefusal};
 use crate::chain::IssuerChain;
 use crate::position::{CertificateIndex, ChainIndex};
 use crate::store::StoreEntry;
@@ -149,8 +149,8 @@ fn first_link(
 }
 
 /// Whether `signer` signs `certificate`, at `at` on the chain: a store certificate valid at
-/// `time`, a CA, whose key verifies the signature with an algorithm TR3 accepts. The validity
-/// of a chain certificate is checked at its own step.
+/// `time`, a CA, that issued `certificate`. The validity of a chain certificate is checked at
+/// its own step.
 fn link(
     certificate: &Certificate,
     at: ChainIndex,
@@ -164,9 +164,10 @@ fn link(
         return Err(PathRefusal::NotCa(signer.position));
     }
     certificate
-        .signed_by(signer.certificate)
+        .issued_by(signer.certificate)
         .map_err(|refusal| match refusal {
-            SignatureRefusal::Algorithm => PathRefusal::Algorithm(at),
-            SignatureRefusal::Invalid => PathRefusal::Signature(at),
+            IssuanceRefusal::IssuerName => PathRefusal::IssuerName(at),
+            IssuanceRefusal::Algorithm => PathRefusal::Algorithm(at),
+            IssuanceRefusal::Signature => PathRefusal::Signature(at),
         })
 }

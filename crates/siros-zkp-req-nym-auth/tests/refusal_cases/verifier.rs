@@ -1,5 +1,8 @@
 //! The Verifier's refusals.
 
+use siros_trust::CertificateError;
+use siros_zkp_req_nym_auth::attestation::DocumentSignerError;
+
 use super::Case;
 use crate::*;
 
@@ -177,7 +180,7 @@ pub fn cases() -> Vec<Case> {
                 })
             }),
             Got::Verify(Rejection::IssuerKeySet(IssuerKeySetError::Certificate(
-                siros_mdoc::CertificateError::Der,
+                DocumentSignerError::Certificate(CertificateError::Der),
             ))),
         ),
         (
@@ -185,7 +188,7 @@ pub fn cases() -> Vec<Case> {
             verify_edit_as(
                 NymAuthSystem::LongfellowV1,
                 Verifying {
-                    anchors: vec![other_root.der.clone()],
+                    trust_anchors: vec![Certificate::parse(&other_root.der).unwrap()],
                     ..Verifying::default()
                 },
                 |_| {},

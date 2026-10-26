@@ -2,7 +2,7 @@
 //! and 7.1).
 
 use rustc_hash::FxHashMap;
-use siros_codec::base64url;
+use siros_codec::{base64, base64url};
 
 use crate::alg::HashAlg;
 use crate::error::ParseError;
@@ -17,8 +17,40 @@ use crate::tree::Object;
 /// algorithm.
 pub struct SdJwt {
     issuer_jwt: String,
+    x5c: Option<X5c>,
     alg: HashAlg,
     claims: Object,
+}
+
+/// The `x5c` header parameter of the issuer-signed JWT (RFC 7515, Section 4.1.6): the issuer's
+/// certificates, DER, the signer's first.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct X5c {
+    signer: Vec<u8>,
+    issuers: Vec<Vec<u8>>,
+}
+
+impl X5c {
+    /// `x5c`: a non-empty array of base64 strings with padding, each one DER certificate.
+    fn read(value: &Json) -> Result<Self, ParseError> {
+        let Json::Array(certificates) = value else {
+            return Err(ParseError::X5c);
+        };
+        let mut ders = certificates.iter().map(|certificate| match certificate {
+            Json::String(text) => base64::decode(text).ok_or(ParseError::X5c),
+            _ => Err(ParseError::X5c),
+        });
+        let signer = ders.next().ok_or(ParseError::X5c)??;
+        Ok(Self {
+            signer,
+            issuers: ders.collect::<Result<_, _>>()?,
+        })
+    }
+
+    /// The certificates, the signer's first.
+    pub fn certificates(&self) -> impl Iterator<Item = &[u8]> {
+        std::iter::once(self.signer.as_slice()).chain(self.issuers.iter().map(Vec::as_slice))
+    }
 }
 
 impl SdJwt {
@@ -30,7 +62,12 @@ impl SdJwt {
     /// [`ParseError`]: the first rule the text breaks.
     pub fn parse(compact: &str) -> Result<Self, ParseError> {
         let (issuer_jwt, disclosures) = split(compact);
-        let payload = issuer_payload(issuer_jwt)?;
+        let (header, payload) = issuer_header_and_payload(issuer_jwt)?;
+        let x5c = header
+            .iter()
+            .find(|(name, _)| name == "x5c")
+            .map(|(_, value)| X5c::read(value))
+            .transpose()?;
         let alg = sd_alg(&payload)?;
         let mut pending = FxHashMap::default();
         for (position, encoded) in disclosures.into_iter().enumerate() {
@@ -44,6 +81,7 @@ impl SdJwt {
         let claims = process::claims(payload, pending)?;
         Ok(Self {
             issuer_jwt: issuer_jwt.to_owned(),
+            x5c,
             alg,
             claims,
         })
@@ -52,6 +90,11 @@ impl SdJwt {
     /// The processed payload: every claim the credential holds, `_sd_alg` removed.
     pub fn claims(&self) -> &Object {
         &self.claims
+    }
+
+    /// The issuer-signed JWT's `x5c` header parameter; `None` when the issuer sent none.
+    pub fn x5c(&self) -> Option<&X5c> {
+        self.x5c.as_ref()
     }
 
     pub(crate) fn issuer_jwt(&self) -> &str {
@@ -74,8 +117,9 @@ fn split(compact: &str) -> (&str, Vec<&str>) {
     (issuer_jwt, listed.split('~').collect())
 }
 
-/// The payload of the issuer JWT, a compact JWS (RFC 7515, Section 7.1).
-fn issuer_payload(issuer_jwt: &str) -> Result<Vec<(String, Json)>, ParseError> {
+/// The protected header and the payload of the issuer JWT, a compact JWS (RFC 7515, Section
+/// 7.1).
+fn issuer_header_and_payload(issuer_jwt: &str) -> Result<(Members, Members), ParseError> {
     let mut segments = issuer_jwt.split('.');
     let (Some(header), Some(payload), Some(signature), None) = (
         segments.next(),
@@ -88,14 +132,16 @@ fn issuer_payload(issuer_jwt: &str) -> Result<Vec<(String, Json)>, ParseError> {
     if signature.is_empty() || base64url::decode(signature).is_none() {
         return Err(ParseError::IssuerJwt);
     }
-    if segment_object(header).is_none() {
-        return Err(ParseError::IssuerJwt);
-    }
-    segment_object(payload).ok_or(ParseError::IssuerJwt)
+    let header = segment_object(header).ok_or(ParseError::IssuerJwt)?;
+    let payload = segment_object(payload).ok_or(ParseError::IssuerJwt)?;
+    Ok((header, payload))
 }
 
+/// The members of a JSON object, in document order.
+type Members = Vec<(String, Json)>;
+
 /// The members of the JSON object the base64url `segment` encodes.
-fn segment_object(segment: &str) -> Option<Vec<(String, Json)>> {
+fn segment_object(segment: &str) -> Option<Members> {
     match Json::parse(&base64url::decode(segment)?)? {
         Json::Object(members) => Some(members),
         _ => None,

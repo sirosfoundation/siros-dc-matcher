@@ -70,10 +70,8 @@ impl ItemCode {
 pub enum CredentialCode {
     /// The proof time lies outside `[validFrom, validUntil)`.
     Validity,
-    /// `issuerAuth` fails under the `x5chain` key, or the MSO omits an item's digest.
+    /// `issuerAuth` fails under the `x5chain` key.
     IssuerSignature,
-    /// The certificate chains to no authority of the query's `trusted_authorities`.
-    IssuerUntrusted,
     /// The device signature fails under the MSO's device key.
     DeviceBinding,
     /// The credential lies outside the form the system reads.
@@ -86,7 +84,6 @@ impl CredentialCode {
         match self {
             Self::Validity => "validity",
             Self::IssuerSignature => "issuer_signature",
-            Self::IssuerUntrusted => "issuer_untrusted",
             Self::DeviceBinding => "device_binding",
             Self::CredentialForm => "credential_form",
         }

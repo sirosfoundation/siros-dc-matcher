@@ -2450,6 +2450,7 @@ dependencies = [
  "siros-dcql",
  "siros-mdoc",
  "siros-sdjwt",
+ "siros-trust",
  "siros-wallet-state",
 ]
 
@@ -2481,6 +2482,7 @@ dependencies = [
  "siros-dcql",
  "siros-display",
  "siros-oid4vp",
+ "siros-trust",
  "siros-zkp-req",
  "siros-zkp-req-nym-auth",
  "thiserror 2.0.20",
@@ -2537,12 +2539,10 @@ dependencies = [
 name = "siros-mdoc"
 version = "0.11.0"
 dependencies = [
- "der",
  "p256",
  "rustc-hash",
  "sha2",
  "siros-codec",
- "x509-cert",
 ]
 
 [[package]]
@@ -2586,6 +2586,7 @@ dependencies = [
  "siros-oid4vp",
  "siros-sdjwt",
  "siros-transaction-data",
+ "siros-trust",
  "siros-wallet-state",
  "siros-zkp-req",
  "siros-zkp-req-nym-auth",
@@ -2654,6 +2655,7 @@ dependencies = [
  "serde",
  "serde_json",
  "siros-codec",
+ "siros-dcql",
 ]
 
 [[package]]
@@ -2663,11 +2665,14 @@ dependencies = [
  "ciborium",
  "der",
  "p256",
+ "rand_core",
  "serde_json",
  "sha2",
  "siros-codec",
+ "siros-dcql",
  "siros-mdoc",
  "siros-oid4vp",
+ "siros-trust",
  "siros-wallet-state",
  "siros-zkp-req",
  "siros-zkp-req-nym-auth",

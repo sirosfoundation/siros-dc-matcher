@@ -27,6 +27,7 @@ use siros_credential::{Credential, UsableCredential};
 use siros_display::{DisplayCache, Locale};
 use siros_oid4vp::{ErrorCode, Fetch, Submission, VerifiedRequest};
 use siros_transaction_data::{Amr, Step, TransactionDataError};
+use siros_trust::TrustStore;
 use siros_wallet_state::{CredentialId, KeyId, PresentationRecord};
 use siros_zkp_req_nym_auth::policy::RequestRefusal;
 use siros_zkp_req_nym_auth::request::NymAuthRequest;
@@ -56,6 +57,8 @@ pub struct PlanInput<'a> {
     pub request: &'a VerifiedRequest,
     /// The wallet's credentials. The plan presents those usable at `now` (C4).
     pub credentials: &'a [Credential],
+    /// The trust store the host provisions (H4, TR4), which resolves `trusted_authorities`.
+    pub trust: &'a TrustStore,
     /// The wallet's presentation records, which choose the instance of each batch (C5).
     pub records: &'a [PresentationRecord],
     /// The display metadata the host holds.
@@ -158,8 +161,9 @@ fn planned<'a>(input: &PlanInput<'a>) -> Result<Step<Planned<'a>>, PresentationE
 }
 
 /// The candidates of each Credential Query of `input`'s request, over the credentials usable at
-/// `now` (C4). An unusable credential is no candidate. Each `zkp_req` candidate answers the
-/// first option its tests pass; `policy` says whether the request meets the nym_auth policy.
+/// `now` (C4) whose issuer the query's `trusted_authorities` admit against the trust store at
+/// `now` (TR3). Each `zkp_req` candidate answers the first option its tests pass; `policy` says
+/// whether the request meets the nym_auth policy.
 fn answered<'a>(
     input: &PlanInput<'a>,
     policy: Result<(), RequestRefusal>,
@@ -178,12 +182,15 @@ fn answered<'a>(
     let matching = Matching::new(
         asked,
         &usable,
+        input.trust,
         input.records,
         input.systems,
         input.now.date(),
         policy,
     );
-    Ok(matching.answer(|credential, zkp| proof::first_answered(credential, zkp, input.now)))
+    Ok(matching.answer(|credential, issuer, zkp| {
+        proof::first_answered(credential, issuer, zkp, input.now)
+    }))
 }
 
 /// The offers of `answered` whose credentials bind every entry of `transactions` (T4).
@@ -194,9 +201,9 @@ fn answered<'a>(
 /// [`TransactionDataError::CredentialUnavailable`] for an offer that cannot carry every entry,
 /// whichever came first; an entry whose queries no credential answers; or why the request has
 /// no offer.
-fn offers(
-    answered: &Wallet<'_>,
-    transactions: &Transactions<'_>,
+fn offers<'a>(
+    answered: &Wallet<'a>,
+    transactions: &Transactions<'a>,
 ) -> Result<Offers, PresentationError> {
     let entries = transactions.carriers(answered);
     let (offers, refusal) = Offers::of(answered, &entries, |members| {

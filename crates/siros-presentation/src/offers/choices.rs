@@ -10,6 +10,7 @@ use serde_json::Value;
 use siros_dcql::{CredentialSetQuery, Dropped, Multiplicity};
 
 use super::{Member, MAX_EXAMINED};
+use crate::credential::MatchCredential;
 use crate::ids::{CandidateIndex, QueryIndex};
 use crate::matching::Answered;
 
@@ -55,7 +56,7 @@ pub(super) struct Space<'a> {
 }
 
 impl<'a> Space<'a> {
-    pub(super) fn of<C, R>(answered: &'a Answered<'_, C, R>) -> Self {
+    pub(super) fn of<C: MatchCredential, R>(answered: &'a Answered<'_, C, R>) -> Self {
         let queries = answered
             .indexed()
             .map(|(query, answers)| {

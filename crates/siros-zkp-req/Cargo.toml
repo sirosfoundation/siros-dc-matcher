@@ -11,6 +11,7 @@ rust-version.workspace = true
 
 [dependencies]
 siros-codec = { workspace = true }
+siros-dcql = { workspace = true }
 serde = "1"
 serde_json = { workspace = true }
 

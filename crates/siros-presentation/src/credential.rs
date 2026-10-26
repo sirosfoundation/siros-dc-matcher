@@ -1,12 +1,33 @@
 //! The credential the matching reads (K2).
 
 use serde_json::Value;
-use siros_credential::{Format, Instance, UsableCredential};
+#[cfg(feature = "wallet")]
+use siros_credential::UsableCredential;
+use siros_credential::{Format, Instance};
 use siros_dcql::{PathComponent, PathError};
+use siros_trust::QueryAuthorities;
+#[cfg(feature = "wallet")]
+use siros_trust::{AdmittedIssuer, TrustStore};
 
 /// A credential as the matching reads it: a usable credential of the wallet (C4), or a credential
 /// of the picker's registration projection.
 pub trait MatchCredential: Instance {
+    /// The admission of the credential's issuer that a candidate carries: the wallet's
+    /// `AdmittedIssuer`, or the picker's [`siros_trust::Admission`] from the TR5 facts.
+    type Admission: Clone;
+
+    /// What resolves a query's `trusted_authorities` beside the credential: the wallet's trust
+    /// store, or nothing for a credential of the projection, which carries its TR5 facts.
+    type Trust: ?Sized;
+
+    /// The admission of the credential's issuer by `authorities` through `trust` (TR3); `None`
+    /// when they admit it not, and the credential matches nothing (A1).
+    fn admission(
+        &self,
+        authorities: &QueryAuthorities,
+        trust: &Self::Trust,
+    ) -> Option<Self::Admission>;
+
     /// The format.
     fn format(&self) -> Format;
 
@@ -34,7 +55,22 @@ pub enum KeyHolding {
     NotHeld,
 }
 
+#[cfg(feature = "wallet")]
 impl MatchCredential for UsableCredential<'_> {
+    type Admission = AdmittedIssuer;
+    type Trust = TrustStore;
+
+    /// The admission of the issuer chain against the trust store at the time the credential is
+    /// usable at.
+    fn admission(
+        &self,
+        authorities: &QueryAuthorities,
+        store: &TrustStore,
+    ) -> Option<AdmittedIssuer> {
+        let chain = self.credential().issuer_chain();
+        AdmittedIssuer::resolve(authorities, chain, store, self.time()).ok()
+    }
+
     fn format(&self) -> Format {
         self.credential().format()
     }

@@ -19,7 +19,7 @@ use super::sign::{key_id, Sign, SignId, SigningInput};
 use crate::error::{Inconsistency, PresentationError};
 use siros_dcql::HolderBinding;
 
-use crate::matching::{Answer, Claims, ProofChoice};
+use crate::matching::{Answer, Candidate, Claims, ProofChoice};
 use crate::plan::{nym_answer, Bound, Offered};
 use siros_dcql::QueryId;
 
@@ -135,9 +135,7 @@ impl<'p, 'a> Chosen<'p, 'a> {
                         let extra = self.transaction_claims(credential, binding, rng)?;
                         self.claims(credential, claims, &extra, id)?
                     }
-                    Answer::Proof(choice) => {
-                        self.proof(member, candidate.credential(), choice, id)?
-                    }
+                    Answer::Proof(choice) => self.proof(member, candidate, choice, id)?,
                 };
                 if let Form::Unsigned(unsigned, _) = &form {
                     signs.push(Sign::new(id, credential, unsigned.signing_input())?);
@@ -245,14 +243,16 @@ impl<'p, 'a> Chosen<'p, 'a> {
         Ok(Form::unsigned(DeviceResponse { disclosure, input }, id))
     }
 
-    /// The nym_auth statement of `choice` by `credential` in the request's session.
+    /// The nym_auth statement of `choice` by `candidate`'s credential, admitted as the candidate
+    /// carries it, in the request's session.
     fn proof(
         &self,
         member: &Offered<'p, 'a>,
-        credential: &UsableCredential<'_>,
+        candidate: &Candidate<UsableCredential<'_>>,
         choice: &ProofChoice,
         id: SignId,
     ) -> Result<Form<'p>, PresentationError> {
+        let credential = candidate.credential();
         let nym_auth = self
             .planned
             .nym_auth
@@ -262,7 +262,13 @@ impl<'p, 'a> Chosen<'p, 'a> {
             .answers
             .zkp()
             .ok_or(Inconsistency::ZkpQuery(member.query))?;
-        let answer = nym_answer(credential, zkp, choice, self.planned.input.now)?;
+        let answer = nym_answer(
+            credential,
+            candidate.admission(),
+            zkp,
+            choice,
+            self.planned.input.now,
+        )?;
         let prepared = NymPrepared::new(answer, nym_auth, &key_id(credential.credential())?)?;
         Ok(Form::unsigned(prepared, id))
     }

@@ -94,11 +94,6 @@ pub fn cases() -> Vec<Case> {
             protocol(RequestRule::OptionInvalid { option: 1 }),
         ),
         (
-            "trusted_authorities_invalid",
-            match_query_edit(|q| q["trusted_authorities"] = json!([{"type": "aki"}])),
-            protocol(RequestRule::TrustedAuthoritiesInvalid),
-        ),
-        (
             "holder_binding_invalid",
             match_query_edit(|q| q["require_cryptographic_holder_binding"] = json!("yes")),
             protocol(RequestRule::HolderBindingInvalid),

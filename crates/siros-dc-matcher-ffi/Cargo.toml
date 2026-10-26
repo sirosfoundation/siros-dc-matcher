@@ -32,6 +32,7 @@ siros-dcql = { workspace = true }
 siros-display = { workspace = true }
 siros-oid4vp = { workspace = true }
 siros-codec = { workspace = true }
+siros-trust = { workspace = true, features = ["chain"] }
 siros-zkp-req = { workspace = true }
 siros-zkp-req-nym-auth = { workspace = true, features = ["credential"] }
 serde_json = { workspace = true }

@@ -16,6 +16,7 @@ siros-codec = { workspace = true }
 siros-dcql = { workspace = true }
 siros-mdoc = { workspace = true }
 siros-sdjwt = { workspace = true }
+siros-trust = { workspace = true, features = ["chain"] }
 siros-wallet-state = { workspace = true }
 
 [dev-dependencies]
