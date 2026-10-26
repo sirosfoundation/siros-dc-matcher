@@ -91,6 +91,12 @@ impl Fetch {
         }
     }
 
+    /// A `GET` of `url` that accepts `accept` and reads at most `max_bytes`.
+    #[must_use]
+    pub fn get(url: HttpsUrl, accept: &'static str, max_bytes: usize) -> Self {
+        Self::new(url, Method::Get, accept, max_bytes)
+    }
+
     /// The URL to request.
     #[must_use]
     pub fn url(&self) -> &HttpsUrl {
@@ -144,7 +150,9 @@ impl FetchResponse {
         }
     }
 
-    pub(crate) fn status(&self) -> u16 {
+    /// The HTTP status.
+    #[must_use]
+    pub fn status(&self) -> u16 {
         self.status
     }
 
@@ -159,7 +167,9 @@ impl FetchResponse {
         })
     }
 
-    pub(crate) fn body(&self) -> &[u8] {
+    /// The body.
+    #[must_use]
+    pub fn body(&self) -> &[u8] {
         &self.body
     }
 }
