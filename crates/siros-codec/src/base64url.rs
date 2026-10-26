@@ -24,25 +24,25 @@ pub fn encode(bytes: &[u8]) -> String {
 
 /// The bytes of `text`, which must be base64url without padding and with zero trailing bits.
 pub fn decode(text: &str) -> Option<Vec<u8>> {
-    if text.len() % 4 == 1 {
+    let bytes = text.as_bytes();
+    // A tail of exactly one character carries no byte: no encoder produces it.
+    if bytes.len() % 4 == 1 {
         return None;
     }
-    let mut out = Vec::with_capacity(text.len() * 3 / 4);
-    for chunk in text.as_bytes().chunks(4) {
-        let mut n = 0u32;
-        for (i, c) in chunk.iter().enumerate() {
-            n |= u32::from(sextet(*c)?) << (18 - 6 * i);
+    let mut out = Vec::with_capacity(bytes.len() / 4 * 3 + 2);
+    let mut acc: u32 = 0;
+    let mut bits: u32 = 0;
+    for &c in bytes {
+        acc = (acc << 6) | u32::from(sextet(c)?);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
         }
-        let bytes = n.to_be_bytes();
-        let kept = chunk.len() - 1;
-        // The bits after the last byte must be zero: one encoding per byte string.
-        if bytes
-            .get(1 + kept..)
-            .is_some_and(|rest| rest.iter().any(|b| *b != 0))
-        {
-            return None;
-        }
-        out.extend_from_slice(bytes.get(1..1 + kept)?);
+    }
+    // The bits after the last byte must be zero: one encoding per byte string.
+    if bits > 0 && acc & ((1 << bits) - 1) != 0 {
+        return None;
     }
     Some(out)
 }

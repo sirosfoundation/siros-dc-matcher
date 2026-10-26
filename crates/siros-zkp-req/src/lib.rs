@@ -32,8 +32,6 @@
     clippy::panic
 )]
 
-pub mod base64url;
-pub mod cbor;
 pub mod consent;
 pub mod formats;
 pub mod outcome;

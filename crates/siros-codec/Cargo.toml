@@ -1,0 +1,10 @@
+[package]
+name = "siros-codec"
+version = "0.11.0"
+description = "Strict CBOR and unpadded base64url for the SIROS wallet core"
+publish = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true

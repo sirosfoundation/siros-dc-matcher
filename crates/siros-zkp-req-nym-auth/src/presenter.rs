@@ -8,7 +8,7 @@
 use std::fmt;
 
 use serde_json::Value;
-use siros_zkp_req::cbor::Value as Cbor;
+use siros_codec::cbor::Value as Cbor;
 use siros_zkp_req::{
     usable_backend, Candidate, Judged, Match, OptionRefusal, PairRefusal, ProofEnvelope,
     QueryOption, ZkpFormats, ZkpPresentation, ZkpReqQuery,

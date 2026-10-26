@@ -12,7 +12,7 @@
 use std::sync::Arc;
 
 use serde_json::Value;
-use siros_zkp_req::cbor::Value as Cbor;
+use siros_codec::cbor::Value as Cbor;
 use siros_zkp_req::{Candidate, ErrorCode, Match, ZkpPresentation};
 use siros_zkp_req_nym_auth::date::Date;
 use siros_zkp_req_nym_auth::mdoc::StoredCredential;

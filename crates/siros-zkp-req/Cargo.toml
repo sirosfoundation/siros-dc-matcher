@@ -10,6 +10,7 @@ authors.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+siros-codec = { workspace = true }
 serde = "1"
 serde_json = { workspace = true }
 

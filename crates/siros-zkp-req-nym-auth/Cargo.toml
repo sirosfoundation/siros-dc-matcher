@@ -24,6 +24,7 @@ test-fixtures = [
 ]
 
 [dependencies]
+siros-codec = { workspace = true }
 siros-zkp-req = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { version = "0.10.9", features = ["oid"] }

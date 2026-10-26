@@ -14,7 +14,7 @@ mod support;
 
 use ciborium::value::Value as Ciborium;
 use serde_json::{json, Value};
-use siros_zkp_req::cbor::Value as Cbor;
+use siros_codec::cbor::Value as Cbor;
 use siros_zkp_req::{Candidate, Match, ZkpPresentation};
 use siros_zkp_req_nym_auth::presenter::{match_query, present, MatchInput, ProveInput};
 use siros_zkp_req_nym_auth::prover::ProofFailure;

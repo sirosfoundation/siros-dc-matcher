@@ -18,6 +18,7 @@ authors = ["SIROS Foundation"]
 rust-version = "1.95"
 
 [workspace.dependencies]
+siros-codec = { path = "../crates/siros-codec" }
 siros-zkp-req = { path = "../crates/siros-zkp-req" }
 siros-zkp-req-nym-auth = { path = "../crates/siros-zkp-req-nym-auth", default-features = false, features = ["credential"] }
 siros-zkp-backend-longfellow = { path = "siros-zkp-backend-longfellow" }

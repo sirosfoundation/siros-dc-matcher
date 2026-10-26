@@ -29,6 +29,7 @@ bindgen = ["uniffi/cli"]
 [dependencies]
 siros-dc-matcher-core = { workspace = true }
 siros-dcql = { workspace = true }
+siros-codec = { workspace = true }
 siros-zkp-req = { workspace = true }
 siros-zkp-req-nym-auth = { workspace = true, features = ["credential"] }
 serde_json = { workspace = true }

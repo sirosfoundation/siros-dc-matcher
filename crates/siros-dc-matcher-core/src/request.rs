@@ -23,8 +23,8 @@ use std::borrow::Cow;
 use serde_json::Value;
 use siros_dcql::DcqlQuery;
 
-use crate::base64url;
 use crate::profile::{MatchProfile, Parser};
+use siros_codec::base64url;
 
 /// Why one protocol's request data yielded no DCQL query.
 ///
@@ -481,7 +481,7 @@ fn compact_payload(jws: &str) -> Result<Vec<u8>, NoQuery> {
     let Some(payload) = payload.filter(|p| !p.is_empty()) else {
         return Err(NoQuery::NotACompactJws);
     };
-    base64url::decode(payload).ok_or(NoQuery::PayloadNotBase64url)
+    decode_payload(payload)
 }
 
 /// The `payload` member of a JWS JSON Serialization object.
@@ -495,6 +495,21 @@ fn json_serialization_payload(value: &Value, missing: NoQuery) -> Result<Vec<u8>
     let Some(Value::String(payload)) = value.get("payload") else {
         return Err(missing);
     };
+    decode_payload(payload)
+}
+
+/// The largest JWS payload the matcher decodes, in encoded bytes.
+///
+/// The payload is verifier-controlled and the matcher runs in someone else's
+/// process, where running out of memory traps and a trap reads as "no
+/// matching credential". An authorization request object is a few kilobytes;
+/// 256 KiB of base64url is two orders of magnitude more.
+const MAX_PAYLOAD: usize = 256 * 1024;
+
+fn decode_payload(payload: &str) -> Result<Vec<u8>, NoQuery> {
+    if payload.len() > MAX_PAYLOAD {
+        return Err(NoQuery::PayloadNotBase64url);
+    }
     base64url::decode(payload).ok_or(NoQuery::PayloadNotBase64url)
 }
 

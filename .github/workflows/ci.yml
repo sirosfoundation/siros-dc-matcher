@@ -220,7 +220,7 @@ jobs:
       - name: The 1.82 crates build on 1.82
         run: |
           cargo check --locked --all-features \
-            -p siros-dcql -p siros-dc-matcher-core -p siros-dc-matcher-wasm \
+            -p siros-codec -p siros-dcql -p siros-dc-matcher-core -p siros-dc-matcher-wasm \
             -p android-credman-sys -p android-credman \
             -p siros-zkp-req -p siros-zkp-req-nym-auth
           cargo check --locked --all-features --target wasm32-wasip1 \

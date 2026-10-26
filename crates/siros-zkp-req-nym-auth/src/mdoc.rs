@@ -3,8 +3,8 @@
 
 use std::fmt;
 
-use siros_zkp_req::base64url;
-use siros_zkp_req::cbor::{self, CborError, Item, Kind};
+use siros_codec::base64url;
+use siros_codec::cbor::{self, CborError, Item, Kind};
 
 use crate::catalogue::MDOC_DOCTYPE;
 use crate::date::{Date, DateTime};

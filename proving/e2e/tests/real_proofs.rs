@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use serde_json::Value;
 use siros_zkp_backend_longfellow::{LongfellowProver, LongfellowVerifier};
 use siros_zkp_backend_vega::VegaNymAuth;
-use siros_zkp_req::cbor::Value as Cbor;
+use siros_codec::cbor::Value as Cbor;
 use siros_zkp_req::Match;
 use siros_zkp_req_nym_auth::presenter::{match_query, prepare, MatchInput, ProveInput, Signer};
 use siros_zkp_req_nym_auth::prover::{

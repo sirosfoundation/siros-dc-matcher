@@ -9,7 +9,6 @@
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
 
-pub mod base64url;
 pub mod circuit_capabilities;
 pub mod db;
 

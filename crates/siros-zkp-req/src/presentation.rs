@@ -3,8 +3,8 @@
 
 use std::fmt;
 
-use crate::base64url;
-use crate::cbor::{self, CborError, Item, Kind, Value};
+use siros_codec::base64url;
+use siros_codec::cbor::{self, CborError, Item, Kind, Value};
 
 /// A member of a CBOR map this module reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

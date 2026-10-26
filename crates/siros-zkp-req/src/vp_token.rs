@@ -6,7 +6,7 @@ use std::fmt;
 use serde::de::{Deserializer, MapAccess, Visitor};
 use serde_json::Value;
 
-use crate::base64url;
+use siros_codec::base64url;
 
 /// Why a `vp_token` gives no presentations for a query.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

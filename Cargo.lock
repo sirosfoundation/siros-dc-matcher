@@ -1961,6 +1961,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "38b58827f4464d87d377d175e90bf58eb00fd8716ff0a62f80356b5e61555d0d"
 
 [[package]]
+name = "siros-codec"
+version = "0.11.0"
+
+[[package]]
 name = "siros-dc-matcher-core"
 version = "0.11.0"
 dependencies = [
@@ -1969,6 +1973,7 @@ dependencies = [
  "serde",
  "serde_bytes",
  "serde_json",
+ "siros-codec",
  "siros-dc-matcher-core",
  "siros-dcql",
  "siros-zkp-req",
@@ -1981,6 +1986,7 @@ version = "0.11.0"
 dependencies = [
  "p256",
  "serde_json",
+ "siros-codec",
  "siros-dc-matcher-core",
  "siros-dcql",
  "siros-zkp-req",
@@ -2026,6 +2032,7 @@ version = "0.11.0"
 dependencies = [
  "serde",
  "serde_json",
+ "siros-codec",
 ]
 
 [[package]]
@@ -2037,6 +2044,7 @@ dependencies = [
  "p256",
  "serde_json",
  "sha2",
+ "siros-codec",
  "siros-zkp-req",
  "siros-zkp-req-nym-auth",
  "x509-cert",

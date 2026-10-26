@@ -1167,6 +1167,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a219298ac11a56ea9a6d2120044824d6f01aeb034955e7af7bc16858527deea"
 
 [[package]]
+name = "siros-codec"
+version = "0.11.0"
+
+[[package]]
 name = "siros-zkp-backend-longfellow"
 version = "0.11.0"
 dependencies = [
@@ -1190,6 +1194,7 @@ name = "siros-zkp-proving-e2e"
 version = "0.0.0"
 dependencies = [
  "serde_json",
+ "siros-codec",
  "siros-zkp-backend-longfellow",
  "siros-zkp-backend-vega",
  "siros-zkp-req",
@@ -1202,6 +1207,7 @@ version = "0.11.0"
 dependencies = [
  "serde",
  "serde_json",
+ "siros-codec",
 ]
 
 [[package]]
@@ -1212,6 +1218,7 @@ dependencies = [
  "p256",
  "serde_json",
  "sha2",
+ "siros-codec",
  "siros-zkp-req",
  "x509-cert",
  "zeroize",

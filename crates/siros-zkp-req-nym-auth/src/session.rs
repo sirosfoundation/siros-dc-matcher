@@ -5,7 +5,7 @@
 use std::fmt;
 
 use serde_json::Value;
-use siros_zkp_req::cbor::{self, Value as Cbor};
+use siros_codec::cbor::{self, Value as Cbor};
 
 use crate::verifier_id::sha256;
 

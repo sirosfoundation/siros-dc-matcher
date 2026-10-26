@@ -6,7 +6,7 @@
 use std::fmt;
 
 use serde_json::Value;
-use siros_zkp_req::cbor::Value as Cbor;
+use siros_codec::cbor::Value as Cbor;
 use siros_zkp_req::{
     answered_option, EncodingError, ProofEnvelope, QueryOption, StructureRejection, ZkpFormats,
     ZkpPresentation, ZkpReqQuery,

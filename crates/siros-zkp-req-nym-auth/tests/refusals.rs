@@ -10,7 +10,7 @@
 mod support;
 
 use serde_json::{json, Value};
-use siros_zkp_req::cbor::Value as Cbor;
+use siros_codec::cbor::Value as Cbor;
 use siros_zkp_req::{
     EncodingError, Match, PairRefusal, ProofEnvelope, RequestRule, StructureRejection,
     ZkpPresentation,

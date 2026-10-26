@@ -12,7 +12,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use serde_json::Value;
-use siros_zkp_req::cbor::CborError;
+use siros_codec::cbor::CborError;
 use siros_zkp_req::{presentations_of, EncodingError, StructureRejection, ZkpReqQuery};
 use siros_zkp_req_nym_auth::prover::ProofFailure;
 use siros_zkp_req_nym_auth::verify::{check_presentation, Rejection};
