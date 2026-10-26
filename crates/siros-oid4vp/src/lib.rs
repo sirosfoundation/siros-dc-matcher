@@ -25,14 +25,13 @@
     clippy::panic
 )]
 
+pub mod client_id;
 pub mod error_code;
 pub mod handover;
 pub mod protocol;
 pub mod semantic;
 pub mod unverified;
 
-#[cfg(feature = "crypto")]
-pub mod client_id;
 #[cfg(feature = "crypto")]
 pub mod fetch;
 #[cfg(feature = "crypto")]
@@ -48,14 +47,13 @@ pub mod verified;
 #[cfg(feature = "crypto")]
 mod x509;
 
+pub use client_id::{ClientId, ClientIdError, ClientIdPrefix};
 pub use error_code::ErrorCode;
 pub use handover::{ec_jwk_thumbprint, Handover, HandoverInvalid};
 pub use protocol::Protocol;
 pub use semantic::{Person, SemanticIdError, SemanticIdentifier};
 pub use unverified::{diagnose, NoQuery, UnverifiedQuery, UnverifiedRequest};
 
-#[cfg(feature = "crypto")]
-pub use client_id::{ClientId, ClientIdPrefix};
 #[cfg(feature = "crypto")]
 pub use fetch::{Fetch, FetchResponse, HttpsUrl, Method};
 #[cfg(feature = "crypto")]

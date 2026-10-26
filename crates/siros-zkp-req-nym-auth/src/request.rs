@@ -5,7 +5,7 @@ use siros_oid4vp::{ClientIdPrefix, Protocol, ResponseMode, VerifiedRequest};
 
 use crate::policy::{PolicyRule, RequestRefusal};
 use crate::presenter::Session;
-use crate::verifier_id::{VerifierId, VerifierIdForm, VerifierIdRule};
+use crate::verifier_id::{Intermediary, VerifierId, VerifierIdForm, VerifierIdRule};
 
 /// The `format` of a registration certificate in `verifier_info` (ETSI TS 119 472-2 V1.2.1,
 /// OIDFVP-HAIP-COMMON-REQ-RO-15).
@@ -73,7 +73,7 @@ impl<'r> NymAuthRequest<'r> {
             ));
         }
         let verifier_id = match verifier_id {
-            VerifierIdForm::X509SanDns => VerifierId::x509_san_dns(client_id.as_str(), false),
+            VerifierIdForm::X509SanDns => VerifierId::x509_san_dns(client_id, Intermediary::Absent),
             VerifierIdForm::Semantic => semantic_id(request),
         }
         .map_err(RequestRefusal::VerifierId)?;
@@ -106,5 +106,5 @@ fn semantic_id(request: &VerifiedRequest) -> Result<VerifierId, VerifierIdRule> 
     let identifier = certificate
         .semantic_identifier()
         .map_err(VerifierIdRule::SemanticId)?;
-    VerifierId::semantic(identifier.as_str())
+    Ok(VerifierId::semantic(identifier))
 }

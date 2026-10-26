@@ -12,6 +12,7 @@ mod support;
 
 use serde_json::{json, Value};
 use siros_codec::cbor::Value as Cbor;
+use siros_oid4vp::ClientId;
 use siros_zkp_req::{
     EncodingError, Match, PairRefusal, ProofEnvelope, RequestRule, StructureRejection,
     ZkpPresentation,
@@ -24,7 +25,7 @@ use siros_zkp_req_nym_auth::presenter::{
 };
 use siros_zkp_req_nym_auth::prover::{ProofFailure, ProverFailure};
 use siros_zkp_req_nym_auth::system::{NymAuthSystem, Unsupported};
-use siros_zkp_req_nym_auth::verifier_id::{VerifierId, VerifierIdRule};
+use siros_zkp_req_nym_auth::verifier_id::{Intermediary, VerifierId, VerifierIdRule};
 use siros_zkp_req_nym_auth::verify::{
     verify, IssuerKeySetError, ProofTimeError, Rejection, Tolerance, VerifyInput,
 };

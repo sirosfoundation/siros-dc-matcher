@@ -2,6 +2,7 @@
 
 use std::fmt;
 
+use crate::client_id::ClientIdError;
 use crate::error_code::ErrorCode;
 
 /// A rule of OpenID4VP 1.0 (or of RFC 9101, RFC 7515, RFC 5280) that a request breaks, or a
@@ -45,8 +46,8 @@ pub enum IntakeError {
     ClientIdMismatch,
     /// The Request Object does not echo the `wallet_nonce` the wallet posted (Section 5.10.1).
     WalletNonceMismatch,
-    /// The `client_id` has no prefix this wallet supports, or an empty value (Section 5.9).
-    ClientIdPrefixUnsupported,
+    /// The `client_id` is not one this wallet supports (Section 5.9).
+    ClientId(ClientIdError),
     /// A signed request uses the `redirect_uri` prefix (Section 5.9.3).
     SignedRedirectUri,
     /// An unsigned request uses a prefix other than `redirect_uri` (Section 5.9.3).
@@ -188,7 +189,7 @@ impl IntakeError {
             Self::NestedRequest => "nested_request",
             Self::ClientIdMismatch => "client_id_mismatch",
             Self::WalletNonceMismatch => "wallet_nonce_mismatch",
-            Self::ClientIdPrefixUnsupported => "client_id_prefix_unsupported",
+            Self::ClientId(e) => e.code(),
             Self::SignedRedirectUri => "signed_redirect_uri",
             Self::UnsignedNeedsRedirectUri => "unsigned_needs_redirect_uri",
             Self::CertificateChainInvalid => "certificate_chain_invalid",
@@ -238,6 +239,12 @@ impl IntakeError {
             Self::ScopeUnsupported => ErrorCode::InvalidScope,
             _ => ErrorCode::InvalidRequest,
         }
+    }
+}
+
+impl From<ClientIdError> for IntakeError {
+    fn from(error: ClientIdError) -> Self {
+        Self::ClientId(error)
     }
 }
 

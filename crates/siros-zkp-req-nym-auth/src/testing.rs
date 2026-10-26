@@ -29,7 +29,7 @@ use crate::prover::{
     Statement,
 };
 use crate::system::NymAuthSystem;
-use crate::verifier_id::VerifierId;
+use crate::verifier_id::{Intermediary, VerifierId};
 use der::asn1::{GeneralizedTime, UtcTime};
 use der::Encode;
 use p256::ecdsa::signature::Signer as _;
@@ -39,7 +39,7 @@ use sha2::{Digest, Sha256};
 use siros_codec::base64url;
 use siros_codec::cbor::Value as Cbor;
 use siros_codec::date::DateTime;
-use siros_oid4vp::ec_jwk_thumbprint;
+use siros_oid4vp::{ec_jwk_thumbprint, ClientId};
 use x509_cert::builder::{Builder, CertificateBuilder, Profile};
 use x509_cert::name::Name;
 use x509_cert::serial_number::SerialNumber;
@@ -324,7 +324,11 @@ pub fn session(query: &Value, nonce: &str) -> Session {
     let thumbprint = ec_jwk_thumbprint(&encryption_jwk()).unwrap();
     Session {
         handover: checked.handover(&thumbprint).unwrap(),
-        verifier_id: VerifierId::x509_san_dns(&checked.client_id, false).unwrap(),
+        verifier_id: VerifierId::x509_san_dns(
+            &ClientId::parse(&checked.client_id).unwrap(),
+            Intermediary::Absent,
+        )
+        .unwrap(),
     }
 }
 

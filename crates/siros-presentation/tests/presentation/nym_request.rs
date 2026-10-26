@@ -2,9 +2,8 @@
 //! the DC API, trusted, and encrypted, and whose `verifier_id` comes from its authenticated
 //! certificate in the trust framework's form.
 //!
-//! `VerifierIdRule::DnsName` and `VerifierIdRule::Intermediary` have no row: intake verifies
-//! the dNSName SAN, an IA5String, against a non-empty Client Identifier, and a request that
-//! carries a registration certificate is refused before an intermediary could be read.
+//! `VerifierIdRule::Intermediary` has no row: a request that carries a registration certificate
+//! is refused before an intermediary could be read.
 
 use serde_json::{json, Value};
 use siros_oid4vp::{IntakeError, IntakeState, SemanticIdError};

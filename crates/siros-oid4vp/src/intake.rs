@@ -187,6 +187,12 @@ impl From<IntakeError> for Halt {
     }
 }
 
+impl From<crate::client_id::ClientIdError> for Halt {
+    fn from(error: crate::client_id::ClientIdError) -> Self {
+        Self::Failed(IntakeError::ClientId(error))
+    }
+}
+
 /// The results not yet used by this run.
 pub(crate) struct Answers<'a> {
     rest: std::slice::Iter<'a, EffectResult>,

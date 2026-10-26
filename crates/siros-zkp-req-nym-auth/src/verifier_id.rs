@@ -4,7 +4,7 @@
 use std::fmt;
 
 use sha2::{Digest, Sha256};
-use siros_oid4vp::SemanticIdError;
+use siros_oid4vp::{ClientId, ClientIdPrefix, SemanticIdError, SemanticIdentifier};
 
 use crate::catalogue::{Config, Pseudonym};
 
@@ -23,8 +23,6 @@ pub enum VerifierIdRule {
     SemanticId(SemanticIdError),
     /// The form is `x509_san_dns` and the Client Identifier has another prefix.
     ClientIdPrefix,
-    /// The form is `x509_san_dns` and the DNS name is empty or not ASCII (an A-label form).
-    DnsName,
     /// The form is `x509_san_dns` and the registration certificate names an intermediary.
     Intermediary,
     /// The request carries a registration certificate, which no intake authenticates: the
@@ -39,7 +37,6 @@ impl VerifierIdRule {
             Self::SemanticIdMissing => "semantic_id_missing",
             Self::SemanticId(e) => e.code(),
             Self::ClientIdPrefix => "client_id_prefix",
-            Self::DnsName => "dns_name",
             Self::Intermediary => "intermediary",
             Self::RegistrationCertificate => "registration_certificate",
         }
@@ -54,43 +51,40 @@ impl fmt::Display for VerifierIdRule {
 
 impl std::error::Error for VerifierIdRule {}
 
-/// The prefix of the `x509_san_dns` form and of its Client Identifier Prefix.
-const X509_SAN_DNS: &str = "x509_san_dns:";
+/// Whether the Verifier's registration certificate names an intermediary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Intermediary {
+    /// It names none, or the request carries no registration certificate.
+    Absent,
+    /// It names one.
+    Named,
+}
 
 impl VerifierId {
-    /// The `semantic` form: `"semantic_id:"` and the end Relying Party's semantic identifier,
+    /// The `semantic` form: `"semantic_id:"` and the end Relying Party's semantics identifier,
     /// from the registration certificate when present, else from the access certificate.
-    ///
-    /// # Errors
-    ///
-    /// [`VerifierIdRule::SemanticIdMissing`] for an empty identifier.
-    pub fn semantic(semantic_identifier: &str) -> Result<Self, VerifierIdRule> {
-        if semantic_identifier.is_empty() {
-            return Err(VerifierIdRule::SemanticIdMissing);
-        }
-        Ok(Self(format!("semantic_id:{semantic_identifier}")))
+    pub fn semantic(identifier: &SemanticIdentifier) -> Self {
+        Self(format!("semantic_id:{}", identifier.as_str()))
     }
 
-    /// The `x509_san_dns` form: the Client Identifier itself.
+    /// The `x509_san_dns` form: the Client Identifier itself, whose prefix gives its DNS name.
     ///
     /// # Errors
     ///
-    /// [`VerifierIdRule`]: another prefix, a DNS name that is empty or not ASCII, or an
+    /// [`VerifierIdRule::ClientIdPrefix`] for another prefix, and
+    /// [`VerifierIdRule::Intermediary`] when the registration certificate names an
     /// intermediary.
     pub fn x509_san_dns(
-        client_id: &str,
-        registration_names_intermediary: bool,
+        client_id: &ClientId,
+        intermediary: Intermediary,
     ) -> Result<Self, VerifierIdRule> {
-        let name = client_id
-            .strip_prefix(X509_SAN_DNS)
-            .ok_or(VerifierIdRule::ClientIdPrefix)?;
-        if name.is_empty() || !name.is_ascii() {
-            return Err(VerifierIdRule::DnsName);
+        if client_id.prefix() != ClientIdPrefix::X509SanDns {
+            return Err(VerifierIdRule::ClientIdPrefix);
         }
-        if registration_names_intermediary {
+        if intermediary == Intermediary::Named {
             return Err(VerifierIdRule::Intermediary);
         }
-        Ok(Self(client_id.to_owned()))
+        Ok(Self(client_id.as_str().to_owned()))
     }
 
     /// The identifier.

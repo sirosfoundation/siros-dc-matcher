@@ -7,12 +7,13 @@ use ciborium::Value as Ciborium;
 use serde_json::{json, Value};
 use siros_codec::base64url;
 use siros_codec::cbor::Value as Cbor;
+use siros_oid4vp::ClientId;
 use siros_oid4vp::Handover;
 use siros_presentation::WalletDisplay;
 use siros_zkp_req::ZkpPresentation;
 use siros_zkp_req_nym_auth::presenter::Session;
 use siros_zkp_req_nym_auth::testing::{query, Spec, TestVerifier};
-use siros_zkp_req_nym_auth::verifier_id::VerifierId;
+use siros_zkp_req_nym_auth::verifier_id::{Intermediary, VerifierId};
 use siros_zkp_req_nym_auth::verify::{verify, Tolerance, VerifyInput};
 
 use crate::verifier::{
@@ -47,7 +48,11 @@ fn nym_query() -> Value {
 fn accepted(query: &Value, presentation: &[u8], handover: &[u8]) {
     let session = Session {
         handover: Handover::from_cbor(handover).unwrap(),
-        verifier_id: VerifierId::x509_san_dns(&signed_client_id(), false).unwrap(),
+        verifier_id: VerifierId::x509_san_dns(
+            &ClientId::parse(&signed_client_id()).unwrap(),
+            Intermediary::Absent,
+        )
+        .unwrap(),
     };
     let verified = verify(
         &VerifyInput {

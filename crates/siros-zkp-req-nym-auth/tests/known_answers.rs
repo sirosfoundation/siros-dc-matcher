@@ -10,10 +10,13 @@
 use serde_json::Value;
 use siros_codec::date::Date;
 use siros_mdoc::{device_signing_digest, DeviceNameSpaces};
+use siros_oid4vp::ClientId;
 use siros_oid4vp::Handover;
 use siros_zkp_req_nym_auth::age::{AgeRange, Bound, Bounds};
 use siros_zkp_req_nym_auth::catalogue::{Config, Prf, Pseudonym};
-use siros_zkp_req_nym_auth::verifier_id::{pseudonym_sha256, verifier_input, VerifierId};
+use siros_zkp_req_nym_auth::verifier_id::{
+    pseudonym_sha256, verifier_input, Intermediary, VerifierId,
+};
 
 /// A range, D, E, C, and where the case comes from.
 type AgeCase = (
@@ -174,7 +177,8 @@ fn pseudonym_vectors() {
     };
     for verifier in v["verifiers"].as_array().unwrap() {
         let client_id = verifier["client_id"].as_str().unwrap();
-        let id = VerifierId::x509_san_dns(client_id, false).unwrap();
+        let client = ClientId::parse(client_id).unwrap();
+        let id = VerifierId::x509_san_dns(&client, Intermediary::Absent).unwrap();
         let vi = verifier_input(&pseudonym, &id);
         assert_eq!(
             vi.to_vec(),

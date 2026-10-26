@@ -14,7 +14,7 @@ use std::sync::Arc;
 use serde_json::Value;
 use siros_codec::cbor::Value as Cbor;
 use siros_codec::date::Date;
-use siros_oid4vp::ec_jwk_thumbprint;
+use siros_oid4vp::{ec_jwk_thumbprint, ClientId, Person, SemanticIdError, SemanticIdentifier};
 use siros_zkp_req::{Candidate, ErrorCode, Match, ZkpPresentation};
 use siros_zkp_req_nym_auth::mdoc::StoredCredential;
 use siros_zkp_req_nym_auth::outcome::ZkpError;
@@ -24,7 +24,7 @@ use siros_zkp_req_nym_auth::presenter::{
 };
 use siros_zkp_req_nym_auth::prover::{NymAuthProofVerifier, ProofFailure, ProofOutput, Statement};
 use siros_zkp_req_nym_auth::system::{pair_code, NymAuthSystem};
-use siros_zkp_req_nym_auth::verifier_id::VerifierId;
+use siros_zkp_req_nym_auth::verifier_id::{Intermediary, VerifierId};
 use siros_zkp_req_nym_auth::verify::{verify, Rejection, Tolerance, VerifyInput};
 
 /// Why a `zkp_req` call gave no result. `error_code` is what the wallet sends the verifier
@@ -406,16 +406,33 @@ pub fn zkp_req_session(
     let verifier_id = match verifier_id {
         FfiVerifierIdForm::Semantic {
             semantic_identifier,
-        } => VerifierId::semantic(&semantic_identifier),
+        } => VerifierId::semantic(&semantic(&semantic_identifier)?),
         FfiVerifierIdForm::X509SanDns {
             registration_names_intermediary,
-        } => VerifierId::x509_san_dns(&checked.client_id, registration_names_intermediary),
-    }
-    .map_err(|r| invalid(r.code()))?;
+        } => {
+            let client_id = ClientId::parse(&checked.client_id).map_err(|e| invalid(e.code()))?;
+            let intermediary = if registration_names_intermediary {
+                Intermediary::Named
+            } else {
+                Intermediary::Absent
+            };
+            VerifierId::x509_san_dns(&client_id, intermediary).map_err(|r| invalid(r.code()))?
+        }
+    };
     Ok(Arc::new(FfiSession(Session {
         handover,
         verifier_id,
     })))
+}
+
+/// The semantics identifier the host gives: a legal person's, or a natural person's when its
+/// type reference is a natural person's (ETSI TS 119 475, Clauses 5.1.3 and 5.1.5).
+fn semantic(text: &str) -> Result<SemanticIdentifier, ZkpReqError> {
+    match SemanticIdentifier::parse(text, Person::Legal) {
+        Err(SemanticIdError::TypeReference) => SemanticIdentifier::parse(text, Person::Natural),
+        legal => legal,
+    }
+    .map_err(|e| invalid(e.code()))
 }
 
 /// The JWK SHA-256 Thumbprint (RFC 7638) of an elliptic-curve JWK.
