@@ -15,9 +15,9 @@ const UNVERIFIED: &str = "(unverified request)";
 /// One `(label, value)` row per `_req` item of `option`, in the Verifier's order.
 ///
 /// `age_check` shows its `range` and `pseudonym` its `config`, as given. Any other function
-/// shows its `fn_id` as the label. The detail is clipped to fit with the [`UNVERIFIED`] marker
-/// in 80 characters, the label to 80, each ending in an ellipsis where clipped. The rows judge
-/// nothing: whether the request is acceptable is the wallet's decision.
+/// shows its `fn_id` as the label. The detail is clipped to fit with the `(unverified request)`
+/// marker in 80 characters, the label to 80, each ending in an ellipsis where clipped. The rows
+/// judge nothing: whether the request is acceptable is the wallet's decision.
 ///
 /// # Errors
 ///
@@ -66,7 +66,7 @@ fn clip(text: &str, max: usize) -> String {
 }
 
 /// A proof statement row of a request intake verified: the picker's row without the
-/// [`UNVERIFIED`] marker.
+/// `(unverified request)` marker.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProofRow {
     label: String,
