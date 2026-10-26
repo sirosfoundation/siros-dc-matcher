@@ -11,7 +11,7 @@
 //! | Credential cards and claim rows | [`Card`], [`ClaimRow`] |
 //! | Display text: no control, format, bidi, separator, private-use or unassigned character, and no over-long text | [`DisplayText`] |
 //! | Purpose lines (OpenID4VP 1.0, Section 6.2) | [`purpose::line`], [`purpose::display`] |
-//! | Proof statement rows of a `zkp_req` option | [`proof::rows`] |
+//! | Proof statement rows of a `zkp_req` option: the picker's, marked as unverified, and a verified request's | [`proof::rows`], [`proof::verified_rows`] |
 
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
