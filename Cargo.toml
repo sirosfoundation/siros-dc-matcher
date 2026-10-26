@@ -9,6 +9,7 @@ members = [
     "crates/siros-dc-matcher-wasm",
     "crates/siros-dc-matcher-ffi",
     "crates/siros-dc-matcher-testhost",
+    "crates/siros-sdjwt",
     "crates/siros-zkp-req",
     "crates/siros-zkp-req-nym-auth",
 ]
