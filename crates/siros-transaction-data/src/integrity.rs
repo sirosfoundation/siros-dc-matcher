@@ -27,6 +27,15 @@ impl Alg {
         .map(|(_, alg)| alg)
     }
 
+    /// The length of a digest, in bytes.
+    fn len(self) -> usize {
+        match self {
+            Self::Sha256 => 32,
+            Self::Sha384 => 48,
+            Self::Sha512 => 64,
+        }
+    }
+
     fn digest(self, bytes: &[u8]) -> Vec<u8> {
         match self {
             Self::Sha256 => Sha256::digest(bytes).to_vec(),
@@ -47,9 +56,6 @@ impl Integrity {
     /// The integrity metadata `text`: whitespace-separated `alg-base64` expressions, each with
     /// optional `?` options (SRI, Section 3.1).
     ///
-    /// SRI passes a metadata string without a supported algorithm; a pin that pins nothing is
-    /// refused here instead.
-    ///
     /// # Errors
     ///
     /// [`TransactionDataError::IntegrityMalformed`]: no expression of SHA-256, SHA-384 or
@@ -65,7 +71,7 @@ impl Integrity {
                 continue;
             };
             let digest = base64::decode(value)
-                .filter(|d| d.len() == alg.digest(&[]).len())
+                .filter(|d| d.len() == alg.len())
                 .ok_or(TransactionDataError::IntegrityMalformed)?;
             expressions.push((alg, digest));
         }

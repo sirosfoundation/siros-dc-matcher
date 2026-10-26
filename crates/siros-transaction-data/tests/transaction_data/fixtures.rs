@@ -4,6 +4,8 @@
 
 use serde_json::{json, Value};
 
+use siros_transaction_data::MAX_DEPTH;
+
 use crate::common::{payment, with, ACCESS, LOGIN, MANDATE, PAYMENT};
 
 pub struct Payload {
@@ -36,6 +38,11 @@ fn row(
 /// A payment with `changes`.
 fn pay(changes: Value) -> Value {
     with(payment(), changes)
+}
+
+/// `depth` arrays, each inside the one before.
+fn nested(depth: usize) -> Value {
+    (1..depth).fold(json!([]), |inner, _| json!([inner]))
 }
 
 /// A payment whose `date_time` is `null`.
@@ -83,6 +90,12 @@ pub fn payloads() -> Vec<Payload> {
                 "payee": {"name": "Shop AB", "id": "SE1", "tags": ["a", null], "branch": {"city": "Malmö"}},
                 "recurrence": {"frequency": "YEAR", "note": 1, "mit_options": {"cap": false}}
             })),
+            Ok(()),
+        ),
+        row(
+            "an open member nesting to MAX_DEPTH in the entry",
+            PAYMENT,
+            pay(json!({"payee": {"name": "Shop AB", "id": "SE1", "x": nested(MAX_DEPTH - 3)}})),
             Ok(()),
         ),
         row(

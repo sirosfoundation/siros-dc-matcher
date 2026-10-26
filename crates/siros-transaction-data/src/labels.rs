@@ -143,8 +143,8 @@ impl Claim {
     }
 }
 
-/// A claim display entry: `label` and a language tag in `locale` (SD-JWT VC, Section 9.2) or
-/// in `lang` (EC TS12 v1.0.1, Section 2.3), not both.
+/// A claim display entry: `label`, and a language tag in exactly one of `locale` (SD-JWT VC,
+/// Section 9.2) and `lang` (EC TS12 v1.0.1, Section 2.3).
 fn claim_label(entry: Json) -> Option<Label> {
     let Json::Object(object) = entry else {
         return None;

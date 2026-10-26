@@ -95,7 +95,7 @@ impl<'c> TypeMetadata<'c> {
     /// The document matches the credential's `vct#integrity` when it has one (Section 7), and
     /// its `vct` is the credential's (Section 6.3). Of `transaction_data_types`, the entries of
     /// the supported types are read; each gives `claims` or `claims_uri`, and `ui_labels` or
-    /// `ui_labels_uri`, never both of a pair. The credential's
+    /// `ui_labels_uri`, exactly one of each pair. The credential's
     /// `transaction_data_types['<type>'].<member>#integrity` claim pins a referenced document
     /// (EC TS12 v1.0.1, Section 4.1.2).
     ///
