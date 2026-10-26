@@ -1,0 +1,22 @@
+[package]
+name = "siros-credential"
+version = "0.11.0"
+description = "The format-independent credential of the SIROS wallet core: typed claims, claims path pointers, validity and instance choice"
+publish = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rustc-hash = { workspace = true }
+serde_json = { workspace = true }
+siros-codec = { workspace = true }
+siros-dcql = { workspace = true }
+siros-mdoc = { workspace = true }
+siros-sdjwt = { workspace = true }
+siros-wallet-state = { workspace = true }
+
+[dev-dependencies]
+sha2 = "0.10.9"

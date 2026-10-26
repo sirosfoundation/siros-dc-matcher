@@ -4,6 +4,7 @@ members = [
     "crates/android-credman-sys",
     "crates/android-credman",
     "crates/siros-codec",
+    "crates/siros-credential",
     "crates/siros-dcql",
     "crates/siros-mdoc",
     "crates/siros-dc-matcher-core",
