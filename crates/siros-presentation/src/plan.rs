@@ -26,7 +26,7 @@ use siros_codec::date::DateTime;
 use siros_credential::{Credential, UsableCredential};
 use siros_display::{DisplayCache, Locale};
 use siros_oid4vp::{ErrorCode, Fetch, Submission, VerifiedRequest};
-use siros_transaction_data::{Amr, Step};
+use siros_transaction_data::{Amr, Step, TransactionDataError};
 use siros_wallet_state::{CredentialId, KeyId, PresentationRecord};
 use siros_zkp_req_nym_auth::policy::RequestRefusal;
 use siros_zkp_req_nym_auth::request::NymAuthRequest;
@@ -36,7 +36,7 @@ use siros_zkp_req_nym_auth::verifier_id::VerifierIdForm;
 use crate::display_rule::TransactionData;
 use crate::error::PresentationError;
 use crate::matching::{Asked, Matching};
-use crate::offers::Offers;
+use crate::offers::{Offers, Refusal};
 use transactions::{Transactions, Wallet};
 use view::Sources;
 
@@ -190,8 +190,10 @@ fn answered<'a>(
 ///
 /// # Errors
 ///
-/// [`PresentationError`]: the first binding refused when no offer remains, an entry whose
-/// queries no credential answers, or why the request has no offer.
+/// [`PresentationError`] when no offer remains: the first binding refused, or
+/// [`TransactionDataError::CredentialUnavailable`] for an offer that cannot carry every entry,
+/// whichever came first; an entry whose queries no credential answers; or why the request has
+/// no offer.
 fn offers(
     answered: &Wallet<'_>,
     transactions: &Transactions<'_>,
@@ -203,8 +205,10 @@ fn offers(
     if !offers.offers().is_empty() {
         return Ok(offers);
     }
-    if let Some(refusal) = refusal {
-        return Err(refusal);
+    match refusal {
+        Some(Refusal::Refused(refusal)) => return Err(refusal),
+        Some(Refusal::Uncarried) => return Err(TransactionDataError::CredentialUnavailable.into()),
+        None => {}
     }
     transactions.available(answered)?;
     Err(answered.failure().into())

@@ -87,9 +87,13 @@ against the 307,200-byte budget (303,914 before).
   `meta`, holder binding and no query but `zkp_req` on a nym_auth attestation (A1); `zkp_req` as
   one selection, then the usable attestation and the seed delivered in the credential's
   auxiliary data (A2); offers, optional additions, an offer per option when every set is
-  optional, a `multiple` member holding every candidate, and each optional set that can carry
-  a transaction entry joined, in an offer of its own, to an offer whose members carry none
-  (A3); the transaction entries each credential authorizes, the credential named by
+  optional, a `multiple` member holding every candidate, and, for an offer whose members leave a
+  transaction entry uncarried, each option of an optional set that can carry it joined in an
+  offer of its own, repeated until every entry is carried, at most one option per set (A3).
+  An offer that cannot carry every entry is dropped, two offers with the same members are one,
+  and the joins spend the examination budget and count among the combinations not examined.
+  `Offers::of` gives the first `Refusal`: an offer no join completes, or one the acceptance
+  refuses. The plan also gives the transaction entries each credential authorizes, the credential named by
   `credentialId` and instance (T4); the plan's digest over the request, its trust verdict, the
   nym_auth `verifier_id` and every offer's credentials by `credentialId` and instance, their
   answers and bound entries, its additions and display (A4); and the consent

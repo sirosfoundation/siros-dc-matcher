@@ -419,8 +419,9 @@ fn offers_of_credential_sets() {
 }
 
 /// A3: when no member of an offer can carry a transaction entry, each optional set whose
-/// credentials can carry it joins the offer, in an offer of its own; a credential without type
-/// metadata carries nothing.
+/// credentials can carry it joins the offer, in an offer of its own, until every entry is
+/// carried; two offers with the same members are one; a credential without type metadata
+/// carries nothing; the joins count against the examination limit.
 #[test]
 fn optional_sets_join_an_offer_that_carries_no_entry() {
     const VCT2: &str = "https://issuer.example/pay2";
@@ -446,13 +447,31 @@ fn optional_sets_join_an_offer_that_carries_no_entry() {
         .push((VCT2.to_owned(), type_metadata_of(VCT2)));
     let query = |id: &str, vct: &str| json!({"id": id, "format": "dc+sd-jwt", "meta": {"vct_values": [vct]}});
     let optional = |options: Value| json!({"options": options, "required": false});
-    // (case, queries, credential sets, the members of each offer with the entries each binds)
+    let request = |queries: &[Value], sets: Value, entries: &[&[&str]]| {
+        let entries: Vec<String> = entries.iter().map(|names| payment_naming(names)).collect();
+        redirect_unsigned(&json!({
+            "response_type": "vp_token", "response_mode": "direct_post", "nonce": NONCE,
+            "state": STATE, "transaction_data": entries,
+            "dcql_query": {"credentials": queries, "credential_sets": sets}
+        }))
+    };
+    let both: &[&[&str]] = &[&["pay", "pay2"]];
+    // (case, queries, credential sets, the queries each entry names, the members of each offer
+    // with the entries each binds)
     type Members = Vec<(&'static str, Vec<usize>)>;
-    let cases: [(&str, Vec<Value>, Value, Vec<Members>); 3] = [
+    type Case<'c> = (
+        &'c str,
+        Vec<Value>,
+        Value,
+        &'c [&'c [&'c str]],
+        Vec<Members>,
+    );
+    let cases: [Case<'_>; 5] = [
         (
             "each optional set that carries the entry gives an offer",
             vec![mdl_query(false), query("pay", VCT), query("pay2", VCT2)],
             json!([{"options": [["mdl"]]}, optional(json!([["pay"]])), optional(json!([["pay2"]]))]),
+            both,
             vec![
                 vec![("mdl", vec![]), ("pay", vec![0])],
                 vec![("mdl", vec![]), ("pay2", vec![0])],
@@ -462,6 +481,7 @@ fn optional_sets_join_an_offer_that_carries_no_entry() {
             "an offer that carries the entry joins nothing",
             vec![mdl_query(false), query("pay", VCT), query("pay2", VCT2)],
             json!([{"options": [["mdl"], ["pay"]]}, optional(json!([["pay2"]]))]),
+            both,
             vec![
                 vec![("mdl", vec![]), ("pay2", vec![0])],
                 vec![("pay", vec![0])],
@@ -471,15 +491,26 @@ fn optional_sets_join_an_offer_that_carries_no_entry() {
             "a required credential without type metadata carries nothing",
             vec![query("pay", UNLOCATED), query("pay2", VCT2)],
             json!([{"options": [["pay"]]}, optional(json!([["pay2"]]))]),
+            both,
             vec![vec![("pay", vec![]), ("pay2", vec![0])]],
         ),
+        (
+            "two entries join two optional sets",
+            vec![mdl_query(false), query("pay", VCT), query("pay2", VCT2)],
+            json!([{"options": [["mdl"]]}, optional(json!([["pay"]])), optional(json!([["pay2"]]))]),
+            &[&["pay"], &["pay2"]],
+            vec![vec![("mdl", vec![]), ("pay", vec![0]), ("pay2", vec![1])]],
+        ),
+        (
+            "a joined offer with the members of another is that offer",
+            vec![mdl_query(false), query("pay", VCT)],
+            json!([{"options": [["mdl"], ["mdl", "pay"]]}, optional(json!([["pay"]]))]),
+            &[&["pay"]],
+            vec![vec![("mdl", vec![]), ("pay", vec![0])]],
+        ),
     ];
-    for (case, queries, sets, expected) in cases {
-        let request = redirect_unsigned(&json!({
-            "response_type": "vp_token", "response_mode": "direct_post", "nonce": NONCE,
-            "state": STATE, "transaction_data": [payment_naming(&["pay", "pay2"])],
-            "dcql_query": {"credentials": queries, "credential_sets": sets}
-        }));
+    for (case, queries, sets, entries, expected) in cases {
+        let request = request(&queries, sets, entries);
         let fetches = wallet.fetches(&request);
         let input = wallet.input(&request, &fetches);
         let planned = ready(&input).unwrap();
@@ -508,4 +539,18 @@ fn optional_sets_join_an_offer_that_carries_no_entry() {
             respond_to(&input, offer, Vec::new(), Vec::new()).unwrap();
         }
     }
+
+    // 40 cards that carry the entry give 40 joins of the one combination, MAX_OFFERS kept.
+    let mut held = vec![mdl(1)];
+    held.extend((2..=41).map(|id| card(id, VCT)));
+    let mut wallet = Wallet::new(held);
+    wallet
+        .documents
+        .push((VCT.to_owned(), type_metadata_of(VCT)));
+    let sets = json!([{"options": [["mdl"]]}, optional(json!([["pay"]]))]);
+    let request = request(&[mdl_query(false), query("pay", VCT)], sets, &[&["pay"]]);
+    let fetches = wallet.fetches(&request);
+    let planned = ready(&wallet.input(&request, &fetches)).unwrap();
+    assert_eq!(planned.view().offers().len(), MAX_OFFERS);
+    assert_eq!(planned.view().unexamined(), Dropped::Exact(40 - MAX_OFFERS));
 }

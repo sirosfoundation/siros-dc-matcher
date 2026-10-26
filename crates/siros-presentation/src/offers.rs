@@ -3,6 +3,7 @@
 
 mod choices;
 mod entries;
+mod joining;
 
 use itertools::{Either, Itertools};
 use serde_json::Value;
@@ -11,6 +12,7 @@ use siros_dcql::{CredentialSetQuery, Dropped};
 use crate::ids::{CandidateIndex, QueryIndex, SetIndex};
 use crate::matching::Answered;
 use choices::{product, sum, Capped, Choices, Examining, Space};
+use joining::{Agreed, Joining, Proposal};
 
 pub use entries::{EntryCarriers, EntryQueries};
 
@@ -20,8 +22,8 @@ pub const MAX_OFFERS: usize = 32;
 /// The most additions of an offer.
 pub const MAX_ADDITIONS: usize = 32;
 
-/// The most combinations examined for the offers of a request, and for the additions of an
-/// offer.
+/// The most combinations and joins examined for the offers of a request, and the most
+/// combinations examined for the additions of an offer.
 pub const MAX_EXAMINED: usize = 1024;
 
 /// What an offer presents for one Credential Query: one candidate, or every candidate of a
@@ -84,6 +86,15 @@ pub struct Offers {
     unexamined: Dropped,
 }
 
+/// Why a combination the enumeration examined is no offer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Refusal<E> {
+    /// No join lets it carry every transaction entry (A3).
+    Uncarried,
+    /// The acceptance refused it.
+    Refused(E),
+}
+
 impl Offer {
     /// The `purpose` of each credential set the offer satisfies, in set order (Section 6.2).
     pub fn purposes(&self) -> &[Value] {
@@ -103,6 +114,11 @@ impl Offer {
     /// How many combinations of the optional sets were not examined for additions.
     pub fn unexamined(&self) -> Dropped {
         self.unexamined
+    }
+
+    /// Whether the offer's members are `members`, in any order.
+    fn has(&self, members: &[Member]) -> bool {
+        self.members.len() == members.len() && members.iter().all(|m| self.members.contains(m))
     }
 }
 
@@ -124,30 +140,33 @@ impl Addition {
 }
 
 impl Offers {
-    /// The offers of `answered` that `accept` accepts, and the first refusal of `accept`.
-    /// `entries` holds each `transaction_data` entry with the candidates that can carry it.
+    /// The offers of `answered` that `accept` accepts, and the first refusal. `entries` holds
+    /// each `transaction_data` entry with the candidates that can carry it.
     ///
     /// - Without `credential_sets`, an offer answers every query (Section 6.4.2).
     /// - Each combination of an option of every required credential set is an offer.
     /// - When every set is optional, each option of each set is an offer.
     /// - When no member of an offer can carry an entry, each option of an optional set whose
     ///   credentials can carry it joins the offer as members, in an offer of its own (Section
-    ///   8.4).
+    ///   8.4). Joining repeats until every entry is carried, at most one option per set. An offer
+    ///   that cannot carry every entry is dropped.
     /// - An option holds a member per query: a candidate, or all candidates of a query that
     ///   sets `multiple`.
+    /// - Two offers with the same members are one offer: the first.
     ///
     /// The options of the other optional sets are each offer's additions, except those that
     /// answer a query of the offer or a query an entry names. Combinations are examined in
-    /// order, the last set varying fastest, up to [`MAX_EXAMINED`], and at most [`MAX_OFFERS`]
-    /// offers and [`MAX_ADDITIONS`] additions per offer are kept.
+    /// order, the last set varying fastest, each followed by its joins; up to [`MAX_EXAMINED`]
+    /// combinations and joins are examined, and at most [`MAX_OFFERS`] offers and
+    /// [`MAX_ADDITIONS`] additions per offer are kept.
     pub fn of<C, R, E>(
         answered: &Answered<'_, C, R>,
         entries: &[EntryCarriers],
         mut accept: impl FnMut(&[Member]) -> Result<(), E>,
-    ) -> (Self, Option<E>) {
+    ) -> (Self, Option<Refusal<E>>) {
         let space = Space::of(answered);
         let (required, optional) = sets(&space, answered.credential_sets());
-        let (proposals, total): (Box<dyn Iterator<Item = Proposal<'_>> + '_>, _) =
+        let (bases, total): (Box<dyn Iterator<Item = Proposal<'_>> + '_>, _) =
             if required.is_empty() {
                 let total = sum(optional.iter().map(|set| set.choices.count()));
                 (Box::new(each_option(&optional)), total)
@@ -155,31 +174,34 @@ impl Offers {
                 let total = product(required.iter().map(Choices::count));
                 (Box::new(each_combination(&required, &optional)), total)
             };
-        let mut examining = Examining::new(proposals);
+        let mut proposals = Joining::new(bases, total, entries);
+        let mut offers: Vec<Offer> = Vec::new();
         let mut refusal = None;
-        let offers = examining
-            .by_ref()
-            .flat_map(|proposal| proposal.carrying(entries))
-            .filter_map(|proposal| {
-                let Proposal {
-                    purposes,
-                    members,
-                    others,
-                } = proposal;
-                let members = members.agreed()?;
-                match accept(&members) {
-                    Ok(()) => Some(offer(purposes, members, &others, entries)),
-                    Err(error) => {
-                        if refusal.is_none() {
-                            refusal = Some(error);
-                        }
-                        None
+        while offers.len() < MAX_OFFERS {
+            let proposal = proposals.next();
+            if refusal.is_none() && proposals.dropped() {
+                refusal = Some(Refusal::Uncarried);
+            }
+            let Some(proposal) = proposal else {
+                break;
+            };
+            if offers.iter().any(|offer| offer.has(&proposal.members)) {
+                continue;
+            }
+            match accept(&proposal.members) {
+                Ok(()) => offers.push(offer(proposal, entries)),
+                Err(error) => {
+                    if refusal.is_none() {
+                        refusal = Some(Refusal::Refused(error));
                     }
                 }
-            })
-            .collect();
-        let unexamined = examining.examined().unexamined(total);
-        (Self { offers, unexamined }, refusal)
+            }
+        }
+        let offers = Self {
+            offers: offers.into_iter().collect(),
+            unexamined: proposals.unexamined(),
+        };
+        (offers, refusal)
     }
 
     /// The offers, in the order of the combinations.
@@ -222,74 +244,6 @@ fn sets(
         })
 }
 
-/// A combination the enumeration proposes as an offer.
-struct Proposal<'s> {
-    purposes: Vec<Value>,
-    members: Combination,
-    /// The optional sets its additions come from.
-    others: Vec<&'s OptionalSet>,
-}
-
-impl<'s> Proposal<'s> {
-    /// The proposal itself when its members can carry every entry. Otherwise each option of
-    /// an optional set that can carry an entry they leave joins it as members, in a proposal of
-    /// its own (A3); the proposal itself when none can.
-    fn carrying(self, entries: &[EntryCarriers]) -> Vec<Proposal<'s>> {
-        let Combination::Agreed(members) = &self.members else {
-            return vec![self];
-        };
-        let uncarried: Vec<&EntryCarriers> = entries
-            .iter()
-            .filter(|entry| !entry.carried_by(members))
-            .collect();
-        if uncarried.is_empty() {
-            return vec![self];
-        }
-        let joined: Vec<Proposal<'s>> = self
-            .others
-            .iter()
-            .flat_map(|&set| set.choices.iter().map(move |choice| (set, choice)))
-            .take(MAX_EXAMINED)
-            .filter(|(_, choice)| uncarried.iter().any(|entry| entry.carried_by(choice)))
-            .filter_map(|(set, choice)| self.joining(members, set, choice))
-            .collect();
-        if joined.is_empty() {
-            vec![self]
-        } else {
-            joined
-        }
-    }
-
-    /// The proposal of `members` with `choice`, an option of the optional set `set`, joined
-    /// as members; `None` when the option answers a query of the proposal with another
-    /// candidate.
-    fn joining(
-        &self,
-        members: &[Member],
-        set: &OptionalSet,
-        choice: Vec<Member>,
-    ) -> Option<Proposal<'s>> {
-        let members = Combination::of(vec![members.to_vec(), choice]).agreed()?;
-        let purposes = self
-            .purposes
-            .iter()
-            .chain(set.choices.purpose())
-            .cloned()
-            .collect();
-        let others = self
-            .others
-            .iter()
-            .copied()
-            .filter(|other| other.index != set.index)
-            .collect();
-        Some(Proposal {
-            purposes,
-            members: Combination::Agreed(members),
-            others,
-        })
-    }
-}
-
 /// The members of one choice of each set of a combination.
 enum Combination {
     /// The choices answer each query once.
@@ -325,14 +279,14 @@ impl Combination {
     }
 }
 
-/// The offer of `members`, which satisfies sets of `purposes`, with its additions from the
-/// optional sets `others`: those that answer no query of the offer and no query an entry names.
-fn offer(
-    purposes: Vec<Value>,
-    members: Vec<Member>,
-    others: &[&OptionalSet],
-    entries: &[EntryCarriers],
-) -> Offer {
+/// The offer of `proposal`, with its additions from the optional sets it leaves: those that
+/// answer no query of the offer and no query an entry names.
+fn offer(proposal: Agreed<'_>, entries: &[EntryCarriers]) -> Offer {
+    let Agreed {
+        purposes,
+        members,
+        others,
+    } = proposal;
     let named = |query: QueryIndex| entries.iter().any(|entry| entry.names(query));
     let candidates = others
         .iter()

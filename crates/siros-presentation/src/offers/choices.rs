@@ -1,6 +1,7 @@
 //! The ways to satisfy a credential set or a request, enumerated lazily, and the limits of what
 //! an enumeration examines.
 
+use std::cmp::Ordering;
 use std::num::NonZeroUsize;
 use std::ops::Deref;
 
@@ -157,6 +158,70 @@ impl Choices {
                 .multi_cartesian_product()
         })
     }
+
+    /// The choices with a member `carries` accepts, and their number; `None` when it
+    /// overflows. Each option's choices come grouped by the first of its queries whose member
+    /// `carries` accepts, the last query varying fastest. No other choice is formed.
+    pub(super) fn carrying(&self, carries: impl Fn(&Member) -> bool) -> Carrying {
+        let options: Vec<Vec<Vec<(Member, bool)>>> = self
+            .options
+            .iter()
+            .map(|slots| {
+                slots
+                    .iter()
+                    .map(|slot| {
+                        slot.ways()
+                            .map(|way| (way.clone(), carries(&way)))
+                            .collect()
+                    })
+                    .collect()
+            })
+            .collect();
+        let count = sum(options.iter().map(|slots| {
+            let all = product(slots.iter().map(|ways| Some(ways.len())));
+            let missing = product(
+                slots
+                    .iter()
+                    .map(|ways| Some(ways.iter().filter(|(_, hit)| !hit).count())),
+            );
+            all.zip(missing)
+                .map(|(all, missing)| all.saturating_sub(missing))
+        }));
+        let choices = options.into_iter().flat_map(|slots| {
+            (0..slots.len())
+                .map(|first| {
+                    slots
+                        .iter()
+                        .enumerate()
+                        .map(|(at, ways)| {
+                            ways.iter()
+                                .filter(|&&(_, hit)| match at.cmp(&first) {
+                                    Ordering::Less => !hit,
+                                    Ordering::Equal => hit,
+                                    Ordering::Greater => true,
+                                })
+                                .map(|(way, _)| way.clone())
+                                .collect::<Vec<Member>>()
+                        })
+                        .multi_cartesian_product()
+                })
+                .collect::<Vec<_>>()
+                .into_iter()
+                .flatten()
+        });
+        Carrying {
+            count,
+            choices: Box::new(choices),
+        }
+    }
+}
+
+/// The choices of a credential set that carry a transaction entry.
+pub(super) struct Carrying {
+    /// Their number; `None` when it overflows.
+    pub(super) count: Option<usize>,
+    /// The choices, formed as they are taken.
+    pub(super) choices: Box<dyn Iterator<Item = Vec<Member>>>,
 }
 
 /// The product of `factors`: zero with a zero factor, else `None` on overflow or for an

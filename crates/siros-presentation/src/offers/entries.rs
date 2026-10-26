@@ -85,12 +85,15 @@ impl EntryCarriers {
 
     /// Whether a member of `members` presents a credential that can carry the entry.
     pub(super) fn carried_by(&self, members: &[Member]) -> bool {
-        members.iter().any(|member| {
-            member.candidates.iter().any(|&candidate| {
-                self.carriers.contains(&Carrier {
-                    query: member.query,
-                    candidate,
-                })
+        members.iter().any(|member| self.carries(member))
+    }
+
+    /// Whether `member` presents a credential that can carry the entry.
+    pub(super) fn carries(&self, member: &Member) -> bool {
+        member.candidates.iter().any(|&candidate| {
+            self.carriers.contains(&Carrier {
+                query: member.query,
+                candidate,
             })
         })
     }
