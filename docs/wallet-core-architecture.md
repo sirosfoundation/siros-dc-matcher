@@ -435,6 +435,7 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
 | nym_auth `policy.rs` (generic parts) | OpenID4VP | the nym_auth part becomes `NymAuthRequest` (N2) |
 | nym_auth `catalogue::validate`, `checks::check`, `checks::opens_ssc` | nym_auth | constructors of witnesses (N1, N3, N4) |
 | nym_auth `presenter::match_query` selection | presentation | one selection (A2) |
+| nym_auth `policy::check_request`, `CheckedRequest` and the rules only it reaches; `presenter::match_query`, `plan_option`; FFI `zkp_req_session`, `zkp_req_match`, `zkp_req_prepare` | removed with the FFI (§4.14) | the facades expose the plan; a zero-reference grep gates the removal |
 | nym_auth `attestation.rs` `anchors` and the wallet's `chains_to`; FFI `anchors` arguments | trust | the `AdmittedIssuer` witness (TR3, N3) |
 | `siros-zkp-req` `TrustedAuthority`, `AuthorityKind` | DCQL | one parse of `trusted_authorities` (Q1) |
 | `siros-dc-matcher-wasm`, `-testhost` | picker | |
