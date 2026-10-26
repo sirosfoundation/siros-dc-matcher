@@ -212,7 +212,7 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
 
 **Requirements:**
 - **N1.** `NymAuthQuery` MUST be constructible only from a `ZkpReqQuery` that satisfies the catalogue. This replaces today's `catalogue::validate`.
-- **N2.** `NymAuthRequest` MUST be constructible only from a `VerifiedRequest` that meets the nym_auth policy. This replaces the host-asserted `signed` flag of today's `check_request`.
+- **N2.** `NymAuthRequest` MUST be constructible only from a `VerifiedRequest` that meets the nym_auth policy: `openid4vp-v1-signed` over the DC API, a positive trust verdict for the Client Identifier, an encrypted Response Mode with its key. The `verifier_id` MUST derive from the request's authenticated certificates in the form the trust framework fixes (catalogue, "Verifier identity"). The host supplies only the form. This replaces the host-asserted `signed` flag of today's `check_request`.
 - **N3.** The credential tests (signature, issuer anchors, validity at `proof_time`, form) MUST be the constructor of a usable-attestation witness. Proving MUST require that witness.
 - **N4.** `OpenedSeed` MUST be constructible only from a delivered `secret_seed` whose SHA-256 equals the credential's `ssc`. It is constructed again for each use (privatedata §5A.2), and the prover job MUST require it. This replaces today's `opens_ssc -> bool`.
 - **N5.** A system is available exactly when its circuits are loaded through the pinned `load` (digest and length). Circuits are data shipped with each build.
@@ -306,15 +306,17 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
 - **A2. `zkp_req` matching** MUST be one selection. It takes the options in the verifier's order and, for each, the first available system whose usable pair the verifier accepts. It then requires a usable-attestation witness and an `OpenedSeed` for the credential (N3, N4).
 - **A3. Offers.**
   - Each combination of the required credential sets is an offer.
-  - Optional sets are additions the user may choose on top of an offer.
+  - Optional sets are additions the user may choose on top of an offer, at most one option per set.
+  - An optional set whose credentials alone can carry a transaction entry joins the offer as members (OpenID4VP §8.4).
   - When every set is optional, each option is an offer.
   - Each member names its query, its instance (C5), its answer (SD-JWT pointers, mdoc elements, or the `zkp_req` system, backend and option) and the transaction entries bound to it (T4).
+  - The member of a `multiple` query holds every candidate. The selection chooses a non-empty subset of them.
 - **A4. Plan binding.** A plan MUST carry a digest of what the user consents to:
-  - the request's response mode, client identifier, origin, response URI, `nonce`, `state`, `dcql_query` and `transaction_data`;
+  - the request's response mode, client identifier, trust verdict, origin, response URI, `nonce`, `state`, `dcql_query` and `transaction_data`, and the nym_auth `verifier_id` when there is one;
   - for each offer: its members with their instances and answers, its additions, the transaction entries bound to each member, and its A9 outcome.
 
   The time, the display metadata and the presentation records stay out of it, so phase 2 can run later on the same plan. A selection MUST be parsed against the recomputed plan into a chosen-offer witness. A digest mismatch, an unknown offer, or an out-of-range optional choice is an error.
-- **A5. Signatures.** Phase 2 MUST state every signing input as a `Sign` effect. The signatures returned MUST be parsed against those requests: none missing, none duplicated, none unknown.
+- **A5. Signatures.** Phase 2 MUST state every signing input as a `Sign` effect. The signatures returned MUST be parsed against those requests: none missing, none duplicated, none unknown, and each one verifying under the key its request names.
 - **A6. Audience.** The SD-JWT `aud` is `prefix:value` of the client identifier for redirects. Over the DC API it is `origin:<origin>`, signed requests included (OpenID4VP A.4).
 - **A7. SessionTranscript.** The mdoc and nym_auth SessionTranscript uses `OpenID4VPHandover` (client id, nonce, encryption key thumbprint or null, response URI) for redirects. It uses `OpenID4VPDCAPIHandover` (origin, nonce, thumbprint or null) for the DC API.
 - **A8. Response.**
@@ -325,7 +327,7 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
   - every member credential is registered as presentable without the wallet's UI (the wallet declares it per credential: its key signs without user interaction and its background service answers);
   - the request carries no `transaction_data` (a type renders it in the wallet, T2);
   - every disclosed claim and every proof statement of the offer has a display row, and no row is clipped;
-  - the offer has no optional additions to choose.
+  - the offer has no optional additions to choose, and no `multiple` query with more than one candidate.
 
   The picker applies the rule to choose delegation (K4). The wallet applies it to a background fulfilment: an offer that needs its display is refused there with `access_denied`.
 
