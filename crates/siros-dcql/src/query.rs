@@ -12,7 +12,7 @@ use rustc_hash::FxHashSet;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use crate::id::QueryId;
+use crate::id::{QueryId, QueryIdError};
 use crate::path::PathComponent;
 
 /// A complete DCQL query (§6).
@@ -131,10 +131,10 @@ fn is_true(b: &bool) -> bool {
 /// breaks §6.1, because the response keys the presentations by it.
 #[derive(Debug)]
 pub enum QueryError {
-    /// Not well-formed JSON, not shaped like a DCQL query, or a credential
-    /// query `id` that breaks §6.1 (its [`crate::QueryIdError`] is the
-    /// message).
+    /// Not well-formed JSON, or not shaped like a DCQL query.
     Json(serde_json::Error),
+    /// A credential query `id` breaks §6.1.
+    Id(QueryIdError),
     /// Two credential queries share this `id`. §6.1 requires it to "be unique
     /// across all Credential Query objects": a reference from
     /// `credential_sets` to a duplicated id names two different requests, and
@@ -155,6 +155,7 @@ impl core::fmt::Display for QueryError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Json(e) => write!(f, "not a DCQL query: {e}"),
+            Self::Id(e) => write!(f, "not a DCQL query: {e}"),
             Self::DuplicateCredentialId(id) => {
                 write!(f, "two credential queries share the id {id:?} (§6.1)")
             }
@@ -170,7 +171,8 @@ impl std::error::Error for QueryError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Json(e) => Some(e),
-            _ => None,
+            Self::Id(e) => Some(e),
+            Self::DuplicateCredentialId(_) | Self::DuplicateClaimId { .. } => None,
         }
     }
 }
@@ -194,7 +196,11 @@ impl DcqlQuery {
     /// [`QueryError`]: the document is not a well-formed DCQL query, or its
     /// identifiers are not usable. Unknown properties are not an error (§6).
     pub fn from_json(json: &str) -> Result<Self, QueryError> {
-        let query: Self = serde_json::from_str(json)?;
+        let document: Value = serde_json::from_str(json)?;
+        if let Some(error) = credential_ids(&document).find_map(|id| QueryId::parse(id).err()) {
+            return Err(QueryError::Id(error));
+        }
+        let query = Self::deserialize(document)?;
         query.validate()?;
         Ok(query)
     }
@@ -206,8 +212,8 @@ impl DcqlQuery {
     ///
     /// # Errors
     ///
-    /// [`QueryError`], excluding [`QueryError::Json`] which only parsing can
-    /// produce.
+    /// [`QueryError`], excluding [`QueryError::Json`] and [`QueryError::Id`],
+    /// which only parsing can produce.
     pub fn validate(&self) -> Result<(), QueryError> {
         let mut seen: FxHashSet<&QueryId> =
             FxHashSet::with_capacity_and_hasher(self.credentials.len(), Default::default());
@@ -224,6 +230,16 @@ impl DcqlQuery {
     pub fn credential(&self, id: &str) -> Option<&CredentialQuery> {
         self.credentials.iter().find(|c| c.id == *id)
     }
+}
+
+/// The string `id` of each credential query of `document`, a DCQL query.
+fn credential_ids(document: &Value) -> impl Iterator<Item = &str> {
+    document
+        .get("credentials")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|credential| credential.get("id")?.as_str())
 }
 
 impl CredentialQuery {
@@ -365,8 +381,11 @@ mod tests {
         for (id, outcome) in cases {
             assert_eq!(QueryId::parse(id).map(drop), outcome, "{id:?}");
             let json = format!(r#"{{"credentials":[{{"id":"{id}","format":"mso_mdoc"}}]}}"#);
-            let parsed = DcqlQuery::from_json(&json);
-            assert_eq!(parsed.is_ok(), outcome.is_ok(), "{id:?}");
+            let parsed = DcqlQuery::from_json(&json).map(drop).map_err(|e| match e {
+                QueryError::Id(e) => Some(e),
+                _ => None,
+            });
+            assert_eq!(parsed, outcome.map_err(Some), "{id:?}");
         }
     }
 
