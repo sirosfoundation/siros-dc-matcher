@@ -40,6 +40,7 @@ impl Member {
 
     /// The member of the candidates at `positions` among [`Member::candidates`], each once.
     /// `None` for an empty subset or a position out of range or repeated.
+    #[cfg(feature = "wallet")]
     pub(crate) fn subset(&self, positions: &[usize]) -> Option<Self> {
         let mut candidates = Vec::with_capacity(positions.len());
         for position in positions {
