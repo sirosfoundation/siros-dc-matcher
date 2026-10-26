@@ -65,7 +65,7 @@ fn the_choice_takes_the_exact_tag_then_the_primary_language_then_the_first_entry
             Some(0),
         ),
         (
-            "an entry without locale is never matched",
+            "an entry without locale matches no preference",
             &["en"],
             &[None, Some("en")],
             Some(1),
