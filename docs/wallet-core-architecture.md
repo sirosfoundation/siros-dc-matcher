@@ -312,7 +312,7 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
 - **A3. Offers.**
   - Each combination of the required credential sets is an offer.
   - Optional sets are additions the user may choose on top of an offer, at most one option per set.
-  - When no member of an offer can carry a transaction entry, an optional set whose credentials can carry it joins the offer as members (OpenID4VP §8.4). Each such set gives its own offer.
+  - When no member of an offer can carry a transaction entry, an optional set whose credentials can carry it joins the offer as members (OpenID4VP §8.4). Each such set gives its own offer. Joining repeats until every entry is carried, at most one option per set; an offer that cannot carry every entry is dropped. Joined offers count against the same examination limit as the others, and two offers with the same members are one offer.
   - When every set is optional, each option is an offer.
   - Each member names its query, its instance (C5), its answer (SD-JWT pointers, mdoc elements, or the `zkp_req` system, backend and option) and the transaction entries bound to it (T4).
   - The member of a `multiple` query holds every candidate. The selection chooses a non-empty subset of them, naming each chosen credential by its `credentialId`.
