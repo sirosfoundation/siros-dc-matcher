@@ -94,8 +94,7 @@ fn vega(credential: &str, thumbprint: &[u8; 32]) -> Value {
 fn main() {
     let ds = Issuer::root(0x11, "Test Document Signer");
     let credential = issue(&ds, &Spec::default());
-    let thumbprint =
-        siros_zkp_req_nym_auth::session::ec_jwk_thumbprint(&encryption_jwk()).expect("an EC key");
+    let thumbprint = siros_oid4vp::ec_jwk_thumbprint(&encryption_jwk()).expect("an EC key");
     let out = json!({
         "provenance": "Computed by readdit-demo 1cf3f26 (native/longfellow/nym-longfellow, native/vega/nym-vega) with scripts/readdit-differential.",
         "inputs": {

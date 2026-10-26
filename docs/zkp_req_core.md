@@ -71,9 +71,10 @@ pub trait NymAuthProofVerifier {
 }
 ```
 
-**Input: `ProofJob`.** `statement` (below), `issuer_signed` (the credential's `IssuerSigned`
-as issued), `secret_seed` (16 bytes, zeroed on drop) and `device_signature` (`r ‖ s`, verified
-under the MSO's device key).
+**Input: `ProofJob`.** The presenter builds it from a `UsableAttestation`, the `OpenedSeed` of
+its `ssc` and a device signature that verifies under the MSO's device key. It gives `statement`
+(below), `issuer_signed` (the credential's `IssuerSigned` as issued), `secret_seed` (16 bytes,
+zeroed on drop) and `device_signature` (`r ‖ s`).
 
 **`Statement`**, the public values of system rulebooks Section 4. The Wallet and the Verifier
 build it independently; equal statements are the binding.
@@ -127,6 +128,13 @@ artifacts from their reference copies.
 
 * `presenter::match_query(&MatchInput)`: `Match::Candidates`, `Rejected` (per credential, with
   the Section 9 codes), `Unsupported` (per option and system) or `Invalid` (the request rule).
+* `catalogue::NymAuthQuery::from_query(ZkpReqQuery)` gives `Catalogued::NymAuth` for a query
+  that follows the catalogue, `Catalogued::OtherType` for another credential type, or the
+  `CatalogueRule` it breaks.
+* `attestation::UsableAttestation::new(data, anchors, proof_time)` reads a stored credential and
+  runs the tests of system rulebooks Section 7, step 1. `Unusable` carries the Section 9 codes of
+  the failed tests. `attestation::OpenedSeed::open(credential, secret_seed)` requires
+  `SHA-256(secret_seed) = ssc`; `prepare` opens it again for each presentation.
 * `policy::check_request(request_object, signed, channel)` and `CheckedRequest::handover(jwk
   thumbprint)`, with `VerifierId::x509_san_dns` or `VerifierId::semantic`, give the `Session`.
 * `presenter::prepare(&ProveInput)` gives `Prepared`: `data_to_sign`, `key_id`, `statement`,

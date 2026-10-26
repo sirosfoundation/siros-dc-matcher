@@ -62,7 +62,15 @@ against the 307,200-byte budget (303,914 before).
   `siros_zkp_req_nym_auth::session` to `siros-oid4vp`. `Handover::dc_api` and
   `Handover::redirect` take the encryption key thumbprint as an `Option`: `None` is CBOR `null`,
   for an unencrypted response (B.2.6).
-- `matcher.wasm` is 300,538 bytes (304,452 before).
+- **BREAKING (Rust API):** in `siros-zkp-req-nym-auth`, each test of a query or a credential is
+  the constructor of its result. `NymAuthQuery::from_query` replaces `catalogue::validate` and
+  returns `Catalogued`: `NymAuth`, or `OtherType` for another credential type. The `checks`
+  module is `attestation`: `UsableAttestation::new` replaces `checks::check`, and its error
+  `Unusable` carries the Section 9 codes. `OpenedSeed::open` replaces `checks::opens_ssc`. Only
+  `Prepared::job` builds a `ProofJob`, from a `UsableAttestation` and an `OpenedSeed`. The fields
+  of `ProofJob`, `NymAuthQuery`, `NymAuthMdoc`, `SignedElement` and `Credential` are private;
+  methods of the same names read them.
+- `matcher.wasm` is 300,478 bytes (304,452 before).
 
 ### Fixed
 

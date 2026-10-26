@@ -7,8 +7,8 @@
 
 use siros_codec::date::{Date, DateTime};
 use siros_mdoc::P256Key;
-use zeroize::Zeroizing;
 
+use crate::attestation::{OpenedSeed, UsableAttestation};
 use crate::system::NymAuthSystem;
 
 /// The public values of a nym_auth mdoc proof.
@@ -38,17 +38,50 @@ pub struct Statement {
     pub challenge_digest: [u8; 32],
 }
 
-/// What a prover needs to prove a [`Statement`] (system rulebooks, Section 7).
+/// What a prover needs to prove a [`Statement`] (system rulebooks, Section 7): a usable
+/// attestation, the seed that opens its `ssc`, and the device signature.
 pub struct ProofJob {
+    statement: Statement,
+    attestation: UsableAttestation,
+    seed: OpenedSeed,
+    device_signature: [u8; 64],
+}
+
+impl ProofJob {
+    /// The job for `statement`. `device_signature` verifies under the MSO's device key.
+    pub(crate) fn new(
+        statement: Statement,
+        attestation: UsableAttestation,
+        seed: OpenedSeed,
+        device_signature: [u8; 64],
+    ) -> Self {
+        Self {
+            statement,
+            attestation,
+            seed,
+            device_signature,
+        }
+    }
+
     /// The public values.
-    pub statement: Statement,
+    pub fn statement(&self) -> &Statement {
+        &self.statement
+    }
+
     /// The credential's `IssuerSigned`, as issued.
-    pub issuer_signed: Vec<u8>,
-    /// The 16-byte `secret_seed`. Zeroed when the job is dropped.
-    pub secret_seed: Zeroizing<[u8; 16]>,
-    /// The device key's ES256 signature on the data to sign, `r ‖ s`. It verifies under the
-    /// MSO's device key.
-    pub device_signature: [u8; 64],
+    pub fn issuer_signed(&self) -> &[u8] {
+        self.attestation.credential().mdoc().issuer_signed()
+    }
+
+    /// The 16-byte `secret_seed`. It is zeroed when the job is dropped.
+    pub fn secret_seed(&self) -> &[u8; 16] {
+        self.seed.secret_seed()
+    }
+
+    /// The device key's ES256 signature on the data to sign, `r ‖ s`.
+    pub fn device_signature(&self) -> &[u8; 64] {
+        &self.device_signature
+    }
 }
 
 impl std::fmt::Debug for ProofJob {
@@ -95,7 +128,7 @@ impl ProverFailure {
 
 /// A system's prover.
 pub trait NymAuthProver {
-    /// Proves `job.statement`.
+    /// Proves the statement of `job`.
     ///
     /// # Errors
     ///

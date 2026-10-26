@@ -392,17 +392,17 @@ impl NymAuthProver for TestProver {
         }
         let pseudonym = {
             let mut message = b"nym_auth/v1/known-offender-matching-ssc".to_vec();
-            message.extend_from_slice(&job.secret_seed[..]);
+            message.extend_from_slice(job.secret_seed());
             message.extend_from_slice(&[0; 32]);
-            message.extend_from_slice(&job.statement.verifier_input);
+            message.extend_from_slice(&job.statement().verifier_input);
             sha256(&message)
         };
-        let digest = binding(&job.statement, &pseudonym);
+        let digest = binding(job.statement(), &pseudonym);
         let zk_proof = digest
             .iter()
             .copied()
             .cycle()
-            .take(proof_len(job.statement.system))
+            .take(proof_len(job.statement().system))
             .collect();
         Ok(ProofOutput {
             zk_proof,

@@ -1,323 +1,28 @@
-//! The presenter of nym_auth queries: `match`, then the Wallet's consent, then `prove`.
-//!
-//! It does no input or output. The host passes what its `WalletContext` holds (credentials,
-//! anchors, the clock, the seed), signs the data the presenter gives it with the device key,
-//! and runs a system's prover on the [`ProofJob`]. The presenter keeps nothing between calls:
-//! `prove` checks everything again.
+//! `prove`: the candidate checked again, the statement, the device signature, the prover's job
+//! and the presentation (system rulebooks, Section 7; `zkp_req`, Section 4).
 
 use std::fmt;
 
 use serde_json::Value;
 use siros_codec::cbor::Value as Cbor;
 use siros_codec::date::{Date, DateTime};
-use siros_mdoc::{device_signing_input, es256_verifies, DeviceNameSpaces, P256Key};
-use siros_zkp_req::{
-    usable_backend, Candidate, Judged, Match, OptionRefusal, PairRefusal, ProofEnvelope,
-    QueryOption, ZkpFormats, ZkpPresentation, ZkpReqQuery,
-};
+use siros_mdoc::{device_signing_input, es256_verifies, DeviceNameSpaces};
+use siros_oid4vp::Handover;
+use siros_zkp_req::{Candidate, PairRefusal, ProofEnvelope, ZkpPresentation};
 use zeroize::Zeroizing;
 
-use crate::age::{Bound, Bounds};
-use crate::catalogue::{Function, Item, NymAuthQuery, Pseudonym, MDOC_DOCTYPE};
-use crate::checks::{self, Checked, Credential};
+use super::{
+    anchors_for, credential_errors, item_errors, parse, plan_option, HostError, OptionPlan, Parsed,
+    MAX_ZK_PROOF,
+};
+use crate::age::Bound;
+use crate::attestation::{OpenedSeed, SeedMismatch, UsableAttestation};
+use crate::catalogue::{Function, NymAuthQuery, Pseudonym, MDOC_DOCTYPE};
 use crate::mdoc::StoredCredential;
 use crate::outcome::{CredentialCode, InvalidRequest, ItemCode, ZkpError};
 use crate::prover::{NymAuthProver, ProofJob, ProofOutput, ProverFailure, Statement};
 use crate::system::{pair_code, NymAuthSystem, Unsupported};
 use crate::verifier_id::{pseudonym_sha256, sha256, verifier_input, VerifierId};
-use siros_oid4vp::Handover;
-
-/// The outcome of matching one nym_auth query.
-pub type NymAuthMatch = Match<InvalidRequest, PairRefusal<Unsupported>, ZkpError>;
-
-/// The largest `zk_proof` the proof backends read (`longfellow-libzk-v1`, `vega-v1`).
-pub const MAX_ZK_PROOF: usize = 1 << 20;
-
-/// A host input this presenter cannot use. It is a defect of the host, never of the request.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum HostError {
-    /// `now` lies outside 0000-01-01T00:00:00Z to 9999-12-31T23:59:59Z.
-    Time,
-    /// The query names trusted authorities and the host passed no anchors for them.
-    AnchorsMissing,
-    /// The secret seed is not 16 bytes.
-    SeedLength,
-    /// The device signature is not 64 bytes, `r ‖ s`.
-    SignatureLength,
-    /// The candidate names an option, system or proof backend `match` does not give.
-    CandidateMismatch,
-    /// The credential is not the candidate's.
-    CredentialMismatch,
-}
-
-impl HostError {
-    /// A stable identifier.
-    pub fn code(self) -> &'static str {
-        match self {
-            Self::Time => "time",
-            Self::AnchorsMissing => "anchors_missing",
-            Self::SeedLength => "seed_length",
-            Self::SignatureLength => "signature_length",
-            Self::CandidateMismatch => "candidate_mismatch",
-            Self::CredentialMismatch => "credential_mismatch",
-        }
-    }
-}
-
-impl fmt::Display for HostError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "host input: {}", self.code())
-    }
-}
-
-impl std::error::Error for HostError {}
-
-/// What `match` needs: the request's query and metadata, and what the host's `WalletContext`
-/// gives.
-#[derive(Debug, Clone, Copy)]
-pub struct MatchInput<'a> {
-    /// The Credential Query, one element of `dcql_query.credentials`.
-    pub query: &'a Value,
-    /// The request's `client_metadata`.
-    pub client_metadata: &'a Value,
-    /// The Wallet's credentials of the query's format and type; a superset is fine.
-    pub credentials: &'a [StoredCredential],
-    /// DER certificates of the anchors the query's `trusted_authorities` designate. Required
-    /// when the query has `trusted_authorities`.
-    pub anchors: Option<&'a [Vec<u8>]>,
-    /// The systems the host proves, in the Wallet's order of preference.
-    pub systems: &'a [NymAuthSystem],
-    /// The Wallet's clock: seconds since 1970-01-01T00:00:00Z. The proof time.
-    pub now: i64,
-}
-
-struct Parsed {
-    query: NymAuthQuery,
-    formats: ZkpFormats,
-}
-
-/// The query and the metadata, validated. `None` when the query asks for another credential
-/// type.
-fn parse(query: &Value, client_metadata: &Value) -> Result<Option<Parsed>, InvalidRequest> {
-    let parsed = ZkpReqQuery::parse(query)?;
-    let formats = ZkpFormats::from_client_metadata(client_metadata)?;
-    Ok(NymAuthQuery::from_query(parsed)?.map(|query| Parsed { query, formats }))
-}
-
-/// The bounds of `option` at `d`: those of its `age_check`, or the widest.
-fn option_bounds(query: &NymAuthQuery, option: &QueryOption, d: Date) -> Bounds {
-    query
-        .option_items(option)
-        .find_map(|(_, item)| match &item.function {
-            Function::AgeCheck(age) => Some(age.range.bounds(d)),
-            Function::Pseudonym(_) => None,
-        })
-        .unwrap_or(Bounds::WIDEST)
-}
-
-/// An option, its bounds, and the first usable pair in the Wallet's order.
-struct OptionPlan<'q> {
-    option: &'q QueryOption,
-    bounds: Bounds,
-    pair: Option<(NymAuthSystem, String)>,
-    refusals: Vec<(String, PairRefusal<Unsupported>)>,
-}
-
-fn plan_option<'q>(
-    parsed: &'q Parsed,
-    option: &'q QueryOption,
-    systems: &[NymAuthSystem],
-    d: Date,
-) -> OptionPlan<'q> {
-    let bounds = option_bounds(&parsed.query, option, d);
-    let items: Vec<&Item> = parsed.query.option_items(option).map(|(_, i)| i).collect();
-    let mut refusals = Vec::new();
-    for &system in systems {
-        let ty = &parsed.query.query.credential_type;
-        match usable_backend(&parsed.formats, ty, &system, |s| {
-            s.supports(items.iter().copied(), &bounds)
-        }) {
-            Ok(backend) => {
-                return OptionPlan {
-                    option,
-                    bounds,
-                    pair: Some((system, backend.to_owned())),
-                    refusals,
-                }
-            }
-            Err(refusal) => refusals.push((system.id().to_owned(), refusal)),
-        }
-    }
-    OptionPlan {
-        option,
-        bounds,
-        pair: None,
-        refusals,
-    }
-}
-
-/// The anchors to check the issuer against: required when the query names authorities.
-fn anchors_for<'a>(
-    query: &NymAuthQuery,
-    anchors: Option<&'a [Vec<u8>]>,
-) -> Result<Option<&'a [Vec<u8>]>, HostError> {
-    match (&query.query.trusted_authorities, anchors) {
-        (None, _) => Ok(None),
-        (Some(_), Some(anchors)) => Ok(Some(anchors)),
-        (Some(_), None) => Err(HostError::AnchorsMissing),
-    }
-}
-
-/// The items of `option` that fail for `credential`: the `age_check` assertion.
-fn item_errors(
-    query: &NymAuthQuery,
-    plan: &OptionPlan<'_>,
-    credential: &Credential,
-) -> Vec<ZkpError> {
-    query
-        .option_items(plan.option)
-        .filter_map(|(index, item)| match item.function {
-            Function::AgeCheck(_) if !plan.bounds.holds(credential.mdoc.birth_date.value) => {
-                Some(ZkpError::Item {
-                    option: plan.option.req_set,
-                    item: index,
-                    code: ItemCode::AgeOutOfRange,
-                })
-            }
-            _ => None,
-        })
-        .collect()
-}
-
-/// Matches one query against the Wallet's credentials (`zkp_req`, Sections 1.3 and 2.1).
-///
-/// The candidates come in the Verifier's order of options, then in the order of
-/// `credentials`. Each answers its option with the first usable pair in the Wallet's order.
-///
-/// # Errors
-///
-/// [`HostError`]: an input of the host this presenter cannot use.
-pub fn match_query(input: &MatchInput<'_>) -> Result<NymAuthMatch, HostError> {
-    let proof_time = DateTime::from_unix(input.now).ok_or(HostError::Time)?;
-    let parsed = match parse(input.query, input.client_metadata) {
-        Ok(Some(parsed)) => parsed,
-        Ok(None) => return Ok(Match::Rejected(Vec::new())),
-        Err(rule) => return Ok(Match::Invalid(rule)),
-    };
-    let d = proof_time.date();
-    let plans: Vec<OptionPlan<'_>> = parsed
-        .query
-        .query
-        .options
-        .iter()
-        .map(|option| plan_option(&parsed, option, input.systems, d))
-        .collect();
-    if plans.iter().all(|p| p.pair.is_none()) {
-        return Ok(Match::Unsupported(unsupported(plans)));
-    }
-    let anchors = anchors_for(&parsed.query, input.anchors)?;
-    let judged: Vec<(&StoredCredential, Checked)> = input
-        .credentials
-        .iter()
-        .filter(|c| c.format == "mso_mdoc")
-        .map(|c| (c, checks::check(&c.data, anchors, proof_time)))
-        .collect();
-    Ok(candidates_or_rejections(&parsed.query, &plans, &judged))
-}
-
-fn unsupported(plans: Vec<OptionPlan<'_>>) -> Vec<OptionRefusal<PairRefusal<Unsupported>>> {
-    plans
-        .into_iter()
-        .map(|p| OptionRefusal {
-            req_set: p.option.req_set,
-            systems: p.refusals,
-        })
-        .collect()
-}
-
-/// The outcome for one credential and one option with a usable pair.
-fn judge(
-    query: &NymAuthQuery,
-    plan: &OptionPlan<'_>,
-    checked: &Checked,
-) -> Option<Result<(), Vec<ZkpError>>> {
-    match checked {
-        Checked::OtherDocType => None,
-        Checked::Unreadable(_) => Some(Err(vec![ZkpError::Credential(
-            CredentialCode::CredentialForm,
-        )])),
-        Checked::Unlisted => Some(Err(vec![ZkpError::Credential(
-            CredentialCode::IssuerSignature,
-        )])),
-        Checked::Read(credential, failures) => {
-            let mut errors: Vec<ZkpError> =
-                failures.iter().map(|c| ZkpError::Credential(*c)).collect();
-            errors.extend(item_errors(query, plan, credential));
-            Some(if errors.is_empty() {
-                Ok(())
-            } else {
-                Err(errors)
-            })
-        }
-    }
-}
-
-fn candidates_or_rejections(
-    query: &NymAuthQuery,
-    plans: &[OptionPlan<'_>],
-    judged: &[(&StoredCredential, Checked)],
-) -> NymAuthMatch {
-    let mut candidates = Vec::new();
-    let mut rejected: Vec<Judged<ZkpError>> = Vec::new();
-    for plan in plans {
-        let Some((system, backend)) = &plan.pair else {
-            continue;
-        };
-        for (credential, checked) in judged {
-            match judge(query, plan, checked) {
-                Some(Ok(())) => candidates.push(Candidate {
-                    credential_id: credential.id.clone(),
-                    system_id: system.id().to_owned(),
-                    proof_backend: backend.clone(),
-                    req_set: plan.option.req_set,
-                    items: plan.option.items.clone(),
-                    inputs: Vec::new(),
-                }),
-                Some(Err(errors)) => record(&mut rejected, &credential.id, errors),
-                None => {}
-            }
-        }
-    }
-    if candidates.is_empty() {
-        Match::Rejected(rejected)
-    } else {
-        Match::Candidates(candidates)
-    }
-}
-
-/// Adds `errors` to the judgement of `credential_id`, each error once.
-fn record(rejected: &mut Vec<Judged<ZkpError>>, credential_id: &str, errors: Vec<ZkpError>) {
-    let index = match rejected
-        .iter()
-        .position(|j| j.credential_id == credential_id)
-    {
-        Some(index) => index,
-        None => {
-            rejected.push(Judged {
-                credential_id: credential_id.to_owned(),
-                errors: Vec::new(),
-            });
-            rejected.len() - 1
-        }
-    };
-    if let Some(judged) = rejected.get_mut(index) {
-        for error in errors {
-            if !judged.errors.contains(&error) {
-                judged.errors.push(error);
-            }
-        }
-    }
-}
 
 /// The session a presentation is bound to.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -432,9 +137,8 @@ impl SignFailure {
 /// A presentation ready for the device signature, then for the prover.
 pub struct Prepared {
     statement: Statement,
-    issuer_signed: Vec<u8>,
-    secret_seed: Zeroizing<[u8; 16]>,
-    device_key: P256Key,
+    attestation: UsableAttestation,
+    seed: OpenedSeed,
     data_to_sign: Vec<u8>,
     kid: String,
     req_set: Option<usize>,
@@ -472,28 +176,30 @@ pub fn prepare(input: &ProveInput<'_>) -> Result<Prepared, ProveError> {
         return Err(HostError::CredentialMismatch.into());
     }
     let anchors = anchors_for(&parsed.query, input.anchors)?;
-    let credential = checked_credential(
+    let (pseudonym_index, pseudonym_item) = pseudonym_of(&parsed.query, &plan)?;
+    let (attestation, opened) = usable_credential(
         &parsed.query,
         &plan,
+        pseudonym_index,
         input.credential,
         anchors,
         proof_time,
         &seed,
     )?;
-    let pseudonym_item = pseudonym_of(&parsed.query, &plan)?;
     let session_transcript = input.session.handover.session_transcript();
     let data_to_sign = device_signing_input(
         &session_transcript,
         MDOC_DOCTYPE,
         &DeviceNameSpaces::empty(),
     );
+    let certificate = attestation.credential().certificate();
     let statement = Statement {
         system,
         proof_backend: input.candidate.proof_backend.clone(),
         doc_type: MDOC_DOCTYPE,
-        issuer_certificate: credential.certificate.der().to_vec(),
-        issuer_key: *credential.certificate.key(),
-        proof_time,
+        issuer_certificate: certificate.der().to_vec(),
+        issuer_key: *certificate.key(),
+        proof_time: attestation.proof_time(),
         earliest: bound_date(plan.bounds.earliest)?,
         cutoff: bound_date(plan.bounds.cutoff)?,
         verifier_input: verifier_input(pseudonym_item, &input.session.verifier_id),
@@ -502,16 +208,15 @@ pub fn prepare(input: &ProveInput<'_>) -> Result<Prepared, ProveError> {
     };
     let pseudonym = pseudonym_sha256(
         &pseudonym_item.config,
-        &seed,
+        opened.secret_seed(),
         &[0; 32],
         &statement.verifier_input,
     );
     let results = results(&parsed.query, &plan, &pseudonym);
     Ok(Prepared {
         statement,
-        issuer_signed: credential.mdoc.issuer_signed.clone(),
-        secret_seed: seed,
-        device_key: credential.mdoc.device_key,
+        attestation,
+        seed: opened,
         data_to_sign,
         kid: input.credential.kid.clone(),
         req_set: plan.option.req_set,
@@ -528,7 +233,7 @@ fn candidate_plan<'q>(
 ) -> Result<(OptionPlan<'q>, NymAuthSystem), ProveError> {
     let option = parsed
         .query
-        .query
+        .query()
         .option(candidate.req_set)
         .filter(|o| o.items == candidate.items)
         .ok_or(HostError::CandidateMismatch)?;
@@ -543,56 +248,51 @@ fn candidate_plan<'q>(
     }
 }
 
-/// The credential, after every test that needs no device signature, the seed's included.
-fn checked_credential(
+/// The usable attestation and the opened seed of `stored`, after every test that needs no
+/// device signature. The failures of the credential come first, then those of the items: the
+/// `age_check` assertion and the `pseudonym` at `pseudonym_index`, whose seed must open `ssc`.
+fn usable_credential(
     query: &NymAuthQuery,
     plan: &OptionPlan<'_>,
+    pseudonym_index: usize,
     stored: &StoredCredential,
     anchors: Option<&[Vec<u8>]>,
     proof_time: DateTime,
     seed: &[u8; 16],
-) -> Result<Credential, ProveError> {
-    let (credential, failures) = match checks::check(&stored.data, anchors, proof_time) {
-        Checked::Read(credential, failures) => (*credential, failures),
-        Checked::Unreadable(_) => {
-            return Err(ProveError::Rejected(vec![ZkpError::Credential(
-                CredentialCode::CredentialForm,
-            )]))
-        }
-        Checked::Unlisted => {
-            return Err(ProveError::Rejected(vec![ZkpError::Credential(
-                CredentialCode::IssuerSignature,
-            )]))
-        }
-        Checked::OtherDocType => return Err(HostError::CredentialMismatch.into()),
+) -> Result<(UsableAttestation, OpenedSeed), ProveError> {
+    let tested = UsableAttestation::new(&stored.data, anchors, proof_time);
+    let (mut errors, credential) =
+        credential_errors(&tested).ok_or(HostError::CredentialMismatch)?;
+    let Some(credential) = credential else {
+        return Err(ProveError::Rejected(errors));
     };
-    let mut errors: Vec<ZkpError> = failures.into_iter().map(ZkpError::Credential).collect();
-    errors.extend(item_errors(query, plan, &credential));
-    if !checks::opens_ssc(&credential.mdoc, seed) {
-        errors.extend(query.option_items(plan.option).filter_map(|(index, item)| {
-            matches!(item.function, Function::Pseudonym(_)).then_some(ZkpError::Item {
+    errors.extend(item_errors(query, plan, credential));
+    let opened = match OpenedSeed::open(credential, seed) {
+        Ok(opened) => Some(opened),
+        Err(SeedMismatch) => {
+            errors.push(ZkpError::Item {
                 option: plan.option.req_set,
-                item: index,
+                item: pseudonym_index,
                 code: ItemCode::SeedMismatch,
-            })
-        }));
-    }
-    if errors.is_empty() {
-        Ok(credential)
-    } else {
-        Err(ProveError::Rejected(errors))
+            });
+            None
+        }
+    };
+    match (tested, opened) {
+        (Ok(attestation), Some(opened)) if errors.is_empty() => Ok((attestation, opened)),
+        _ => Err(ProveError::Rejected(errors)),
     }
 }
 
-/// The option's `pseudonym`, which every system requires.
+/// The option's `pseudonym` and its `_req` index. Every system requires one.
 fn pseudonym_of<'q>(
     query: &'q NymAuthQuery,
     plan: &OptionPlan<'q>,
-) -> Result<&'q Pseudonym, ProveError> {
+) -> Result<(usize, &'q Pseudonym), ProveError> {
     query
         .option_items(plan.option)
-        .find_map(|(_, item)| match &item.function {
-            Function::Pseudonym(p) => Some(p),
+        .find_map(|(index, item)| match &item.function {
+            Function::Pseudonym(p) => Some((index, p)),
             Function::AgeCheck(_) => None,
         })
         .ok_or(ProveError::NotUsable(PairRefusal::Unsupported(
@@ -657,17 +357,18 @@ impl Prepared {
         let signature: [u8; 64] = device_signature
             .try_into()
             .map_err(|_| HostError::SignatureLength)?;
-        if !es256_verifies(&self.device_key, &self.data_to_sign, &signature) {
+        let device_key = self.attestation.credential().mdoc().device_key();
+        if !es256_verifies(device_key, &self.data_to_sign, &signature) {
             return Err(ProveError::Rejected(vec![ZkpError::Credential(
                 CredentialCode::DeviceBinding,
             )]));
         }
-        Ok(ProofJob {
-            statement: self.statement.clone(),
-            issuer_signed: self.issuer_signed.clone(),
-            secret_seed: self.secret_seed.clone(),
-            device_signature: signature,
-        })
+        Ok(ProofJob::new(
+            self.statement.clone(),
+            self.attestation.clone(),
+            self.seed.clone(),
+            signature,
+        ))
     }
 
     /// The presentation of the prover's output (`zkp_req`, Section 4, and the proof backends'
