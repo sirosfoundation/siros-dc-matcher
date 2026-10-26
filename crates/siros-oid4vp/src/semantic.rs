@@ -129,6 +129,24 @@ impl SemanticIdentifier {
         Ok(Self(text.to_owned()))
     }
 
+    /// The semantics identifier `text` a host states without its certificate: a natural
+    /// person's when its type reference is one, else a legal person's.
+    ///
+    /// # Errors
+    ///
+    /// [`SemanticIdError`]: the first part of the structure `text` breaks.
+    pub fn parse_stated(text: &str) -> Result<Self, SemanticIdError> {
+        let natural = text
+            .get(..3)
+            .is_some_and(|reference| NATURAL_TYPES.contains(&reference));
+        let person = if natural {
+            Person::Natural
+        } else {
+            Person::Legal
+        };
+        Self::parse(text, person)
+    }
+
     /// The identifier.
     #[must_use]
     pub fn as_str(&self) -> &str {

@@ -1275,6 +1275,7 @@ dependencies = [
  "serde_bytes",
  "serde_json",
  "siros-codec",
+ "siros-oid4vp",
  "siros-zkp-backend-longfellow",
  "siros-zkp-backend-vega",
  "siros-zkp-req",

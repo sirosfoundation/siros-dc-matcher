@@ -14,6 +14,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 siros-codec = { workspace = true }
+siros-oid4vp = { workspace = true }
 siros-zkp-req = { workspace = true }
 siros-zkp-req-nym-auth = { workspace = true }
 siros-zkp-backend-longfellow = { workspace = true }

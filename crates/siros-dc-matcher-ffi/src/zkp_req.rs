@@ -14,7 +14,7 @@ use std::sync::Arc;
 use serde_json::Value;
 use siros_codec::cbor::Value as Cbor;
 use siros_codec::date::Date;
-use siros_oid4vp::{ec_jwk_thumbprint, ClientId, Person, SemanticIdError, SemanticIdentifier};
+use siros_oid4vp::{ec_jwk_thumbprint, ClientId, SemanticIdentifier};
 use siros_zkp_req::{Candidate, ErrorCode, Match, ZkpPresentation};
 use siros_zkp_req_nym_auth::mdoc::StoredCredential;
 use siros_zkp_req_nym_auth::outcome::ZkpError;
@@ -406,7 +406,10 @@ pub fn zkp_req_session(
     let verifier_id = match verifier_id {
         FfiVerifierIdForm::Semantic {
             semantic_identifier,
-        } => VerifierId::semantic(&semantic(&semantic_identifier)?),
+        } => VerifierId::semantic(
+            &SemanticIdentifier::parse_stated(&semantic_identifier)
+                .map_err(|e| invalid(e.code()))?,
+        ),
         FfiVerifierIdForm::X509SanDns {
             registration_names_intermediary,
         } => {
@@ -423,16 +426,6 @@ pub fn zkp_req_session(
         handover,
         verifier_id,
     })))
-}
-
-/// The semantics identifier the host gives: a legal person's, or a natural person's when its
-/// type reference is a natural person's (ETSI TS 119 475, Clauses 5.1.3 and 5.1.5).
-fn semantic(text: &str) -> Result<SemanticIdentifier, ZkpReqError> {
-    match SemanticIdentifier::parse(text, Person::Legal) {
-        Err(SemanticIdError::TypeReference) => SemanticIdentifier::parse(text, Person::Natural),
-        legal => legal,
-    }
-    .map_err(|e| invalid(e.code()))
 }
 
 /// The JWK SHA-256 Thumbprint (RFC 7638) of an elliptic-curve JWK.
