@@ -1,36 +1,52 @@
 //! Phase 1: the plan of a verified request over the wallet's usable credentials, and its consent
 //! view.
 
+/// The value of the planning step `step`, or the fetch it waits for, which the enclosing
+/// function returns at once.
+macro_rules! fetched {
+    ($step:expr) => {
+        match $step {
+            siros_transaction_data::Step::Fetch(fetch) => {
+                return Ok(siros_transaction_data::Step::Fetch(fetch))
+            }
+            siros_transaction_data::Step::Done(value) => value,
+        }
+    };
+}
+
 mod digest;
 mod fetches;
+mod proof;
 mod seed;
 mod transactions;
 mod view;
 
 use rand_core::CryptoRngCore;
-use siros_codec::base64url;
 use siros_codec::date::DateTime;
-use siros_credential::{Credential, Parsed, UsableCredential};
+use siros_credential::{Credential, UsableCredential};
 use siros_display::{DisplayCache, Locale};
 use siros_oid4vp::{ErrorCode, Fetch, Submission, VerifiedRequest};
-use siros_transaction_data::{Amr, Step, TransactionDataError};
+use siros_transaction_data::{Amr, Step};
 use siros_wallet_state::{CredentialId, KeyId, PresentationRecord};
-use siros_zkp_req_nym_auth::attestation::UsableAttestation;
-use siros_zkp_req_nym_auth::outcome::ZkpError;
-use siros_zkp_req_nym_auth::presenter::{Answer as NymAnswer, ProveError};
+use siros_zkp_req_nym_auth::policy::RequestRefusal;
 use siros_zkp_req_nym_auth::request::NymAuthRequest;
 use siros_zkp_req_nym_auth::system::NymAuthSystem;
 use siros_zkp_req_nym_auth::verifier_id::VerifierIdForm;
-use zeroize::Zeroizing;
 
+use crate::display_rule::TransactionData;
 use crate::error::PresentationError;
-use crate::matching::{Asked, Matching, ProofChoice, ZkpQuery};
+use crate::matching::{Asked, Matching};
 use crate::offers::Offers;
 use transactions::{Transactions, Wallet};
 use view::Sources;
 
+pub use digest::{DigestError, PlanDigest};
 pub use fetches::Fetches;
+pub(crate) use proof::nym_answer;
+pub use proof::{OptionRefusal, Unproven};
 pub use seed::NoSeed;
+pub use transactions::EntryPosition;
+pub(crate) use transactions::{offered, Bound, MemberPosition, Offered};
 pub use view::{AdditionView, ConsentView, CredentialView, MemberView, OfferView, Shown};
 
 /// What a plan is made from. Phase 2 makes the plan again from the same input.
@@ -70,87 +86,47 @@ pub enum PlanStep<'a> {
     Ready(Box<Planned<'a>>),
 }
 
-/// The plan of a request: its offers, their consent view, and its digest.
+/// The plan of a request: its offers, and their consent view with its digest.
 pub struct Planned<'a> {
     pub(crate) input: PlanInput<'a>,
-    pub(crate) nym_auth: Option<NymAuthRequest<'a>>,
+    pub(crate) nym_auth: Result<NymAuthRequest<'a>, RequestRefusal>,
     pub(crate) answered: Wallet<'a>,
     pub(crate) transactions: Transactions<'a>,
-    pub(crate) offers: Offers,
-    pub(crate) digest: [u8; 32],
     pub(crate) view: ConsentView<'a>,
 }
 
 /// The plan of `input` (phase 1).
 ///
-/// The request's `transaction_data` entries are read at `now`. The credentials are matched
-/// (A1, A2); a nym_auth candidate answers the first option with a usable pair whose
-/// [`NymAnswer`] holds: a usable attestation at `now`, its `secret_seed` from the delivered
-/// auxiliary data, and the option's assertions (N3, N4). Of the offers (A3), those that bind
-/// every entry are kept (T4). The view shows each member's card and claim rows or verified proof
-/// statement rows, and the transactions bound to it.
+/// The request's `transaction_data` entries are read at `now`. The credentials usable at `now`
+/// are matched (A1, A2); a nym_auth candidate answers the first option with a usable pair whose
+/// answer holds: a usable attestation at `now`, its `secret_seed` from the delivered auxiliary
+/// data, and the option's assertions (N3, N4). Of the offers (A3), those that bind every entry
+/// are kept (T4). The view shows each member's card and claim rows or verified proof statement
+/// rows, and the transactions bound to it.
 ///
 /// # Errors
 ///
-/// [`PresentationError::NoOffer`] with the request's code when no offer remains, and the first
-/// transaction data or display rule the input breaks.
+/// [`PresentationError::NoOffer`] with the reason when no offer remains, and the first rule
+/// the request, its transaction data or the display breaks.
 pub fn plan<'a>(input: &PlanInput<'a>) -> Result<PlanStep<'a>, PresentationError> {
+    Ok(match planned(input)? {
+        Step::Fetch(fetch) => PlanStep::Fetch(fetch),
+        Step::Done(planned) => PlanStep::Ready(Box::new(planned)),
+    })
+}
+
+fn planned<'a>(input: &PlanInput<'a>) -> Result<Step<Planned<'a>>, PresentationError> {
     let request = input.request;
     let nym_auth = NymAuthRequest::new(request, input.verifier_id);
-    let policy = nym_auth.as_ref().map(|_| ()).map_err(|refusal| *refusal);
-    let asked = Asked::new(
-        request.dcql_query(),
-        request.dcql_query_json(),
-        request.client_metadata(),
-    );
-    let usable: Vec<UsableCredential<'a>> = input
-        .credentials
-        .iter()
-        .filter_map(|credential| UsableCredential::at(credential, input.now).ok())
-        .collect();
-    let answered = Matching::new(
-        asked,
-        &usable,
-        input.records,
-        input.systems,
-        input.now.date(),
-        policy,
-    )
-    .answer(|credential, zkp| {
-        // A credential that fails a test answers no option.
-        let (attestation, seed) = tested(credential, zkp, input.now).ok()?;
-        zkp.choices().iter().position(|choice| {
-            zkp.pair(choice)
-                .is_some_and(|pair| NymAnswer::new(pair, attestation.clone(), &seed).is_ok())
-        })
-    });
-    let transactions = match Transactions::read(request, &answered, input.fetches, input.now)? {
-        Step::Fetch(fetch) => return Ok(PlanStep::Fetch(fetch)),
-        Step::Done(transactions) => transactions,
-    };
-    let mut refused = None;
-    let offers = Offers::of(
+    let policy = nym_auth.as_ref().map(drop).map_err(|refusal| *refusal);
+    let answered = answered(input, policy)?;
+    let transactions = fetched!(Transactions::read(
+        request,
         &answered,
-        |members| match transactions.bind(&answered, members) {
-            Ok(_) => true,
-            Err(error) => {
-                if refused.is_none() {
-                    refused = Some(error);
-                }
-                false
-            }
-        },
-        &transactions.named(&answered),
-    );
-    if offers.offers().is_empty() {
-        return Err(match refused {
-            Some(error) => error,
-            None if transactions.unavailable(&answered) => {
-                PresentationError::TransactionData(TransactionDataError::CredentialUnavailable)
-            }
-            None => PresentationError::NoOffer(error_code(answered.failure())),
-        });
-    }
+        input.fetches,
+        input.now
+    )?);
+    let offers = offers(&answered, &transactions)?;
     let fetched = input.fetches.fetched();
     let sources = Sources {
         answered: &answered,
@@ -159,27 +135,80 @@ pub fn plan<'a>(input: &PlanInput<'a>) -> Result<PlanStep<'a>, PresentationError
         locales: input.locales,
         background: input.background,
         fetched: &fetched,
-        transaction_data: !request.transaction_data().is_empty(),
+        transaction_data: if request.transaction_data().is_empty() {
+            TransactionData::Absent
+        } else {
+            TransactionData::Carried
+        },
     };
-    let view = match ConsentView::build(request.verifier(), &offers, &sources)? {
-        Step::Fetch(fetch) => return Ok(PlanStep::Fetch(fetch)),
-        Step::Done(view) => view,
-    };
+    let views = fetched!(view::offer_views(&offers, &sources)?);
+    // A request that is no nym_auth request has no `verifier_id`.
     let verifier_id = nym_auth
         .as_ref()
         .ok()
-        .map(|nym_auth| nym_auth.session().verifier_id.as_str());
-    let digest = digest::digest(request, verifier_id, view.offers());
-    let view = view.with_digest(base64url::encode(&digest));
-    Ok(PlanStep::Ready(Box::new(Planned {
+        .map(|nym_auth| &nym_auth.session().verifier_id);
+    let digest = PlanDigest::of(request, verifier_id, &views);
+    let view = ConsentView::new(request.verifier(), digest, views, offers.unexamined());
+    Ok(Step::Done(Planned {
         input: *input,
-        nym_auth: nym_auth.ok(),
+        nym_auth,
         answered,
         transactions,
-        offers,
-        digest,
         view,
-    })))
+    }))
+}
+
+/// The candidates of each Credential Query of `input`'s request, over the credentials usable at
+/// `now` (C4). An unusable credential is no candidate. Each `zkp_req` candidate answers the
+/// first option its tests pass; `policy` says whether the request meets the nym_auth policy.
+fn answered<'a>(
+    input: &PlanInput<'a>,
+    policy: Result<(), RequestRefusal>,
+) -> Result<Wallet<'a>, PresentationError> {
+    let request = input.request;
+    let asked = Asked::new(
+        request.dcql_query(),
+        request.dcql_query_json(),
+        request.client_metadata(),
+    )?;
+    let usable: Vec<UsableCredential<'a>> = input
+        .credentials
+        .iter()
+        .filter_map(|credential| UsableCredential::at(credential, input.now).ok())
+        .collect();
+    let matching = Matching::new(
+        asked,
+        &usable,
+        input.records,
+        input.systems,
+        input.now.date(),
+        policy,
+    );
+    Ok(matching.answer(|credential, zkp| proof::first_answered(credential, zkp, input.now)))
+}
+
+/// The offers of `answered` whose credentials bind every entry of `transactions` (T4).
+///
+/// # Errors
+///
+/// [`PresentationError`]: the first binding refused when no offer remains, an entry whose
+/// queries no credential answers, or why the request has no offer.
+fn offers(
+    answered: &Wallet<'_>,
+    transactions: &Transactions<'_>,
+) -> Result<Offers, PresentationError> {
+    let entries = transactions.entry_queries(answered);
+    let (offers, refusal) = Offers::of(answered, &entries, |members| {
+        transactions.bind(answered, members).map(drop)
+    });
+    if !offers.offers().is_empty() {
+        return Ok(offers);
+    }
+    if let Some(refusal) = refusal {
+        return Err(refusal);
+    }
+    transactions.available(answered)?;
+    Err(answered.failure().into())
 }
 
 impl<'a> Planned<'a> {
@@ -210,67 +239,5 @@ pub fn refusal(
     code: ErrorCode,
     rng: &mut impl CryptoRngCore,
 ) -> Result<Submission, PresentationError> {
-    request
-        .error_submission(code, rng)
-        .map_err(PresentationError::Response)
-}
-
-/// The answer of `choice` by `credential` at `now`, which opens the attestation's `ssc` for
-/// this use.
-///
-/// # Errors
-///
-/// [`PresentationError`]: the attestation's failed tests, the seed, the option's failed
-/// items, or a choice of another query.
-pub(crate) fn nym_answer<'z>(
-    credential: &UsableCredential<'_>,
-    zkp: &'z ZkpQuery,
-    choice: &ProofChoice,
-    now: DateTime,
-) -> Result<NymAnswer<'z>, PresentationError> {
-    let (attestation, seed) = tested(credential, zkp, now)?;
-    let pair = zkp.pair(choice).ok_or(PresentationError::AnswerMismatch)?;
-    NymAnswer::new(pair, attestation, &seed).map_err(|e| PresentationError::Prove(e.into()))
-}
-
-/// The usable attestation of `credential`'s mdoc for `zkp` at `now`, and the `secret_seed` its
-/// issuer delivered.
-fn tested(
-    credential: &UsableCredential<'_>,
-    zkp: &ZkpQuery,
-    now: DateTime,
-) -> Result<(UsableAttestation, Zeroizing<[u8; 16]>), PresentationError> {
-    let Parsed::Mdoc(mdoc) = credential.credential().parsed() else {
-        return Err(PresentationError::AnswerMismatch);
-    };
-    // No input resolves `trusted_authorities` to anchors: a query that names authorities finds
-    // every issuer untrusted.
-    let anchors = zkp
-        .query()
-        .query()
-        .trusted_authorities
-        .as_ref()
-        .map(|_| &[][..]);
-    let attestation = UsableAttestation::of(mdoc, anchors, now).map_err(|unusable| {
-        let codes = unusable.codes();
-        if codes.is_empty() {
-            return PresentationError::AnswerMismatch;
-        }
-        let failed = codes
-            .iter()
-            .map(|&code| ZkpError::Credential(code))
-            .collect();
-        PresentationError::Prove(ProveError::Rejected(failed))
-    })?;
-    let seed = seed::delivered(credential.credential()).map_err(PresentationError::Seed)?;
-    Ok((attestation, seed))
-}
-
-/// The OpenID4VP 1.0, Section 8.5 code of a `zkp_req.md`, Section 5 code.
-fn error_code(code: siros_zkp_req::ErrorCode) -> ErrorCode {
-    match code {
-        siros_zkp_req::ErrorCode::InvalidRequest => ErrorCode::InvalidRequest,
-        siros_zkp_req::ErrorCode::VpFormatsNotSupported => ErrorCode::VpFormatsNotSupported,
-        siros_zkp_req::ErrorCode::AccessDenied => ErrorCode::AccessDenied,
-    }
+    Ok(request.error_submission(code, rng)?)
 }

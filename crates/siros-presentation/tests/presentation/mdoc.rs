@@ -70,7 +70,7 @@ fn mdoc_over_dc_api_jwt() {
             "claims": [{"path": [MDL_NS, "family_name"]}, {"path": [MDL_NS, "age_over_18"]}]}]}
     }));
     let fetches = wallet.fetches(&request);
-    let (_, response) = respond(&wallet.input(&request, &fetches));
+    let response = respond(&wallet.input(&request, &fetches));
 
     let payload = decrypt_jwe(response.submission());
     assert!(payload.get("state").is_none());

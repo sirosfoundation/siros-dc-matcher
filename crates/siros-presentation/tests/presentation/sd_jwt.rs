@@ -103,11 +103,14 @@ fn sd_jwt_over_redirect_direct_post_jwt() {
     let planned = ready(&input).unwrap();
     let offer = &planned.view().offers()[0];
     let card = &offer.members()[0].credentials()[0];
-    assert_eq!(card.entries(), [0]);
+    assert_eq!(
+        card.entries().iter().map(|e| e.value()).collect::<Vec<_>>(),
+        [0]
+    );
     assert_eq!(card.transactions().len(), 1);
     assert_eq!(offer.wallet_display(), WalletDisplay::Needed);
 
-    let (_, response) = respond(&input);
+    let response = respond(&input);
     let payload = decrypt_jwe(response.submission());
     assert_eq!(payload["state"], STATE);
     let sent = payload["vp_token"]["pid"][0].as_str().unwrap();
@@ -177,7 +180,7 @@ fn kb_jwt_aud_over_the_dc_api() {
             "meta": {"vct_values": [VCT]}, "claims": [{"path": ["given_name"]}]}]}
     }));
     let fetches = wallet.fetches(&request);
-    let (_, response) = respond(&wallet.input(&request, &fetches));
+    let response = respond(&wallet.input(&request, &fetches));
     let payload = decrypt_jwe(response.submission());
     let sent = payload["vp_token"]["pid"][0].as_str().unwrap();
     let body = sent.rsplit('~').next().unwrap().split('.').nth(1).unwrap();

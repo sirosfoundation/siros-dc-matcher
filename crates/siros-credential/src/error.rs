@@ -133,3 +133,36 @@ impl fmt::Display for ValidityError {
 }
 
 impl std::error::Error for ValidityError {}
+
+/// Why a credential gives no P-256 holder key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum HolderKeyError {
+    /// The SD-JWT VC has no `cnf`: it is bound to no key.
+    Unbound,
+    /// `cnf` has no `jwk` object (RFC 7800, Section 3.2).
+    Jwk,
+    /// The `jwk`'s `kty` is not `EC` or its `crv` not `P-256` (RFC 7518, Section 6.2.1).
+    KeyType,
+    /// The `jwk`'s `x` or `y` is not 32 bytes of base64url.
+    Coordinate,
+}
+
+impl HolderKeyError {
+    /// A stable identifier.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Unbound => "holder_key_unbound",
+            Self::Jwk => "holder_key_jwk",
+            Self::KeyType => "holder_key_type",
+            Self::Coordinate => "holder_key_coordinate",
+        }
+    }
+}
+
+impl fmt::Display for HolderKeyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.code())
+    }
+}
+
+impl std::error::Error for HolderKeyError {}

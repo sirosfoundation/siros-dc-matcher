@@ -5,13 +5,15 @@ use serde_json::{Map, Value};
 use siros_dcql::DcqlQuery;
 
 use super::signature::{strings, Metadata, UriRule, Verifier};
-use super::IntakeError;
+use super::{IntakeError, VerifierInfoRule};
 use crate::client_id::ClientId;
 use crate::fetch::HttpsUrl;
 use crate::handover::ec_jwk_thumbprint;
 use crate::jose;
 use crate::protocol::Protocol;
-use crate::verified::{Channel, ContentEncryption, Encryption, PostEncoding, VerifiedRequest};
+use crate::verified::{
+    AttestationFormat, Channel, ContentEncryption, Encryption, PostEncoding, VerifiedRequest,
+};
 
 /// The channel a request arrived on, and who sent it.
 pub(super) enum Arrival<'a> {
@@ -260,33 +262,48 @@ fn dcql_query(params: &Map<String, Value>) -> Result<(DcqlQuery, Value), IntakeE
 /// The `format` of each attestation of `verifier_info` (Section 5.1): a non-empty array of
 /// objects, each with a string `format`, a `data` object or string, and `credential_ids`, when
 /// present, a non-empty array of the ids of Credential Queries of `query`.
-fn verifier_info(value: Option<&Value>, query: &DcqlQuery) -> Result<Vec<String>, IntakeError> {
+fn verifier_info(
+    value: Option<&Value>,
+    query: &DcqlQuery,
+) -> Result<Vec<AttestationFormat>, IntakeError> {
     let Some(value) = value else {
         return Ok(Vec::new());
     };
-    let entries = value
-        .as_array()
-        .filter(|entries| !entries.is_empty())
-        .ok_or(IntakeError::VerifierInfoInvalid)?;
-    entries
+    let attestations = value.as_array().ok_or(VerifierInfoRule::NotArray)?;
+    if attestations.is_empty() {
+        return Err(VerifierInfoRule::Empty.into());
+    }
+    attestations
         .iter()
-        .map(|entry| {
-            let format = entry.get("format").and_then(Value::as_str);
-            let data = entry
-                .get("data")
-                .is_some_and(|d| d.is_object() || d.is_string());
-            let credential_ids = match entry.get("credential_ids") {
-                None => true,
-                Some(ids) => strings(ids).is_some_and(|ids| {
-                    !ids.is_empty() && ids.iter().all(|id| query.credential(id).is_some())
-                }),
-            };
-            match (entry.is_object(), format, data, credential_ids) {
-                (true, Some(format), true, true) => Ok(format.to_owned()),
-                _ => Err(IntakeError::VerifierInfoInvalid),
-            }
-        })
+        .map(|attestation| attestation_format(attestation, query).map_err(IntakeError::from))
         .collect()
+}
+
+/// The `format` of the `verifier_info` attestation `attestation`.
+fn attestation_format(
+    attestation: &Value,
+    query: &DcqlQuery,
+) -> Result<AttestationFormat, VerifierInfoRule> {
+    let attestation = attestation.as_object().ok_or(VerifierInfoRule::NotObject)?;
+    let format = attestation
+        .get("format")
+        .and_then(Value::as_str)
+        .ok_or(VerifierInfoRule::Format)?;
+    if !attestation
+        .get("data")
+        .is_some_and(|data| data.is_object() || data.is_string())
+    {
+        return Err(VerifierInfoRule::Data);
+    }
+    if let Some(ids) = attestation.get("credential_ids") {
+        let ids = strings(ids)
+            .filter(|ids| !ids.is_empty())
+            .ok_or(VerifierInfoRule::CredentialIds)?;
+        if !ids.iter().all(|id| query.credential(id).is_some()) {
+            return Err(VerifierInfoRule::CredentialIdUnknown);
+        }
+    }
+    Ok(AttestationFormat(format.to_owned()))
 }
 
 /// The key and `enc` of an encrypted response, for a JWE and for a `COSE_Encrypt` alike

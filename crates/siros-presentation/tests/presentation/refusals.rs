@@ -5,7 +5,10 @@ use p256::ecdsa::signature::Signer as _;
 use p256::ecdsa::Signature;
 use serde_json::json;
 use siros_codec::cbor::Value as Cbor;
-use siros_presentation::{Fulfilment, PresentationError, Selection, Sign, SignId};
+use siros_presentation::{
+    AdditionIndex, DigestError, Fulfilment, OfferIndex, PlanDigest, PresentationError, Selection,
+    Sign, SignId, SignatureError,
+};
 use siros_zkp_req_nym_auth::testing::{self, TestProver};
 
 use crate::verifier::{b64, redirect_unsigned, Rng, NONCE, STATE};
@@ -45,7 +48,9 @@ fn selections_and_signatures_parse_against_the_plan() {
     }));
     let fetches = wallet.fetches(&request);
     let input = wallet.input(&request, &fetches);
-    let digest = ready(&input).unwrap().view().digest().to_owned();
+    let planned = ready(&input).unwrap();
+    let digest = planned.view().digest().to_string();
+    let set = planned.view().offers()[0].additions()[0].set();
     let other = b64(&[0; 32]);
 
     // A4: (case, digest, offer, additions, refusal)
@@ -56,14 +61,21 @@ fn selections_and_signatures_parse_against_the_plan() {
         Vec<usize>,
         Option<PresentationError>,
     );
-    let selections: [Case<'_>; 6] = [
+    let selections: [Case<'_>; 7] = [
         ("the plan's offer and addition", &digest, 0, vec![0], None),
+        (
+            "a digest not of base64url",
+            "AA=A",
+            0,
+            vec![],
+            Some(PresentationError::Digest(DigestError::Encoding)),
+        ),
         (
             "a digest not of 32 bytes",
             "AAAA",
             0,
             vec![],
-            Some(PresentationError::DigestMalformed),
+            Some(PresentationError::Digest(DigestError::Length(3))),
         ),
         (
             "another plan",
@@ -77,70 +89,79 @@ fn selections_and_signatures_parse_against_the_plan() {
             &digest,
             1,
             vec![],
-            Some(PresentationError::OfferUnknown),
+            Some(PresentationError::OfferUnknown(OfferIndex::new(1))),
         ),
         (
             "an unknown addition",
             &digest,
             0,
             vec![1],
-            Some(PresentationError::AdditionUnknown),
+            Some(PresentationError::AdditionUnknown(AdditionIndex::new(1))),
         ),
         (
             "an addition twice",
             &digest,
             0,
             vec![0, 0],
-            Some(PresentationError::AdditionConflict),
+            Some(PresentationError::AdditionSetRepeated(set)),
         ),
     ];
-    let planned = ready(&input).unwrap();
     for (case, digest, offer, additions, refusal) in selections {
-        let chosen = Selection::new(digest, offer, additions, Vec::new())
-            .and_then(|selection| planned.choose(&selection, Fulfilment::WalletUi));
+        let additions = additions.into_iter().map(AdditionIndex::new).collect();
+        let chosen = PlanDigest::parse(digest)
+            .map_err(PresentationError::from)
+            .and_then(|digest| {
+                let selection =
+                    Selection::new(digest, OfferIndex::new(offer), additions, Vec::new());
+                planned.choose(&selection, Fulfilment::WalletUi).map(drop)
+            });
         assert_eq!(chosen.err(), refusal, "{case}");
     }
 
-    // A5: (case, the signatures from the honest ones, refusal)
+    // A5: (case, the signatures from the honest ones, refusal); the first effect is 0, the
+    // second 1.
     type Edit = fn(&[Sign], &mut Vec<(SignId, Vec<u8>)>);
-    let signatures: [(&str, Edit, Option<PresentationError>); 6] = [
+    let first = SignId::new(0);
+    let signatures: [(&str, Edit, Option<SignatureError>); 6] = [
         ("every signature once", |_, _| {}, None),
         (
-            "one missing",
+            "the second missing",
             |_, s| drop(s.pop()),
-            Some(PresentationError::SignatureMissing),
+            Some(SignatureError::Missing(SignId::new(1))),
         ),
         (
-            "one twice",
+            "the first twice",
             |_, s| s.push(s[0].clone()),
-            Some(PresentationError::SignatureRepeated),
+            Some(SignatureError::Repeated(first)),
         ),
         (
             "one of no effect",
-            |_, s| s.push((SignId::new(s.len()), s[0].1.clone())),
-            Some(PresentationError::SignatureUnknown),
+            |_, s| s.push((SignId::new(2), s[0].1.clone())),
+            Some(SignatureError::Unknown(SignId::new(2))),
         ),
         (
-            "one not 64 bytes",
+            "the first of 63 bytes",
             |_, s| s[0].1.truncate(63),
-            Some(PresentationError::SignatureLength),
+            Some(SignatureError::Length(first, 63)),
         ),
         (
-            "one under another key",
+            "the first under another key",
             |signs, s| {
                 let other: Signature = testing::key(0x55).sign(signs[0].input());
                 s[0].1 = other.to_bytes().to_vec();
             },
-            Some(PresentationError::SignatureInvalid),
+            Some(SignatureError::Invalid(first)),
         ),
     ];
+    let parsed = PlanDigest::parse(&digest).unwrap();
     for (case, edit, refusal) in signatures {
-        let chosen = planned
-            .choose(
-                &Selection::new(&digest, 0, vec![0], Vec::new()).unwrap(),
-                Fulfilment::WalletUi,
-            )
-            .unwrap();
+        let selection = Selection::new(
+            parsed,
+            OfferIndex::new(0),
+            vec![AdditionIndex::new(0)],
+            Vec::new(),
+        );
+        let chosen = planned.choose(&selection, Fulfilment::WalletUi).unwrap();
         let mut rng = Rng(3);
         let prepared = chosen.prepare(&mut rng).unwrap();
         assert_eq!(
@@ -151,6 +172,10 @@ fn selections_and_signatures_parse_against_the_plan() {
         let mut signed = sign_all(prepared.signs());
         edit(prepared.signs(), &mut signed);
         let response = prepared.finish(signed, &TestProver { fail: None }, &mut rng);
-        assert_eq!(response.err(), refusal, "{case}");
+        assert_eq!(
+            response.err(),
+            refusal.map(PresentationError::Signature),
+            "{case}"
+        );
     }
 }

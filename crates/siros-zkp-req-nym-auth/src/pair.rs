@@ -70,11 +70,23 @@ impl<'q> NymAuthOption<'q> {
         Ok(UsablePair {
             option: self,
             system,
-            backend: backend.to_owned(),
+            backend: ProofBackend(backend.to_owned()),
             date: d,
             bounds,
             pseudonym,
         })
+    }
+}
+
+/// A proof backend of the Verifier's `proof_backend_values` that a system runs on (`zkp_req`,
+/// Section 1.2).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ProofBackend(String);
+
+impl ProofBackend {
+    /// The proof backend identifier.
+    pub fn as_str(&self) -> &str {
+        &self.0
     }
 }
 
@@ -85,7 +97,7 @@ impl<'q> NymAuthOption<'q> {
 pub struct UsablePair<'q> {
     option: NymAuthOption<'q>,
     system: NymAuthSystem,
-    backend: String,
+    backend: ProofBackend,
     date: Date,
     bounds: Bounds,
     pseudonym: (usize, &'q Pseudonym),
@@ -103,7 +115,7 @@ impl<'q> UsablePair<'q> {
     }
 
     /// The proof backend.
-    pub fn backend(&self) -> &str {
+    pub fn backend(&self) -> &ProofBackend {
         &self.backend
     }
 

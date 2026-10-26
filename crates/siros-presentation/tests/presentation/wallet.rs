@@ -12,8 +12,8 @@ use siros_credential::Credential;
 use siros_display::{DisplayCache, Locale};
 use siros_oid4vp::{FetchResponse, VerifiedRequest};
 use siros_presentation::{
-    plan, Fetches, Fulfilment, PlanInput, PlanStep, Planned, PresentationError, Response,
-    Selection, SignId,
+    plan, AdditionIndex, Fetches, Fulfilment, OfferIndex, PlanInput, PlanStep, Planned, Position,
+    PresentationError, QueryId, Response, Selection, SignId, Subset,
 };
 use siros_transaction_data::{Amr, Factor, Inherence, Possession};
 use siros_wallet_state::{CredentialId, WalletState};
@@ -388,9 +388,17 @@ pub fn respond_to(
     additions: Vec<usize>,
     subsets: Vec<(String, Vec<usize>)>,
 ) -> Result<Response, PresentationError> {
-    let digest = ready(input)?.view().digest().to_owned();
+    let digest = *ready(input)?.view().digest();
     let planned = ready(input)?;
-    let selection = Selection::new(&digest, offer, additions, subsets)?;
+    let subsets = subsets
+        .into_iter()
+        .map(|(query, positions)| {
+            let positions = positions.into_iter().map(Position::new).collect();
+            Subset::new(QueryId::parse(&query).unwrap(), positions)
+        })
+        .collect();
+    let additions = additions.into_iter().map(AdditionIndex::new).collect();
+    let selection = Selection::new(digest, OfferIndex::new(offer), additions, subsets);
     let chosen = planned.choose(&selection, Fulfilment::WalletUi)?;
     let mut rng = Rng(77);
     let prepared = chosen.prepare(&mut rng)?;
@@ -400,22 +408,17 @@ pub fn respond_to(
 
 /// Both phases for the first offer of the plan of `input`: the plan, the plan again, the
 /// selection on the plan's digest, the signatures and the response.
-pub fn respond(input: &PlanInput<'_>) -> (Vec<u8>, Response) {
-    let digest = ready(input).unwrap().view().digest().to_owned();
+pub fn respond(input: &PlanInput<'_>) -> Response {
+    let digest = *ready(input).unwrap().view().digest();
     let planned = ready(input).unwrap();
-    let chosen = planned
-        .choose(
-            &Selection::new(&digest, 0, Vec::new(), Vec::new()).unwrap(),
-            Fulfilment::WalletUi,
-        )
-        .unwrap();
+    let selection = Selection::new(digest, OfferIndex::new(0), Vec::new(), Vec::new());
+    let chosen = planned.choose(&selection, Fulfilment::WalletUi).unwrap();
     let mut rng = Rng(77);
     let prepared = chosen.prepare(&mut rng).unwrap();
     let signatures = sign_all(prepared.signs());
-    let response = prepared
+    prepared
         .finish(signatures, &TestProver { fail: None }, &mut rng)
-        .unwrap();
-    (base64url::decode(&digest).unwrap(), response)
+        .unwrap()
 }
 
 /// An ES256 signature `r ‖ s` verifies `message` under the holder's key.
@@ -449,7 +452,7 @@ pub fn view_texts(view: &siros_presentation::ConsentView<'_>) -> Vec<String> {
         value(claim.value(), out);
     }
     fn member(member: &MemberView, out: &mut Vec<String>) {
-        out.push(member.query_id().to_owned());
+        out.push(member.query_id().as_str().to_owned());
         for credential in member.credentials() {
             let card = credential.card();
             out.push(card.title().as_str().to_owned());
@@ -478,7 +481,7 @@ pub fn view_texts(view: &siros_presentation::ConsentView<'_>) -> Vec<String> {
     }
     let mut out = vec![
         view.verifier().display().to_owned(),
-        view.digest().to_owned(),
+        view.digest().to_string(),
     ];
     for offer in view.offers() {
         out.extend(offer.purpose().map(str::to_owned));

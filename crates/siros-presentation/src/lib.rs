@@ -4,10 +4,10 @@
 //!
 //! | Requirement | API |
 //! | --- | --- |
-//! | A1: the format table, `meta`, holder binding, usable credentials, no undisclosable nym_auth attribute | [`Matching::new`] over [`MatchCredential`]s |
+//! | A1: the format table, `meta`, holder binding, usable credentials, no undisclosable nym_auth attribute; why a request has no offer | [`Matching::new`] over [`MatchCredential`]s, [`Failure`] |
 //! | A2: `zkp_req` matching as one selection, then the usable attestation and the opened seed | [`ZkpQuery`], [`Matching::answer`]; the wallet's tests in [`plan`] |
 //! | A3: offers, optional additions (one option per set), optional sets joined for a transaction entry, all-optional sets, the subset of a `multiple` member | [`Offers::of`], [`Selection`] |
-//! | A4: the digest of what the user consents to; the selection parsed against the recomputed plan | [`ConsentView::digest`], [`Selection`], [`Planned::choose`] gives a [`Chosen`] |
+//! | A4: the digest of what the user consents to; the selection parsed against the recomputed plan | [`ConsentView::digest`], [`PlanDigest::parse`], [`Selection`], [`Planned::choose`] gives a [`Chosen`] |
 //! | A5: every signing input a `Sign` effect; the signatures parsed against them, each verifying under its key | [`Chosen::prepare`] gives [`Sign`]s, [`Prepared::finish`] |
 //! | A6: the SD-JWT `aud` | [`Chosen::prepare`] |
 //! | A7: the SessionTranscript of the request's `Handover` | [`Chosen::prepare`] |
@@ -36,15 +36,24 @@
 
 mod credential;
 mod display_rule;
+mod ids;
 mod matching;
 mod offers;
 
-pub use credential::MatchCredential;
-pub use display_rule::{DisplayFacts, WalletDisplay};
-pub use matching::{
-    Answer, Answered, Answers, Asked, Candidate, Claims, Matching, ProofChoice, ZkpQuery,
+pub use credential::{KeyHolding, MatchCredential};
+pub use display_rule::{Choice, DisplayFacts, Presentability, TransactionData, WalletDisplay};
+pub use ids::{
+    AdditionIndex, CandidateIndex, OfferIndex, OptionIndex, Position, QueryId, QueryIdError,
+    QueryIndex, SetIndex,
 };
-pub use offers::{Addition, Member, Offer, Offers, MAX_ADDITIONS, MAX_EXAMINED, MAX_OFFERS};
+pub use matching::{
+    Answer, Answered, Answers, Asked, AskedError, Candidate, ChoiceError, Claims, Excluded,
+    Failure, HolderBinding, Matching, ProofChoice, QueryRefusal, ZkpQuery, ZkpRefusal,
+};
+pub use offers::{
+    Addition, EntryQueries, Member, Offer, Offers, SubsetError, MAX_ADDITIONS, MAX_EXAMINED,
+    MAX_OFFERS,
+};
 
 #[cfg(feature = "wallet")]
 mod error;
@@ -54,11 +63,14 @@ mod plan;
 mod respond;
 
 #[cfg(feature = "wallet")]
-pub use error::PresentationError;
+pub use error::{Inconsistency, PresentationError};
 #[cfg(feature = "wallet")]
 pub use plan::{
-    plan, refusal, AdditionView, ConsentView, CredentialView, Fetches, MemberView, NoSeed,
-    OfferView, PlanInput, PlanStep, Planned, Shown,
+    plan, refusal, AdditionView, ConsentView, CredentialView, DigestError, EntryPosition, Fetches,
+    MemberView, NoSeed, OfferView, OptionRefusal, PlanDigest, PlanInput, PlanStep, Planned, Shown,
+    Unproven,
 };
 #[cfg(feature = "wallet")]
-pub use respond::{Chosen, Fulfilment, Prepared, Response, Selection, Sign, SignId};
+pub use respond::{
+    Chosen, Fulfilment, Prepared, Response, Selection, Sign, SignId, SignatureError, Subset,
+};

@@ -1,100 +1,67 @@
 //! The signing inputs of a chosen offer (A5, A6, A7): one `Sign` effect per signature its
 //! presentations need.
 
+use itertools::Itertools;
 use rand_core::CryptoRngCore;
-use siros_credential::{Parsed, UsableCredential};
+use serde_json::Value;
+use siros_credential::{Credential, Parsed, UsableCredential};
 use siros_dcql::mdoc_components;
-use siros_mdoc::{es256_verifies, Disclosure, ElementId, P256Key};
+use siros_mdoc::{ElementId, Mdoc};
 use siros_oid4vp::{Presentation, VerifiedRequest};
-use siros_sdjwt::KeyBinding;
-use siros_transaction_data::{Jti, KbJwtInputs};
+use siros_sdjwt::SdJwt;
+use siros_transaction_data::{Amr, Jti, KbJwtInputs, MemberBinding};
 use siros_wallet_state::{CredentialId, KeyId};
 use siros_zkp_req_nym_auth::presenter::Prepared as NymPrepared;
 
+use super::forms::{DeviceResponse, Form};
 use super::selection::Chosen;
-use crate::error::PresentationError;
-use crate::matching::{Answer, Claims, ProofChoice};
-use crate::plan::nym_answer;
-
-/// The identifier of a [`Sign`] effect, which its signature names.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct SignId(usize);
-
-impl SignId {
-    /// The identifier `id`, as the host returns it.
-    pub fn new(id: usize) -> Self {
-        Self(id)
-    }
-
-    /// The number.
-    pub fn value(self) -> usize {
-        self.0
-    }
-}
-
-/// An ES256 signature the host makes (H3): of exactly [`Sign::input`], with the key pair
-/// [`Sign::key`], returned as `r ‖ s`. It verifies under the credential's holder key.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Sign {
-    id: SignId,
-    key: KeyId,
-    input: Vec<u8>,
-    holder: P256Key,
-}
-
-impl Sign {
-    /// The identifier the signature names.
-    pub fn id(&self) -> SignId {
-        self.id
-    }
-
-    /// The key pair that signs.
-    pub fn key(&self) -> &KeyId {
-        &self.key
-    }
-
-    /// The bytes it signs.
-    pub fn input(&self) -> &[u8] {
-        &self.input
-    }
-
-    /// The signature `signature`, `r ‖ s`, when it verifies under the holder key: the SD-JWT
-    /// VC's `cnf.jwk`, or the mdoc's `deviceKey` (A5).
-    pub(crate) fn verified(&self, signature: Vec<u8>) -> Result<[u8; 64], PresentationError> {
-        let signature: [u8; 64] = signature
-            .try_into()
-            .map_err(|_| PresentationError::SignatureLength)?;
-        if es256_verifies(&self.holder, &self.input, &signature) {
-            Ok(signature)
-        } else {
-            Err(PresentationError::SignatureInvalid)
-        }
-    }
-}
+use super::sign::{key_id, Sign, SignId, SigningInput};
+use crate::error::{Inconsistency, PresentationError};
+use crate::ids::QueryId;
+use crate::matching::{Answer, Claims, HolderBinding, ProofChoice};
+use crate::plan::{nym_answer, Bound, Offered};
 
 /// A chosen offer whose presentations wait for their signatures.
 pub struct Prepared<'p, 'a> {
     pub(crate) chosen: Chosen<'p, 'a>,
-    pub(crate) members: Vec<Pending<'p>>,
+    pub(crate) members: Vec<PendingMember<'p>>,
     pub(crate) signs: Vec<Sign>,
 }
 
-/// A member's presentation, complete or waiting for the signature of its `Sign` effect.
-pub(crate) struct Pending<'p> {
-    pub(crate) query_id: &'p str,
-    pub(crate) credential: CredentialId,
-    pub(crate) form: Form<'p>,
+/// A member's presentations, complete or waiting for the signatures of their `Sign` effects.
+pub(crate) struct PendingMember<'p> {
+    pub(crate) query_id: QueryId,
+    pub(crate) credentials: Vec<(CredentialId, Form<'p>)>,
 }
 
-pub(crate) enum Form<'p> {
-    /// An SD-JWT VC without key binding.
-    Ready(Presentation),
-    /// An SD-JWT VC with its KB-JWT.
-    KeyBinding(KeyBinding, SignId),
-    /// An mdoc's `DeviceResponse`.
-    Mdoc(Disclosure<'p>, SignId),
-    /// A nym_auth proof, whose device signature the prover's job needs.
-    Proof(Box<NymPrepared>, SignId),
+/// The audience of a response (A6): `origin:` and the calling origin over the Digital
+/// Credentials API, the Client Identifier with its prefix over redirects, signed requests
+/// included (A.4).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Audience(String);
+
+impl Audience {
+    /// The audience of `request`.
+    ///
+    /// # Errors
+    ///
+    /// [`PresentationError::AudienceMissing`] for a request without an origin or a Client
+    /// Identifier.
+    pub(crate) fn of(request: &VerifiedRequest) -> Result<Self, PresentationError> {
+        match (request.origin(), request.verifier().client_id()) {
+            (Some(origin), _) => Ok(Self(format!("origin:{origin}"))),
+            (None, Some(client_id)) => Ok(Self(client_id.as_str().to_owned())),
+            (None, None) => Err(PresentationError::AudienceMissing),
+        }
+    }
+
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub(crate) fn into_string(self) -> String {
+        self.0
+    }
 }
 
 impl<'p, 'a> Chosen<'p, 'a> {
@@ -109,9 +76,7 @@ impl<'p, 'a> Chosen<'p, 'a> {
     /// - A nym_auth proof's device key signs the data nym_auth gives for the request's session
     ///   (N2), from a usable attestation and a seed opened again for this use (N3, N4).
     ///
-    /// The entries bind to the offer's chosen credentials (T4). `aud` is the Client Identifier
-    /// with its prefix over redirects, and `origin:` with the calling origin over the Digital
-    /// Credentials API, signed requests included (A.4).
+    /// The entries bind to the offer's chosen credentials (T4).
     ///
     /// # Errors
     ///
@@ -122,92 +87,20 @@ impl<'p, 'a> Chosen<'p, 'a> {
         self,
         rng: &mut impl CryptoRngCore,
     ) -> Result<Prepared<'p, 'a>, PresentationError> {
-        let mut members = Vec::new();
-        let mut signs = Vec::new();
         let planned = self.planned;
         let bindings = planned
             .transactions
             .bind(&planned.answered, &self.members)?;
-        // The offer's members by their position, to which entries bind, then the additions'.
-        let chosen = self
-            .members
+        let offer = crate::plan::offered(&planned.answered, &self.members)?;
+        let added = crate::plan::offered(&planned.answered, &self.added)?;
+        let mut signs = Vec::new();
+        // Entries bind to the offer's members; the additions' carry none.
+        let members = offer
             .iter()
-            .enumerate()
-            .map(|(at, member)| (Some(at), member))
-            .chain(self.added.iter().map(|member| (None, member)));
-        for (at, member) in chosen {
-            let answers = planned
-                .answered
-                .queries()
-                .get(member.query())
-                .ok_or(PresentationError::AnswerMismatch)?;
-            for &index in member.candidates() {
-                let candidate = answers
-                    .candidates()
-                    .get(index)
-                    .ok_or(PresentationError::AnswerMismatch)?;
-                let credential: &'p UsableCredential<'a> = candidate.credential();
-                let id = SignId(signs.len());
-                let key = || {
-                    credential
-                        .credential()
-                        .key_id()
-                        .cloned()
-                        .ok_or(PresentationError::KeyMissing)
-                };
-                let form = match candidate.answer() {
-                    Answer::Claims(claims) => {
-                        let bound = bindings
-                            .iter()
-                            .find(|(key, _)| at.is_some_and(|at| *key == (at, index)));
-                        let extra = match bound {
-                            None => Vec::new(),
-                            Some((_, binding)) => {
-                                let kid = key()?;
-                                let mut jti = [0u8; 16];
-                                rng.fill_bytes(&mut jti);
-                                let inputs = KbJwtInputs::new(
-                                    Jti::new(jti),
-                                    planned.input.request.response_mode(),
-                                    self.amr(&kid)?,
-                                );
-                                binding.kb_jwt_claims(&inputs)
-                            }
-                        };
-                        self.claims(credential, claims, &extra, id)?
-                    }
-                    Answer::Proof(choice) => {
-                        let zkp = answers.zkp().ok_or(PresentationError::AnswerMismatch)?;
-                        self.proof(credential, zkp, choice, id)?
-                    }
-                };
-                let input = match &form {
-                    Form::Ready(_) => None,
-                    Form::KeyBinding(kb, _) => Some(kb.signing_input().to_vec()),
-                    Form::Mdoc(disclosure, _) => Some(
-                        disclosure
-                            .signing_input(&planned.input.request.handover().session_transcript()),
-                    ),
-                    Form::Proof(prepared, _) => Some(prepared.data_to_sign().to_vec()),
-                };
-                if let Some(input) = input {
-                    signs.push(Sign {
-                        id,
-                        key: key()?,
-                        input,
-                        holder: credential
-                            .credential()
-                            .holder_key()
-                            .ok_or(PresentationError::KeyMissing)?,
-                    });
-                }
-                members.push(Pending {
-                    query_id: &answers.query().id,
-                    credential: credential.credential().entry().credential_id(),
-                    form,
-                });
-            }
-        }
+            .map(|member| (member, bindings.as_slice()))
+            .chain(added.iter().map(|member| (member, &[][..])))
+            .map(|(member, bindings)| self.pending(member, bindings, &mut signs, rng))
+            .try_collect()?;
         Ok(Prepared {
             chosen: self,
             members,
@@ -215,67 +108,145 @@ impl<'p, 'a> Chosen<'p, 'a> {
         })
     }
 
+    /// The presentations of `member`'s credentials, with `bindings`' entries, each adding to
+    /// `signs` the effect of the signature it needs.
+    fn pending(
+        &self,
+        member: &Offered<'p, 'a>,
+        bindings: &[(Bound, MemberBinding<'_, '_>)],
+        signs: &mut Vec<Sign>,
+        rng: &mut impl CryptoRngCore,
+    ) -> Result<PendingMember<'p>, PresentationError> {
+        let credentials = member
+            .candidates
+            .iter()
+            .map(|&(index, candidate)| {
+                let credential: &'p Credential = candidate.credential().credential();
+                let id = SignId::new(signs.len());
+                let binding = bindings
+                    .iter()
+                    .find(|(bound, _)| *bound == member.bound(index))
+                    .map(|(_, binding)| binding);
+                let form = match candidate.answer() {
+                    Answer::Claims(claims) => {
+                        let extra = self.transaction_claims(credential, binding, rng)?;
+                        self.claims(credential, claims, &extra, id)?
+                    }
+                    Answer::Proof(choice) => {
+                        self.proof(member, candidate.credential(), choice, id)?
+                    }
+                };
+                if let Form::Unsigned(unsigned, _) = &form {
+                    signs.push(Sign::new(id, credential, unsigned.signing_input())?);
+                }
+                Ok::<_, PresentationError>((credential.entry().credential_id(), form))
+            })
+            .try_collect()?;
+        Ok(PendingMember {
+            query_id: member.answers.id().clone(),
+            credentials,
+        })
+    }
+
+    /// The KB-JWT claims of the entries `binding` binds to `credential` (T3), with `jti` drawn
+    /// from `rng`; none without entries.
+    fn transaction_claims(
+        &self,
+        credential: &Credential,
+        binding: Option<&MemberBinding<'_, '_>>,
+        rng: &mut impl CryptoRngCore,
+    ) -> Result<Vec<(String, Value)>, PresentationError> {
+        let Some(binding) = binding else {
+            return Ok(Vec::new());
+        };
+        let mut jti = [0u8; 16];
+        rng.fill_bytes(&mut jti);
+        let inputs = KbJwtInputs::new(
+            Jti::new(jti),
+            self.planned.input.request.response_mode(),
+            self.amr(&key_id(credential)?)?,
+        );
+        Ok(binding.kb_jwt_claims(&inputs))
+    }
+
     /// The factors the host reported for the key `kid`.
-    fn amr(&self, kid: &KeyId) -> Result<siros_transaction_data::Amr, PresentationError> {
+    fn amr(&self, kid: &KeyId) -> Result<Amr, PresentationError> {
         self.planned
             .input
             .key_factors
             .iter()
             .find(|(key, _)| key == kid)
             .map(|(_, amr)| amr.clone())
-            .ok_or(PresentationError::KeyFactorsMissing)
+            .ok_or_else(|| PresentationError::KeyFactorsMissing(kid.clone()))
     }
 
+    /// The presentation of `claims` of `credential`, the KB-JWT carrying `extra`.
     fn claims(
         &self,
-        credential: &'p UsableCredential<'a>,
+        credential: &'p Credential,
         claims: &Claims,
-        extra: &[(String, serde_json::Value)],
+        extra: &[(String, Value)],
         id: SignId,
     ) -> Result<Form<'p>, PresentationError> {
-        let request = self.planned.input.request;
-        match credential.credential().parsed() {
-            Parsed::SdJwtVc(sd_jwt) => {
-                let presentation = sd_jwt
-                    .select(claims.pointers())
-                    .map_err(PresentationError::Pointer)?;
-                if !claims.holder_binding() {
-                    return Ok(Form::Ready(Presentation::text(
-                        presentation.as_str().to_owned(),
-                    )));
-                }
-                let iat = u64::try_from(self.planned.input.now.unix())
-                    .map_err(|_| PresentationError::Time)?;
-                let binding = presentation
-                    .key_binding(iat, &audience(request)?, request.nonce(), extra)
-                    .map_err(PresentationError::KeyBinding)?;
-                Ok(Form::KeyBinding(binding, id))
-            }
-            Parsed::Mdoc(mdoc) => {
-                let elements = claims
-                    .pointers()
-                    .iter()
-                    .map(|pointer| {
-                        let (name_space, identifier) = mdoc_components(pointer.components())
-                            .map_err(PresentationError::Pointer)?;
-                        Ok(ElementId {
-                            name_space,
-                            identifier,
-                        })
-                    })
-                    .collect::<Result<Vec<_>, PresentationError>>()?;
-                let disclosure = mdoc
-                    .disclose(&elements, Vec::new())
-                    .map_err(PresentationError::Disclosure)?;
-                Ok(Form::Mdoc(disclosure, id))
-            }
+        match credential.parsed() {
+            Parsed::SdJwtVc(sd_jwt) => self.sd_jwt(sd_jwt, claims, extra, id),
+            Parsed::Mdoc(mdoc) => self.mdoc(mdoc, claims, id),
         }
     }
 
+    /// The SD-JWT VC's selected disclosures (S3), and its KB-JWT when the query requires holder
+    /// binding.
+    fn sd_jwt(
+        &self,
+        sd_jwt: &SdJwt,
+        claims: &Claims,
+        extra: &[(String, Value)],
+        id: SignId,
+    ) -> Result<Form<'p>, PresentationError> {
+        let presentation = sd_jwt.select(claims.pointers())?;
+        if claims.holder_binding() == HolderBinding::Optional {
+            return Ok(Form::Ready(Presentation::text(
+                presentation.as_str().to_owned(),
+            )));
+        }
+        let input = self.planned.input;
+        let iat = u64::try_from(input.now.unix()).map_err(|_| PresentationError::Time)?;
+        let audience = Audience::of(input.request)?;
+        let binding =
+            presentation.key_binding(iat, audience.as_str(), input.request.nonce(), extra)?;
+        Ok(Form::unsigned(binding, id))
+    }
+
+    /// The mdoc's selected elements, and the DeviceAuthentication its device key signs over the
+    /// SessionTranscript of the request's `Handover` (A7).
+    fn mdoc(
+        &self,
+        mdoc: &'p Mdoc,
+        claims: &Claims,
+        id: SignId,
+    ) -> Result<Form<'p>, PresentationError> {
+        let elements: Vec<ElementId> = claims
+            .pointers()
+            .iter()
+            .map(|pointer| {
+                let (name_space, identifier) = mdoc_components(pointer.components())?;
+                Ok::<_, PresentationError>(ElementId {
+                    name_space,
+                    identifier,
+                })
+            })
+            .try_collect()?;
+        let disclosure = mdoc.disclose(&elements, Vec::new())?;
+        let transcript = self.planned.input.request.handover().session_transcript();
+        let input = SigningInput::new(disclosure.signing_input(&transcript));
+        Ok(Form::unsigned(DeviceResponse { disclosure, input }, id))
+    }
+
+    /// The nym_auth statement of `choice` by `credential` in the request's session.
     fn proof(
         &self,
+        member: &Offered<'p, 'a>,
         credential: &UsableCredential<'_>,
-        zkp: &crate::matching::ZkpQuery,
         choice: &ProofChoice,
         id: SignId,
     ) -> Result<Form<'p>, PresentationError> {
@@ -283,24 +254,13 @@ impl<'p, 'a> Chosen<'p, 'a> {
             .planned
             .nym_auth
             .as_ref()
-            .ok_or(PresentationError::AnswerMismatch)?;
+            .map_err(|refusal| Inconsistency::NymAuthRequest(*refusal))?;
+        let zkp = member
+            .answers
+            .zkp()
+            .ok_or(Inconsistency::ZkpQuery(member.query))?;
         let answer = nym_answer(credential, zkp, choice, self.planned.input.now)?;
-        let kid = credential
-            .credential()
-            .key_id()
-            .ok_or(PresentationError::KeyMissing)?;
-        let prepared =
-            NymPrepared::new(answer, nym_auth, kid.as_str()).map_err(PresentationError::Prove)?;
-        Ok(Form::Proof(Box::new(prepared), id))
-    }
-}
-
-/// The audience of the response (A6): `origin:` and the calling origin over the Digital
-/// Credentials API, the Client Identifier with its prefix over redirects.
-pub(crate) fn audience(request: &VerifiedRequest) -> Result<String, PresentationError> {
-    match (request.origin(), request.verifier().client_id()) {
-        (Some(origin), _) => Ok(format!("origin:{origin}")),
-        (None, Some(client_id)) => Ok(client_id.as_str().to_owned()),
-        (None, None) => Err(PresentationError::AudienceMissing),
+        let prepared = NymPrepared::new(answer, nym_auth, &key_id(credential.credential())?)?;
+        Ok(Form::unsigned(prepared, id))
     }
 }

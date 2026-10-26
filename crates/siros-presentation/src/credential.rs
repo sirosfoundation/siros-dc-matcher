@@ -13,9 +13,8 @@ pub trait MatchCredential: Instance {
     /// The type: the SD-JWT VC's `vct`, or the mdoc's `docType`.
     fn credential_type(&self) -> &str;
 
-    /// Whether a presentation of the credential proves holder binding: the credential is bound
-    /// to a key, and the wallet holds that key.
-    fn holds_key(&self) -> bool;
+    /// Whether a presentation of the credential proves holder binding.
+    fn key_holding(&self) -> KeyHolding;
 
     /// The values of the claims `path` selects, as JSON, for the comparison with `values`
     /// (OpenID4VP 1.0, Section 6.3).
@@ -24,6 +23,15 @@ pub trait MatchCredential: Instance {
     ///
     /// [`PathError`] when the pointer does not fit the credential or selects nothing.
     fn claim_values(&self, path: &[PathComponent]) -> Result<Vec<Value>, PathError>;
+}
+
+/// Whether the wallet holds the key a credential is bound to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum KeyHolding {
+    /// The credential is bound to a key the wallet holds: a presentation proves holder binding.
+    Held,
+    /// The credential is bound to no key, or to one the wallet does not hold.
+    NotHeld,
 }
 
 impl MatchCredential for UsableCredential<'_> {
@@ -35,10 +43,13 @@ impl MatchCredential for UsableCredential<'_> {
         self.credential().credential_type()
     }
 
-    /// An SD-JWT VC with a P-256 `cnf.jwk`, or an mdoc, whose entry names its key pair.
-    fn holds_key(&self) -> bool {
+    /// Held for an SD-JWT VC with a P-256 `cnf.jwk`, or an mdoc, whose entry names its key pair.
+    fn key_holding(&self) -> KeyHolding {
         let credential = self.credential();
-        credential.key_id().is_some() && credential.holder_key().is_some()
+        match (credential.key_id(), credential.holder_key()) {
+            (Some(_), Ok(_)) => KeyHolding::Held,
+            _ => KeyHolding::NotHeld,
+        }
     }
 
     fn claim_values(&self, path: &[PathComponent]) -> Result<Vec<Value>, PathError> {

@@ -1,7 +1,6 @@
 //! The consent view: the verifier, and per offer its purposes, its credentials with their
 //! claim or proof statement rows, its additions and its transactions.
 
-use siros_credential::UsableCredential;
 use siros_dcql::Dropped;
 use siros_display::proof::{verified_rows, ProofRow};
 use siros_display::{purpose, Card, ClaimRow, DisplayCache, Locale};
@@ -9,22 +8,25 @@ use siros_oid4vp::VerifierView;
 use siros_transaction_data::{Fetched, MemberBinding, Step, TransactionView};
 use siros_wallet_state::CredentialId;
 
-use super::transactions::{Bound, Transactions, Wallet};
-use crate::display_rule::{DisplayFacts, WalletDisplay};
-use crate::error::PresentationError;
-use crate::matching::{Answer, Answers, Candidate};
-use crate::offers::{Member, Offer, Offers};
+use super::digest::PlanDigest;
+use super::transactions::{offered, Bound, EntryPosition, Offered, Transactions, Wallet};
+use crate::display_rule::{Choice, DisplayFacts, Presentability, TransactionData, WalletDisplay};
+use crate::error::{Inconsistency, PresentationError};
+use crate::ids::{QueryId, SetIndex};
+use crate::matching::{Answer, Candidate};
+use crate::offers::{Addition, Member, Offer, Offers};
 
 /// What the user consents to. It holds no delivered secret and no undisclosable attribute.
 pub struct ConsentView<'a> {
     verifier: VerifierView<'a>,
-    digest: String,
+    digest: PlanDigest,
     offers: Vec<OfferView>,
     unexamined: Dropped,
 }
 
 /// An offer as the user sees it.
 pub struct OfferView {
+    offer: Offer,
     purpose: Option<String>,
     members: Vec<MemberView>,
     additions: Vec<AdditionView>,
@@ -34,7 +36,7 @@ pub struct OfferView {
 
 /// An addition as the user sees it.
 pub struct AdditionView {
-    set: usize,
+    set: SetIndex,
     purpose: Option<String>,
     members: Vec<MemberView>,
 }
@@ -42,7 +44,7 @@ pub struct AdditionView {
 /// A member of an offer as the user sees it: its Credential Query and its credentials, one
 /// unless the query sets `multiple`.
 pub struct MemberView {
-    query_id: String,
+    query_id: QueryId,
     credentials: Vec<CredentialView>,
 }
 
@@ -52,7 +54,7 @@ pub struct CredentialView {
     answer: Answer,
     card: Card,
     shown: Shown,
-    entries: Vec<usize>,
+    entries: Vec<EntryPosition>,
     transactions: Vec<TransactionView>,
 }
 
@@ -65,13 +67,29 @@ pub enum Shown {
 }
 
 impl<'a> ConsentView<'a> {
+    /// The view of the request of `verifier`, whose offers show as `offers`, with the plan's
+    /// `digest`.
+    pub(crate) fn new(
+        verifier: VerifierView<'a>,
+        digest: PlanDigest,
+        offers: Vec<OfferView>,
+        unexamined: Dropped,
+    ) -> Self {
+        Self {
+            verifier,
+            digest,
+            offers,
+            unexamined,
+        }
+    }
+
     /// Who asks.
     pub fn verifier(&self) -> VerifierView<'a> {
         self.verifier
     }
 
-    /// The plan's digest, unpadded base64url, which the selection returns (A4).
-    pub fn digest(&self) -> &str {
+    /// The plan's digest, which the selection returns (A4).
+    pub fn digest(&self) -> &PlanDigest {
         &self.digest
     }
 
@@ -87,6 +105,11 @@ impl<'a> ConsentView<'a> {
 }
 
 impl OfferView {
+    /// The offer of the plan the view shows.
+    pub(crate) fn offer(&self) -> &Offer {
+        &self.offer
+    }
+
     /// The purposes of the credential sets the offer satisfies, as one line (Section 6.2).
     pub fn purpose(&self) -> Option<&str> {
         self.purpose.as_deref()
@@ -114,8 +137,8 @@ impl OfferView {
 }
 
 impl AdditionView {
-    /// The index of the addition's credential set in `credential_sets`.
-    pub(super) fn set(&self) -> usize {
+    /// The position of the addition's credential set in `credential_sets`.
+    pub fn set(&self) -> SetIndex {
         self.set
     }
 
@@ -132,7 +155,7 @@ impl AdditionView {
 
 impl MemberView {
     /// The Credential Query the member answers.
-    pub fn query_id(&self) -> &str {
+    pub fn query_id(&self) -> &QueryId {
         &self.query_id
     }
 
@@ -145,12 +168,12 @@ impl MemberView {
 
 impl CredentialView {
     /// The instance presented.
-    pub(super) fn credential_id(&self) -> CredentialId {
+    pub(crate) fn credential_id(&self) -> CredentialId {
         self.credential_id
     }
 
     /// What the instance presents.
-    pub(super) fn answer(&self) -> &Answer {
+    pub(crate) fn answer(&self) -> &Answer {
         &self.answer
     }
 
@@ -166,7 +189,7 @@ impl CredentialView {
 
     /// The positions in the request's `transaction_data` of the entries bound to the credential
     /// (T4), in the order of the request.
-    pub fn entries(&self) -> &[usize] {
+    pub fn entries(&self) -> &[EntryPosition] {
         &self.entries
     }
 
@@ -184,36 +207,20 @@ pub(crate) struct Sources<'s, 'a> {
     pub(crate) locales: &'s [Locale],
     pub(crate) background: &'s [CredentialId],
     pub(crate) fetched: &'s Fetched,
-    pub(crate) transaction_data: bool,
+    pub(crate) transaction_data: TransactionData,
 }
 
-impl<'a> ConsentView<'a> {
-    /// The view of `offers`, before its digest. The step is a fetch while a transaction's
-    /// display references a document the host has not given.
-    pub(crate) fn build(
-        verifier: VerifierView<'a>,
-        offers: &Offers,
-        sources: &Sources<'_, 'a>,
-    ) -> Result<Step<Self>, PresentationError> {
-        let mut views = Vec::with_capacity(offers.offers().len());
-        for offer in offers.offers() {
-            match offer_view(offer, sources)? {
-                Step::Fetch(fetch) => return Ok(Step::Fetch(fetch)),
-                Step::Done(view) => views.push(view),
-            }
-        }
-        Ok(Step::Done(Self {
-            verifier,
-            digest: String::new(),
-            offers: views,
-            unexamined: offers.unexamined(),
-        }))
+/// The view of each of `offers`. The step is a fetch while a transaction's display references
+/// a document the host has not given.
+pub(crate) fn offer_views(
+    offers: &Offers,
+    sources: &Sources<'_, '_>,
+) -> Result<Step<Vec<OfferView>>, PresentationError> {
+    let mut views = Vec::with_capacity(offers.offers().len());
+    for offer in offers.offers() {
+        views.push(fetched!(offer_view(offer, sources)?));
     }
-
-    pub(crate) fn with_digest(mut self, digest: String) -> Self {
-        self.digest = digest;
-        self
-    }
+    Ok(Step::Done(views))
 }
 
 fn offer_view(
@@ -223,43 +230,27 @@ fn offer_view(
     let bindings = sources
         .transactions
         .bind(sources.answered, offer.members())?;
-    let mut members = Vec::with_capacity(offer.members().len());
-    for (at, member) in offer.members().iter().enumerate() {
-        match member_view(member, at, &bindings, sources)? {
-            Step::Fetch(fetch) => return Ok(Step::Fetch(fetch)),
-            Step::Done(view) => members.push(view),
-        }
-    }
+    let members = fetched!(member_views(offer.members(), &bindings, sources)?);
     let mut additions = Vec::with_capacity(offer.additions().len());
     for addition in offer.additions() {
-        let mut views = Vec::with_capacity(addition.members().len());
-        for (at, member) in addition.members().iter().enumerate() {
-            match member_view(member, at, &[], sources)? {
-                Step::Fetch(fetch) => return Ok(Step::Fetch(fetch)),
-                Step::Done(view) => views.push(view),
-            }
-        }
-        additions.push(AdditionView {
-            set: addition.set(),
-            purpose: addition
-                .purpose()
-                .and_then(|p| purpose::line(std::slice::from_ref(p))),
-            members: views,
-        });
+        additions.push(fetched!(addition_view(addition, sources)?));
     }
     let facts = DisplayFacts {
-        presentable_without_ui: members
-            .iter()
-            .flat_map(MemberView::credentials)
-            .all(|c| sources.background.contains(&c.credential_id)),
+        presentability: presentability(&members, sources.background),
         transaction_data: sources.transaction_data,
-        // Each disclosed claim and each proof statement has a row of `DisplayText`, which holds
-        // its text whole.
-        rows_whole: true,
-        additions: !additions.is_empty(),
-        multiple: offer.members().iter().any(|m| m.candidates().len() > 1),
+        additions: if additions.is_empty() {
+            Choice::Settled
+        } else {
+            Choice::Open
+        },
+        subsets: if offer.members().iter().any(|m| m.candidates().len() > 1) {
+            Choice::Open
+        } else {
+            Choice::Settled
+        },
     };
     Ok(Step::Done(OfferView {
+        offer: offer.clone(),
         purpose: purpose::line(offer.purposes()),
         members,
         additions,
@@ -268,82 +259,115 @@ fn offer_view(
     }))
 }
 
-/// The view of `member`, at position `at` of its offer, with the entries `bindings` bind to
-/// each of its credentials.
-fn member_view(
-    member: &Member,
-    at: usize,
-    bindings: &[(Bound, MemberBinding<'_, '_>)],
+fn addition_view(
+    addition: &Addition,
     sources: &Sources<'_, '_>,
-) -> Result<Step<MemberView>, PresentationError> {
-    let answers = sources
-        .answered
-        .queries()
-        .get(member.query())
-        .ok_or(PresentationError::AnswerMismatch)?;
-    let mut credentials = Vec::with_capacity(member.candidates().len());
-    for &index in member.candidates() {
-        let candidate = answers
-            .candidates()
-            .get(index)
-            .ok_or(PresentationError::AnswerMismatch)?;
-        let mut entries = Vec::new();
-        let mut transactions = Vec::new();
-        let fail = PresentationError::TransactionData;
-        for (_, binding) in bindings.iter().filter(|(key, _)| *key == (at, index)) {
-            match binding
-                .views(sources.fetched, sources.locales)
-                .map_err(fail)?
-            {
-                Step::Fetch(fetch) => return Ok(Step::Fetch(fetch)),
-                Step::Done(views) => transactions.extend(views),
-            }
-            entries.extend(sources.transactions.positions(binding).map_err(fail)?);
-        }
-        let credential = candidate.credential().credential();
-        credentials.push(CredentialView {
-            credential_id: credential.entry().credential_id(),
-            answer: candidate.answer().clone(),
-            card: sources
-                .display
-                .card(credential, sources.locales)
-                .map_err(PresentationError::Display)?,
-            shown: shown(answers, candidate, sources)?,
-            entries,
-            transactions,
-        });
-    }
-    Ok(Step::Done(MemberView {
-        query_id: answers.query().id.clone(),
-        credentials,
+) -> Result<Step<AdditionView>, PresentationError> {
+    let members = fetched!(member_views(addition.members(), &[], sources)?);
+    Ok(Step::Done(AdditionView {
+        set: addition.set(),
+        purpose: addition
+            .purpose()
+            .and_then(|p| purpose::line(std::slice::from_ref(p))),
+        members,
     }))
 }
 
-/// What `candidate`, a candidate of `answers`, shows: its claim rows or its proof statement
+/// Whether the wallet presents each credential of `members` from its background service.
+fn presentability(members: &[MemberView], background: &[CredentialId]) -> Presentability {
+    let presentable = members
+        .iter()
+        .flat_map(MemberView::credentials)
+        .all(|credential| background.contains(&credential.credential_id));
+    if presentable {
+        Presentability::WithoutUi
+    } else {
+        Presentability::OnWalletUi
+    }
+}
+
+/// The views of `members`, with the entries `bindings` bind to each of their credentials.
+fn member_views(
+    members: &[Member],
+    bindings: &[(Bound, MemberBinding<'_, '_>)],
+    sources: &Sources<'_, '_>,
+) -> Result<Step<Vec<MemberView>>, PresentationError> {
+    let mut views = Vec::with_capacity(members.len());
+    for member in offered(sources.answered, members)? {
+        let mut credentials = Vec::with_capacity(member.candidates.len());
+        for &(index, candidate) in &member.candidates {
+            let bound = fetched!(bound_entries(bindings, member.bound(index), sources)?);
+            credentials.push(credential_view(&member, candidate, bound, sources)?);
+        }
+        views.push(MemberView {
+            query_id: member.answers.id().clone(),
+            credentials,
+        });
+    }
+    Ok(Step::Done(views))
+}
+
+/// The entries bound to one credential: their positions, and their displays.
+struct BoundEntries {
+    entries: Vec<EntryPosition>,
+    transactions: Vec<TransactionView>,
+}
+
+/// The entries `bindings` bind to the credential `bound`.
+fn bound_entries(
+    bindings: &[(Bound, MemberBinding<'_, '_>)],
+    bound: Bound,
+    sources: &Sources<'_, '_>,
+) -> Result<Step<BoundEntries>, PresentationError> {
+    let mut entries = Vec::new();
+    let mut transactions = Vec::new();
+    for (_, binding) in bindings.iter().filter(|(key, _)| *key == bound) {
+        transactions.extend(fetched!(binding.views(sources.fetched, sources.locales)?));
+        entries.extend(sources.transactions.positions(binding)?);
+    }
+    Ok(Step::Done(BoundEntries {
+        entries,
+        transactions,
+    }))
+}
+
+/// The view of `candidate`, a candidate of `member`, with the entries bound to it.
+fn credential_view(
+    member: &Offered<'_, '_>,
+    candidate: &Candidate<siros_credential::UsableCredential<'_>>,
+    bound: BoundEntries,
+    sources: &Sources<'_, '_>,
+) -> Result<CredentialView, PresentationError> {
+    let credential = candidate.credential().credential();
+    Ok(CredentialView {
+        credential_id: credential.entry().credential_id(),
+        answer: candidate.answer().clone(),
+        card: sources.display.card(credential, sources.locales)?,
+        shown: shown(member, candidate, sources)?,
+        entries: bound.entries,
+        transactions: bound.transactions,
+    })
+}
+
+/// What `candidate`, a candidate of `member`, shows: its claim rows or its proof statement
 /// rows.
-fn shown<'a>(
-    answers: &Answers<'a, UsableCredential<'a>>,
-    candidate: &Candidate<UsableCredential<'a>>,
-    sources: &Sources<'_, 'a>,
+fn shown(
+    member: &Offered<'_, '_>,
+    candidate: &Candidate<siros_credential::UsableCredential<'_>>,
+    sources: &Sources<'_, '_>,
 ) -> Result<Shown, PresentationError> {
-    let display = PresentationError::Display;
     Ok(match candidate.answer() {
-        Answer::Claims(claims) => Shown::Claims(
-            sources
-                .display
-                .claim_rows(
-                    candidate.credential().credential(),
-                    claims.pointers(),
-                    sources.locales,
-                )
-                .map_err(display)?,
-        ),
+        Answer::Claims(claims) => Shown::Claims(sources.display.claim_rows(
+            candidate.credential().credential(),
+            claims.pointers(),
+            sources.locales,
+        )?),
         Answer::Proof(choice) => {
-            let zkp = answers.zkp().ok_or(PresentationError::AnswerMismatch)?;
-            let option = zkp
-                .option(choice)
-                .ok_or(PresentationError::AnswerMismatch)?;
-            Shown::Proof(verified_rows(zkp.query().query(), option).map_err(display)?)
+            let zkp = member
+                .answers
+                .zkp()
+                .ok_or(Inconsistency::ZkpQuery(member.query))?;
+            Shown::Proof(verified_rows(zkp.query().query(), zkp.option(choice)?)?)
         }
     })
 }

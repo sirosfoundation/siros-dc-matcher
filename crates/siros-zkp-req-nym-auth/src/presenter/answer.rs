@@ -3,7 +3,7 @@
 
 use std::fmt;
 
-use crate::attestation::{OpenedSeed, SeedMismatch, UsableAttestation};
+use crate::attestation::{Credential, OpenedSeed, SecretSeed, SeedMismatch, UsableAttestation};
 use crate::outcome::{ItemCode, ZkpError};
 use crate::pair::{failed_assertions, UsablePair};
 
@@ -57,34 +57,18 @@ impl<'q> Answer<'q> {
     pub fn new(
         pair: UsablePair<'q>,
         attestation: UsableAttestation,
-        secret_seed: &[u8; 16],
+        secret_seed: &SecretSeed,
     ) -> Result<Self, Unanswerable> {
         if attestation.proof_time().date() != pair.date() {
             return Err(Unanswerable::ProofDate);
         }
-        let option = pair.option().option();
-        let birth_date = *attestation.credential().mdoc().birth_date().value();
-        let mut errors =
-            failed_assertions(pair.option().query(), option, pair.bounds(), birth_date);
-        let seed = match OpenedSeed::open(attestation.credential(), secret_seed) {
-            Ok(seed) => Some(seed),
-            Err(SeedMismatch) => {
-                errors.push(ZkpError::Item {
-                    option: option.req_set,
-                    item: pair.pseudonym().0,
-                    code: ItemCode::SeedMismatch,
-                });
-                None
-            }
-        };
-        match seed {
-            Some(seed) if errors.is_empty() => Ok(Self {
-                pair,
-                attestation,
-                seed,
-            }),
-            _ => Err(Unanswerable::Failed(errors)),
-        }
+        let seed = opened_seed(&pair, attestation.credential(), secret_seed)
+            .map_err(Unanswerable::Failed)?;
+        Ok(Self {
+            pair,
+            attestation,
+            seed,
+        })
     }
 
     /// The usable pair.
@@ -99,5 +83,33 @@ impl<'q> Answer<'q> {
 
     pub(crate) fn into_parts(self) -> (UsablePair<'q>, UsableAttestation, OpenedSeed) {
         (self.pair, self.attestation, self.seed)
+    }
+}
+
+/// The seed that opens `credential`'s `ssc` when every item of `pair`'s option holds for it.
+///
+/// # Errors
+///
+/// The items that fail: the `age_check` assertion, then the `pseudonym` whose `secret_seed`
+/// does not open `ssc`.
+pub(crate) fn opened_seed(
+    pair: &UsablePair<'_>,
+    credential: &Credential,
+    secret_seed: &SecretSeed,
+) -> Result<OpenedSeed, Vec<ZkpError>> {
+    let option = pair.option();
+    let birth_date = *credential.mdoc().birth_date().value();
+    let assertions = failed_assertions(option.query(), option.option(), pair.bounds(), birth_date);
+    match OpenedSeed::open(credential, secret_seed) {
+        Ok(seed) if assertions.is_empty() => Ok(seed),
+        Ok(_) => Err(assertions),
+        Err(SeedMismatch) => {
+            let seed = ZkpError::Item {
+                option: option.option().req_set,
+                item: pair.pseudonym().0,
+                code: ItemCode::SeedMismatch,
+            };
+            Err(assertions.into_iter().chain([seed]).collect())
+        }
     }
 }

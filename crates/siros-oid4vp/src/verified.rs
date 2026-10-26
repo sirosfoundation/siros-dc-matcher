@@ -8,6 +8,7 @@ use crate::client_id::ClientId;
 use crate::fetch::HttpsUrl;
 use crate::handover::Handover;
 use crate::protocol::Protocol;
+use crate::semantic::{SemanticIdError, SemanticIdentifier};
 
 /// An OpenID4VP request that intake verified. Only intake constructs it.
 ///
@@ -33,7 +34,7 @@ pub struct VerifiedRequest {
     pub(crate) channel: Channel,
     pub(crate) trusted: bool,
     pub(crate) access_certificate: Option<AccessCertificate>,
-    pub(crate) verifier_info: Vec<String>,
+    pub(crate) verifier_info: Vec<AttestationFormat>,
     pub(crate) nonce: String,
     pub(crate) state: Option<String>,
     pub(crate) dcql_query: DcqlQuery,
@@ -185,24 +186,50 @@ impl Encryption {
 /// or `x509_hash` Client Identifier: its access certificate (ETSI TS 119 475, Clause 4.3).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccessCertificate {
-    pub(crate) der: Vec<u8>,
-    pub(crate) semantic_identifier: Option<String>,
+    pub(crate) der: CertificateDer,
+    pub(crate) semantic_identifier: Result<SemanticIdentifier, SemanticIdError>,
+}
+
+/// An X.509 certificate that decoded, DER (RFC 5280).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CertificateDer(pub(crate) Vec<u8>);
+
+impl CertificateDer {
+    /// The DER bytes.
+    #[must_use]
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
 }
 
 impl AccessCertificate {
-    /// The certificate, DER.
+    /// The certificate.
     #[must_use]
-    pub fn der(&self) -> &[u8] {
+    pub fn der(&self) -> &CertificateDer {
         &self.der
     }
 
-    /// The Wallet-Relying Party's semantic identifier: its `organizationIdentifier`, or for a
-    /// natural person its `serialNumber`, in the structure of ETSI EN 319 412-1, Clause 5.1.4 or
-    /// 5.1.3 (ETSI TS 119 475, Clauses 5.1.3 and 5.1.5), such as `VATBE-0876866142`. `None` when
-    /// the subject holds no such attribute.
+    /// The Wallet-Relying Party's semantics identifier: its `organizationIdentifier`, or for a
+    /// natural person its `serialNumber` (ETSI TS 119 475, Clauses 5.1.3 and 5.1.5).
+    ///
+    /// # Errors
+    ///
+    /// [`SemanticIdError`]: the subject holds no such attribute, holds it twice, or its value
+    /// breaks the structure of ETSI EN 319 412-1.
+    pub fn semantic_identifier(&self) -> Result<&SemanticIdentifier, SemanticIdError> {
+        self.semantic_identifier.as_ref().map_err(|e| *e)
+    }
+}
+
+/// The `format` of a `verifier_info` attestation (Section 5.1).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AttestationFormat(pub(crate) String);
+
+impl AttestationFormat {
+    /// The format identifier.
     #[must_use]
-    pub fn semantic_identifier(&self) -> Option<&str> {
-        self.semantic_identifier.as_deref()
+    pub fn as_str(&self) -> &str {
+        &self.0
     }
 }
 
@@ -276,7 +303,7 @@ impl VerifiedRequest {
 
     /// The `format` of each `verifier_info` attestation, in the request's order (Section 5.1).
     #[must_use]
-    pub fn verifier_info_formats(&self) -> &[String] {
+    pub fn verifier_info_formats(&self) -> &[AttestationFormat] {
         &self.verifier_info
     }
 

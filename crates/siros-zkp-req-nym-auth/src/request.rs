@@ -63,23 +63,20 @@ impl<'r> NymAuthRequest<'r> {
         if !encrypted {
             return Err(policy(PolicyRule::ResponseMode));
         }
-        let refused = RequestRefusal::VerifierId;
-        if request
+        let registered = request
             .verifier_info_formats()
             .iter()
-            .any(|format| format == REGISTRATION_CERTIFICATE)
-        {
-            return Err(refused(VerifierIdRule::RegistrationCertificate));
+            .any(|format| format.as_str() == REGISTRATION_CERTIFICATE);
+        if registered {
+            return Err(RequestRefusal::VerifierId(
+                VerifierIdRule::RegistrationCertificate,
+            ));
         }
         let verifier_id = match verifier_id {
             VerifierIdForm::X509SanDns => VerifierId::x509_san_dns(client_id.as_str(), false),
-            VerifierIdForm::Semantic => request
-                .access_certificate()
-                .and_then(|c| c.semantic_identifier())
-                .ok_or(VerifierIdRule::SemanticIdMissing)
-                .and_then(VerifierId::semantic),
+            VerifierIdForm::Semantic => semantic_id(request),
         }
-        .map_err(refused)?;
+        .map_err(RequestRefusal::VerifierId)?;
         Ok(Self {
             request,
             session: Session {
@@ -98,4 +95,16 @@ impl<'r> NymAuthRequest<'r> {
     pub fn session(&self) -> &Session {
         &self.session
     }
+}
+
+/// The `semantic` form of `request`'s `verifier_id`: from the semantics identifier of its access
+/// certificate.
+fn semantic_id(request: &VerifiedRequest) -> Result<VerifierId, VerifierIdRule> {
+    let certificate = request
+        .access_certificate()
+        .ok_or(VerifierIdRule::SemanticIdMissing)?;
+    let identifier = certificate
+        .semantic_identifier()
+        .map_err(VerifierIdRule::SemanticId)?;
+    VerifierId::semantic(identifier.as_str())
 }

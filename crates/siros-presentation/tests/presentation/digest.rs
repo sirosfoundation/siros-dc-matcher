@@ -4,7 +4,7 @@
 
 use serde_json::json;
 use siros_oid4vp::VerifiedRequest;
-use siros_presentation::{Fulfilment, PresentationError, Selection};
+use siros_presentation::{Fulfilment, OfferIndex, PresentationError, Selection};
 
 use crate::verifier::{redirect_unsigned, NONCE};
 use crate::wallet::{ready, sd_jwt, Held, Wallet, VCT};
@@ -38,12 +38,11 @@ fn a_selection_parses_against_its_own_plan_only() {
     let first = wallet(Vec::new());
     let original = request(NONCE);
     let fetches = first.fetches(&original);
-    let digest = ready(&first.input(&original, &fetches))
+    let digest = *ready(&first.input(&original, &fetches))
         .unwrap()
         .view()
-        .digest()
-        .to_owned();
-    let selection = Selection::new(&digest, 0, Vec::new(), Vec::new()).unwrap();
+        .digest();
+    let selection = Selection::new(digest, OfferIndex::new(0), Vec::new(), Vec::new());
 
     // (case, wallet, request, refusal)
     let other_nonce = request("another-nonce-1234");

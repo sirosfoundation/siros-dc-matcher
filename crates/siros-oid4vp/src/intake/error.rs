@@ -115,10 +115,8 @@ pub enum IntakeError {
     ClientMetadataInvalid,
     /// `transaction_data` is not a non-empty array of strings (Section 5.1).
     TransactionDataInvalid,
-    /// `verifier_info` is not a non-empty array of objects with a string `format`, a `data`
-    /// object or string, and `credential_ids` naming Credential Queries when present (Section
-    /// 5.1).
-    VerifierInfoInvalid,
+    /// `verifier_info` breaks a rule of Section 5.1.
+    VerifierInfo(VerifierInfoRule),
     /// An encrypted Response Mode, and no key of `jwks` is a P-256 `ECDH-ES` encryption key.
     EncryptionKeyMissing,
     /// `encrypted_response_enc_values_supported` names no `enc` of the Response Mode's
@@ -130,6 +128,41 @@ pub enum IntakeError {
     UnexpectedTrustKey,
     /// The state holds more answers than the request asked effects.
     UnusedAnswer,
+}
+
+/// A rule of `verifier_info` (Section 5.1) that a request breaks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum VerifierInfoRule {
+    /// `verifier_info` is not an array.
+    NotArray,
+    /// The array is empty.
+    Empty,
+    /// An attestation is not a JSON object.
+    NotObject,
+    /// An attestation has no string `format`.
+    Format,
+    /// An attestation's `data` is neither an object nor a string.
+    Data,
+    /// An attestation's `credential_ids` is not a non-empty array of strings.
+    CredentialIds,
+    /// An attestation's `credential_ids` names no Credential Query of `dcql_query`.
+    CredentialIdUnknown,
+}
+
+impl VerifierInfoRule {
+    /// A stable identifier.
+    #[must_use]
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::NotArray => "verifier_info_not_array",
+            Self::Empty => "verifier_info_empty",
+            Self::NotObject => "verifier_info_not_object",
+            Self::Format => "verifier_info_format",
+            Self::Data => "verifier_info_data",
+            Self::CredentialIds => "verifier_info_credential_ids",
+            Self::CredentialIdUnknown => "verifier_info_credential_id_unknown",
+        }
+    }
 }
 
 impl IntakeError {
@@ -188,7 +221,7 @@ impl IntakeError {
             Self::DcqlQueryInvalid => "dcql_query_invalid",
             Self::ClientMetadataInvalid => "client_metadata_invalid",
             Self::TransactionDataInvalid => "transaction_data_invalid",
-            Self::VerifierInfoInvalid => "verifier_info_invalid",
+            Self::VerifierInfo(rule) => rule.code(),
             Self::EncryptionKeyMissing => "encryption_key_missing",
             Self::EncryptionUnsupported => "encryption_unsupported",
             Self::AnswerMismatch => "answer_mismatch",
@@ -205,6 +238,12 @@ impl IntakeError {
             Self::ScopeUnsupported => ErrorCode::InvalidScope,
             _ => ErrorCode::InvalidRequest,
         }
+    }
+}
+
+impl From<VerifierInfoRule> for IntakeError {
+    fn from(rule: VerifierInfoRule) -> Self {
+        Self::VerifierInfo(rule)
     }
 }
 

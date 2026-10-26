@@ -7,7 +7,7 @@
 //! carries a registration certificate is refused before an intermediary could be read.
 
 use serde_json::{json, Value};
-use siros_oid4vp::{IntakeError, IntakeState};
+use siros_oid4vp::{IntakeError, IntakeState, SemanticIdError};
 use siros_zkp_req_nym_auth::policy::{PolicyRule, RequestRefusal};
 use siros_zkp_req_nym_auth::request::NymAuthRequest;
 use siros_zkp_req_nym_auth::testing::query;
@@ -147,7 +147,7 @@ fn nym_auth_requests_meet_the_policy() {
             redirect_signed_state(&cwt(), anonymous),
             true,
             semantic,
-            identity(VerifierIdRule::SemanticIdMissing),
+            identity(VerifierIdRule::SemanticId(SemanticIdError::Absent)),
         ),
         (
             "another Client Identifier Prefix",

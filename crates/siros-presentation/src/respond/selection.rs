@@ -1,48 +1,53 @@
 //! The user's selection, parsed against the plan (A3, A4), and the refusal of a background
 //! fulfilment that needs the wallet's display (A9).
 
-use siros_codec::base64url;
-
 use crate::display_rule::WalletDisplay;
-use crate::error::PresentationError;
-use crate::offers::Member;
-use crate::plan::Planned;
+use crate::error::{Inconsistency, PresentationError};
+use crate::ids::{AdditionIndex, OfferIndex, Position, QueryId, QueryIndex};
+use crate::offers::{Addition, Member, Offer};
+use crate::plan::{PlanDigest, Planned};
 
 /// The user's choice in a consent view, as the UI returns it.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Selection {
-    digest: [u8; 32],
-    offer: usize,
-    additions: Vec<usize>,
-    subsets: Vec<(String, Vec<usize>)>,
+    digest: PlanDigest,
+    offer: OfferIndex,
+    additions: Vec<AdditionIndex>,
+    subsets: Vec<Subset>,
+}
+
+/// The credentials chosen for the member of a `multiple` Credential Query: their positions in
+/// [`MemberView::credentials`](crate::MemberView::credentials).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Subset {
+    query: QueryId,
+    positions: Vec<Position>,
+}
+
+impl Subset {
+    /// The credentials at `positions` for the member of the query `query`.
+    pub fn new(query: QueryId, positions: Vec<Position>) -> Self {
+        Self { query, positions }
+    }
 }
 
 impl Selection {
-    /// The choice of the offer at `offer`, of its additions at `additions`, and for members of
-    /// `multiple` queries, by query id, of the credentials at the positions of each subset in
-    /// [`MemberView::credentials`](crate::MemberView::credentials), in the view whose
+    /// The choice of the offer at `offer`, of its additions at `additions`, and of `subsets`
+    /// for members of `multiple` queries, in the view whose
     /// [`ConsentView::digest`](crate::ConsentView::digest) is `digest`. A `multiple` member
     /// without a subset presents every credential the view shows for it.
-    ///
-    /// # Errors
-    ///
-    /// [`PresentationError::DigestMalformed`] when `digest` is not 32 bytes of unpadded
-    /// base64url.
     pub fn new(
-        digest: &str,
-        offer: usize,
-        additions: Vec<usize>,
-        subsets: Vec<(String, Vec<usize>)>,
-    ) -> Result<Self, PresentationError> {
-        let digest = base64url::decode(digest)
-            .and_then(|bytes| <[u8; 32]>::try_from(bytes).ok())
-            .ok_or(PresentationError::DigestMalformed)?;
-        Ok(Self {
+        digest: PlanDigest,
+        offer: OfferIndex,
+        additions: Vec<AdditionIndex>,
+        subsets: Vec<Subset>,
+    ) -> Self {
+        Self {
             digest,
             offer,
             additions,
             subsets,
-        })
+        }
     }
 }
 
@@ -70,83 +75,49 @@ impl<'a> Planned<'a> {
     ///
     /// # Errors
     ///
-    /// [`PresentationError`]: the digest of another plan; an unknown offer or addition; an
-    /// addition chosen twice, a second addition from one optional set, or one answering a query
-    /// another chosen addition answers; a subset of no `multiple` member, a second subset for
-    /// one, an empty subset, a position out of range or repeated, or a subset that drops a
-    /// credential a transaction entry is bound to; or a background fulfilment of an offer that
-    /// needs the wallet's display.
+    /// [`PresentationError`]: the digest of another plan; an unknown offer or addition; two
+    /// additions of one optional set or answering one query; a subset of no `multiple` query
+    /// or of one no chosen member answers, a second subset for one member, a subset refused, or
+    /// one that drops a credential a transaction entry is bound to; or a background fulfilment
+    /// of an offer that needs the wallet's display.
     pub fn choose(
         &self,
         selection: &Selection,
         fulfilment: Fulfilment,
     ) -> Result<Chosen<'_, 'a>, PresentationError> {
-        if selection.digest != self.digest {
+        if selection.digest != *self.view.digest() {
             return Err(PresentationError::DigestMismatch);
         }
-        let offer = self
-            .offers
-            .offers()
-            .get(selection.offer)
-            .ok_or(PresentationError::OfferUnknown)?;
         let view = self
             .view
             .offers()
-            .get(selection.offer)
-            .ok_or(PresentationError::OfferUnknown)?;
-        let mut added: Vec<Member> = Vec::new();
-        let mut sets: Vec<usize> = Vec::with_capacity(selection.additions.len());
-        for &index in &selection.additions {
-            let addition = offer
-                .additions()
-                .get(index)
-                .ok_or(PresentationError::AdditionUnknown)?;
-            let conflicts = sets.contains(&addition.set())
-                || addition
-                    .members()
-                    .iter()
-                    .any(|a| added.iter().any(|b| a.query() == b.query()));
-            if conflicts {
-                return Err(PresentationError::AdditionConflict);
-            }
-            sets.push(addition.set());
-            added.extend(addition.members().iter().cloned());
-        }
+            .get(selection.offer.value())
+            .ok_or(PresentationError::OfferUnknown(selection.offer))?;
+        let offer = view.offer();
+        let additions = self.additions(offer, &selection.additions)?;
         let mut members = offer.members().to_vec();
-        let mut chosen: Vec<usize> = Vec::with_capacity(selection.subsets.len());
-        for (query_id, positions) in &selection.subsets {
-            let query = self
-                .answered
-                .queries()
+        let mut added: Vec<Member> = additions
+            .iter()
+            .flat_map(|addition| addition.members().iter().cloned())
+            .collect();
+        for (at, subset) in selection.subsets.iter().enumerate() {
+            if selection
+                .subsets
                 .iter()
-                .position(|answers| answers.query().multiple && &answers.query().id == query_id)
-                .ok_or(PresentationError::SubsetUnknown)?;
-            if chosen.contains(&query) {
-                return Err(PresentationError::SubsetRepeated);
+                .take(at)
+                .any(|s| s.query == subset.query)
+            {
+                return Err(PresentationError::SubsetRepeated(subset.query.clone()));
             }
-            chosen.push(query);
+            let query = self.multiple_query(&subset.query)?;
             let member = members
                 .iter_mut()
                 .chain(added.iter_mut())
                 .find(|member| member.query() == query)
-                .ok_or(PresentationError::SubsetUnknown)?;
-            if positions.is_empty() {
-                return Err(PresentationError::SubsetEmpty);
-            }
-            *member = member
-                .subset(positions)
-                .ok_or(PresentationError::SubsetOutOfRange)?;
+                .ok_or_else(|| PresentationError::SubsetMember(subset.query.clone()))?;
+            *member = member.subset(&subset.positions)?;
         }
-        // Every credential an entry is bound to stays, so the binding of the chosen credentials
-        // is the plan's (T4).
-        for ((at, candidate), _) in self.transactions.bind(&self.answered, offer.members())? {
-            let kept = members
-                .get(at)
-                .is_some_and(|member| member.candidates().contains(&candidate));
-            if !kept {
-                return Err(PresentationError::SubsetDropsEntry);
-            }
-        }
+        self.keeps_bound_credentials(offer, &members)?;
         if fulfilment == Fulfilment::Background && view.wallet_display() == WalletDisplay::Needed {
             return Err(PresentationError::WalletDisplayNeeded);
         }
@@ -155,5 +126,77 @@ impl<'a> Planned<'a> {
             members,
             added,
         })
+    }
+
+    /// The additions of `offer` at `chosen`, at most one per optional set, none answering a
+    /// query another answers (A3).
+    fn additions<'o>(
+        &self,
+        offer: &'o Offer,
+        chosen: &[AdditionIndex],
+    ) -> Result<Vec<&'o Addition>, PresentationError> {
+        let mut additions: Vec<&Addition> = Vec::with_capacity(chosen.len());
+        for &index in chosen {
+            let addition = offer
+                .additions()
+                .get(index.value())
+                .ok_or(PresentationError::AdditionUnknown(index))?;
+            if additions.iter().any(|a| a.set() == addition.set()) {
+                return Err(PresentationError::AdditionSetRepeated(addition.set()));
+            }
+            let shared = addition.members().iter().find(|member| {
+                additions
+                    .iter()
+                    .flat_map(|a| a.members())
+                    .any(|other| other.query() == member.query())
+            });
+            if let Some(member) = shared {
+                return Err(PresentationError::AdditionQueryRepeated(
+                    self.query_id(member.query())?,
+                ));
+            }
+            additions.push(addition);
+        }
+        Ok(additions)
+    }
+
+    /// The position of the `multiple` Credential Query `id`.
+    fn multiple_query(&self, id: &QueryId) -> Result<QueryIndex, PresentationError> {
+        self.answered
+            .index_of(id.as_str())
+            .filter(|&index| {
+                self.answered
+                    .answers(index)
+                    .is_some_and(|answers| answers.query().multiple)
+            })
+            .ok_or_else(|| PresentationError::SubsetQuery(id.clone()))
+    }
+
+    /// Checks that every credential an entry of `offer` is bound to stays among `members`, so
+    /// the binding of the chosen credentials is the plan's (T4).
+    fn keeps_bound_credentials(
+        &self,
+        offer: &Offer,
+        members: &[Member],
+    ) -> Result<(), PresentationError> {
+        for (bound, _) in self.transactions.bind(&self.answered, offer.members())? {
+            let member = members
+                .get(bound.member.value())
+                .ok_or(Inconsistency::Member(bound.member))?;
+            if !member.candidates().contains(&bound.candidate) {
+                return Err(PresentationError::SubsetDropsEntry(
+                    self.query_id(member.query())?,
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// The `id` of the Credential Query at `index`.
+    fn query_id(&self, index: QueryIndex) -> Result<QueryId, Inconsistency> {
+        self.answered
+            .answers(index)
+            .map(|answers| answers.id().clone())
+            .ok_or(Inconsistency::Query(index))
     }
 }

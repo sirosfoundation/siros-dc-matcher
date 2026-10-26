@@ -1,13 +1,14 @@
 //! The response of a chosen offer: the signatures parsed against their `Sign` effects (A5), the
 //! presentations, one `vp_token` (A8), its submission (P4) and the presentation record (W4).
 
+use itertools::Itertools;
 use rand_core::CryptoRngCore;
-use siros_codec::base64url;
 use siros_oid4vp::{Presentation, Submission};
 use siros_wallet_state::{CredentialId, PresentationId, PresentationRecord, TransactionId};
 use siros_zkp_req_nym_auth::prover::NymAuthProver;
 
-use super::prepare::{audience, Form, Prepared, Sign, SignId};
+use super::prepare::{Audience, PendingMember, Prepared};
+use super::sign::{verified, Sign, SignId, VerifiedSignature};
 use crate::error::PresentationError;
 
 /// What the wallet sends, and what it records.
@@ -42,13 +43,11 @@ impl Prepared<'_, '_> {
     /// The response, with `signatures` the host made for [`Prepared::signs`].
     ///
     /// Each signature answers one `Sign` effect and verifies under the key it names, and every
-    /// effect has one (A5). `prover` proves
-    /// each nym_auth statement in-process, once the device signature verifies under the MSO's
-    /// device key. One `vp_token` answers every member, keyed by query id (A8). `rng` gives the
-    /// response encryption's ephemeral key and IV, then the record's `presentationId` and
-    /// `transactionId`. The record names exactly the instances the presentations use, its
-    /// `data` is the `vp_token` as JSON text, its time the plan's, and its `audience` that of
-    /// the KB-JWT (A6).
+    /// effect has one (A5). `prover` proves each nym_auth statement in-process. One `vp_token`
+    /// answers every member, keyed by query id (A8). `rng` gives the response encryption's
+    /// ephemeral key and IV, then the record's `presentationId` and `transactionId`. The record
+    /// names exactly the instances the presentations use, its `data` is the `vp_token` as JSON
+    /// text, its time the plan's, and its `audience` that of the KB-JWT (A6).
     ///
     /// # Errors
     ///
@@ -60,76 +59,53 @@ impl Prepared<'_, '_> {
         prover: &dyn NymAuthProver,
         rng: &mut impl CryptoRngCore,
     ) -> Result<Response, PresentationError> {
-        let signed = parse(&self.signs, signatures)?;
-        let signature = |id: SignId| {
-            signed
-                .get(id.value())
-                .copied()
-                .ok_or(PresentationError::SignatureMissing)
-        };
-        let mut entries: Vec<(String, Vec<Presentation>)> = Vec::new();
-        let mut used: Vec<CredentialId> = Vec::new();
-        for member in self.members {
-            let presentation = match member.form {
-                Form::Ready(presentation) => presentation,
-                Form::KeyBinding(binding, id) => {
-                    Presentation::text(binding.assemble(&signature(id)?))
-                }
-                Form::Mdoc(disclosure, id) => Presentation::text(base64url::encode(
-                    &disclosure.device_response(&signature(id)?),
-                )),
-                Form::Proof(prepared, id) => {
-                    let proof = prepared
-                        .prove(&signature(id)?, prover)
-                        .map_err(PresentationError::Prove)?;
-                    Presentation::cbor_map(proof.encode()).map_err(PresentationError::Response)?
-                }
-            };
-            match entries.iter_mut().find(|(id, _)| id == member.query_id) {
-                Some((_, presentations)) => presentations.push(presentation),
-                None => entries.push((member.query_id.to_owned(), vec![presentation])),
-            }
-            if !used.contains(&member.credential) {
-                used.push(member.credential);
-            }
-        }
+        let signatures = verified(&self.signs, signatures)?;
+        let used = used(&self.members);
+        let entries: Vec<(String, Vec<Presentation>)> = self
+            .members
+            .into_iter()
+            .map(|member| presentations(member, &signatures, prover))
+            .try_collect()?;
         let planned = self.chosen.planned;
         let request = planned.input.request;
-        let token = request
-            .vp_token(entries)
-            .map_err(PresentationError::Response)?;
-        let submission = token.submission(rng).map_err(PresentationError::Response)?;
+        let token = request.vp_token(entries)?;
+        let submission = token.submission(rng)?;
         let record = PresentationRecord::new(
             PresentationId::new(rng.next_u64()),
             TransactionId::new(rng.next_u64()),
             token.json().to_string(),
             used,
             planned.input.now,
-            audience(request)?,
+            Audience::of(request)?.into_string(),
         );
         Ok(Response { submission, record })
     }
 }
 
-/// The signature of each effect of `signs`, by its identifier, verified under the key the
-/// effect names (A5).
-fn parse(
-    signs: &[Sign],
-    signatures: Vec<(SignId, Vec<u8>)>,
-) -> Result<Vec<[u8; 64]>, PresentationError> {
-    let mut by_id: Vec<Option<[u8; 64]>> = vec![None; signs.len()];
-    for (id, signature) in signatures {
-        let (slot, sign) = by_id
-            .get_mut(id.value())
-            .zip(signs.get(id.value()))
-            .ok_or(PresentationError::SignatureUnknown)?;
-        if slot.is_some() {
-            return Err(PresentationError::SignatureRepeated);
-        }
-        *slot = Some(sign.verified(signature)?);
-    }
-    by_id
+/// The `vp_token` entry of `member`: its query id and the presentation of each of its
+/// credentials.
+fn presentations(
+    member: PendingMember<'_>,
+    signatures: &[VerifiedSignature],
+    prover: &dyn NymAuthProver,
+) -> Result<(String, Vec<Presentation>), PresentationError> {
+    let presentations = member
+        .credentials
         .into_iter()
-        .map(|signature| signature.ok_or(PresentationError::SignatureMissing))
-        .collect()
+        .map(|(_, form)| form.present(signatures, prover))
+        .try_collect()?;
+    Ok((member.query_id.as_str().to_owned(), presentations))
+}
+
+/// The instances `members` present, each once, in order.
+fn used(members: &[PendingMember<'_>]) -> Vec<CredentialId> {
+    members
+        .iter()
+        .flat_map(|member| member.credentials.iter().map(|(id, _)| *id))
+        .fold(Vec::new(), |mut used, id| {
+            if !used.contains(&id) {
+                used.push(id);
+            }
+            used
+        })
 }

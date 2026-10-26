@@ -4,6 +4,7 @@
 use std::fmt;
 
 use sha2::{Digest, Sha256};
+use siros_oid4vp::SemanticIdError;
 
 use crate::catalogue::{Config, Pseudonym};
 
@@ -17,6 +18,9 @@ pub struct VerifierId(String);
 pub enum VerifierIdRule {
     /// The form is `semantic` and no semantic identifier comes from an authenticated source.
     SemanticIdMissing,
+    /// The form is `semantic` and the authenticated certificate's subject gives no semantics
+    /// identifier.
+    SemanticId(SemanticIdError),
     /// The form is `x509_san_dns` and the Client Identifier has another prefix.
     ClientIdPrefix,
     /// The form is `x509_san_dns` and the DNS name is empty or not ASCII (an A-label form).
@@ -33,6 +37,7 @@ impl VerifierIdRule {
     pub fn code(self) -> &'static str {
         match self {
             Self::SemanticIdMissing => "semantic_id_missing",
+            Self::SemanticId(e) => e.code(),
             Self::ClientIdPrefix => "client_id_prefix",
             Self::DnsName => "dns_name",
             Self::Intermediary => "intermediary",

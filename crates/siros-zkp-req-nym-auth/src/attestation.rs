@@ -229,6 +229,25 @@ impl fmt::Display for SeedMismatch {
 
 impl std::error::Error for SeedMismatch {}
 
+/// The 16-byte `secret_seed` an issuer delivered with a credential (privatedata, Section 5A).
+/// It is zeroed on drop.
+#[derive(Clone)]
+pub struct SecretSeed(Zeroizing<[u8; 16]>);
+
+impl SecretSeed {
+    /// The seed `seed`.
+    pub fn new(seed: Zeroizing<[u8; 16]>) -> Self {
+        Self(seed)
+    }
+}
+
+/// Shows nothing: the seed is a delivered secret.
+impl fmt::Debug for SecretSeed {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SecretSeed").finish_non_exhaustive()
+    }
+}
+
 /// A delivered `secret_seed` whose SHA-256 is the credential's `ssc`. The Wallet opens it again
 /// for each use (privatedata, Section 5A.2). It is zeroed on drop.
 #[derive(Clone)]
@@ -240,9 +259,9 @@ impl OpenedSeed {
     /// # Errors
     ///
     /// [`SeedMismatch`] when `SHA-256(secret_seed)` is not `ssc`.
-    pub fn open(credential: &Credential, secret_seed: &[u8; 16]) -> Result<Self, SeedMismatch> {
-        if sha256(secret_seed) == *credential.mdoc().ssc().value() {
-            Ok(Self(Zeroizing::new(*secret_seed)))
+    pub fn open(credential: &Credential, secret_seed: &SecretSeed) -> Result<Self, SeedMismatch> {
+        if sha256(&*secret_seed.0) == *credential.mdoc().ssc().value() {
+            Ok(Self(secret_seed.0.clone()))
         } else {
             Err(SeedMismatch)
         }

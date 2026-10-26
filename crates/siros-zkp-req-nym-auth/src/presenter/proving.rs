@@ -11,16 +11,13 @@ use siros_oid4vp::Handover;
 use siros_zkp_req::{Candidate, PairRefusal, ProofEnvelope, QueryOption, ZkpPresentation};
 use zeroize::Zeroizing;
 
-use super::answer::{Answer, Unanswerable};
-use super::{
-    anchors_for, credential_errors, item_errors, parse, plan_option, HostError, OptionPlan, Parsed,
-    MAX_ZK_PROOF,
-};
+use super::answer::{opened_seed, Answer, Unanswerable};
+use super::{anchors_for, parse, HostError, Parsed, MAX_ZK_PROOF};
 use crate::age::Bound;
-use crate::attestation::{OpenedSeed, UsableAttestation};
+use crate::attestation::{OpenedSeed, SecretSeed, Unusable, UsableAttestation};
 use crate::catalogue::{Function, NymAuthQuery, MDOC_DOCTYPE};
 use crate::mdoc::StoredCredential;
-use crate::outcome::{CredentialCode, InvalidRequest, ItemCode, ZkpError};
+use crate::outcome::{CredentialCode, InvalidRequest, ZkpError};
 use crate::pair::UsablePair;
 use crate::prover::{NymAuthProver, ProofJob, ProofOutput, ProverFailure, Statement};
 use crate::system::{pair_code, NymAuthSystem, Unsupported};
@@ -28,6 +25,8 @@ use crate::verifier_id::{pseudonym_sha256, sha256, verifier_input, VerifierId};
 
 #[cfg(feature = "request")]
 use crate::request::NymAuthRequest;
+#[cfg(feature = "request")]
+use siros_wallet_state::KeyId;
 
 /// The session a presentation is bound to.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -176,30 +175,21 @@ impl fmt::Debug for Prepared {
 /// [`ProveError`]: what fails, as the Section 9 codes name it.
 pub fn prepare(input: &ProveInput<'_>) -> Result<Prepared, ProveError> {
     let proof_time = DateTime::from_unix(input.now).ok_or(HostError::Time)?;
-    let seed: Zeroizing<[u8; 16]> = Zeroizing::new(
+    let seed = SecretSeed::new(Zeroizing::new(
         input
             .secret_seed
             .try_into()
             .map_err(|_| HostError::SeedLength)?,
-    );
+    ));
     let parsed = parse(input.query, input.client_metadata)
         .map_err(ProveError::Invalid)?
         .ok_or(HostError::CandidateMismatch)?;
-    let (plan, pair) = candidate_plan(&parsed, input.candidate, proof_time.date())?;
+    let pair = candidate_pair(&parsed, input.candidate, proof_time.date())?;
     if input.credential.id != input.candidate.credential_id {
         return Err(HostError::CredentialMismatch.into());
     }
     let anchors = anchors_for(&parsed.query, input.anchors)?;
-    let attestation = usable_credential(
-        &parsed.query,
-        &plan,
-        pair.pseudonym().0,
-        input.credential,
-        anchors,
-        proof_time,
-        &seed,
-    )?;
-    let answer = Answer::new(pair, attestation, &seed)?;
+    let answer = answer(pair, input.credential, anchors, proof_time, &seed)?;
     build(answer, input.session, &input.credential.kid)
 }
 
@@ -214,9 +204,9 @@ impl Prepared {
     pub fn new(
         answer: Answer<'_>,
         request: &NymAuthRequest<'_>,
-        key_id: &str,
+        key_id: &KeyId,
     ) -> Result<Self, ProveError> {
-        build(answer, request.session(), key_id)
+        build(answer, request.session(), key_id.as_str())
     }
 }
 
@@ -233,7 +223,7 @@ fn build(answer: Answer<'_>, session: &Session, kid: &str) -> Result<Prepared, P
     let certificate = attestation.credential().certificate();
     let statement = Statement {
         system: pair.system(),
-        proof_backend: pair.backend().to_owned(),
+        proof_backend: pair.backend().as_str().to_owned(),
         doc_type: MDOC_DOCTYPE,
         issuer_certificate: certificate.der().to_vec(),
         issuer_key: *certificate.key(),
@@ -264,12 +254,12 @@ fn build(answer: Answer<'_>, session: &Session, kid: &str) -> Result<Prepared, P
     })
 }
 
-/// The candidate's option and pair, usable again at the proof date.
-fn candidate_plan<'q>(
+/// The candidate's pair, usable again at the proof date.
+fn candidate_pair<'q>(
     parsed: &'q Parsed,
     candidate: &Candidate,
     d: Date,
-) -> Result<(OptionPlan<'q>, UsablePair<'q>), ProveError> {
+) -> Result<UsablePair<'q>, ProveError> {
     let option = parsed
         .query
         .options()
@@ -277,44 +267,39 @@ fn candidate_plan<'q>(
         .ok_or(HostError::CandidateMismatch)?;
     let system =
         NymAuthSystem::from_id(&candidate.system_id).ok_or(HostError::CandidateMismatch)?;
-    let plan = plan_option(parsed, option, &[system], d);
-    match (plan.pair.clone(), plan.refusals.first()) {
-        (Some(pair), _) if pair.backend() == candidate.proof_backend => Ok((plan, pair)),
-        (Some(_), _) => Err(HostError::CandidateMismatch.into()),
-        (None, Some((_, refusal))) => Err(ProveError::NotUsable(refusal.clone())),
-        (None, None) => Err(HostError::CandidateMismatch.into()),
+    let pair = option
+        .pair(&parsed.formats, system, d)
+        .map_err(ProveError::NotUsable)?;
+    if pair.backend().as_str() != candidate.proof_backend {
+        return Err(HostError::CandidateMismatch.into());
     }
+    Ok(pair)
 }
 
-/// The usable attestation of `stored`, after every test that needs no device signature. The
+/// The answer of `pair`'s option by `stored` at `proof_time`, opened with `secret_seed`. The
 /// failures of the credential come first, then those of the items: the `age_check` assertion
-/// and the `pseudonym` at `pseudonym_index`, whose seed must open `ssc`.
-fn usable_credential(
-    query: &NymAuthQuery,
-    plan: &OptionPlan<'_>,
-    pseudonym_index: usize,
+/// and the `pseudonym`, whose seed must open `ssc`.
+fn answer<'q>(
+    pair: UsablePair<'q>,
     stored: &StoredCredential,
     anchors: Option<&[Vec<u8>]>,
     proof_time: DateTime,
-    seed: &[u8; 16],
-) -> Result<UsableAttestation, ProveError> {
-    let tested = UsableAttestation::new(&stored.data, anchors, proof_time);
-    let (mut errors, credential) =
-        credential_errors(&tested).ok_or(HostError::CredentialMismatch)?;
-    let Some(credential) = credential else {
-        return Err(ProveError::Rejected(errors));
-    };
-    errors.extend(item_errors(query, plan, credential));
-    if OpenedSeed::open(credential, seed).is_err() {
-        errors.push(ZkpError::Item {
-            option: plan.option.req_set,
-            item: pseudonym_index,
-            code: ItemCode::SeedMismatch,
-        });
-    }
-    match tested {
-        Ok(attestation) if errors.is_empty() => Ok(attestation),
-        _ => Err(ProveError::Rejected(errors)),
+    secret_seed: &SecretSeed,
+) -> Result<Answer<'q>, ProveError> {
+    match UsableAttestation::new(&stored.data, anchors, proof_time) {
+        Ok(attestation) => Ok(Answer::new(pair, attestation, secret_seed)?),
+        Err(Unusable::OtherDocType) => Err(HostError::CredentialMismatch.into()),
+        Err(unusable) => {
+            let tested = unusable
+                .codes()
+                .iter()
+                .map(|&code| ZkpError::Credential(code));
+            let items = unusable
+                .credential()
+                .and_then(|credential| opened_seed(&pair, credential, secret_seed).err())
+                .unwrap_or_default();
+            Err(ProveError::Rejected(tested.chain(items).collect()))
+        }
     }
 }
 

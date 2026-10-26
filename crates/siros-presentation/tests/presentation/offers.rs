@@ -6,7 +6,8 @@ use siros_codec::cbor::Value as Cbor;
 use siros_dcql::Dropped;
 use siros_oid4vp::{ErrorCode, Submission};
 use siros_presentation::{
-    PresentationError, WalletDisplay, MAX_ADDITIONS, MAX_EXAMINED, MAX_OFFERS,
+    Failure, Position, PresentationError, QueryId, SubsetError, WalletDisplay, MAX_ADDITIONS,
+    MAX_EXAMINED, MAX_OFFERS,
 };
 use siros_zkp_req_nym_auth::testing::Spec;
 
@@ -57,11 +58,15 @@ fn all_optional_sets_offer_each_option() {
         .offers()
         .iter()
         .map(|offer| {
-            let queries = offer.members().iter().map(|m| m.query_id()).collect();
+            let queries = offer
+                .members()
+                .iter()
+                .map(|m| m.query_id().as_str())
+                .collect();
             let additions = offer
                 .additions()
                 .iter()
-                .map(|a| a.members().iter().map(|m| m.query_id()).collect())
+                .map(|a| a.members().iter().map(|m| m.query_id().as_str()).collect())
                 .collect();
             (offer.purpose(), queries, additions)
         })
@@ -94,12 +99,13 @@ fn no_query_but_zkp_req_reaches_a_nym_auth_attestation() {
     for query in queries {
         let request = request(json!({"credentials": [query.clone()]}));
         let fetches = wallet.fetches(&request);
-        let planned = ready(&wallet.input(&request, &fetches));
+        let refused = ready(&wallet.input(&request, &fetches)).err().unwrap();
         assert_eq!(
-            planned.err(),
-            Some(PresentationError::NoOffer(ErrorCode::AccessDenied)),
+            refused,
+            PresentationError::NoOffer(Failure::Unsatisfied),
             "{query}"
         );
+        assert_eq!(refused.error_code(), ErrorCode::AccessDenied, "{query}");
     }
 }
 
@@ -111,7 +117,7 @@ fn shape(offer: &siros_presentation::OfferView) -> Shape {
     let members = offer
         .members()
         .iter()
-        .map(|m| (m.query_id().to_owned(), m.credentials().len()))
+        .map(|m| (m.query_id().as_str().to_owned(), m.credentials().len()))
         .collect();
     let additions = offer
         .additions()
@@ -119,7 +125,7 @@ fn shape(offer: &siros_presentation::OfferView) -> Shape {
         .map(|a| {
             a.members()
                 .iter()
-                .map(|m| m.query_id().to_owned())
+                .map(|m| m.query_id().as_str().to_owned())
                 .collect()
         })
         .collect();
@@ -198,23 +204,27 @@ fn offers_of_credential_sets() {
     let record = serde_json::to_value(response.record()).unwrap();
     assert_eq!(record["usedCredentialIds"], json!([1, 3]));
     let subset = |query: &str, positions: Vec<usize>| (query.to_owned(), positions);
+    let id = |query: &str| QueryId::parse(query).unwrap();
     let refusals = [
-        (vec![subset("mdl", vec![])], PresentationError::SubsetEmpty),
+        (
+            vec![subset("mdl", vec![])],
+            PresentationError::Subset(SubsetError::Empty),
+        ),
         (
             vec![subset("mdl", vec![3])],
-            PresentationError::SubsetOutOfRange,
+            PresentationError::Subset(SubsetError::OutOfRange(Position::new(3))),
         ),
         (
             vec![subset("mdl", vec![1, 1])],
-            PresentationError::SubsetOutOfRange,
+            PresentationError::Subset(SubsetError::Repeated(Position::new(1))),
         ),
         (
             vec![subset("pid", vec![0])],
-            PresentationError::SubsetUnknown,
+            PresentationError::SubsetQuery(id("pid")),
         ),
         (
             vec![subset("mdl", vec![0]), subset("mdl", vec![1])],
-            PresentationError::SubsetRepeated,
+            PresentationError::SubsetRepeated(id("mdl")),
         ),
     ];
     for (subsets, refusal) in refusals {
@@ -244,12 +254,15 @@ fn offers_of_credential_sets() {
     }));
     let fetches = wallet.fetches(&request);
     let input = wallet.input(&request, &fetches);
-    assert_eq!(
-        ready(&input).unwrap().view().offers()[0].additions().len(),
-        2
-    );
+    let planned = ready(&input).unwrap();
+    let additions = planned.view().offers()[0].additions();
+    assert_eq!(additions.len(), 2);
     let both = respond_to(&input, 0, vec![0, 1], Vec::new());
-    assert_eq!(both.err(), Some(PresentationError::AdditionConflict));
+    let set = additions[0].set();
+    assert_eq!(
+        both.err(),
+        Some(PresentationError::AdditionSetRepeated(set))
+    );
 
     // An optional set that alone carries a transaction entry joins the offer.
     let mut wallet = Wallet::new(vec![mdl(1), pid(2)]);
@@ -269,7 +282,8 @@ fn offers_of_credential_sets() {
     };
     let members = vec![("mdl".to_owned(), 1), ("pay".to_owned(), 1)];
     assert_eq!(shape(offer), (members, Vec::new()));
-    assert_eq!(offer.members()[1].credentials()[0].entries(), [0]);
+    let entries = offer.members()[1].credentials()[0].entries();
+    assert_eq!(entries.iter().map(|e| e.value()).collect::<Vec<_>>(), [0]);
     respond_to(&input, 0, Vec::new(), Vec::new()).unwrap();
 
     // The limits: 40 candidates give MAX_OFFERS offers and MAX_ADDITIONS additions, and two

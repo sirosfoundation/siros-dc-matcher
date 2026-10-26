@@ -31,6 +31,7 @@ wallet = [
 ]
 
 [dependencies]
+itertools = { workspace = true }
 rustc-hash = { workspace = true }
 serde_json = { workspace = true }
 siros-codec = { workspace = true }

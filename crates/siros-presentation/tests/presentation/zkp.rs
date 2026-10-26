@@ -81,7 +81,7 @@ fn zkp_req_over_redirect_direct_post_cwt() {
     }));
     let fetches = wallet.fetches(&request);
     let input = wallet.input(&request, &fetches);
-    let (_, response) = respond(&input);
+    let response = respond(&input);
     let authorization = decrypt_cwt(response.submission());
     assert_eq!(
         get(&authorization, &Ciborium::Text("state".into())),
@@ -121,11 +121,15 @@ fn zkp_req_and_mdoc_over_dc_api_jwt() {
     let [offer] = view.offers() else {
         panic!("one consent: {}", view.offers().len())
     };
-    let queries: Vec<&str> = offer.members().iter().map(|m| m.query_id()).collect();
+    let queries: Vec<&str> = offer
+        .members()
+        .iter()
+        .map(|m| m.query_id().as_str())
+        .collect();
     assert_eq!(queries, ["mdl", "nym"]);
     assert_eq!(offer.wallet_display(), WalletDisplay::Needed);
 
-    let (_, response) = respond(&input);
+    let response = respond(&input);
     let payload = decrypt_jwe(response.submission());
     let token = payload["vp_token"].as_object().unwrap();
     let mut keys: Vec<&String> = token.keys().collect();
@@ -190,7 +194,7 @@ fn a_credential_answers_the_first_option_it_passes() {
         "dcql_query": {"credentials": [nym.clone()]}
     }));
     let fetches = wallet.fetches(&request);
-    let (_, response) = respond(&wallet.input(&request, &fetches));
+    let response = respond(&wallet.input(&request, &fetches));
     let payload = decrypt_jwe(response.submission());
     let encoded = base64url::decode(payload["vp_token"]["nym"][0].as_str().unwrap()).unwrap();
     assert_eq!(ZkpPresentation::decode(&encoded).unwrap().req_set, Some(1));

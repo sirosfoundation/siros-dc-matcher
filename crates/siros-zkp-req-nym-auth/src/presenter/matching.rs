@@ -116,7 +116,7 @@ fn candidates_or_rejections(
                 Some(Ok(())) => candidates.push(Candidate {
                     credential_id: credential.id.clone(),
                     system_id: pair.system().id().to_owned(),
-                    proof_backend: pair.backend().to_owned(),
+                    proof_backend: pair.backend().as_str().to_owned(),
                     req_set: plan.option.req_set,
                     items: plan.option.items.clone(),
                     inputs: Vec::new(),

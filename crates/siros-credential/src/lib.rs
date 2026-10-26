@@ -34,7 +34,7 @@ mod usable;
 mod value;
 
 pub use credential::{Credential, EntryRef, Format, Parsed};
-pub use error::{CredentialError, PointerError, ValidityError};
+pub use error::{CredentialError, HolderKeyError, PointerError, ValidityError};
 pub use instance::{least_used, Instance};
 pub use pointer::ClaimPointer;
 pub use usable::{UsableCredential, Validity};

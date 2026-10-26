@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use siros_codec::base64url;
 
-pub use error::IntakeError;
+pub use error::{IntakeError, VerifierInfoRule};
 pub use trust::{KeyMaterial, Trust, TrustAnswer, TrustSubject};
 
 use crate::fetch::{Fetch, FetchResponse};
