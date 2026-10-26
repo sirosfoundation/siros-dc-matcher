@@ -276,7 +276,7 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
   - its bindings per credential format: a KB-JWT claim (B.3.3), the hashes profile (B.3.3.1), or a `DeviceSigned` element (B.2.1);
   - the extra KB-JWT claims its specification requires.
 - **T3.** The B.3.3.1 profile is one binding a type MAY adopt. It hashes each entry's string exactly as received. The algorithm is one listed in `transaction_data_hashes_alg`, or `sha-256` when absent, and is shared by the entries bound to one credential. `transaction_data_hashes_alg` is returned when the request carried it.
-- **T4.** An entry MUST bind to exactly one presented credential: the first of its `credential_ids` that the chosen offer answers with a credential the type authorizes (§5.1).
+- **T4.** An entry MUST bind to exactly one presented credential: the first of its `credential_ids` that the chosen offer answers with a credential the type authorizes (§5.1). The binding MUST name that credential by its `credentialId` and instance. The view shows it, the plan digest covers it, and phase 2 binds by it. A selection that leaves the named credential out is an error.
 - **T5.** An SD-JWT member whose query sets `require_cryptographic_holder_binding: false` MUST NOT carry a binding (B.3.3).
 - **T6.** The supported types are the four TS12 v1.0.1 types:
   - `urn:eudi:sca:payment:1`
