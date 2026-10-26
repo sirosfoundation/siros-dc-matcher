@@ -32,7 +32,7 @@ pub struct Member<'a> {
     ///
     /// `None` and `Some("")` differ to the host: it renders the *presence*
     /// of this field, so an empty string produces a label with nothing in
-    /// it. Build it with [`siros_dc_matcher_core::purpose::line`], which
+    /// it. Build it with [`siros_display::purpose::line`], which
     /// returns `None` for a reason that is blank as well as for one that is
     /// absent.
     pub disclaimer: Option<&'a str>,

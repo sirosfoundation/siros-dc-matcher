@@ -1,0 +1,32 @@
+[package]
+name = "siros-display"
+version = "0.11.0"
+description = "Display for the SIROS wallet core: display metadata and its locale, credential cards, claim rows, purpose lines and proof statement rows"
+publish = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[features]
+default = ["credential"]
+# Display metadata, credential cards and claim rows. The matcher links the purpose lines and the
+# proof statement rows only, and builds without it.
+credential = ["dep:siros-codec", "dep:siros-credential"]
+
+[dependencies]
+rustc-hash = { workspace = true }
+serde_json = { workspace = true }
+siros-codec = { workspace = true, optional = true }
+siros-credential = { workspace = true, optional = true }
+siros-dcql = { workspace = true }
+siros-zkp-req = { workspace = true }
+unicode-general-category = "1.1.0"
+
+[dev-dependencies]
+serde_json = { workspace = true }
+siros-codec = { workspace = true }
+siros-credential = { workspace = true }
+siros-dcql = { workspace = true }
+siros-wallet-state = { workspace = true }

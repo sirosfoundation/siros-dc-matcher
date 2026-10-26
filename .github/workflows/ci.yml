@@ -226,7 +226,7 @@ jobs:
             -p siros-codec -p siros-dcql -p siros-dc-matcher-core -p siros-dc-matcher-wasm \
             -p android-credman-sys -p android-credman \
             -p siros-zkp-req -p siros-zkp-req-nym-auth -p siros-sdjwt -p siros-mdoc \
-            -p siros-wallet-state -p siros-credential
+            -p siros-wallet-state -p siros-credential -p siros-display
           cargo check --locked -p siros-oid4vp
           cargo check --locked --all-features --target wasm32-wasip1 \
             -p siros-dc-matcher-wasm -p android-credman-sys -p android-credman

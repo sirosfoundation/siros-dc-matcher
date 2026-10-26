@@ -6,6 +6,7 @@ members = [
     "crates/siros-codec",
     "crates/siros-credential",
     "crates/siros-dcql",
+    "crates/siros-display",
     "crates/siros-mdoc",
     "crates/siros-oid4vp",
     "crates/siros-dc-matcher-core",
@@ -34,6 +35,7 @@ rust-version = "1.82"
 siros-codec = { path = "crates/siros-codec" }
 siros-credential = { path = "crates/siros-credential" }
 siros-dcql = { version = "0.12.0", path = "crates/siros-dcql" }
+siros-display = { path = "crates/siros-display", default-features = false }
 siros-mdoc = { path = "crates/siros-mdoc" }
 siros-oid4vp = { path = "crates/siros-oid4vp" }
 siros-sdjwt = { path = "crates/siros-sdjwt" }
