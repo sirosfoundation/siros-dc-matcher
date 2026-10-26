@@ -7,9 +7,10 @@ use siros_dcql::Dropped;
 use siros_dcql::QueryId;
 use siros_oid4vp::{ErrorCode, Submission};
 use siros_presentation::{
-    Failure, Position, PresentationError, SubsetError, WalletDisplay, MAX_ADDITIONS, MAX_EXAMINED,
-    MAX_OFFERS,
+    AdditionIndex, Failure, OfferIndex, Pick, PickError, PresentationError, Selection, SubsetError,
+    WalletDisplay, MAX_ADDITIONS, MAX_EXAMINED, MAX_OFFERS,
 };
+use siros_wallet_state::CredentialId;
 use siros_zkp_req_nym_auth::testing::Spec;
 
 use crate::sd_jwt::{payment_naming, type_metadata_of};
@@ -155,6 +156,122 @@ fn pid_query() -> Value {
     json!({"id": "pid", "format": "dc+sd-jwt", "meta": {"vct_values": [VCT]}})
 }
 
+fn photo(id: u64) -> Held {
+    Held::new(
+        id,
+        "mso_mdoc",
+        mdoc(
+            "org.example.photo.1",
+            "org.example.photo",
+            &[("photo", Cbor::Bytes(vec![1]))],
+        ),
+    )
+}
+
+fn photo_query() -> Value {
+    json!({"id": "photo", "format": "mso_mdoc", "meta": {"doctype_value": "org.example.photo.1"}})
+}
+
+/// K3: the picked credential picker entries make the selection of the offer they name, with the
+/// additions that answer exactly the picked queries the offer leaves; each pick the plan does
+/// not hold is refused.
+#[test]
+fn picks_select_against_the_plan() {
+    let pid = Held::new(
+        1,
+        "dc+sd-jwt",
+        sd_jwt(VCT, &[("given_name", json!("Erika"))]),
+    );
+    let wallet = Wallet::new(vec![pid, mdl(2), photo(3)]);
+    let request = asked(json!({
+        "credentials": [pid_query(), mdl_query(false), photo_query()],
+        "credential_sets": [
+            {"options": [["pid"]]},
+            {"options": [["mdl"], ["mdl", "photo"]], "required": false}
+        ]
+    }));
+    let fetches = wallet.fetches(&request);
+    let planned = ready(&wallet.input(&request, &fetches)).unwrap();
+    let digest = *planned.view().digest();
+    let id = |query: &str| QueryId::parse(query).unwrap();
+    let pick = |offer, query: &str, credential| {
+        Pick::new(
+            OfferIndex::new(offer),
+            id(query),
+            CredentialId::new(credential),
+        )
+    };
+    let selection = |additions: Vec<usize>| {
+        let additions = additions.into_iter().map(AdditionIndex::new).collect();
+        Ok(Selection::new(
+            digest,
+            OfferIndex::new(0),
+            additions,
+            Vec::new(),
+        ))
+    };
+    let refused = |error| Err(PresentationError::Pick(error));
+    // (case, picks, outcome)
+    let cases: [(&str, Vec<Pick>, Result<Selection, PresentationError>); 11] = [
+        ("the offer", vec![pick(0, "pid", 1)], selection(vec![])),
+        (
+            "the offer and an addition",
+            vec![pick(0, "mdl", 2), pick(0, "pid", 1)],
+            selection(vec![0]),
+        ),
+        (
+            "the addition that answers every picked query",
+            vec![pick(0, "pid", 1), pick(0, "mdl", 2), pick(0, "photo", 3)],
+            selection(vec![1]),
+        ),
+        ("no pick", vec![], refused(PickError::Empty)),
+        (
+            "two offers",
+            vec![pick(0, "pid", 1), pick(1, "pid", 1)],
+            refused(PickError::Offers(OfferIndex::new(0), OfferIndex::new(1))),
+        ),
+        (
+            "a pick twice",
+            vec![pick(0, "pid", 1), pick(0, "pid", 1)],
+            refused(PickError::Repeated {
+                query: id("pid"),
+                credential: CredentialId::new(1),
+            }),
+        ),
+        (
+            "an unknown offer",
+            vec![pick(1, "pid", 1)],
+            Err(PresentationError::OfferUnknown(OfferIndex::new(1))),
+        ),
+        (
+            "a query the request lacks",
+            vec![pick(0, "pid", 1), pick(0, "card", 1)],
+            refused(PickError::Query(id("card"))),
+        ),
+        (
+            "a credential the offer does not hold",
+            vec![pick(0, "pid", 2)],
+            refused(PickError::Credential {
+                query: id("pid"),
+                credential: CredentialId::new(2),
+            }),
+        ),
+        (
+            "an offer member without a pick",
+            vec![pick(0, "mdl", 2)],
+            refused(PickError::Missing(id("pid"))),
+        ),
+        (
+            "a part of an addition",
+            vec![pick(0, "pid", 1), pick(0, "photo", 3)],
+            refused(PickError::Additions),
+        ),
+    ];
+    for (case, picks, outcome) in cases {
+        assert_eq!(planned.picked(&picks), outcome, "{case}");
+    }
+}
+
 /// A3: required and optional sets, additions, `multiple` members, an optional set joined for a
 /// transaction entry, and the limits.
 #[test]
@@ -197,14 +314,14 @@ fn offers_of_credential_sets() {
     };
     assert_eq!(shape(offer), (vec![("mdl".to_owned(), 3)], Vec::new()));
     assert_eq!(offer.wallet_display(), WalletDisplay::Needed);
-    let response = respond_to(&input, 0, Vec::new(), vec![("mdl".into(), vec![0, 2])]).unwrap();
+    let response = respond_to(&input, 0, Vec::new(), vec![("mdl".into(), vec![3, 1])]).unwrap();
     let Submission::DcApi(data) = response.submission() else {
         panic!("a DC API response")
     };
     assert_eq!(data["vp_token"]["mdl"].as_array().unwrap().len(), 2);
     let record = serde_json::to_value(response.record()).unwrap();
     assert_eq!(record["usedCredentialIds"], json!([1, 3]));
-    let subset = |query: &str, positions: Vec<usize>| (query.to_owned(), positions);
+    let subset = |query: &str, ids: Vec<u64>| (query.to_owned(), ids);
     let id = |query: &str| QueryId::parse(query).unwrap();
     let refusals = [
         (
@@ -212,19 +329,19 @@ fn offers_of_credential_sets() {
             PresentationError::Subset(SubsetError::Empty),
         ),
         (
-            vec![subset("mdl", vec![3])],
-            PresentationError::Subset(SubsetError::OutOfRange(Position::new(3))),
+            vec![subset("mdl", vec![9])],
+            PresentationError::Subset(SubsetError::Unknown(CredentialId::new(9))),
         ),
         (
-            vec![subset("mdl", vec![1, 1])],
-            PresentationError::Subset(SubsetError::Repeated(Position::new(1))),
+            vec![subset("mdl", vec![2, 2])],
+            PresentationError::Subset(SubsetError::Repeated(CredentialId::new(2))),
         ),
         (
-            vec![subset("pid", vec![0])],
+            vec![subset("pid", vec![1])],
             PresentationError::SubsetQuery(id("pid")),
         ),
         (
-            vec![subset("mdl", vec![0]), subset("mdl", vec![1])],
+            vec![subset("mdl", vec![1]), subset("mdl", vec![2])],
             PresentationError::SubsetRepeated(id("mdl")),
         ),
     ];
@@ -234,20 +351,9 @@ fn offers_of_credential_sets() {
     }
 
     // At most one option per optional set.
-    let photo = Held::new(
-        3,
-        "mso_mdoc",
-        mdoc(
-            "org.example.photo.1",
-            "org.example.photo",
-            &[("photo", Cbor::Bytes(vec![1]))],
-        ),
-    );
-    let wallet = Wallet::new(vec![pid(1), mdl(2), photo]);
-    let photo_query = json!({"id": "photo", "format": "mso_mdoc",
-        "meta": {"doctype_value": "org.example.photo.1"}});
+    let wallet = Wallet::new(vec![pid(1), mdl(2), photo(3)]);
     let request = asked(json!({
-        "credentials": [pid_query(), mdl_query(false), photo_query],
+        "credentials": [pid_query(), mdl_query(false), photo_query()],
         "credential_sets": [
             {"options": [["pid"]]},
             {"options": [["mdl"], ["photo"]], "required": false}

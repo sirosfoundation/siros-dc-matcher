@@ -69,9 +69,9 @@ impl PlanDigest {
     ///
     /// It covers the request's response mode, Client Identifier, trust verdict, origin,
     /// response URI, `nonce`, `state`, `dcql_query` as sent, `transaction_data` and the
-    /// nym_auth `verifier_id`; and for each offer its members with every candidate's instance
-    /// and answer and the positions of the entries bound to it, its additions, and whether it
-    /// needs the wallet's display.
+    /// nym_auth `verifier_id`; and for each offer its members with every candidate's
+    /// `credentialId`, instance and answer and the positions of the entries bound to it, its
+    /// additions, and whether it needs the wallet's display.
     pub(crate) fn of(
         request: &VerifiedRequest,
         verifier_id: Option<&VerifierId>,
@@ -160,11 +160,13 @@ impl Encode for MemberView {
     }
 }
 
-/// Its instance, its answer, and the positions of the entries bound to it.
+/// Its `credentialId` and instance, its answer, and the positions of the entries bound to it.
 impl Encode for CredentialView {
     fn encode(&self) -> Value {
+        let entry = self.entry();
         Value::Array(vec![
-            Value::text(&self.credential_id().to_string()),
+            Value::text(&entry.credential_id().to_string()),
+            Value::text(&entry.instance_id().to_string()),
             self.answer().encode(),
             list(self.entries()),
         ])

@@ -3,6 +3,7 @@
 
 use std::fmt;
 
+use siros_credential::EntryRef;
 use siros_dcql::PathError;
 use siros_display::DisplayError;
 use siros_mdoc::DisclosureError;
@@ -15,9 +16,8 @@ use siros_zkp_req_nym_auth::presenter::{ProveError, Unanswerable};
 
 use crate::ids::{AdditionIndex, CandidateIndex, OfferIndex, QueryIndex, SetIndex};
 use crate::matching::{AskedError, ChoiceError, Failure};
-use crate::offers::SubsetError;
-use crate::plan::{DigestError, MemberPosition, Unproven};
-use crate::respond::SignatureError;
+use crate::plan::{DigestError, EntryPosition, Unproven};
+use crate::respond::{PickError, SignatureError, SubsetError};
 use siros_dcql::QueryId;
 
 /// Why the core gives no plan, no chosen offer or no response.
@@ -55,8 +55,15 @@ pub enum PresentationError {
     SubsetRepeated(QueryId),
     /// A subset of a member's credentials is refused (A3).
     Subset(SubsetError),
-    /// A subset drops a credential a transaction entry is bound to (T4).
-    SubsetDropsEntry(QueryId),
+    /// The selection leaves out the credential the transaction entry at `entry` binds to (T4).
+    BoundCredentialOmitted {
+        /// The entry's position in `transaction_data`.
+        entry: EntryPosition,
+        /// The credential, by `credentialId` and instance.
+        credential: EntryRef,
+    },
+    /// The picked credential picker entries make no selection (K3).
+    Pick(PickError),
     /// A fulfilment without the wallet's UI chose an offer that needs it (A9).
     WalletDisplayNeeded,
     /// A member's credential names no key pair.
@@ -97,8 +104,6 @@ pub enum PresentationError {
 pub enum Inconsistency {
     /// A member names a query the matching lacks.
     Query(QueryIndex),
-    /// A binding names a member the offer lacks.
-    Member(MemberPosition),
     /// A member names a candidate its query lacks.
     Candidate(QueryIndex, CandidateIndex),
     /// A proof answers a query without a nym_auth query.
@@ -116,7 +121,6 @@ impl Inconsistency {
     pub fn code(self) -> &'static str {
         match self {
             Self::Query(_) => "plan_query_unknown",
-            Self::Member(_) => "plan_member_unknown",
             Self::Candidate(..) => "plan_candidate_unknown",
             Self::ZkpQuery(_) => "plan_zkp_query_missing",
             Self::NymAuthRequest(_) => "plan_nym_auth_request_missing",
@@ -145,7 +149,8 @@ impl PresentationError {
             Self::SubsetMember(_) => "selection_subset_member",
             Self::SubsetRepeated(_) => "selection_subset_repeated",
             Self::Subset(e) => e.code(),
-            Self::SubsetDropsEntry(_) => "selection_subset_drops_entry",
+            Self::BoundCredentialOmitted { .. } => "selection_bound_credential_omitted",
+            Self::Pick(e) => e.code(),
             Self::WalletDisplayNeeded => "wallet_display_needed",
             Self::KeyIdMissing => "key_id_missing",
             Self::HolderKeyMissing => "holder_key_missing",
@@ -187,7 +192,8 @@ impl PresentationError {
             | Self::SubsetMember(_)
             | Self::SubsetRepeated(_)
             | Self::Subset(_)
-            | Self::SubsetDropsEntry(_)
+            | Self::BoundCredentialOmitted { .. }
+            | Self::Pick(_)
             | Self::WalletDisplayNeeded
             | Self::KeyIdMissing
             | Self::HolderKeyMissing
@@ -244,6 +250,7 @@ causes! {
     DisplayError => Display,
     DigestError => Digest,
     SubsetError => Subset,
+    PickError => Pick,
     Inconsistency => Inconsistent,
     ChoiceError => Choice,
     Unproven => Unproven,

@@ -89,20 +89,26 @@ against the 307,200-byte budget (303,914 before).
   auxiliary data (A2); offers, optional additions, an offer per option when every set is
   optional, a `multiple` member holding every candidate, and each optional set that can carry
   a transaction entry joined, in an offer of its own, to an offer whose members carry none
-  (A3); the transaction entries each credential authorizes (T4); the plan's digest over the request, its trust verdict, the nym_auth `verifier_id` and
-  every offer's instances, answers, bound entries, additions and display (A4); and the consent
+  (A3); the transaction entries each credential authorizes, the credential named by
+  `credentialId` and instance (T4); the plan's digest over the request, its trust verdict, the
+  nym_auth `verifier_id` and every offer's credentials by `credentialId` and instance, their
+  answers and bound entries, its additions and display (A4); and the consent
   view with cards, claim rows, proof statement rows, additions, transactions and whether an
   offer needs the wallet's display (A9). The plan asks the host for each type metadata fetch.
   A nym_auth request must be signed, trusted and encrypted, and its `verifier_id` comes from the
   authenticated certificate (N2). A `zkp_req` query that names `trusted_authorities` finds every
   issuer untrusted until the wallet evaluates them. Phase 2 parses the selection against the
-  plan made again, with the non-empty subset of each `multiple` member, a set in the member's
-  order, binds the entries as the plan did, gives a `Sign` effect per signing input, verifies each signature under the instance's holder key (A5), and gives
+  plan made again, with the non-empty subset of each `multiple` member by `credentialId`, kept
+  in the member's order. A selection that leaves out the credential an entry binds to is
+  refused, and phase 2 binds the entries to the credentials the view named. `Planned::picked`
+  makes the selection from the credential picker entries the user picked, each naming its
+  offer, query and `credentialId` (K3). Phase 2 gives a `Sign` effect per signing input,
+  verifies each signature under the instance's holder key (A5), and gives
   one `vp_token` (A8), its submission for the request's Response Mode and the presentation
   record. It proves `zkp_req` in-process through a `NymAuthProver`. A decline, and a background
   fulfilment of an offer that needs the wallet's display, give `access_denied`. Positions and
   identifiers are their own types (`QueryIndex`, `CandidateIndex`, `SetIndex`, `OfferIndex`,
-  `AdditionIndex`, `Position`, `EntryPosition`, `PlanDigest`, `SignId`, and DCQL's `QueryId`),
+  `AdditionIndex`, `EntryPosition`, `PlanDigest`, `SignId`, and DCQL's `QueryId`),
   and so are A9's facts. `Fetches` is the one store of the host's responses, and a second
   answer to a URL is refused. A request without an offer gives its `Failure`: the refused query and why,
   the reasons each `zkp_req` candidate answers no option, or no combination. Without the
@@ -139,7 +145,8 @@ against the 307,200-byte budget (303,914 before).
   holder's P-256 key, an SD-JWT VC's `cnf.jwk` or an mdoc's `deviceKey`; an SD-JWT VC whose
   `cnf` holds no P-256 `jwk` does not parse (`CredentialError::HolderKey`). `siros-mdoc` gains
   `P256Key::new`. `siros-transaction-data` gains `Entry::carried_by`, `Fetched::insert_first`
-  and `Fetched::response`.
+  and `Fetched::response`. `siros-wallet-state`: `CredentialId::new` is public, for the ids
+  picker entries carry, and `InstanceId` displays its decimal form.
 - `siros-transaction-data`, the `transaction_data` request parameter (OpenID4VP 1.0, Section
   5.1) for the wallet core. It parses entries of the four EC TS12 v1.0.1 types into typed
   payloads, binds each entry to one credential of an offer, gives the KB-JWT claims

@@ -46,7 +46,7 @@ pub(crate) use proof::nym_answer;
 pub use proof::{OptionRefusal, Unproven};
 pub use seed::{JsonCause, NoSeed};
 pub use transactions::EntryPosition;
-pub(crate) use transactions::{offered, Bound, MemberPosition, Offered};
+pub(crate) use transactions::{offered, Bound, Offered};
 pub use view::{AdditionView, ConsentView, CredentialView, MemberView, OfferView, Shown};
 
 /// What a plan is made from. Phase 2 makes the plan again from the same input.

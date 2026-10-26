@@ -13,7 +13,7 @@ use siros_dcql::QueryId;
 use siros_display::{DisplayCache, Locale};
 use siros_oid4vp::{FetchResponse, VerifiedRequest};
 use siros_presentation::{
-    plan, AdditionIndex, Fetches, Fulfilment, OfferIndex, PlanInput, PlanStep, Planned, Position,
+    plan, AdditionIndex, Fetches, Fulfilment, OfferIndex, PlanInput, PlanStep, Planned,
     PresentationError, Response, Selection, SignId, Subset,
 };
 use siros_transaction_data::{Amr, Factor, Inherence, Possession};
@@ -389,25 +389,35 @@ pub fn sign_all(signs: &[siros_presentation::Sign]) -> Vec<(SignId, Vec<u8>)> {
 }
 
 /// Both phases for the offer at `offer` of the plan of `input`, with the additions at
-/// `additions` and the subsets `subsets`: the plan, the plan again, the selection on the
-/// plan's digest, the holder's signatures and the response.
+/// `additions` and the subsets `subsets` of `credentialId`s: the plan, then
+/// [`respond_with`] the selection on the plan's digest.
 pub fn respond_to(
     input: &PlanInput<'_>,
     offer: usize,
     additions: Vec<usize>,
-    subsets: Vec<(String, Vec<usize>)>,
+    subsets: Vec<(String, Vec<u64>)>,
 ) -> Result<Response, PresentationError> {
     let digest = *ready(input)?.view().digest();
-    let planned = ready(input)?;
     let subsets = subsets
         .into_iter()
-        .map(|(query, positions)| {
-            let positions = positions.into_iter().map(Position::new).collect();
-            Subset::new(QueryId::parse(&query).unwrap(), positions)
+        .map(|(query, ids)| {
+            let ids = ids.into_iter().map(CredentialId::new).collect();
+            Subset::new(QueryId::parse(&query).unwrap(), ids)
         })
         .collect();
     let additions = additions.into_iter().map(AdditionIndex::new).collect();
     let selection = Selection::new(digest, OfferIndex::new(offer), additions, subsets);
+    respond_with(input, |_| Ok(selection))
+}
+
+/// Phase 2 for the selection `select` makes on the plan of `input`: the plan again, the
+/// selection, the holder's signatures and the response.
+pub fn respond_with(
+    input: &PlanInput<'_>,
+    select: impl FnOnce(&Planned<'_>) -> Result<Selection, PresentationError>,
+) -> Result<Response, PresentationError> {
+    let planned = ready(input)?;
+    let selection = select(&planned)?;
     let chosen = planned.choose(&selection, Fulfilment::WalletUi)?;
     let mut rng = Rng(77);
     let prepared = chosen.prepare(&mut rng)?;

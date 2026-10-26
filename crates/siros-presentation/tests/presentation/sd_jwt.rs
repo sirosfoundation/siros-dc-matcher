@@ -5,15 +5,17 @@
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use siros_codec::base64url;
+use siros_dcql::QueryId;
 use siros_oid4vp::FetchResponse;
-use siros_presentation::{plan, PlanStep, WalletDisplay};
+use siros_presentation::{plan, OfferIndex, Pick, PlanStep, PresentationError, WalletDisplay};
+use siros_wallet_state::CredentialId;
 
 use crate::verifier::{
     b64, client_metadata, dc_api_signed, decrypt_jwe, redirect_unsigned, NONCE, NOW, RESPONSE_URI,
     STATE,
 };
 use crate::wallet::{
-    disclosed, holder_signed, ready, respond, respond_to, sd_jwt, Held, Wallet, VCT,
+    disclosed, holder_signed, ready, respond, respond_to, respond_with, sd_jwt, Held, Wallet, VCT,
 };
 
 const PAYMENT: &str = "urn:eudi:sca:payment:1";
@@ -200,9 +202,9 @@ fn kb_jwt_aud_over_the_dc_api() {
     assert_eq!(claims["aud"], "origin:https://verifier.example");
 }
 
-/// T4 and A3: a subset of a `multiple` member is a set, and phase 2 binds the entries as the plan
-/// did: the payment stays on the credential the view showed it on, whatever order the subset
-/// lists.
+/// T4, A3 and K3: the view names the credential the payment binds to by its `credentialId`;
+/// the same ids in any order, in a subset or in picks, give the same response, which binds the
+/// payment to that credential; a subset without it is refused.
 #[test]
 fn a_subset_keeps_the_plans_binding() {
     let mut wallet = Wallet::new(vec![
@@ -223,18 +225,33 @@ fn a_subset_keeps_the_plans_binding() {
     let fetches = wallet.fetches(&request);
     let input = wallet.input(&request, &fetches);
     let planned = ready(&input).unwrap();
-    let shown: Vec<Vec<usize>> = planned.view().offers()[0].members()[0]
-        .credentials()
+    let credentials = planned.view().offers()[0].members()[0].credentials();
+    let shown: Vec<(CredentialId, Vec<usize>)> = credentials
         .iter()
-        .map(|c| c.entries().iter().map(|e| e.value()).collect())
+        .map(|c| {
+            let entries = c.entries().iter().map(|e| e.value()).collect();
+            (c.entry().credential_id(), entries)
+        })
         .collect();
     assert_eq!(
         shown,
-        [vec![0], vec![]],
+        [
+            (CredentialId::new(1), vec![0]),
+            (CredentialId::new(2), vec![])
+        ],
         "the view binds the payment to One"
     );
 
-    let response = respond_to(&input, 0, Vec::new(), vec![("pid".into(), vec![1, 0])]).unwrap();
+    let ids = |ids: &[u64]| vec![("pid".to_owned(), ids.to_vec())];
+    let response = respond_to(&input, 0, Vec::new(), ids(&[1, 2])).unwrap();
+    let reordered = respond_to(&input, 0, Vec::new(), ids(&[2, 1])).unwrap();
+    let pick = |id| {
+        let query = QueryId::parse("pid").unwrap();
+        Pick::new(OfferIndex::new(0), query, CredentialId::new(id))
+    };
+    let picked = respond_with(&input, |planned| planned.picked(&[pick(2), pick(1)])).unwrap();
+    assert_eq!(reordered.submission(), response.submission());
+    assert_eq!(picked.submission(), response.submission());
     let payload = decrypt_jwe(response.submission());
     let bound: Vec<(String, bool)> = payload["vp_token"]["pid"]
         .as_array()
@@ -256,4 +273,13 @@ fn a_subset_keeps_the_plans_binding() {
         })
         .collect();
     assert_eq!(bound, [("One".to_owned(), true), ("Two".to_owned(), false)]);
+
+    let one = &credentials[0];
+    assert_eq!(
+        respond_to(&input, 0, Vec::new(), ids(&[2])).err(),
+        Some(PresentationError::BoundCredentialOmitted {
+            entry: one.entries()[0],
+            credential: one.entry(),
+        })
+    );
 }

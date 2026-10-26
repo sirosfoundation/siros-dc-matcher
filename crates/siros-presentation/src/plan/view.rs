@@ -1,6 +1,7 @@
 //! The consent view: the verifier, and per offer its purposes, its credentials with their
 //! claim or proof statement rows, its additions and its transactions.
 
+use siros_credential::EntryRef;
 use siros_dcql::Dropped;
 use siros_display::proof::{verified_rows, ProofRow};
 use siros_display::{purpose, Card, ClaimRow, DisplayCache, Locale};
@@ -51,7 +52,7 @@ pub struct MemberView {
 
 /// A credential of a member as the user sees it.
 pub struct CredentialView {
-    credential_id: CredentialId,
+    entry: EntryRef,
     answer: Answer,
     card: Card,
     shown: Shown,
@@ -160,17 +161,18 @@ impl MemberView {
         &self.query_id
     }
 
-    /// The credentials, in the order of the member's candidates: the selection chooses a
-    /// subset of them by their positions here.
+    /// The credentials, in the order of the member's candidates. For a `multiple` query, the
+    /// selection chooses a subset of them by `credentialId`.
     pub fn credentials(&self) -> &[CredentialView] {
         &self.credentials
     }
 }
 
 impl CredentialView {
-    /// The instance presented.
-    pub(crate) fn credential_id(&self) -> CredentialId {
-        self.credential_id
+    /// The instance presented. A selection names it by its `credentialId`; the entries bound
+    /// to it name it by `credentialId` and instance (T4).
+    pub fn entry(&self) -> EntryRef {
+        self.entry
     }
 
     /// What the instance presents.
@@ -279,7 +281,7 @@ fn presentability(members: &[MemberView], background: &[CredentialId]) -> Presen
     let presentable = members
         .iter()
         .flat_map(MemberView::credentials)
-        .all(|credential| background.contains(&credential.credential_id));
+        .all(|credential| background.contains(&credential.entry.credential_id()));
     if presentable {
         Presentability::WithoutUi
     } else {
@@ -296,8 +298,9 @@ fn member_views(
     let mut views = Vec::with_capacity(members.len());
     for member in offered(sources.answered, members)? {
         let mut credentials = Vec::with_capacity(member.candidates.len());
-        for &(index, candidate) in &member.candidates {
-            let bound = fetched!(bound_entries(bindings, member.bound(index), sources)?);
+        for &(_, candidate) in &member.candidates {
+            let bound = Bound::of(member.answers, candidate);
+            let bound = fetched!(bound_entries(bindings, &bound, sources)?);
             credentials.push(credential_view(&member, candidate, bound, sources)?);
         }
         views.push(MemberView {
@@ -317,12 +320,12 @@ struct BoundEntries {
 /// The entries `bindings` bind to the credential `bound`.
 fn bound_entries(
     bindings: &[(Bound, MemberBinding<'_, '_>)],
-    bound: Bound,
+    bound: &Bound,
     sources: &Sources<'_, '_>,
 ) -> Result<Step<BoundEntries>, PresentationError> {
     let mut entries = Vec::new();
     let mut transactions = Vec::new();
-    for (_, binding) in bindings.iter().filter(|(key, _)| *key == bound) {
+    for (_, binding) in bindings.iter().filter(|(key, _)| key == bound) {
         transactions.extend(fetched!(binding.views(sources.fetched, sources.locales)?));
         entries.extend(sources.transactions.positions(binding)?);
     }
@@ -341,7 +344,7 @@ fn credential_view(
 ) -> Result<CredentialView, PresentationError> {
     let credential = candidate.credential().credential();
     Ok(CredentialView {
-        credential_id: credential.entry().credential_id(),
+        entry: credential.entry(),
         answer: candidate.answer().clone(),
         card: sources.display.card(credential, sources.locales)?,
         shown: shown(member, candidate, sources)?,

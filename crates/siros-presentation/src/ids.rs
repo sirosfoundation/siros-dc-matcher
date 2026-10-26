@@ -75,8 +75,3 @@ chosen!(
     /// The position of an addition among the additions of an offer in the consent view.
     AdditionIndex
 );
-
-chosen!(
-    /// The position of a credential among the credentials of a member in the consent view.
-    Position
-);

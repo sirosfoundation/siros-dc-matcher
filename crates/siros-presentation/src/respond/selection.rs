@@ -1,11 +1,14 @@
 //! The user's selection, parsed against the plan (A3, A4), and the refusal of a background
 //! fulfilment that needs the wallet's display (A9).
 
+use std::fmt;
+
+use siros_dcql::QueryId;
+use siros_wallet_state::CredentialId;
+
 use crate::display_rule::WalletDisplay;
 use crate::error::{Inconsistency, PresentationError};
-use siros_dcql::QueryId;
-
-use crate::ids::{AdditionIndex, OfferIndex, Position, QueryIndex};
+use crate::ids::{AdditionIndex, CandidateIndex, OfferIndex, QueryIndex};
 use crate::offers::{Addition, Member, Offer};
 use crate::plan::{PlanDigest, Planned};
 
@@ -18,18 +21,48 @@ pub struct Selection {
     subsets: Vec<Subset>,
 }
 
-/// The credentials chosen for the member of a `multiple` Credential Query: their positions in
-/// [`MemberView::credentials`](crate::MemberView::credentials).
+/// The credentials chosen for the member of a `multiple` Credential Query, by `credentialId`:
+/// a set, whatever order it lists them in.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Subset {
     query: QueryId,
-    positions: Vec<Position>,
+    credentials: Vec<CredentialId>,
 }
 
+/// Why the credentials a subset names are refused (A3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SubsetError {
+    /// The subset names no credential.
+    Empty,
+    /// The subset names this credential twice.
+    Repeated(CredentialId),
+    /// The member holds no credential of this `credentialId`.
+    Unknown(CredentialId),
+}
+
+impl SubsetError {
+    /// A stable identifier.
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Empty => "selection_subset_empty",
+            Self::Repeated(_) => "selection_subset_credential_repeated",
+            Self::Unknown(_) => "selection_subset_credential_unknown",
+        }
+    }
+}
+
+impl fmt::Display for SubsetError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.code())
+    }
+}
+
+impl std::error::Error for SubsetError {}
+
 impl Subset {
-    /// The credentials at `positions` for the member of the query `query`.
-    pub fn new(query: QueryId, positions: Vec<Position>) -> Self {
-        Self { query, positions }
+    /// The credentials `credentials` for the member of the query `query`.
+    pub fn new(query: QueryId, credentials: Vec<CredentialId>) -> Self {
+        Self { query, credentials }
     }
 }
 
@@ -81,9 +114,9 @@ impl<'a> Planned<'a> {
     ///
     /// [`PresentationError`]: the digest of another plan; an unknown offer or addition; two
     /// additions of one optional set or answering one query; a subset of no `multiple` query
-    /// or of one no chosen member answers, a second subset for one member, a subset refused, or
-    /// one that drops a credential a transaction entry is bound to; or a background fulfilment
-    /// of an offer that needs the wallet's display.
+    /// or of one no chosen member answers, a second subset for one member, or a subset
+    /// refused; a choice that leaves out a credential a transaction entry binds to; or a
+    /// background fulfilment of an offer that needs the wallet's display.
     pub fn choose(
         &self,
         selection: &Selection,
@@ -119,7 +152,8 @@ impl<'a> Planned<'a> {
                 .chain(added.iter_mut())
                 .find(|member| member.query() == query)
                 .ok_or_else(|| PresentationError::SubsetMember(subset.query.clone()))?;
-            *member = member.subset(&subset.positions)?;
+            let held = self.held(member)?;
+            *member = chosen(member, &held, &subset.credentials)?;
         }
         self.keeps_bound_credentials(offer, &members)?;
         if fulfilment == Fulfilment::Background && view.wallet_display() == WalletDisplay::Needed {
@@ -177,31 +211,93 @@ impl<'a> Planned<'a> {
             .ok_or_else(|| PresentationError::SubsetQuery(id.clone()))
     }
 
-    /// Checks that every credential an entry of `offer` is bound to stays among `members`, so
+    /// Each candidate of `member` with the `credentialId` of its credential.
+    pub(super) fn held(
+        &self,
+        member: &Member,
+    ) -> Result<Vec<(CandidateIndex, CredentialId)>, Inconsistency> {
+        let query = member.query();
+        let answers = self
+            .answered
+            .answers(query)
+            .ok_or(Inconsistency::Query(query))?;
+        member
+            .candidates()
+            .iter()
+            .map(|&index| {
+                answers
+                    .candidate(index)
+                    .map(|c| (index, c.credential().credential().entry().credential_id()))
+                    .ok_or(Inconsistency::Candidate(query, index))
+            })
+            .collect()
+    }
+
+    /// Checks that `members` keep every credential a transaction entry of `offer` binds to, so
     /// the binding of the chosen credentials is the plan's (T4).
     fn keeps_bound_credentials(
         &self,
         offer: &Offer,
         members: &[Member],
     ) -> Result<(), PresentationError> {
-        for (bound, _) in self.transactions.bind(&self.answered, offer.members())? {
-            let member = members
-                .get(bound.member.value())
-                .ok_or(Inconsistency::Member(bound.member))?;
-            if !member.candidates().contains(&bound.candidate) {
-                return Err(PresentationError::SubsetDropsEntry(
-                    self.query_id(member.query())?,
-                ));
+        let chosen = crate::plan::offered(&self.answered, members)?;
+        for (bound, binding) in self.transactions.bind(&self.answered, offer.members())? {
+            let kept = chosen.iter().any(|member| {
+                member
+                    .candidates
+                    .iter()
+                    .any(|&(_, candidate)| member.carries(&bound, candidate))
+            });
+            if !kept {
+                let entries = self.transactions.positions(&binding)?;
+                let entry = entries.first().copied().ok_or(Inconsistency::Entry)?;
+                return Err(PresentationError::BoundCredentialOmitted {
+                    entry,
+                    credential: bound.credential,
+                });
             }
         }
         Ok(())
     }
 
     /// The `id` of the Credential Query at `index`.
-    fn query_id(&self, index: QueryIndex) -> Result<QueryId, Inconsistency> {
+    pub(super) fn query_id(&self, index: QueryIndex) -> Result<QueryId, Inconsistency> {
         self.answered
             .answers(index)
             .map(|answers| answers.id().clone())
             .ok_or(Inconsistency::Query(index))
     }
+}
+
+/// The member of the candidates of `member` whose `credentialId` `credentials` names, in the
+/// member's order. `held` holds each candidate with its `credentialId`.
+///
+/// # Errors
+///
+/// [`SubsetError`]: no credential, one named twice, or one the member does not hold.
+fn chosen(
+    member: &Member,
+    held: &[(CandidateIndex, CredentialId)],
+    credentials: &[CredentialId],
+) -> Result<Member, SubsetError> {
+    if credentials.is_empty() {
+        return Err(SubsetError::Empty);
+    }
+    let repeated = credentials
+        .iter()
+        .enumerate()
+        .find(|&(at, id)| credentials.iter().take(at).any(|other| other == id));
+    if let Some((_, &id)) = repeated {
+        return Err(SubsetError::Repeated(id));
+    }
+    if let Some(&unknown) = credentials
+        .iter()
+        .find(|&id| held.iter().all(|(_, held)| held != id))
+    {
+        return Err(SubsetError::Unknown(unknown));
+    }
+    Ok(member.keeping(|candidate| {
+        held.iter()
+            .any(|(c, id)| *c == candidate && credentials.contains(id))
+    }))
 }

@@ -10,7 +10,8 @@ use serde::Serialize;
 pub struct CredentialId(u64);
 
 impl CredentialId {
-    pub(crate) fn new(id: u64) -> Self {
+    /// The identifier `id`, as the wallet state and the credential picker's entries write it.
+    pub fn new(id: u64) -> Self {
         Self(id)
     }
 }
@@ -39,6 +40,13 @@ pub struct InstanceId(u64);
 impl InstanceId {
     pub(crate) fn new(id: u64) -> Self {
         Self(id)
+    }
+}
+
+/// The decimal form, as JSON writes the number.
+impl fmt::Display for InstanceId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
     }
 }
 

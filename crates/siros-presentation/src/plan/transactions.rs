@@ -3,7 +3,8 @@
 
 use itertools::Itertools;
 use siros_codec::date::DateTime;
-use siros_credential::{Credential, Format, UsableCredential};
+use siros_credential::{Credential, EntryRef, Format, Instance, UsableCredential};
+use siros_dcql::QueryId;
 use siros_oid4vp::VerifiedRequest;
 use siros_transaction_data::{
     bind, Entry, MemberBinding, Presented, ScaMetadata, Step, TransactionDataError,
@@ -22,16 +23,25 @@ position!(
     EntryPosition
 );
 
-position!(
-    /// The position of a member in its offer.
-    MemberPosition
-);
-
-/// A credential of an offer an entry binds to: its member's position, and its candidate.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// The presented credential a transaction entry binds to (T4): the Credential Query it answers,
+/// and its entry, named by `credentialId` and instance.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct Bound {
-    pub(crate) member: MemberPosition,
-    pub(crate) candidate: CandidateIndex,
+    pub(crate) query: QueryId,
+    pub(crate) credential: EntryRef,
+}
+
+impl Bound {
+    /// The credential `candidate` presented for the query of `answers`.
+    pub(crate) fn of<C: Instance, R>(
+        answers: &Answers<'_, C, R>,
+        candidate: &Candidate<C>,
+    ) -> Self {
+        Self {
+            query: answers.id().clone(),
+            credential: candidate.credential().entry(),
+        }
+    }
 }
 
 /// The answers of a request over the wallet's usable credentials.
@@ -168,10 +178,11 @@ impl<'a> Transactions<'a> {
         let presented: Vec<(Bound, Presented<'t>)> = offered
             .iter()
             .flat_map(|member| {
-                member.candidates.iter().filter_map(|&(index, candidate)| {
+                member.candidates.iter().filter_map(|&(_, candidate)| {
                     let metadata = self.metadata_of(candidate)?;
                     let query_id = member.answers.query().id.as_str();
-                    Some((member.bound(index), Presented::new(query_id, metadata)))
+                    let bound = Bound::of(member.answers, candidate);
+                    Some((bound, Presented::new(query_id, metadata)))
                 })
             })
             .collect();
@@ -186,7 +197,7 @@ impl<'a> Transactions<'a> {
                         p.query_id() == credential.query_id()
                             && p.credential().entry() == credential.credential().entry()
                     })
-                    .map(|(bound, _)| *bound)
+                    .map(|(bound, _)| bound.clone())
                     .ok_or(Inconsistency::BoundCredential)?;
                 Ok((bound, binding))
             })
@@ -222,22 +233,21 @@ fn authorizing<'w, 'a: 'w>(
         })
 }
 
-/// A member of an offer as the matching answers it: its position and query, and each of its
-/// candidates.
+/// A member of an offer as the matching answers it: its query, and each of its candidates.
 pub(crate) struct Offered<'w, 'a> {
-    pub(crate) position: MemberPosition,
     pub(crate) query: QueryIndex,
     pub(crate) answers: &'w Answers<'a, UsableCredential<'a>, Unproven>,
     pub(crate) candidates: Vec<(CandidateIndex, &'w Candidate<UsableCredential<'a>>)>,
 }
 
 impl Offered<'_, '_> {
-    /// The binding key of the member's candidate `candidate`.
-    pub(crate) fn bound(&self, candidate: CandidateIndex) -> Bound {
-        Bound {
-            member: self.position,
-            candidate,
-        }
+    /// Whether the entries of `bound` bind to the member's candidate `candidate`.
+    pub(crate) fn carries(
+        &self,
+        bound: &Bound,
+        candidate: &Candidate<UsableCredential<'_>>,
+    ) -> bool {
+        *bound == Bound::of(self.answers, candidate)
     }
 }
 
@@ -252,8 +262,7 @@ pub(crate) fn offered<'w, 'a>(
 ) -> Result<Vec<Offered<'w, 'a>>, Inconsistency> {
     members
         .iter()
-        .enumerate()
-        .map(|(at, member)| {
+        .map(|member| {
             let query = member.query();
             let answers = answered.answers(query).ok_or(Inconsistency::Query(query))?;
             let candidates = member
@@ -267,7 +276,6 @@ pub(crate) fn offered<'w, 'a>(
                 })
                 .try_collect()?;
             Ok(Offered {
-                position: MemberPosition::at(at),
                 query,
                 answers,
                 candidates,

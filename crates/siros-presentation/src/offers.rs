@@ -4,13 +4,11 @@
 mod choices;
 mod entries;
 
-use std::fmt;
-
 use itertools::{Either, Itertools};
 use serde_json::Value;
 use siros_dcql::{CredentialSetQuery, Dropped};
 
-use crate::ids::{CandidateIndex, Position, QueryIndex, SetIndex};
+use crate::ids::{CandidateIndex, QueryIndex, SetIndex};
 use crate::matching::Answered;
 use choices::{product, sum, Capped, Choices, Examining, Space};
 
@@ -34,36 +32,6 @@ pub struct Member {
     candidates: Vec<CandidateIndex>,
 }
 
-/// Why a subset of a member's candidates is refused (A3).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum SubsetError {
-    /// The subset is empty.
-    Empty,
-    /// The subset names a position beyond the member's credentials.
-    OutOfRange(Position),
-    /// The subset names a position twice.
-    Repeated(Position),
-}
-
-impl SubsetError {
-    /// A stable identifier.
-    pub fn code(self) -> &'static str {
-        match self {
-            Self::Empty => "selection_subset_empty",
-            Self::OutOfRange(_) => "selection_subset_out_of_range",
-            Self::Repeated(_) => "selection_subset_position_repeated",
-        }
-    }
-}
-
-impl fmt::Display for SubsetError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
-
-impl std::error::Error for SubsetError {}
-
 impl Member {
     /// The position of the Credential Query in the DCQL query.
     pub fn query(&self) -> QueryIndex {
@@ -76,41 +44,18 @@ impl Member {
         &self.candidates
     }
 
-    /// The member of the candidates at `positions` among [`Member::candidates`]: a set, whose
-    /// candidates keep the member's order whatever the order of `positions`.
-    ///
-    /// # Errors
-    ///
-    /// [`SubsetError`]: no position, a position out of range, or one named twice.
+    /// The member of the candidates `keep` accepts, in the member's order.
     #[cfg(feature = "wallet")]
-    pub(crate) fn subset(&self, positions: &[Position]) -> Result<Self, SubsetError> {
-        if positions.is_empty() {
-            return Err(SubsetError::Empty);
-        }
-        let repeated = positions
-            .iter()
-            .enumerate()
-            .find(|&(at, position)| positions.iter().take(at).contains(position));
-        if let Some((_, &position)) = repeated {
-            return Err(SubsetError::Repeated(position));
-        }
-        if let Some(&beyond) = positions
-            .iter()
-            .find(|position| position.value() >= self.candidates.len())
-        {
-            return Err(SubsetError::OutOfRange(beyond));
-        }
-        let candidates = self
-            .candidates
-            .iter()
-            .enumerate()
-            .filter(|(at, _)| positions.contains(&Position::new(*at)))
-            .map(|(_, &candidate)| candidate)
-            .collect();
-        Ok(Self {
+    pub(crate) fn keeping(&self, mut keep: impl FnMut(CandidateIndex) -> bool) -> Self {
+        Self {
             query: self.query,
-            candidates,
-        })
+            candidates: self
+                .candidates
+                .iter()
+                .copied()
+                .filter(|&c| keep(c))
+                .collect(),
+        }
     }
 }
 

@@ -96,12 +96,11 @@ impl<'p, 'a> Chosen<'p, 'a> {
         let offer = crate::plan::offered(&planned.answered, &self.members)?;
         let added = crate::plan::offered(&planned.answered, &self.added)?;
         let mut signs = Vec::new();
-        // Entries bind to the offer's members; the additions' carry none.
+        // The bindings name credentials of the offer's members; the additions' carry none.
         let members = offer
             .iter()
-            .map(|member| (member, bindings.as_slice()))
-            .chain(added.iter().map(|member| (member, &[][..])))
-            .map(|(member, bindings)| self.pending(member, bindings, &mut signs, rng))
+            .chain(added.iter())
+            .map(|member| self.pending(member, &bindings, &mut signs, rng))
             .try_collect()?;
         Ok(Prepared {
             chosen: self,
@@ -122,12 +121,12 @@ impl<'p, 'a> Chosen<'p, 'a> {
         let credentials = member
             .candidates
             .iter()
-            .map(|&(index, candidate)| {
+            .map(|&(_, candidate)| {
                 let credential: &'p Credential = candidate.credential().credential();
                 let id = SignId::new(signs.len());
                 let binding = bindings
                     .iter()
-                    .find(|(bound, _)| *bound == member.bound(index))
+                    .find(|(bound, _)| member.carries(bound, candidate))
                     .map(|(_, binding)| binding);
                 let form = match candidate.answer() {
                     Answer::Claims(claims) => {
