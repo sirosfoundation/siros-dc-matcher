@@ -6,8 +6,11 @@
 //! bytes the issuer wrote. Parsing refuses a credential whose `Document` names another
 //! `docType` than its MSO, or whose items do not have the digests `valueDigests` lists.
 //!
-//! [`device_signing_input`] gives the data the device key signs from a session transcript, a
-//! document type and the `DeviceSigned` namespaces.
+//! [`Mdoc::disclose`] selects items and takes the `DeviceSigned` elements the response carries.
+//! It refuses an element the MSO's `KeyAuthorizations` do not authorize (OpenID4VP 1.0, B.2.1).
+//! The [`Disclosure`] gives the data the device key signs and, with that signature, the
+//! `DeviceResponse`. [`device_signing_input`] gives the same data from a session transcript, a
+//! document type and the `DeviceSigned` namespaces alone.
 //!
 //! The feature `crypto` adds the Document Signer certificate ([`P256Certificate`]) and ES256
 //! verification ([`es256_verifies`]).
@@ -23,6 +26,7 @@
 )]
 
 mod device;
+mod disclosure;
 mod error;
 mod issuer_auth;
 mod mdoc;
@@ -33,8 +37,11 @@ mod es256;
 #[cfg(feature = "crypto")]
 mod x509;
 
-pub use device::{device_signing_digest, device_signing_input, DeviceNameSpaces};
-pub use error::MdocError;
+pub use device::{
+    device_signing_digest, device_signing_input, DeviceNameSpaces, DeviceSignedElement,
+};
+pub use disclosure::{Disclosure, ElementId};
+pub use error::{DisclosureError, MdocError};
 pub use issuer_auth::IssuerAuth;
 pub use mdoc::{IssuerNameSpace, IssuerSignedItem, Mdoc};
 pub use mso::{DigestAlgorithm, KeyAuthorizations, Mso, P256Key, Validity};

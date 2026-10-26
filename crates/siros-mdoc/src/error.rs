@@ -1,4 +1,4 @@
-//! The refusals of reading, each with a stable code.
+//! The refusals of reading and of disclosing, each with a stable code.
 
 use std::fmt;
 
@@ -84,3 +84,37 @@ impl fmt::Display for MdocError {
 }
 
 impl std::error::Error for MdocError {}
+
+/// Why [`Mdoc::disclose`](crate::Mdoc::disclose) refuses a selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DisclosureError {
+    /// A selected element is no item of the mdoc.
+    UnknownElement,
+    /// An element is selected twice.
+    RepeatedSelection,
+    /// The MSO's `KeyAuthorizations` do not authorize a `DeviceSigned` element (OpenID4VP 1.0,
+    /// B.2.1).
+    Unauthorized,
+    /// A `DeviceSigned` element is given twice.
+    RepeatedDeviceElement,
+}
+
+impl DisclosureError {
+    /// A stable identifier.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::UnknownElement => "unknown_element",
+            Self::RepeatedSelection => "repeated_selection",
+            Self::Unauthorized => "unauthorized_device_element",
+            Self::RepeatedDeviceElement => "repeated_device_element",
+        }
+    }
+}
+
+impl fmt::Display for DisclosureError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "mso_mdoc disclosure: {}", self.code())
+    }
+}
+
+impl std::error::Error for DisclosureError {}

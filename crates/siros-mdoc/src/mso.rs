@@ -246,6 +246,18 @@ impl KeyAuthorizations {
             data_elements,
         })
     }
+
+    /// Whether the device key may sign `identifier` of `name_space`. [`Mdoc::disclose`]
+    /// refuses each `DeviceSigned` element this does not authorize.
+    ///
+    /// [`Mdoc::disclose`]: crate::Mdoc::disclose
+    pub fn authorizes(&self, name_space: &str, identifier: &str) -> bool {
+        self.name_spaces.contains(name_space)
+            || self
+                .data_elements
+                .get(name_space)
+                .is_some_and(|identifiers| identifiers.contains(identifier))
+    }
 }
 
 /// A non-empty array of text strings, each once.
