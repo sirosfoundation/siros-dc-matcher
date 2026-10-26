@@ -51,8 +51,8 @@ use android_credman::{CallingAppError, SetSink};
 use picker::{emit_set, Member};
 use siros_dc_matcher_core::db::CredentialDatabase;
 use siros_dc_matcher_core::evaluator::{credentials, resolve, ProfilePolicy};
-use siros_dc_matcher_core::request::{diagnose, first_supported_context};
 use siros_dcql::execute;
+use siros_oid4vp::{diagnose, UnverifiedRequest};
 use siros_zkp_req::ReqItem;
 
 /// Prefix for the per-entry set ids.
@@ -142,20 +142,25 @@ fn run(input: &Input<'_>, sets: &mut impl SetSink) {
         }
     };
 
-    // The whole request context, not only the query: a `zkp_req` request is
-    // matched against the verifier's `client_metadata` and has no typed DCQL
-    // form when it uses the rulebook example's `claims` object. Nothing in the
-    // context is authenticated; the wallet checks the request at selection.
-    let Some((context, query)) = first_supported_context(request, &db.profile, None)
-        .and_then(|context| Some((context.clone(), context.matching_query()?)))
+    // The whole request, not only the query: a `zkp_req` request is matched
+    // against the verifier's `client_metadata` and has no typed DCQL form when
+    // it uses the rulebook example's `claims` object. Nothing in it is
+    // authenticated; the wallet runs intake at selection.
+    let registered = |label: &str| db.profile.parser_for(label).is_some();
+    let Some((unverified, query)) = UnverifiedRequest::first_registered(request, &registered)
+        .and_then(|unverified| {
+            let query = unverified.query().matching_query()?;
+            Some((unverified, query))
+        })
     else {
-        diag.emit(sets, "request", || diagnose(request, &db.profile));
+        diag.emit(sets, "request", || diagnose(request, &registered));
         return;
     };
-    let protocol = context.protocol.as_str();
+    let protocol = unverified.protocol().label();
 
     let held = credentials(&db);
-    let policy = ProfilePolicy::new(&db.profile).with_context(&context);
+    let policy = ProfilePolicy::new(&db.profile)
+        .with_context(unverified.query(), unverified.client_metadata());
     let result = execute(&query, &held, &policy);
 
     // "If the Wallet cannot deliver all non-optional Credentials requested by

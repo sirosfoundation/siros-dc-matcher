@@ -5,7 +5,7 @@ use std::fmt;
 
 use serde_json::Value;
 
-use crate::session::{ec_jwk_thumbprint, Handover};
+use siros_oid4vp::{ec_jwk_thumbprint, Handover};
 
 /// The channel a request arrived on.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -174,9 +174,9 @@ impl CheckedRequest {
             return Err(KeyNotInRequest);
         }
         Ok(match &self.endpoint {
-            Endpoint::Origin(origin) => Handover::dc_api(origin, &self.nonce, jwk_thumbprint),
+            Endpoint::Origin(origin) => Handover::dc_api(origin, &self.nonce, Some(jwk_thumbprint)),
             Endpoint::ResponseUri(uri) => {
-                Handover::redirect(&self.client_id, &self.nonce, jwk_thumbprint, uri)
+                Handover::redirect(&self.client_id, &self.nonce, Some(jwk_thumbprint), uri)
             }
         })
     }

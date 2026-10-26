@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 use siros_codec::cbor::Value as Cbor;
+use siros_oid4vp::ec_jwk_thumbprint;
 use siros_zkp_req::{Candidate, ErrorCode, Match, ZkpPresentation};
 use siros_zkp_req_nym_auth::date::Date;
 use siros_zkp_req_nym_auth::mdoc::StoredCredential;
@@ -22,7 +23,6 @@ use siros_zkp_req_nym_auth::presenter::{
     match_query, prepare, MatchInput, NymAuthMatch, Prepared, ProveError, ProveInput, Session,
 };
 use siros_zkp_req_nym_auth::prover::{NymAuthProofVerifier, ProofFailure, ProofOutput, Statement};
-use siros_zkp_req_nym_auth::session::ec_jwk_thumbprint;
 use siros_zkp_req_nym_auth::system::{pair_code, NymAuthSystem};
 use siros_zkp_req_nym_auth::verifier_id::VerifierId;
 use siros_zkp_req_nym_auth::verify::{verify, Rejection, Tolerance, VerifyInput};

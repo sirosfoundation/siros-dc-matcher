@@ -9,8 +9,8 @@ use serde_json::{json, Value};
 use siros_dc_matcher_core::db::CredentialDatabase;
 use siros_dc_matcher_core::evaluator::{credentials, resolve, ProfilePolicy};
 use siros_dc_matcher_core::fixtures::{circuit, nym_wallet, NYM_AUTH_DOCTYPE};
-use siros_dc_matcher_core::request::first_supported_context;
 use siros_dcql::execute;
+use siros_oid4vp::UnverifiedRequest;
 
 const LONGFELLOW: &str = "longfellow-libzk-v1";
 const CIRCUIT: &str = "urn:circuits:longfellow:nym_auth:v1";
@@ -71,14 +71,16 @@ fn run(db: &CredentialDatabase, request: &[u8]) -> Outcome {
         claims: vec![],
         selection: None,
     };
-    let Some(context) = first_supported_context(request, &db.profile, None) else {
+    let registered = |label: &str| db.profile.parser_for(label).is_some();
+    let Some(context) = UnverifiedRequest::first_registered(request, &registered) else {
         return none;
     };
-    let Some(query) = context.matching_query() else {
+    let Some(query) = context.query().matching_query() else {
         return none;
     };
     let held = credentials(db);
-    let policy = ProfilePolicy::new(&db.profile).with_context(&context);
+    let policy =
+        ProfilePolicy::new(&db.profile).with_context(context.query(), context.client_metadata());
     let result = execute(&query, &held, &policy);
     let Some(matched) = result.query("nym") else {
         return none;

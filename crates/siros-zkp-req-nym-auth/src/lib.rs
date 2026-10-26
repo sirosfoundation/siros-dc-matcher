@@ -10,7 +10,7 @@
 //! | [`age`] | `range`, E and C | `age_check` |
 //! | [`verifier_id`] | `verifier_id`, `verifier_input`, the `sha-256` pseudonym | `pseudonym` |
 //! | [`system`] | The systems and the options each supports | System rulebooks, Sections 1 to 3 |
-//! | [`session`] | The `Handover`, the device message, e2 | Binding; system rulebooks, Section 5 |
+//! | [`session`] | The device message, e2 | System rulebooks, Section 5 |
 //! | [`policy`] | Signed requests, encrypted responses | Binding, Response confidentiality |
 //! | [`mdoc`] | The ISO/IEC 18013-5 attestation | Attestation |
 //! | [`checks`] | The Wallet's tests of a credential | System rulebooks, Section 7 |

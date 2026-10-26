@@ -215,6 +215,9 @@ jobs:
       #
       # The zkp_req crates are in the matcher, so they hold the same floor.
       #
+      # siros-oid4vp holds it without `crypto`, the part the matcher links;
+      # `crypto` builds with the pinned toolchain.
+      #
       # -ffi and -testhost are deliberately excluded: they declare 1.88 in
       # their own manifests. Checking them here would only re-discover that.
       - name: The 1.82 crates build on 1.82
@@ -223,6 +226,7 @@ jobs:
             -p siros-codec -p siros-dcql -p siros-dc-matcher-core -p siros-dc-matcher-wasm \
             -p android-credman-sys -p android-credman \
             -p siros-zkp-req -p siros-zkp-req-nym-auth
+          cargo check --locked -p siros-oid4vp
           cargo check --locked --all-features --target wasm32-wasip1 \
             -p siros-dc-matcher-wasm -p android-credman-sys -p android-credman
 

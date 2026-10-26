@@ -22,9 +22,10 @@ use crate::date::{Date, DateTime};
 use crate::mdoc::{P256Key, StoredCredential};
 use crate::outcome::{CredentialCode, InvalidRequest, ItemCode, ZkpError};
 use crate::prover::{NymAuthProver, ProofJob, ProofOutput, ProverFailure, Statement};
-use crate::session::{device_message, Handover};
+use crate::session::device_message;
 use crate::system::{pair_code, NymAuthSystem, Unsupported};
 use crate::verifier_id::{pseudonym_sha256, sha256, verifier_input, VerifierId};
+use siros_oid4vp::Handover;
 
 /// The outcome of matching one nym_auth query.
 pub type NymAuthMatch = Match<InvalidRequest, PairRefusal<Unsupported>, ZkpError>;
