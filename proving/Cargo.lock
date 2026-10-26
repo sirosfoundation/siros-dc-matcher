@@ -1011,6 +1011,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustc-hash"
+version = "2.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6b1e7f9a428571be2dc5bc0505c13fb6bf936822b894ec87abf8a08a4e51742d"
+
+[[package]]
 name = "rustversion"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1171,10 +1177,23 @@ name = "siros-codec"
 version = "0.11.0"
 
 [[package]]
+name = "siros-mdoc"
+version = "0.11.0"
+dependencies = [
+ "der",
+ "p256",
+ "rustc-hash",
+ "sha2",
+ "siros-codec",
+ "x509-cert",
+]
+
+[[package]]
 name = "siros-zkp-backend-longfellow"
 version = "0.11.0"
 dependencies = [
  "sha2",
+ "siros-codec",
  "siros-zkp-req-nym-auth",
  "zk-cred-longfellow",
  "zstd",
@@ -1184,6 +1203,7 @@ dependencies = [
 name = "siros-zkp-backend-vega"
 version = "0.11.0"
 dependencies = [
+ "siros-codec",
  "siros-zkp-req-nym-auth",
  "zk-cred-vega",
  "zstd",
@@ -1219,6 +1239,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "siros-codec",
+ "siros-mdoc",
  "siros-zkp-req",
  "x509-cert",
  "zeroize",
@@ -1232,6 +1253,7 @@ dependencies = [
  "serde-wasm-bindgen",
  "serde_bytes",
  "serde_json",
+ "siros-codec",
  "siros-zkp-backend-longfellow",
  "siros-zkp-backend-vega",
  "siros-zkp-req",

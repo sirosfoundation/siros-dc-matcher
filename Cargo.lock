@@ -2027,6 +2027,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "siros-mdoc"
+version = "0.11.0"
+dependencies = [
+ "der",
+ "p256",
+ "rustc-hash",
+ "sha2",
+ "siros-codec",
+ "x509-cert",
+]
+
+[[package]]
 name = "siros-zkp-req"
 version = "0.11.0"
 dependencies = [
@@ -2045,6 +2057,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "siros-codec",
+ "siros-mdoc",
  "siros-zkp-req",
  "siros-zkp-req-nym-auth",
  "x509-cert",

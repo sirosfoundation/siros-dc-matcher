@@ -13,8 +13,8 @@ use std::sync::Arc;
 
 use serde_json::Value;
 use siros_codec::cbor::Value as Cbor;
+use siros_codec::date::Date;
 use siros_zkp_req::{Candidate, ErrorCode, Match, ZkpPresentation};
-use siros_zkp_req_nym_auth::date::Date;
 use siros_zkp_req_nym_auth::mdoc::StoredCredential;
 use siros_zkp_req_nym_auth::outcome::ZkpError;
 use siros_zkp_req_nym_auth::policy::{check_request, Channel};
@@ -471,8 +471,8 @@ impl From<&Statement> for FfiStatement {
             proof_backend: s.proof_backend.clone(),
             doc_type: s.doc_type.to_owned(),
             issuer_certificate: s.issuer_certificate.clone(),
-            issuer_key_x: s.issuer_key.x.to_vec(),
-            issuer_key_y: s.issuer_key.y.to_vec(),
+            issuer_key_x: s.issuer_key.x().to_vec(),
+            issuer_key_y: s.issuer_key.y().to_vec(),
             proof_time: s.proof_time.to_string(),
             earliest: full_date(s.earliest),
             cutoff: full_date(s.cutoff),

@@ -9,6 +9,8 @@ use std::fmt;
 
 use serde_json::Value;
 use siros_codec::cbor::Value as Cbor;
+use siros_codec::date::{Date, DateTime};
+use siros_mdoc::{device_signing_input, es256_verifies, DeviceNameSpaces, P256Key};
 use siros_zkp_req::{
     usable_backend, Candidate, Judged, Match, OptionRefusal, PairRefusal, ProofEnvelope,
     QueryOption, ZkpFormats, ZkpPresentation, ZkpReqQuery,
@@ -18,11 +20,10 @@ use zeroize::Zeroizing;
 use crate::age::{Bound, Bounds};
 use crate::catalogue::{Function, Item, NymAuthQuery, Pseudonym, MDOC_DOCTYPE};
 use crate::checks::{self, Checked, Credential};
-use crate::date::{Date, DateTime};
-use crate::mdoc::{P256Key, StoredCredential};
+use crate::mdoc::StoredCredential;
 use crate::outcome::{CredentialCode, InvalidRequest, ItemCode, ZkpError};
 use crate::prover::{NymAuthProver, ProofJob, ProofOutput, ProverFailure, Statement};
-use crate::session::{device_message, Handover};
+use crate::session::Handover;
 use crate::system::{pair_code, NymAuthSystem, Unsupported};
 use crate::verifier_id::{pseudonym_sha256, sha256, verifier_input, VerifierId};
 
@@ -244,6 +245,9 @@ fn judge(
         Checked::OtherDocType => None,
         Checked::Unreadable(_) => Some(Err(vec![ZkpError::Credential(
             CredentialCode::CredentialForm,
+        )])),
+        Checked::Unlisted => Some(Err(vec![ZkpError::Credential(
+            CredentialCode::IssuerSignature,
         )])),
         Checked::Read(credential, failures) => {
             let mut errors: Vec<ZkpError> =
@@ -478,13 +482,17 @@ pub fn prepare(input: &ProveInput<'_>) -> Result<Prepared, ProveError> {
     )?;
     let pseudonym_item = pseudonym_of(&parsed.query, &plan)?;
     let session_transcript = input.session.handover.session_transcript();
-    let data_to_sign = device_message(&session_transcript, MDOC_DOCTYPE);
+    let data_to_sign = device_signing_input(
+        &session_transcript,
+        MDOC_DOCTYPE,
+        &DeviceNameSpaces::empty(),
+    );
     let statement = Statement {
         system,
         proof_backend: input.candidate.proof_backend.clone(),
         doc_type: MDOC_DOCTYPE,
-        issuer_certificate: credential.certificate.der.clone(),
-        issuer_key: credential.certificate.key,
+        issuer_certificate: credential.certificate.der().to_vec(),
+        issuer_key: *credential.certificate.key(),
         proof_time,
         earliest: bound_date(plan.bounds.earliest)?,
         cutoff: bound_date(plan.bounds.cutoff)?,
@@ -549,6 +557,11 @@ fn checked_credential(
         Checked::Unreadable(_) => {
             return Err(ProveError::Rejected(vec![ZkpError::Credential(
                 CredentialCode::CredentialForm,
+            )]))
+        }
+        Checked::Unlisted => {
+            return Err(ProveError::Rejected(vec![ZkpError::Credential(
+                CredentialCode::IssuerSignature,
             )]))
         }
         Checked::OtherDocType => return Err(HostError::CredentialMismatch.into()),
@@ -644,7 +657,7 @@ impl Prepared {
         let signature: [u8; 64] = device_signature
             .try_into()
             .map_err(|_| HostError::SignatureLength)?;
-        if !checks::es256_verifies(&self.device_key, &self.data_to_sign, &signature) {
+        if !es256_verifies(&self.device_key, &self.data_to_sign, &signature) {
             return Err(ProveError::Rejected(vec![ZkpError::Credential(
                 CredentialCode::DeviceBinding,
             )]));

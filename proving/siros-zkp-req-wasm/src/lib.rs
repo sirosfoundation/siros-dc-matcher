@@ -17,10 +17,10 @@
 use serde::{Deserialize, Serialize};
 use serde_bytes::ByteBuf;
 use serde_json::Value;
+use siros_codec::date::Date;
 use siros_zkp_backend_longfellow::{self as longfellow, LongfellowProver};
 use siros_zkp_backend_vega::{self as vega, VegaNymAuth};
 use siros_zkp_req::{Candidate, ErrorCode, Match, ZkpPresentation};
-use siros_zkp_req_nym_auth::date::Date;
 use siros_zkp_req_nym_auth::mdoc::StoredCredential;
 use siros_zkp_req_nym_auth::outcome::ZkpError;
 use siros_zkp_req_nym_auth::policy::{check_request, Channel};
@@ -409,8 +409,8 @@ impl From<&Statement> for JsStatement {
             proof_backend: s.proof_backend.clone(),
             doc_type: s.doc_type,
             issuer_certificate: ByteBuf::from(s.issuer_certificate.clone()),
-            issuer_key_x: ByteBuf::from(s.issuer_key.x.to_vec()),
-            issuer_key_y: ByteBuf::from(s.issuer_key.y.to_vec()),
+            issuer_key_x: ByteBuf::from(s.issuer_key.x().to_vec()),
+            issuer_key_y: ByteBuf::from(s.issuer_key.y().to_vec()),
             proof_time: s.proof_time.to_string(),
             earliest: s.earliest.and_then(Date::to_full_date),
             cutoff: s.cutoff.and_then(Date::to_full_date),

@@ -21,7 +21,6 @@
 use std::str::FromStr;
 use std::time::Duration;
 
-use crate::date::DateTime;
 use crate::mdoc::StoredCredential;
 use crate::policy::{check_request, Channel};
 use crate::presenter::{Session, SignFailure, Signer};
@@ -40,6 +39,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use siros_codec::base64url;
 use siros_codec::cbor::Value as Cbor;
+use siros_codec::date::DateTime;
 use x509_cert::builder::{Builder, CertificateBuilder, Profile};
 use x509_cert::name::Name;
 use x509_cert::serial_number::SerialNumber;
@@ -351,15 +351,15 @@ pub fn expected_pseudonym(seed: &[u8; 16], verifier_id: &str) -> [u8; 32] {
 /// A digest of every public value and the pseudonym: a test proof binds them as a real proof
 /// does, so a verifier with any other value refuses it.
 fn binding(statement: &Statement, pseudonym: &[u8; 32]) -> [u8; 32] {
-    let date = |d: Option<crate::date::Date>| d.map_or("-".to_owned(), |d| d.to_string());
+    let date = |d: Option<siros_codec::date::Date>| d.map_or("-".to_owned(), |d| d.to_string());
     let mut h = Sha256::new();
     for part in [
         statement.system.id().as_bytes(),
         statement.proof_backend.as_bytes(),
         statement.doc_type.as_bytes(),
         &statement.issuer_certificate,
-        &statement.issuer_key.x,
-        &statement.issuer_key.y,
+        statement.issuer_key.x(),
+        statement.issuer_key.y(),
         statement.proof_time.to_string().as_bytes(),
         date(statement.earliest).as_bytes(),
         date(statement.cutoff).as_bytes(),
@@ -379,7 +379,7 @@ fn proof_len(system: NymAuthSystem) -> usize {
     system.zk_proof_len().unwrap_or(1024)
 }
 
-/// A test prover: its `zk_proof` repeats [`binding`] to the system's length.
+/// A test prover: its `zk_proof` repeats `binding` to the system's length.
 pub struct TestProver {
     /// What the prover answers instead of a proof.
     pub fail: Option<ProverFailure>,

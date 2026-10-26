@@ -1,5 +1,5 @@
-//! The Document Signer certificate of `x5chain` and `issuer_key_set` (system rulebooks,
-//! Section 6): an X.509 certificate with an uncompressed P-256 key.
+//! The Document Signer certificate of `x5chain`: an X.509 certificate with an uncompressed
+//! P-256 key.
 
 use std::fmt;
 
@@ -9,7 +9,7 @@ use p256::ecdsa::signature::Verifier;
 use p256::ecdsa::{DerSignature, VerifyingKey};
 use x509_cert::Certificate;
 
-use crate::mdoc::P256Key;
+use crate::mso::P256Key;
 
 /// `id-ecPublicKey` (RFC 5480).
 const EC_PUBLIC_KEY: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.2.1");
@@ -18,7 +18,7 @@ const PRIME256V1: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045
 /// `ecdsa-with-SHA256` (RFC 5758).
 const ECDSA_SHA256: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.2");
 
-/// Why a certificate is not a Document Signer certificate of the systems.
+/// Why a certificate is no X.509 certificate with a P-256 key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CertificateError {
     /// The bytes are not one DER X.509 certificate.
@@ -27,6 +27,17 @@ pub enum CertificateError {
     Algorithm,
     /// The key is not an uncompressed point of P-256.
     Point,
+}
+
+impl CertificateError {
+    /// A stable identifier.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Der => "certificate_der",
+            Self::Algorithm => "certificate_key_algorithm",
+            Self::Point => "certificate_key_point",
+        }
+    }
 }
 
 impl fmt::Display for CertificateError {
@@ -44,10 +55,8 @@ impl std::error::Error for CertificateError {}
 /// A parsed certificate with a P-256 key.
 #[derive(Debug, Clone)]
 pub struct P256Certificate {
-    /// The DER bytes.
-    pub der: Vec<u8>,
-    /// The subject's key, the issuer key Q of the statement.
-    pub key: P256Key,
+    der: Vec<u8>,
+    key: P256Key,
     certificate: Certificate,
 }
 
@@ -78,6 +87,16 @@ impl P256Certificate {
             key,
             certificate,
         })
+    }
+
+    /// The DER bytes.
+    pub fn der(&self) -> &[u8] {
+        &self.der
+    }
+
+    /// The subject's key.
+    pub fn key(&self) -> &P256Key {
+        &self.key
     }
 
     /// Whether `unix` lies in the validity period.

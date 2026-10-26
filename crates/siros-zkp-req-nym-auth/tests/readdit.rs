@@ -16,11 +16,11 @@ mod support;
 
 use ciborium::value::Value as Ciborium;
 use serde_json::{json, Value};
+use siros_codec::date::DateTime;
+use siros_mdoc::P256Key;
 use siros_zkp_req::Match;
 use siros_zkp_req_nym_auth::catalogue::MDOC_DOCTYPE;
 use siros_zkp_req_nym_auth::checks::{check, Checked};
-use siros_zkp_req_nym_auth::date::DateTime;
-use siros_zkp_req_nym_auth::mdoc::P256Key;
 use siros_zkp_req_nym_auth::outcome::CredentialCode;
 use siros_zkp_req_nym_auth::presenter::{match_query, prepare, MatchInput, Prepared, ProveInput};
 use siros_zkp_req_nym_auth::prover::ProofOutput;
@@ -45,7 +45,7 @@ fn hex(bytes: &[u8]) -> Value {
 }
 
 fn key(k: &P256Key) -> Value {
-    json!([hex(&k.x), hex(&k.y)])
+    json!([hex(k.x()), hex(k.y())])
 }
 
 fn proof_time(facts: &Value) -> DateTime {
@@ -77,7 +77,7 @@ fn our_credential(facts: &Value) -> Value {
         "issuer_signature": hex(&mdoc.issuer_signature),
         "birth_date_item": hex(&mdoc.birth_date.bytes),
         "ssc_item": hex(&mdoc.ssc.bytes),
-        "document_signer": hex(&mdoc.x5chain[0]),
+        "document_signer": hex(&mdoc.document_signer),
         "doc_type": MDOC_DOCTYPE,
         "device_key": key(&mdoc.device_key),
         "valid_from": mdoc.valid_from.to_string(),
@@ -85,7 +85,7 @@ fn our_credential(facts: &Value) -> Value {
         "birth_date": mdoc.birth_date.value.to_string(),
         "ssc": hex(&mdoc.ssc.value),
         "digests_listed": !failures.contains(&CredentialCode::IssuerSignature),
-        "issuer_key": key(&credential.certificate.key),
+        "issuer_key": key(credential.certificate.key()),
     })
 }
 

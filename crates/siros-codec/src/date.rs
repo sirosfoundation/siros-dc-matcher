@@ -237,10 +237,10 @@ mod tests {
             ("9999-12-31", 2_932_896),
         ];
         for (text, days) in cases {
-            let date = Date::parse(text).unwrap_or_else(|| panic!("{text}"));
-            assert_eq!(date.days(), days, "{text}");
-            assert_eq!(Date::from_days(days), date, "{text}");
-            assert_eq!(date.to_full_date().as_deref(), Some(text));
+            let date = Date::parse(text);
+            assert_eq!(date.map(Date::days), Some(days), "{text}");
+            assert_eq!(Some(Date::from_days(days)), date, "{text}");
+            assert_eq!(date.and_then(Date::to_full_date).as_deref(), Some(text));
         }
         for bad in [
             "1900-02-29",
@@ -261,8 +261,8 @@ mod tests {
             "2026-10-09T12:34:56Z",
             "9999-12-31T23:59:59Z",
         ] {
-            let t = DateTime::parse(text).unwrap_or_else(|| panic!("{text}"));
-            assert_eq!(t.to_string(), text);
+            let t = DateTime::parse(text);
+            assert_eq!(t.map(|t| t.to_string()).as_deref(), Some(text));
         }
         assert_eq!(
             DateTime::parse("0000-01-01T00:00:00Z").map(DateTime::unix),

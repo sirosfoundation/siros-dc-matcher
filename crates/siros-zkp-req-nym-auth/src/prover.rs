@@ -5,10 +5,10 @@
 //! credential and the session, the Verifier from its own request, session, clock and trust
 //! configuration and from the prover-supplied values of the presentation.
 
+use siros_codec::date::{Date, DateTime};
+use siros_mdoc::P256Key;
 use zeroize::Zeroizing;
 
-use crate::date::{Date, DateTime};
-use crate::mdoc::P256Key;
 use crate::system::NymAuthSystem;
 
 /// The public values of a nym_auth mdoc proof.

@@ -214,6 +214,7 @@ jobs:
       # toolchain is whatever the wallet's build uses, not ours.
       #
       # The zkp_req crates are in the matcher, so they hold the same floor.
+      # siros-mdoc holds it with them: the zkp_req presenter links it.
       #
       # -ffi and -testhost are deliberately excluded: they declare 1.88 in
       # their own manifests. Checking them here would only re-discover that.
@@ -222,7 +223,7 @@ jobs:
           cargo check --locked --all-features \
             -p siros-codec -p siros-dcql -p siros-dc-matcher-core -p siros-dc-matcher-wasm \
             -p android-credman-sys -p android-credman \
-            -p siros-zkp-req -p siros-zkp-req-nym-auth
+            -p siros-zkp-req -p siros-zkp-req-nym-auth -p siros-mdoc
           cargo check --locked --all-features --target wasm32-wasip1 \
             -p siros-dc-matcher-wasm -p android-credman-sys -p android-credman
 

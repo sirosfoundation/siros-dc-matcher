@@ -15,7 +15,7 @@ behind the nym_auth prover interface and the rulebooks' artifact pins.
 | Crate | Holds | Rust |
 | :-- | :-- | :-- |
 | `siros-zkp-req` | The protocol: the Credential Query with `_req` and `_req_sets`, `vp_formats_supported.zkp_req`, the usable pair of Section 1.3, the consent model, `ZkpPresentation`, the backends' `Proof`, the `vp_token`, the Verifier's steps 1 to 5 of Section 4.1. Depends on `serde` and `serde_json` only. | 1.82 |
-| `siros-zkp-req-nym-auth` | The catalogue (`pseudonym`, `age_check` with E and C), `verifier_id`, the Longfellow and Vega systems, the `Handover` and the device message, the request policy. With the default feature `credential`: the mdoc reader, the Wallet's credential tests, the presenter, the prover interface and the verifier (`p256`, `x509-cert`, `der`, `zeroize`). With `test-fixtures`: a test issuer, requests and a test host. | 1.82 |
+| `siros-zkp-req-nym-auth` | The catalogue (`pseudonym`, `age_check` with E and C), `verifier_id`, the Longfellow and Vega systems, the `Handover`, the request policy. With the default feature `credential`: the nym_auth form of an mdoc, the Wallet's credential tests, the presenter, the prover interface and the verifier (`siros-mdoc` with `crypto`, `zeroize`). With `test-fixtures`: a test issuer, requests and a test host. | 1.82 |
 | `siros-dc-matcher-core` | The matcher. It plans `zkp_req` with the two crates above, without `credential`. | 1.82 |
 | `siros-dc-matcher-ffi` | Module `zkp_req`: the presenter and the verifier for Kotlin and Swift (UniFFI), around a host's prover. | 1.88 |
 | `siros-zkp-backend-longfellow` | `urn:circuits:longfellow:nym_auth:v1` on `longfellow-libzk-v1`: `LongfellowProver` and `LongfellowVerifier` over zk-cred-longfellow. | 1.95 |

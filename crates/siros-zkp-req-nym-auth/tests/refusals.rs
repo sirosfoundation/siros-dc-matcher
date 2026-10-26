@@ -884,7 +884,7 @@ fn every_refusal_rule() {
                 })
             }),
             Got::Verify(Rejection::IssuerKeySet(IssuerKeySetError::Certificate(
-                siros_zkp_req_nym_auth::x509::CertificateError::Der,
+                siros_mdoc::CertificateError::Der,
             ))),
         ),
         (
