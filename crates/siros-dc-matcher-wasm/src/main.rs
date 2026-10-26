@@ -208,7 +208,7 @@ fn run(input: &Input<'_>, sets: &mut impl SetSink) {
             })
             .collect();
         let Some(resolved) = resolved else {
-            continue 'combinations;
+            continue;
         };
 
         let set_id = format!("{SET_PREFIX}-{index}");
@@ -268,6 +268,8 @@ fn run(input: &Input<'_>, sets: &mut impl SetSink) {
             let fields = match zk {
                 Some(zk) => match siros_display::proof::rows(&zk.query, &zk.option) {
                     Ok(rows) => rows,
+                    // The option names an item its query lacks: the combination
+                    // has no rows to show, and is not offered.
                     Err(_) => continue 'combinations,
                 },
                 None => disclosed_fields(credential, candidate),

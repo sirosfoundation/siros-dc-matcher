@@ -20,3 +20,7 @@ siros-dcql = { workspace = true }
 siros-display = { workspace = true }
 siros-oid4vp = { workspace = true }
 serde_json = { workspace = true }
+
+# The unit tests build wallets from core's fixtures.
+[dev-dependencies]
+siros-dc-matcher-core = { workspace = true, features = ["test-fixtures"] }
