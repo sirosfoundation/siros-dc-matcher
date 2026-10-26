@@ -12,7 +12,7 @@ use crate::error_code::ErrorCode;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum IntakeError {
     /// The authorization request URI has no query of form-encoded parameters, each once.
-    NotAnAuthorizationRequest,
+    NotAnAuthorizationRequest(FormFault),
     /// `client_id` is missing or not a string (Section 5.2; A.2 for signed DC API requests).
     ClientIdMissing,
     /// Both `request` and `request_uri` are present (RFC 9101, Section 5).
@@ -133,6 +133,19 @@ pub enum IntakeError {
     UnusedAnswer,
 }
 
+/// Why an authorization request URI has no query of form-encoded parameters (Section 5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FormFault {
+    /// The URI has no query.
+    NoQuery,
+    /// A parameter name repeats.
+    RepeatedName,
+    /// A `%` is not followed by two hexadecimal digits.
+    Escape,
+    /// A decoded name or value is not UTF-8.
+    NotUtf8,
+}
+
 /// The rule a JWS breaks (RFC 7515, Sections 7.1 and 7.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum JwsFault {
@@ -236,7 +249,7 @@ impl IntakeError {
     #[must_use]
     pub fn code(self) -> &'static str {
         match self {
-            Self::NotAnAuthorizationRequest => "not_an_authorization_request",
+            Self::NotAnAuthorizationRequest(_) => "not_an_authorization_request",
             Self::ClientIdMissing => "client_id_missing",
             Self::RequestAndRequestUri => "request_and_request_uri",
             Self::RequestUriMethodWithoutRequestUri => "request_uri_method_without_request_uri",
@@ -302,7 +315,7 @@ impl IntakeError {
         match self {
             Self::RequestUriMethodInvalid => ErrorCode::InvalidRequestUriMethod,
             Self::ScopeUnsupported => ErrorCode::InvalidScope,
-            Self::NotAnAuthorizationRequest
+            Self::NotAnAuthorizationRequest(_)
             | Self::ClientIdMissing
             | Self::RequestAndRequestUri
             | Self::RequestUriMethodWithoutRequestUri

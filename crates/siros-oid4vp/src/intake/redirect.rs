@@ -8,7 +8,7 @@ use siros_codec::date::DateTime;
 use super::request::{self, Arrival};
 use super::signature::{self, by_request, UriRule};
 use super::trust::{self, KeyMaterial, TrustSubject};
-use super::{Answers, Halt, IntakeError, JwsFault};
+use super::{Answers, FormFault, Halt, IntakeError, JwsFault};
 use crate::client_id::{ClientId, ClientIdPrefix};
 use crate::fetch::{BodyLimit, Fetch, HttpStatus, HttpsUrl, MediaType, Method};
 use crate::form;
@@ -52,11 +52,12 @@ pub(super) fn intake(
     now: DateTime,
     answers: &mut Answers<'_>,
 ) -> Result<VerifiedRequest, Halt> {
+    let refused = IntakeError::NotAnAuthorizationRequest;
     let query = uri
         .split_once('?')
         .and_then(|(_, rest)| rest.split('#').next())
-        .ok_or(IntakeError::NotAnAuthorizationRequest)?;
-    let params = form::parse(query).ok_or(IntakeError::NotAnAuthorizationRequest)?;
+        .ok_or(refused(FormFault::NoQuery))?;
+    let params = form::parse(query).map_err(refused)?;
     let outer = params
         .get("client_id")
         .ok_or(IntakeError::ClientIdMissing)?;

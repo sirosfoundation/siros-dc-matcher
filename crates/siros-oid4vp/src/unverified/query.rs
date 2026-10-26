@@ -37,7 +37,6 @@ impl UnverifiedQuery {
             }
             Err(e) => e,
         };
-        let is_zkp_req = |c: &Value| c.get("format").and_then(Value::as_str) == Some("zkp_req");
         let (Some(credentials), Some(object)) = (
             raw.get("credentials").and_then(Value::as_array),
             raw.as_object(),
@@ -88,13 +87,19 @@ impl UnverifiedQuery {
             return Some(query.clone());
         }
         let mut raw = self.raw.clone();
-        for credential in raw.get_mut("credentials")?.as_array_mut()? {
-            if credential.get("format").and_then(Value::as_str) == Some("zkp_req") {
-                if let Some(object) = credential.as_object_mut() {
-                    object.remove("claims");
-                }
-            }
-        }
+        raw.get_mut("credentials")?
+            .as_array_mut()?
+            .iter_mut()
+            .filter(|credential| is_zkp_req(credential))
+            .filter_map(Value::as_object_mut)
+            .for_each(|credential| {
+                credential.remove("claims");
+            });
         DcqlQuery::deserialize(&raw).ok()
     }
+}
+
+/// Whether the credential query `credential` asks for the `zkp_req` format.
+fn is_zkp_req(credential: &Value) -> bool {
+    credential.get("format").and_then(Value::as_str) == Some("zkp_req")
 }

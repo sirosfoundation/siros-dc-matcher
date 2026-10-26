@@ -280,11 +280,10 @@ impl<'a> Reader<'a> {
 
     fn array(&mut self, argument: u64, depth: usize) -> Result<Kind<'a>, CborError> {
         let n = self.length(argument)?;
-        let mut items = Vec::with_capacity(n);
-        for _ in 0..n {
-            items.push(self.item(depth + 1)?);
-        }
-        Ok(Kind::Array(items))
+        (0..n)
+            .map(|_| self.item(depth + 1))
+            .collect::<Result<_, _>>()
+            .map(Kind::Array)
     }
 
     fn map(&mut self, argument: u64, depth: usize) -> Result<Kind<'a>, CborError> {

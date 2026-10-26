@@ -3,7 +3,7 @@
 //! Appendix A). The payloads follow the specification; a capture from a real
 //! verifier belongs in the device pass.
 
-use siros_codec::base64url;
+use siros_codec::base64url::encode as b64;
 use siros_codec::Base64Error;
 use siros_oid4vp::{diagnose, CompactFault, NoQuery, PayloadFault, UnverifiedRequest};
 
@@ -58,10 +58,6 @@ fn envelope(protocol: &str, data: serde_json::Value) -> Vec<u8> {
         .into_bytes()
 }
 
-fn b64(bytes: &[u8]) -> String {
-    base64url::encode(bytes).into()
-}
-
 fn compact_jws(payload: &str) -> String {
     format!(
         "{}.{}.{}",
@@ -101,8 +97,8 @@ fn a_signed_request_is_read_from_the_jws_payload() {
 fn a_multisigned_request_is_read_from_the_payload_member() {
     let data = serde_json::json!({
         "request": {
-            "payload": b64(request_object().as_bytes()),
-            "signatures": [{"protected": b64(br#"{"alg":"ES256"}"#), "signature": b64(b"sig")}]
+            "payload": b64(request_object().as_bytes()).to_string(),
+            "signatures": [{"protected": b64(br#"{"alg":"ES256"}"#).to_string(), "signature": b64(b"sig").to_string()}]
         }
     });
     let found =
@@ -117,8 +113,8 @@ fn a_multisigned_request_is_read_from_the_payload_member() {
 #[test]
 fn a_multisigned_payload_at_the_top_level_of_data_is_accepted_too() {
     let data = serde_json::json!({
-        "payload": b64(request_object().as_bytes()),
-        "signatures": [{"signature": b64(b"sig")}]
+        "payload": b64(request_object().as_bytes()).to_string(),
+        "signatures": [{"signature": b64(b"sig").to_string()}]
     });
     let found =
         first_supported_request(&envelope("openid4vp-v1-multisigned", data), &siros_default);
@@ -356,7 +352,7 @@ fn a_signed_label_does_not_accept_an_inline_query() {
 fn the_two_signed_protocols_do_not_accept_each_other_s_shape() {
     let compact = serde_json::json!({"request": compact_jws(&request_object())});
     let json = serde_json::json!({
-        "request": {"payload": b64(request_object().as_bytes()), "signatures": []}
+        "request": {"payload": b64(request_object().as_bytes()).to_string(), "signatures": []}
     });
 
     assert!(UnverifiedRequest::read("openid4vp-v1-signed", &compact).is_ok());

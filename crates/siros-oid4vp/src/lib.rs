@@ -62,8 +62,9 @@ pub use unverified::{
 pub use fetch::{BodyLimit, Fetch, FetchResponse, HttpStatus, HttpsUrl, MediaType, Method};
 #[cfg(feature = "crypto")]
 pub use intake::{
-    AttestationFault, ChainFault, Effect, EffectResult, IntakeError, IntakeState, JwsError,
-    JwsFault, KeyMaterial, Step, Trust, TrustAnswer, TrustSubject, Verdict, VerifierInfoRule,
+    AttestationFault, ChainFault, Effect, EffectResult, FormFault, IntakeError, IntakeState,
+    JwsError, JwsFault, KeyMaterial, Step, Trust, TrustAnswer, TrustSubject, Verdict,
+    VerifierInfoRule,
 };
 #[cfg(feature = "crypto")]
 pub use response::{

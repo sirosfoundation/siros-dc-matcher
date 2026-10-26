@@ -20,7 +20,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use siros_codec::date::DateTime;
 
-pub use error::{AttestationFault, ChainFault, IntakeError, JwsError, JwsFault, VerifierInfoRule};
+pub use error::{
+    AttestationFault, ChainFault, FormFault, IntakeError, JwsError, JwsFault, VerifierInfoRule,
+};
 pub use trust::{KeyMaterial, Trust, TrustAnswer, TrustSubject, Verdict};
 
 use crate::fetch::{Fetch, FetchResponse};
