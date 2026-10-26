@@ -1,5 +1,6 @@
 //! The semantics identifier of an access certificate (ETSI TS 119 475, Clauses 5.1.3 and
-//! 5.1.5): one row per refusal, and one accepting row per person.
+//! 5.1.5): one row per refusal, one accepting row per person, and the `serialNumber` of a legal
+//! person without `organizationIdentifier`.
 
 #![allow(
     clippy::unwrap_used,
@@ -49,12 +50,18 @@ fn the_access_certificate_names_its_wallet_relying_party() {
     let natural = Policies::Listed(&[NATURAL]);
     let org = |value: &str| format!("CN=Verifier,2.5.4.97={value}");
     // (case, subject, policies, outcome)
-    let cases: [(&str, String, Policies, Result<&str, SemanticIdError>); 13] = [
+    let cases: [(&str, String, Policies, Result<&str, SemanticIdError>); 14] = [
         (
             "a legal person's organizationIdentifier",
             org("VATBE-0876866142"),
             legal,
             Ok("VATBE-0876866142"),
+        ),
+        (
+            "a legal person's serialNumber without organizationIdentifier",
+            "CN=Verifier,2.5.4.5=NTRBE-0876866142".to_owned(),
+            legal,
+            Ok("NTRBE-0876866142"),
         ),
         (
             "a natural person's serialNumber, an employer's organizationIdentifier beside it",

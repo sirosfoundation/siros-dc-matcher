@@ -237,7 +237,61 @@ impl IntakeError {
         match self {
             Self::RequestUriMethodInvalid => ErrorCode::InvalidRequestUriMethod,
             Self::ScopeUnsupported => ErrorCode::InvalidScope,
-            _ => ErrorCode::InvalidRequest,
+            Self::NotAnAuthorizationRequest
+            | Self::ClientIdMissing
+            | Self::RequestAndRequestUri
+            | Self::RequestUriMethodWithoutRequestUri
+            | Self::RequestUriNotHttps
+            | Self::FetchStatus
+            | Self::FetchContentType
+            | Self::FetchTooLarge
+            | Self::JwsMalformed
+            | Self::AlgorithmUnsupported
+            | Self::CriticalHeader
+            | Self::TypMismatch
+            | Self::SignatureInvalid
+            | Self::RequestObjectNotObject
+            | Self::NestedRequest
+            | Self::ClientIdMismatch
+            | Self::WalletNonceMismatch
+            | Self::ClientId(_)
+            | Self::SignedRedirectUri
+            | Self::UnsignedNeedsRedirectUri
+            | Self::CertificateChainInvalid
+            | Self::SanMismatch
+            | Self::CertificateHashMismatch
+            | Self::KidNotOfClient
+            | Self::KeyNotResolved
+            | Self::AttestationInvalid
+            | Self::AttestationSubjectMismatch
+            | Self::AttestationExpired
+            | Self::AttestationSignatureInvalid
+            | Self::RedirectUriNotAttested
+            | Self::ClientIdInPayload
+            | Self::NoVerifiableSignature
+            | Self::EnvelopeUnreadable
+            | Self::ExpectedOriginsMissing
+            | Self::OriginNotExpected
+            | Self::ResponseTypeUnsupported
+            | Self::NonceInvalid
+            | Self::StateInvalid
+            | Self::ResponseModeUnsupported
+            | Self::ResponseUriMissing
+            | Self::ResponseUriNotHttps
+            | Self::RedirectUriWithDirectPost
+            | Self::ResponseUriNotClientId
+            | Self::ResponseUriHostMismatch
+            | Self::QueryAndScope
+            | Self::DcqlQueryMissing
+            | Self::DcqlQueryInvalid
+            | Self::ClientMetadataInvalid
+            | Self::TransactionDataInvalid
+            | Self::VerifierInfo(_)
+            | Self::EncryptionKeyMissing
+            | Self::EncryptionUnsupported
+            | Self::AnswerMismatch
+            | Self::UnexpectedTrustKey
+            | Self::UnusedAnswer => ErrorCode::InvalidRequest,
         }
     }
 }

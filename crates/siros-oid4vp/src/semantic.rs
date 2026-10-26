@@ -13,9 +13,9 @@ use std::fmt;
 
 /// The identity type references of a legal person (ETSI TS 119 475, Table 2).
 const LEGAL_TYPES: [&str; 5] = ["VAT", "NTR", "LEI", "EOR", "EXC"];
-/// The identity type references of a natural person: TIN (ETSI TS 119 475, Table 4), and the
-/// national schemes of ETSI EN 319 412-1, NAT-5.1.3-03: passport, identity card, personal
-/// number and personal tax reference.
+/// The identity type references of a natural person: TIN (ETSI TS 119 475, Table 4), and items
+/// 1 to 4 of ETSI EN 319 412-1, Clause 5.1.3: passport, identity card, personal number and
+/// personal tax reference.
 const NATURAL_TYPES: [&str; 5] = ["TIN", "PAS", "IDC", "PNO", "TAX"];
 
 /// Whom a Wallet-Relying Party access certificate is issued to.
@@ -39,7 +39,9 @@ impl Person {
 
 /// A semantics identifier, such as `VATBE-0876866142`: an identity type reference of the
 /// person, two uppercase letters of an ISO 3166-1 country code, `-`, and an identifier of
-/// printable ASCII without leading or trailing space.
+/// printable ASCII without leading or trailing space. The national-scheme form of ETSI EN 319
+/// 412-1, two characters and `:` in place of the type reference, is refused, as go-trust
+/// refuses it.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SemanticIdentifier(String);
 
