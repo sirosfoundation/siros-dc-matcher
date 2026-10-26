@@ -345,7 +345,7 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
 
 **Requirements:**
 - **K1.** The projection MUST hold, per credential: entry reference, format, type, the typed claim tree minus undisclosable attributes, card and labels. It also holds the available system ids, and is versioned. It MUST NOT hold delivered or derived secrets (R-G6).
-- **K2.** The picker MUST run the presentation component's matching over an `UnverifiedRequest`. For the same request and credentials, it MUST give the offers the wallet's plan gives.
+- **K2.** The picker MUST run the presentation component's matching over an `UnverifiedRequest`. For the same request and credentials, it MUST give the offers the wallet's plan gives, except where the wallet's plan depends on what the projection leaves out: the `zkp_req` credential tests that read undisclosable attributes (N3, for example the `age_check` bounds against `birth_date`) and the delivered seed (N4). The wallet refuses such an offer with `access_denied` (A9 applies to it as to any other).
 - **K3.** Each picker entry MUST carry the offer, query id and credential id, so that the wallet maps the pick to a selection after its own verified plan.
 - **K4. Delegation.** The picker MUST send `Full` delegation (Credential Manager keeps its UI and the wallet fulfils from its background service) for the entries of an offer that needs no wallet display, and no delegation otherwise. Every entry of one set gets the same type. The rule is A9's, applied with the host's display level: an offer that the host displayed only in part (`display_skipped`) needs the wallet's display.
 
