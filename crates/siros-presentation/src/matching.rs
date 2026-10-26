@@ -84,21 +84,21 @@ impl Claims {
 
 /// The credentials that can answer each Credential Query, before the `zkp_req` credential
 /// tests.
-pub struct Matching<'r, 'c, C> {
+pub struct Matching<'r, C> {
     asked: Asked<'r>,
-    queries: Vec<(&'r CredentialQuery, Outcome<'c, C>)>,
+    queries: Vec<(&'r CredentialQuery, Outcome<C>)>,
 }
 
-enum Outcome<'c, C> {
-    Claims(Vec<(&'c C, Claims)>),
+enum Outcome<C> {
+    Claims(Vec<(C, Claims)>),
     Proof {
         zkp: Box<ZkpQuery>,
-        credentials: Vec<&'c C>,
+        credentials: Vec<C>,
     },
     Failed(ErrorCode),
 }
 
-impl<'r, 'c, C: MatchCredential> Matching<'r, 'c, C> {
+impl<'r, C: MatchCredential + Clone> Matching<'r, C> {
     /// The matching of `asked` over `credentials`, usable at the proof date `date`.
     ///
     /// One instance of each batch is matched: the one [`least_used`] chooses from `records`
@@ -117,7 +117,7 @@ impl<'r, 'c, C: MatchCredential> Matching<'r, 'c, C> {
     /// meets the nym_auth policy; a nym_auth query of a request that does not is invalid.
     pub fn new(
         asked: Asked<'r>,
-        credentials: &'c [C],
+        credentials: &[C],
         records: &[PresentationRecord],
         systems: &[NymAuthSystem],
         date: Date,
@@ -140,8 +140,8 @@ impl<'r, 'c, C: MatchCredential> Matching<'r, 'c, C> {
                         Ok(zkp) => Outcome::Proof {
                             credentials: instances
                                 .iter()
-                                .copied()
-                                .filter(|c| zkp.proves_over(*c))
+                                .filter(|c| zkp.proves_over(**c))
+                                .map(|c| (*c).clone())
                                 .collect(),
                             zkp: Box::new(zkp),
                         },
@@ -150,8 +150,7 @@ impl<'r, 'c, C: MatchCredential> Matching<'r, 'c, C> {
                     _ => Outcome::Claims(
                         instances
                             .iter()
-                            .copied()
-                            .filter_map(|c| claims(query, c).map(|claims| (c, claims)))
+                            .filter_map(|c| claims(query, *c).map(|claims| ((*c).clone(), claims)))
                             .collect(),
                     ),
                 };
@@ -165,10 +164,7 @@ impl<'r, 'c, C: MatchCredential> Matching<'r, 'c, C> {
     /// candidate by its index in [`ZkpQuery::choices`], or drops the candidate with `None`. The
     /// wallet applies the credential tests there (A2); the picker, which cannot, picks the
     /// first.
-    pub fn answer(
-        self,
-        mut choose: impl FnMut(&C, &ZkpQuery) -> Option<usize>,
-    ) -> Answered<'r, 'c, C> {
+    pub fn answer(self, mut choose: impl FnMut(&C, &ZkpQuery) -> Option<usize>) -> Answered<'r, C> {
         let queries = self
             .queries
             .into_iter()
@@ -190,7 +186,7 @@ impl<'r, 'c, C: MatchCredential> Matching<'r, 'c, C> {
                     candidates: credentials
                         .into_iter()
                         .filter_map(|credential| {
-                            let choice = zkp.choices().get(choose(credential, &zkp)?)?.clone();
+                            let choice = zkp.choices().get(choose(&credential, &zkp)?)?.clone();
                             Some(Candidate {
                                 credential,
                                 answer: Answer::Proof(choice),
@@ -282,33 +278,33 @@ impl<C: MatchCredential> siros_dcql::Credential for Held<'_, C> {
 }
 
 /// The candidates of every Credential Query, each with its answer.
-pub struct Answered<'r, 'c, C> {
+pub struct Answered<'r, C> {
     asked: Asked<'r>,
-    queries: Vec<Answers<'r, 'c, C>>,
+    queries: Vec<Answers<'r, C>>,
 }
 
 /// The candidates of one Credential Query.
-pub struct Answers<'r, 'c, C> {
+pub struct Answers<'r, C> {
     query: &'r CredentialQuery,
-    candidates: Vec<Candidate<'c, C>>,
+    candidates: Vec<Candidate<C>>,
     zkp: Option<Box<ZkpQuery>>,
     failure: Option<ErrorCode>,
 }
 
 /// A credential that answers a Credential Query, and its answer.
-pub struct Candidate<'c, C> {
-    credential: &'c C,
+pub struct Candidate<C> {
+    credential: C,
     answer: Answer,
 }
 
-impl<'r, 'c, C> Answered<'r, 'c, C> {
+impl<'r, C> Answered<'r, C> {
     /// The request.
     pub fn asked(&self) -> Asked<'r> {
         self.asked
     }
 
     /// The candidates of each Credential Query, in the order of the DCQL query.
-    pub fn queries(&self) -> &[Answers<'r, 'c, C>] {
+    pub fn queries(&self) -> &[Answers<'r, C>] {
         &self.queries
     }
 
@@ -328,14 +324,14 @@ impl<'r, 'c, C> Answered<'r, 'c, C> {
     }
 }
 
-impl<'r, 'c, C> Answers<'r, 'c, C> {
+impl<'r, C> Answers<'r, C> {
     /// The Credential Query.
     pub fn query(&self) -> &'r CredentialQuery {
         self.query
     }
 
     /// The credentials that answer it, in the order of the wallet's credentials.
-    pub fn candidates(&self) -> &[Candidate<'c, C>] {
+    pub fn candidates(&self) -> &[Candidate<C>] {
         &self.candidates
     }
 
@@ -345,10 +341,10 @@ impl<'r, 'c, C> Answers<'r, 'c, C> {
     }
 }
 
-impl<'c, C> Candidate<'c, C> {
+impl<C> Candidate<C> {
     /// The credential.
-    pub fn credential(&self) -> &'c C {
-        self.credential
+    pub fn credential(&self) -> &C {
+        &self.credential
     }
 
     /// The answer.

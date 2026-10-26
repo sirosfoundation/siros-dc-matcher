@@ -15,7 +15,7 @@ use crate::matching::Answered;
 use crate::offers::Member;
 
 /// The answers of a request over the wallet's usable credentials.
-pub(crate) type Wallet<'a> = Answered<'a, 'a, UsableCredential<'a>>;
+pub(crate) type Wallet<'a> = Answered<'a, UsableCredential<'a>>;
 
 /// The `transaction_data` entries of a request, and the SCA Attestation metadata of the
 /// credentials that answer a query they name.

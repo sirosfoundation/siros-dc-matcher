@@ -113,7 +113,7 @@ impl Offers {
     /// Combinations are examined in order, up to [`MAX_EXAMINED`], and at most [`MAX_OFFERS`]
     /// offers and [`MAX_ADDITIONS`] additions per offer are kept.
     pub fn of<C>(
-        answered: &Answered<'_, '_, C>,
+        answered: &Answered<'_, C>,
         mut accept: impl FnMut(&[Member]) -> bool,
         fixed: impl Fn(usize) -> bool,
     ) -> Self {
@@ -320,7 +320,7 @@ impl QuerySpace {
 }
 
 impl Space {
-    fn of<C>(answered: &Answered<'_, '_, C>) -> Self {
+    fn of<C>(answered: &Answered<'_, C>) -> Self {
         Self {
             queries: answered
                 .queries()

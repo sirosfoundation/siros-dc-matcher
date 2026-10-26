@@ -85,15 +85,14 @@ fn sd_jwt_over_redirect_direct_post_jwt() {
         "dcql_query": {"credentials": [{"id": "pid", "format": "dc+sd-jwt",
             "meta": {"vct_values": [VCT]}, "claims": [{"path": ["given_name"]}]}]}
     }));
-    let usable = wallet.usable();
     let empty = siros_presentation::Fetches::new();
-    let first = plan(&wallet.input(&request, &usable, &empty)).unwrap();
+    let first = plan(&wallet.input(&request, &empty)).unwrap();
     let PlanStep::Fetch(fetch) = first else {
         panic!("the plan fetches the type metadata first")
     };
     assert_eq!(fetch.url().as_str(), VCT);
-    let fetches = wallet.fetches(&request, &usable);
-    let input = wallet.input(&request, &usable, &fetches);
+    let fetches = wallet.fetches(&request);
+    let input = wallet.input(&request, &fetches);
 
     let planned = ready(&input).unwrap();
     let offer = &planned.view().offers()[0];

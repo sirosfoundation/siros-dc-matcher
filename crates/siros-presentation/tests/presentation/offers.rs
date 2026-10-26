@@ -44,9 +44,8 @@ fn all_optional_sets_offer_each_option() {
             {"options": [["mdl"]], "required": false, "purpose": "Drive"}
         ]
     }));
-    let usable = wallet.usable();
-    let fetches = wallet.fetches(&request, &usable);
-    let planned = ready(&wallet.input(&request, &usable, &fetches)).unwrap();
+    let fetches = wallet.fetches(&request);
+    let planned = ready(&wallet.input(&request, &fetches)).unwrap();
     // (purpose, the queries of the members, the queries of each addition)
     type Shape<'v> = (Option<&'v str>, Vec<&'v str>, Vec<Vec<&'v str>>);
     let offers: Vec<Shape<'_>> = planned
@@ -90,9 +89,8 @@ fn no_query_but_zkp_req_reaches_a_nym_auth_attestation() {
     ];
     for query in queries {
         let request = request(json!({"credentials": [query.clone()]}));
-        let usable = wallet.usable();
-        let fetches = wallet.fetches(&request, &usable);
-        let planned = ready(&wallet.input(&request, &usable, &fetches));
+        let fetches = wallet.fetches(&request);
+        let planned = ready(&wallet.input(&request, &fetches));
         assert_eq!(
             planned.err(),
             Some(PresentationError::NoOffer(ErrorCode::AccessDenied)),

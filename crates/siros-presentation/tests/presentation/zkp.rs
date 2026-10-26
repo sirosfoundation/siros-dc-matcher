@@ -77,9 +77,8 @@ fn zkp_req_over_redirect_direct_post_cwt() {
         "client_metadata": client_metadata(),
         "dcql_query": {"credentials": [nym_query()]}
     }));
-    let usable = wallet.usable();
-    let fetches = wallet.fetches(&request, &usable);
-    let input = wallet.input(&request, &usable, &fetches);
+    let fetches = wallet.fetches(&request);
+    let input = wallet.input(&request, &fetches);
     let planned = ready(&input).unwrap();
     let Shown::Proof(rows) = planned.view().offers()[0].members()[0].shown() else {
         panic!("proof statement rows")
@@ -129,9 +128,8 @@ fn zkp_req_and_mdoc_over_dc_api_jwt() {
         "client_metadata": client_metadata(),
         "dcql_query": {"credentials": [mdl, nym_query()]}
     }));
-    let usable = wallet.usable();
-    let fetches = wallet.fetches(&request, &usable);
-    let input = wallet.input(&request, &usable, &fetches);
+    let fetches = wallet.fetches(&request);
+    let input = wallet.input(&request, &fetches);
     let planned = ready(&input).unwrap();
     let view = planned.view();
     let [offer] = view.offers() else {

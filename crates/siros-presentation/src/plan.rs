@@ -10,7 +10,7 @@ mod view;
 use rand_core::CryptoRngCore;
 use siros_codec::base64url;
 use siros_codec::date::DateTime;
-use siros_credential::{Parsed, UsableCredential};
+use siros_credential::{Credential, Parsed, UsableCredential};
 use siros_display::{DisplayCache, Locale};
 use siros_oid4vp::{ErrorCode, Fetch, Submission, VerifiedRequest};
 use siros_transaction_data::{Amr, Step, TransactionDataError};
@@ -36,8 +36,8 @@ pub use view::{AdditionView, ConsentView, MemberView, OfferView, Shown};
 pub struct PlanInput<'a> {
     /// The request intake verified.
     pub request: &'a VerifiedRequest,
-    /// The wallet's credentials usable at `now` (C4).
-    pub credentials: &'a [UsableCredential<'a>],
+    /// The wallet's credentials. The plan presents those usable at `now` (C4).
+    pub credentials: &'a [Credential],
     /// The wallet's presentation records, which choose the instance of each batch (C5).
     pub records: &'a [PresentationRecord],
     /// The display metadata the host holds.
@@ -101,9 +101,14 @@ pub fn plan<'a>(input: &PlanInput<'a>) -> Result<PlanStep<'a>, PresentationError
         request.dcql_query_json(),
         request.client_metadata(),
     );
+    let usable: Vec<UsableCredential<'a>> = input
+        .credentials
+        .iter()
+        .filter_map(|credential| UsableCredential::at(credential, input.now).ok())
+        .collect();
     let answered = Matching::new(
         asked,
-        input.credentials,
+        &usable,
         input.records,
         input.systems,
         input.now.date(),

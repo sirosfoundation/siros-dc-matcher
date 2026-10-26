@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 use siros_codec::base64url;
 use siros_codec::cbor::Value as Cbor;
 use siros_codec::date::DateTime;
-use siros_credential::{Credential, UsableCredential};
+use siros_credential::Credential;
 use siros_display::{DisplayCache, Locale};
 use siros_oid4vp::{FetchResponse, VerifiedRequest};
 use siros_presentation::{
@@ -284,15 +284,6 @@ impl Wallet {
         }
     }
 
-    /// The credentials usable at [`NOW`].
-    pub fn usable(&self) -> Vec<UsableCredential<'_>> {
-        let now = DateTime::from_unix(NOW).unwrap();
-        self.credentials
-            .iter()
-            .filter_map(|c| UsableCredential::at(c, now).ok())
-            .collect()
-    }
-
     /// Every credential is presentable without the wallet's UI.
     pub fn all_in_background(mut self) -> Self {
         self.background = self
@@ -306,12 +297,11 @@ impl Wallet {
     pub fn input<'a>(
         &'a self,
         request: &'a VerifiedRequest,
-        usable: &'a [UsableCredential<'a>],
         fetches: &'a Fetches,
     ) -> PlanInput<'a> {
         PlanInput {
             request,
-            credentials: usable,
+            credentials: &self.credentials,
             records: self.state.presentations(),
             display: &self.display,
             locales: &self.locales,
@@ -325,10 +315,10 @@ impl Wallet {
     }
 
     /// The host's responses to every fetch the plan of `request` asks for.
-    pub fn fetches(&self, request: &VerifiedRequest, usable: &[UsableCredential<'_>]) -> Fetches {
+    pub fn fetches(&self, request: &VerifiedRequest) -> Fetches {
         let mut fetches = Fetches::new();
         loop {
-            let fetch = match plan(&self.input(request, usable, &fetches)) {
+            let fetch = match plan(&self.input(request, &fetches)) {
                 Ok(PlanStep::Fetch(fetch)) => fetch,
                 Ok(PlanStep::Ready(_)) | Err(_) => return fetches,
             };

@@ -41,9 +41,8 @@ fn selections_and_signatures_parse_against_the_plan() {
             ]
         }
     }));
-    let usable = wallet.usable();
-    let fetches = wallet.fetches(&request, &usable);
-    let input = wallet.input(&request, &usable, &fetches);
+    let fetches = wallet.fetches(&request);
+    let input = wallet.input(&request, &fetches);
     let digest = ready(&input).unwrap().view().digest().to_owned();
     let other = b64(&[0; 32]);
 

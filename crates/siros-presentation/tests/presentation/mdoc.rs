@@ -69,9 +69,8 @@ fn mdoc_over_dc_api_jwt() {
             "meta": {"doctype_value": MDL},
             "claims": [{"path": [MDL_NS, "family_name"]}, {"path": [MDL_NS, "age_over_18"]}]}]}
     }));
-    let usable = wallet.usable();
-    let fetches = wallet.fetches(&request, &usable);
-    let (_, response) = respond(&wallet.input(&request, &usable, &fetches));
+    let fetches = wallet.fetches(&request);
+    let (_, response) = respond(&wallet.input(&request, &fetches));
 
     let payload = decrypt_jwe(response.submission());
     assert!(payload.get("state").is_none());
