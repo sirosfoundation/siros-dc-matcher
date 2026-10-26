@@ -83,28 +83,45 @@ against the 307,200-byte budget (303,914 before).
 ### Added
 
 - `siros-presentation`, the presentation component of the wallet core. Phase 1 plans a
-  verified request over the wallet's usable credentials: the format table, `meta`, holder
-  binding and no query but `zkp_req` on a nym_auth attestation (A1); `zkp_req` as one selection,
-  then the usable attestation and the seed delivered in the credential's auxiliary data (A2);
-  offers, optional additions, and an offer per option when every set is optional (A3); the
-  transaction entries each member authorizes (T4); the plan's digest (A4); and the consent view
-  with cards, claim rows, proof statement rows, additions, transactions and whether an offer
-  needs the wallet's display (A9). The plan asks the host for each type metadata fetch. Phase 2
-  parses the selection against the plan made again, gives a `Sign` effect per signing input,
-  parses the signatures against them (A5), and gives one `vp_token` (A8), its submission for the
-  request's Response Mode and the presentation record. It proves `zkp_req` in-process through a
-  `NymAuthProver`. A decline, and a background fulfilment of an offer that needs the wallet's
-  display, give `access_denied`. Without the default feature `wallet` it holds the matching the
-  picker runs, over `MatchCredential`, and builds with Rust 1.82.
+  verified request over the wallet's credentials usable at the plan's time: the format table,
+  `meta`, holder binding and no query but `zkp_req` on a nym_auth attestation (A1); `zkp_req` as
+  one selection, then the usable attestation and the seed delivered in the credential's
+  auxiliary data (A2); offers, optional additions, an offer per option when every set is
+  optional, a `multiple` member holding every candidate, and an optional set joined when it
+  alone carries a transaction entry (A3); the transaction entries each credential authorizes
+  (T4); the plan's digest over the request, its trust verdict, the nym_auth `verifier_id` and
+  every offer's instances, answers, bound entries, additions and display (A4); and the consent
+  view with cards, claim rows, proof statement rows, additions, transactions and whether an
+  offer needs the wallet's display (A9). The plan asks the host for each type metadata fetch.
+  A nym_auth request must be signed, trusted and encrypted, and its `verifier_id` comes from the
+  authenticated certificate (N2). A `zkp_req` query that names `trusted_authorities` finds every
+  issuer untrusted until the wallet evaluates them. Phase 2 parses the selection against the
+  plan made again, with the non-empty subset of each `multiple` member, gives a `Sign` effect
+  per signing input, verifies each signature under the instance's holder key (A5), and gives
+  one `vp_token` (A8), its submission for the request's Response Mode and the presentation
+  record. It proves `zkp_req` in-process through a `NymAuthProver`. A decline, and a background
+  fulfilment of an offer that needs the wallet's display, give `access_denied`. Without the
+  default feature `wallet` it holds the matching the picker runs, over `MatchCredential`, and
+  builds with Rust 1.82.
 - `siros-zkp-req-nym-auth`: `NymAuthRequest` (feature `request`), the nym_auth request of a
-  verified request, signed and encrypted, with the session of its `Handover` and the
-  `verifier_id` of a `VerifierIdForm`; `NymAuthQuery::options`, `UsablePair`, `Answer` and
+  verified request, with the session of its `Handover`. The request is signed by a Request
+  Object or under `openid4vp-v1-signed`, trusted, encrypted, and carries no registration
+  certificate (`unsigned`, `multisigned`, `untrusted`, `response_mode`,
+  `registration_certificate`). Its `verifier_id` takes the `VerifierIdForm` of the trust
+  framework: `semantic_id:` and the access certificate's semantic identifier, or
+  `x509_san_dns:` and the Client Identifier; `NymAuthQuery::options`, `UsablePair`, `Answer` and
   `Prepared::new`; `UsableAttestation::of` an mdoc already parsed. `prepare` builds through
   them.
-- `siros-display`: `proof::verified_rows`, the picker's proof statement rows without the
-  "(unverified request)" marker. `matcher.wasm` is unchanged.
-- `siros-oid4vp`: `VpToken::json`.
-- `siros-credential`: `least_used` takes any `Instance`.
+- `siros-display`: `proof::verified_rows`, the proof statement rows of a verified request, each
+  a `DisplayText` label and value held whole, without the "(unverified request)" marker.
+- `siros-oid4vp`: `VpToken::json`. `VerifiedRequest::access_certificate` gives the DER and the
+  semantic identifier (ETSI EN 319 412-1, Sections 5.1.3 and 5.1.4) of an `x509_san_dns` or
+  `x509_hash` signer's certificate; `dc_api_protocol` the DC API protocol; and
+  `verifier_info_formats` the formats of `verifier_info` (OpenID4VP 1.0, Section 5.1). Intake
+  refuses a malformed `verifier_info` with `verifier_info_invalid`.
+- `siros-credential`: `least_used` takes any `Instance`. `Credential::holder_key` gives the
+  holder's P-256 key: an SD-JWT VC's `cnf.jwk`, an mdoc's `deviceKey`. `siros-mdoc` gains
+  `P256Key::new`.
 - `siros-transaction-data`, the `transaction_data` request parameter (OpenID4VP 1.0, Section
   5.1) for the wallet core. It parses entries of the four EC TS12 v1.0.1 types into typed
   payloads, binds each entry to one credential of an offer, gives the KB-JWT claims
