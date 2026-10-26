@@ -1,6 +1,6 @@
 //! A credential of the wallet state, read through its format component (C1).
 
-use siros_mdoc::Mdoc;
+use siros_mdoc::{Mdoc, P256Key};
 use siros_sdjwt::SdJwt;
 use siros_wallet_state::{
     BatchId, CredentialEntry, CredentialId, InstanceId, KeyId, MetadataValue,
@@ -180,6 +180,15 @@ impl Credential {
     /// `exp`.
     pub fn validity(&self) -> Validity {
         self.validity
+    }
+
+    /// The public key a presentation of the credential proves possession of: the P-256 key of
+    /// an SD-JWT VC's `cnf.jwk`, or an mdoc's `deviceKey`.
+    pub fn holder_key(&self) -> Option<P256Key> {
+        match &self.body {
+            Body::SdJwtVc(vc) => vc.holder_key(),
+            Body::Mdoc(mdoc) => Some(*mdoc.mso().device_key()),
+        }
     }
 
     /// The entry's `kid`: the key pair the credential is bound to.

@@ -1,7 +1,9 @@
 //! The rules of SD-JWT VC (draft-ietf-oauth-sd-jwt-vc-19) over a stored SD-JWT.
 
+use siros_codec::base64url;
 use siros_codec::date::DateTime;
-use siros_sdjwt::{Claim, ClaimValue, Element, SdJwt};
+use siros_mdoc::P256Key;
+use siros_sdjwt::{Claim, ClaimValue, Element, Object, SdJwt};
 
 use crate::error::CredentialError;
 use crate::usable::Validity;
@@ -24,6 +26,7 @@ pub(crate) struct SdJwtVc {
     sd_jwt: SdJwt,
     vct: String,
     bound: bool,
+    holder_key: Option<P256Key>,
     validity: Validity,
 }
 
@@ -41,9 +44,9 @@ impl SdJwtVc {
             Some(ClaimValue::String(vct)) => vct.clone(),
             _ => return Err(CredentialError::Vct),
         };
-        let bound = match claims.get("cnf").map(Claim::value) {
-            None => false,
-            Some(ClaimValue::Object(_)) => true,
+        let (bound, holder_key) = match claims.get("cnf").map(Claim::value) {
+            None => (false, None),
+            Some(ClaimValue::Object(cnf)) => (true, p256_jwk(cnf)),
             Some(_) => return Err(CredentialError::Cnf),
         };
         let validity = Validity::new(
@@ -54,6 +57,7 @@ impl SdJwtVc {
             sd_jwt,
             vct,
             bound,
+            holder_key,
             validity,
         })
     }
@@ -75,6 +79,29 @@ impl SdJwtVc {
     pub(crate) fn validity(&self) -> Validity {
         self.validity
     }
+
+    /// The key of `cnf.jwk` when it is a P-256 key (RFC 7800, Section 3.2).
+    pub(crate) fn holder_key(&self) -> Option<P256Key> {
+        self.holder_key
+    }
+}
+
+/// The P-256 key of `cnf`'s `jwk`: `kty` `EC`, `crv` `P-256`, and `x` and `y` of 32 bytes of
+/// base64url (RFC 7518, Section 6.2.1). `None` for any other confirmation method or key.
+fn p256_jwk(cnf: &Object) -> Option<P256Key> {
+    let ClaimValue::Object(jwk) = cnf.get("jwk")?.value() else {
+        return None;
+    };
+    let text = |name: &str| match jwk.get(name).map(Claim::value) {
+        Some(ClaimValue::String(text)) => Some(text.as_str()),
+        _ => None,
+    };
+    if text("kty")? != "EC" || text("crv")? != "P-256" {
+        return None;
+    }
+    let coordinate =
+        |name: &str| -> Option<[u8; 32]> { base64url::decode(text(name)?)?.try_into().ok() };
+    Some(P256Key::new(coordinate("x")?, coordinate("y")?))
 }
 
 /// Whether a disclosure reveals `claim` or one of its sub-claims.
