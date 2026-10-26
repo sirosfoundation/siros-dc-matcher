@@ -16,11 +16,12 @@ pub const MAX_ADDITIONS: usize = 32;
 /// offer.
 pub const MAX_EXAMINED: usize = 1024;
 
-/// A credential an offer presents: a candidate of a Credential Query.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// What an offer presents for one Credential Query: one candidate, or every candidate of a
+/// query that sets `multiple`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Member {
     query: usize,
-    candidate: usize,
+    candidates: Vec<usize>,
 }
 
 impl Member {
@@ -29,9 +30,27 @@ impl Member {
         self.query
     }
 
-    /// The index of the candidate among the query's candidates.
-    pub fn candidate(&self) -> usize {
-        self.candidate
+    /// The indexes of the candidates among the query's candidates, at least one; every
+    /// candidate of a `multiple` query, of which the selection chooses a subset.
+    pub fn candidates(&self) -> &[usize] {
+        &self.candidates
+    }
+
+    /// The member of the candidates at `positions` among [`Member::candidates`], each once.
+    /// `None` for an empty subset or a position out of range or repeated.
+    pub(crate) fn subset(&self, positions: &[usize]) -> Option<Self> {
+        let mut candidates = Vec::with_capacity(positions.len());
+        for position in positions {
+            let candidate = *self.candidates.get(*position)?;
+            if candidates.contains(&candidate) {
+                return None;
+            }
+            candidates.push(candidate);
+        }
+        (!candidates.is_empty()).then_some(Self {
+            query: self.query,
+            candidates,
+        })
     }
 }
 
@@ -100,32 +119,38 @@ impl Addition {
 }
 
 impl Offers {
-    /// The offers of `answered` that `accept` accepts.
+    /// The offers of `answered` that `accept` accepts. `entries` holds, for each
+    /// `transaction_data` entry, the indexes of the Credential Queries its `credential_ids`
+    /// name.
     ///
     /// - Without `credential_sets`, an offer answers every query (Section 6.4.2).
     /// - Each combination of an option of every required credential set is an offer.
+    /// - An optional set that alone names a query of an entry no required set names joins the
+    ///   required sets, so its credentials carry the entry (Section 8.4).
     /// - When every set is optional, each option of each set is an offer.
-    /// - An option is a candidate for each of its queries; a query that sets `multiple`
-    ///   takes all of its candidates.
+    /// - An option holds a member per query: a candidate, or all candidates of a query that
+    ///   sets `multiple`.
     ///
-    /// The options of the optional sets are each offer's additions, except the set the offer
-    /// came from and the options that answer a query of the offer or a query `fixed` names.
-    /// Combinations are examined in order, up to [`MAX_EXAMINED`], and at most [`MAX_OFFERS`]
-    /// offers and [`MAX_ADDITIONS`] additions per offer are kept.
+    /// The options of the other optional sets are each offer's additions, except those that
+    /// answer a query of the offer or a query an entry names. Combinations are examined in
+    /// order, up to [`MAX_EXAMINED`], and at most [`MAX_OFFERS`] offers and [`MAX_ADDITIONS`]
+    /// additions per offer are kept.
     pub fn of<C>(
         answered: &Answered<'_, C>,
         mut accept: impl FnMut(&[Member]) -> bool,
-        fixed: impl Fn(usize) -> bool,
+        entries: &[Vec<usize>],
     ) -> Self {
         let space = Space::of(answered);
+        let named = |query: usize| entries.iter().any(|named| named.contains(&query));
         let mut required = Vec::new();
         let mut optional = Vec::new();
         match answered.asked().query().credential_sets.as_deref() {
             None => required.push(Choices::all(&space)),
             Some(sets) => {
+                let joined = joined(&space, sets, entries);
                 for (index, set) in sets.iter().enumerate() {
                     let choices = Choices::of_set(&space, index, set);
-                    if set.required {
+                    if set.required || joined.contains(&index) {
                         required.push(choices);
                     } else {
                         optional.push(choices);
@@ -148,7 +173,7 @@ impl Offers {
                     let members = choices.choice(&space, n);
                     n += 1;
                     found.consider(members, choices.purposes(), &mut accept, |members| {
-                        additions(&space, &others, members, &fixed)
+                        additions(&space, &others, members, &named)
                     });
                 }
             }
@@ -166,7 +191,7 @@ impl Offers {
                     continue;
                 };
                 found.consider(members, purposes.clone(), &mut accept, |members| {
-                    additions(&space, &optional, members, &fixed)
+                    additions(&space, &optional, members, &named)
                 });
             }
             found.unexamined = remaining(std::iter::once(total), found.examined);
@@ -186,6 +211,33 @@ impl Offers {
     pub fn unexamined(&self) -> Dropped {
         self.unexamined
     }
+}
+
+/// The optional sets that join the required ones: for each entry no required set can carry,
+/// the one optional set whose options name a query of the entry, when it is alone.
+fn joined(space: &Space, sets: &[CredentialSetQuery], entries: &[Vec<usize>]) -> Vec<usize> {
+    let names = |set: &CredentialSetQuery, entry: &[usize]| {
+        set.options
+            .iter()
+            .flatten()
+            .filter_map(|id| space.index(id))
+            .any(|query| entry.contains(&query))
+    };
+    entries
+        .iter()
+        .filter(|entry| !sets.iter().any(|set| set.required && names(set, entry)))
+        .filter_map(|entry| {
+            let mut carrying = sets
+                .iter()
+                .enumerate()
+                .filter(|(_, set)| names(set, entry))
+                .map(|(index, _)| index);
+            match (carrying.next(), carrying.next()) {
+                (Some(alone), None) => Some(alone),
+                _ => None,
+            }
+        })
+        .collect()
 }
 
 /// The offers found so far.
@@ -231,12 +283,13 @@ impl Found {
     }
 }
 
-/// The additions to the offer of `members` from the option choices of `optional`.
+/// The additions to the offer of `members` from the option choices of `optional`, none
+/// answering a query `named` names.
 fn additions(
     space: &Space,
     optional: &[&Choices],
     members: &[Member],
-    fixed: &impl Fn(usize) -> bool,
+    named: &impl Fn(usize) -> bool,
 ) -> (Vec<Addition>, Dropped) {
     let mut found = Vec::new();
     let mut examined = 0;
@@ -254,7 +307,7 @@ fn additions(
             examined += 1;
             if added
                 .iter()
-                .any(|m| fixed(m.query) || answers(members, m.query))
+                .any(|m| named(m.query) || answers(members, m.query))
             {
                 continue;
             }
@@ -283,14 +336,11 @@ fn combine(space: &Space, dimensions: &[Choices], mut n: usize) -> Option<Vec<Me
         let chosen = choices.choice(space, n.checked_rem(count)?);
         n = n.checked_div(count)?;
         for member in chosen {
-            if members.contains(&member) {
-                continue;
+            match members.iter().find(|m| m.query == member.query) {
+                Some(same) if *same == member => {}
+                Some(_) => return None,
+                None => members.push(member),
             }
-            let multiple = space.queries.get(member.query).is_some_and(|q| q.multiple);
-            if !multiple && answers(&members, member.query) {
-                return None;
-            }
-            members.push(member);
         }
     }
     Some(members)
@@ -418,11 +468,17 @@ impl Choices {
                     continue;
                 };
                 if q.multiple {
-                    members.extend((0..q.candidates).map(|candidate| Member { query, candidate }));
+                    members.push(Member {
+                        query,
+                        candidates: (0..q.candidates).collect(),
+                    });
                 } else if let (Some(candidate), Some(rest)) =
                     (n.checked_rem(q.candidates), n.checked_div(q.candidates))
                 {
-                    members.push(Member { query, candidate });
+                    members.push(Member {
+                        query,
+                        candidates: vec![candidate],
+                    });
                     n = rest;
                 }
             }

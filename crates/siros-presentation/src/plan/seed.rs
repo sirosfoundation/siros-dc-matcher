@@ -11,9 +11,9 @@ use zeroize::Zeroizing;
 /// The claim the seed commits to.
 const SSC: [&str; 2] = [MDOC_DOCTYPE, "ssc"];
 
-/// Why a credential gives no seed. A credential without one answers no nym_auth query.
+/// Why a credential gives no `secret_seed`. A credential without one answers no nym_auth query.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum NoSeed {
+pub enum NoSeed {
     /// No `hash_commitment` entry names `ssc`.
     Missing,
     /// Several do (Credential Auxiliary Data, Section 3).
@@ -22,6 +22,17 @@ pub(crate) enum NoSeed {
     /// rules of `hash_commitment`: an `alg` other than `sha-256`, an `encoding`, or an
     /// `opening` that is not 16 bytes of unpadded base64url.
     Malformed,
+}
+
+impl NoSeed {
+    /// A stable identifier.
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Missing => "seed_missing",
+            Self::Repeated => "seed_repeated",
+            Self::Malformed => "seed_malformed",
+        }
+    }
 }
 
 /// The 16-byte `secret_seed` delivered with `credential`. It is zeroed on drop.

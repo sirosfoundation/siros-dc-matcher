@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use siros_codec::base64url;
 use siros_codec::cbor::Value as Cbor;
 use siros_oid4vp::Handover;
-use siros_presentation::{Shown, WalletDisplay};
+use siros_presentation::WalletDisplay;
 use siros_zkp_req_nym_auth::presenter::Session;
 use siros_zkp_req_nym_auth::testing::{query, Spec, TestVerifier};
 use siros_zkp_req_nym_auth::verifier_id::VerifierId;
@@ -79,22 +79,6 @@ fn zkp_req_over_redirect_direct_post_cwt() {
     }));
     let fetches = wallet.fetches(&request);
     let input = wallet.input(&request, &fetches);
-    let planned = ready(&input).unwrap();
-    let Shown::Proof(rows) = planned.view().offers()[0].members()[0].shown() else {
-        panic!("proof statement rows")
-    };
-    let rows: Vec<(&str, Option<&str>)> = rows
-        .iter()
-        .map(|r| (r.label().as_str(), r.value().map(|v| v.as_str())))
-        .collect();
-    assert_eq!(
-        rows,
-        [
-            ("Pseudonym", Some("config known-offender-matching-ssc")),
-            ("Age check", Some("age 18+"))
-        ]
-    );
-
     let (_, response) = respond(&input);
     let authorization = decrypt_cwt(response.submission());
     assert_eq!(

@@ -4,7 +4,7 @@
 use rand_core::CryptoRngCore;
 use siros_credential::{Parsed, UsableCredential};
 use siros_dcql::mdoc_components;
-use siros_mdoc::{Disclosure, ElementId};
+use siros_mdoc::{es256_verifies, Disclosure, ElementId, P256Key};
 use siros_oid4vp::{Presentation, VerifiedRequest};
 use siros_sdjwt::KeyBinding;
 use siros_transaction_data::{Jti, KbJwtInputs};
@@ -14,7 +14,6 @@ use siros_zkp_req_nym_auth::presenter::Prepared as NymPrepared;
 use super::selection::Chosen;
 use crate::error::PresentationError;
 use crate::matching::{Answer, Claims, ProofChoice};
-use crate::offers::Member;
 use crate::plan::nym_answer;
 
 /// The identifier of a [`Sign`] effect, which its signature names.
@@ -34,12 +33,13 @@ impl SignId {
 }
 
 /// An ES256 signature the host makes (H3): of exactly [`Sign::input`], with the key pair
-/// [`Sign::key`], returned as `r ‖ s`.
+/// [`Sign::key`], returned as `r ‖ s`. It verifies under the credential's holder key.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Sign {
     id: SignId,
     key: KeyId,
     input: Vec<u8>,
+    holder: P256Key,
 }
 
 impl Sign {
@@ -56,6 +56,19 @@ impl Sign {
     /// The bytes it signs.
     pub fn input(&self) -> &[u8] {
         &self.input
+    }
+
+    /// The signature `signature`, `r ‖ s`, when it verifies under the holder key: the SD-JWT
+    /// VC's `cnf.jwk`, or the mdoc's `deviceKey` (A5).
+    pub(crate) fn verified(&self, signature: Vec<u8>) -> Result<[u8; 64], PresentationError> {
+        let signature: [u8; 64] = signature
+            .try_into()
+            .map_err(|_| PresentationError::SignatureLength)?;
+        if es256_verifies(&self.holder, &self.input, &signature) {
+            Ok(signature)
+        } else {
+            Err(PresentationError::SignatureInvalid)
+        }
     }
 }
 
@@ -85,8 +98,8 @@ pub(crate) enum Form<'p> {
 }
 
 impl<'p, 'a> Chosen<'p, 'a> {
-    /// The presentations of the offer and its chosen additions, in that order, and the `Sign`
-    /// effect of each signature they need (A5).
+    /// The presentations of the offer and its chosen additions, in that order, one per chosen
+    /// credential, and the `Sign` effect of each signature they need (A5).
     ///
     /// - An SD-JWT VC discloses its selected claims (S3). When its query requires holder
     ///   binding, its KB-JWT has `iat` from the plan's time, `nonce`, `aud` (A6) and the claims
@@ -96,101 +109,104 @@ impl<'p, 'a> Chosen<'p, 'a> {
     /// - A nym_auth proof's device key signs the data nym_auth gives for the request's session
     ///   (N2), from a usable attestation and a seed opened again for this use (N3, N4).
     ///
-    /// `aud` is the Client Identifier with its prefix over redirects, and `origin:` with the
-    /// calling origin over the Digital Credentials API, signed requests included (A.4).
+    /// The entries bind to the offer's chosen credentials (T4). `aud` is the Client Identifier
+    /// with its prefix over redirects, and `origin:` with the calling origin over the Digital
+    /// Credentials API, signed requests included (A.4).
     ///
     /// # Errors
     ///
-    /// [`PresentationError`]: a member whose credential names no key pair, a key without the
-    /// factors a transaction requires, or a presentation its format refuses.
+    /// [`PresentationError`]: a member whose credential names no key pair or holder key, a key
+    /// without the factors a transaction requires, a nym_auth credential that no longer passes
+    /// its tests, or a presentation its format refuses.
     pub fn prepare(
         self,
         rng: &mut impl CryptoRngCore,
     ) -> Result<Prepared<'p, 'a>, PresentationError> {
         let mut members = Vec::new();
         let mut signs = Vec::new();
+        let planned = self.planned;
+        let bindings = planned
+            .transactions
+            .bind(&planned.answered, &self.members)?;
         // The offer's members by their position, to which entries bind, then the additions'.
-        let chosen: Vec<(Option<usize>, &Member)> = self
-            .offer
-            .members()
+        let chosen = self
+            .members
             .iter()
             .enumerate()
             .map(|(at, member)| (Some(at), member))
-            .chain(
-                self.additions
-                    .iter()
-                    .flat_map(|a| a.members().iter().map(|member| (None, member))),
-            )
-            .collect();
-        let bindings = self
-            .planned
-            .transactions
-            .bind(&self.planned.answered, self.offer.members())
-            .map_err(PresentationError::TransactionData)?;
+            .chain(self.added.iter().map(|member| (None, member)));
         for (at, member) in chosen {
-            let answers = self
-                .planned
+            let answers = planned
                 .answered
                 .queries()
                 .get(member.query())
                 .ok_or(PresentationError::AnswerMismatch)?;
-            let candidate = answers
-                .candidates()
-                .get(member.candidate())
-                .ok_or(PresentationError::AnswerMismatch)?;
-            let credential: &'p UsableCredential<'a> = candidate.credential();
-            let id = SignId(signs.len());
-            let key = || {
-                credential
-                    .credential()
-                    .key_id()
-                    .cloned()
-                    .ok_or(PresentationError::KeyMissing)
-            };
-            let form = match candidate.answer() {
-                Answer::Claims(claims) => {
-                    let extra = match bindings.iter().find(|(bound, _)| Some(*bound) == at) {
-                        None => Vec::new(),
-                        Some((_, binding)) => {
-                            let kid = key()?;
-                            let mut jti = [0u8; 16];
-                            rng.fill_bytes(&mut jti);
-                            let inputs = KbJwtInputs::new(
-                                Jti::new(jti),
-                                self.planned.input.request.response_mode(),
-                                self.amr(&kid)?,
-                            );
-                            binding.kb_jwt_claims(&inputs)
-                        }
-                    };
-                    self.claims(credential, claims, &extra, id)?
+            for &index in member.candidates() {
+                let candidate = answers
+                    .candidates()
+                    .get(index)
+                    .ok_or(PresentationError::AnswerMismatch)?;
+                let credential: &'p UsableCredential<'a> = candidate.credential();
+                let id = SignId(signs.len());
+                let key = || {
+                    credential
+                        .credential()
+                        .key_id()
+                        .cloned()
+                        .ok_or(PresentationError::KeyMissing)
+                };
+                let form = match candidate.answer() {
+                    Answer::Claims(claims) => {
+                        let bound = bindings
+                            .iter()
+                            .find(|(key, _)| at.is_some_and(|at| *key == (at, index)));
+                        let extra = match bound {
+                            None => Vec::new(),
+                            Some((_, binding)) => {
+                                let kid = key()?;
+                                let mut jti = [0u8; 16];
+                                rng.fill_bytes(&mut jti);
+                                let inputs = KbJwtInputs::new(
+                                    Jti::new(jti),
+                                    planned.input.request.response_mode(),
+                                    self.amr(&kid)?,
+                                );
+                                binding.kb_jwt_claims(&inputs)
+                            }
+                        };
+                        self.claims(credential, claims, &extra, id)?
+                    }
+                    Answer::Proof(choice) => {
+                        let zkp = answers.zkp().ok_or(PresentationError::AnswerMismatch)?;
+                        self.proof(credential, zkp, choice, id)?
+                    }
+                };
+                let input = match &form {
+                    Form::Ready(_) => None,
+                    Form::KeyBinding(kb, _) => Some(kb.signing_input().to_vec()),
+                    Form::Mdoc(disclosure, _) => Some(
+                        disclosure
+                            .signing_input(&planned.input.request.handover().session_transcript()),
+                    ),
+                    Form::Proof(prepared, _) => Some(prepared.data_to_sign().to_vec()),
+                };
+                if let Some(input) = input {
+                    signs.push(Sign {
+                        id,
+                        key: key()?,
+                        input,
+                        holder: credential
+                            .credential()
+                            .holder_key()
+                            .ok_or(PresentationError::KeyMissing)?,
+                    });
                 }
-                Answer::Proof(choice) => {
-                    let zkp = answers.zkp().ok_or(PresentationError::AnswerMismatch)?;
-                    self.proof(credential, zkp, choice, id)?
-                }
-            };
-            let input = match &form {
-                Form::Ready(_) => None,
-                Form::KeyBinding(kb, _) => Some(kb.signing_input().to_vec()),
-                Form::Mdoc(disclosure, _) => Some(
-                    disclosure
-                        .signing_input(&self.planned.input.request.handover().session_transcript()),
-                ),
-                Form::Proof(prepared, _) => Some(prepared.data_to_sign().to_vec()),
-            };
-            if let Some(input) = input {
-                signs.push(Sign {
-                    id,
-                    key: key()?,
-                    input,
+                members.push(Pending {
+                    query_id: &answers.query().id,
+                    credential: credential.credential().entry().credential_id(),
+                    form,
                 });
             }
-            members.push(Pending {
-                query_id: &answers.query().id,
-                credential: credential.credential().entry().credential_id(),
-                form,
-            });
         }
         Ok(Prepared {
             chosen: self,
@@ -268,8 +284,7 @@ impl<'p, 'a> Chosen<'p, 'a> {
             .nym_auth
             .as_ref()
             .ok_or(PresentationError::AnswerMismatch)?;
-        let answer = nym_answer(credential, zkp, choice, self.planned.input.now)
-            .ok_or(PresentationError::AnswerMismatch)?;
+        let answer = nym_answer(credential, zkp, choice, self.planned.input.now)?;
         let kid = credential
             .credential()
             .key_id()

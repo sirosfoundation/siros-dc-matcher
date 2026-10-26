@@ -25,6 +25,7 @@ wallet = [
     "dep:siros-transaction-data",
     "dep:zeroize",
     "siros-display/credential",
+    "siros-mdoc/crypto",
     "siros-oid4vp/crypto",
     "siros-zkp-req-nym-auth/request",
 ]

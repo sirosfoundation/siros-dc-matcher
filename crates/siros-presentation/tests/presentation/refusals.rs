@@ -94,7 +94,7 @@ fn selections_and_signatures_parse_against_the_plan() {
     ];
     let planned = ready(&input).unwrap();
     for (case, digest, offer, additions, refusal) in selections {
-        let chosen = Selection::new(digest, offer, additions)
+        let chosen = Selection::new(digest, offer, additions, Vec::new())
             .and_then(|selection| planned.choose(&selection, Fulfilment::WalletUi));
         assert_eq!(chosen.err(), refusal, "{case}");
     }
@@ -127,7 +127,7 @@ fn selections_and_signatures_parse_against_the_plan() {
     for (case, edit, refusal) in signatures {
         let chosen = planned
             .choose(
-                &Selection::new(&digest, 0, vec![0]).unwrap(),
+                &Selection::new(&digest, 0, vec![0], Vec::new()).unwrap(),
                 Fulfilment::WalletUi,
             )
             .unwrap();

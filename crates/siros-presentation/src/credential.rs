@@ -35,11 +35,10 @@ impl MatchCredential for UsableCredential<'_> {
         self.credential().credential_type()
     }
 
-    /// An SD-JWT VC with `cnf`, or an mdoc, whose entry names its key pair.
+    /// An SD-JWT VC with a P-256 `cnf.jwk`, or an mdoc, whose entry names its key pair.
     fn holds_key(&self) -> bool {
         let credential = self.credential();
-        credential.key_id().is_some()
-            && siros_dcql::Credential::has_cryptographic_holder_binding(credential)
+        credential.key_id().is_some() && credential.holder_key().is_some()
     }
 
     fn claim_values(&self, path: &[PathComponent]) -> Result<Vec<Value>, PathError> {

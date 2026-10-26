@@ -41,7 +41,8 @@ impl Prepared<'_, '_> {
 
     /// The response, with `signatures` the host made for [`Prepared::signs`].
     ///
-    /// Each signature answers one `Sign` effect, and every effect has one (A5). `prover` proves
+    /// Each signature answers one `Sign` effect and verifies under the key it names, and every
+    /// effect has one (A5). `prover` proves
     /// each nym_auth statement in-process, once the device signature verifies under the MSO's
     /// device key. One `vp_token` answers every member, keyed by query id (A8). `rng` gives the
     /// response encryption's ephemeral key and IV, then the record's `presentationId` and
@@ -51,8 +52,8 @@ impl Prepared<'_, '_> {
     ///
     /// # Errors
     ///
-    /// [`PresentationError`]: a signature missing, repeated, unknown or not 64 bytes, a proof
-    /// that failed, or a `vp_token` or submission that could not be built.
+    /// [`PresentationError`]: a signature missing, repeated, unknown, not 64 bytes or not
+    /// verifying, a proof that failed, or a `vp_token` or submission that could not be built.
     pub fn finish(
         self,
         signatures: Vec<(SignId, Vec<u8>)>,
@@ -110,23 +111,22 @@ impl Prepared<'_, '_> {
     }
 }
 
-/// The signature of each effect of `signs`, by its identifier (A5).
+/// The signature of each effect of `signs`, by its identifier, verified under the key the
+/// effect names (A5).
 fn parse(
     signs: &[Sign],
     signatures: Vec<(SignId, Vec<u8>)>,
 ) -> Result<Vec<[u8; 64]>, PresentationError> {
     let mut by_id: Vec<Option<[u8; 64]>> = vec![None; signs.len()];
     for (id, signature) in signatures {
-        let slot = by_id
+        let (slot, sign) = by_id
             .get_mut(id.value())
+            .zip(signs.get(id.value()))
             .ok_or(PresentationError::SignatureUnknown)?;
         if slot.is_some() {
             return Err(PresentationError::SignatureRepeated);
         }
-        let signature: [u8; 64] = signature
-            .try_into()
-            .map_err(|_| PresentationError::SignatureLength)?;
-        *slot = Some(signature);
+        *slot = Some(sign.verified(signature)?);
     }
     by_id
         .into_iter()

@@ -6,14 +6,14 @@
 //! | --- | --- |
 //! | A1: the format table, `meta`, holder binding, usable credentials, no undisclosable nym_auth attribute | [`Matching::new`] over [`MatchCredential`]s |
 //! | A2: `zkp_req` matching as one selection, then the usable attestation and the opened seed | [`ZkpQuery`], [`Matching::answer`]; the wallet's tests in [`plan`] |
-//! | A3: offers, optional additions, all-optional sets | [`Offers::of`] |
-//! | A4: the plan's digest; the selection parsed against the recomputed plan | [`ConsentView::digest`], [`Selection`], [`Planned::choose`] gives a [`Chosen`] |
-//! | A5: every signing input a `Sign` effect; the signatures parsed against them | [`Chosen::prepare`] gives [`Sign`]s, [`Prepared::finish`] |
+//! | A3: offers, optional additions (one option per set), optional sets joined for a transaction entry, all-optional sets, the subset of a `multiple` member | [`Offers::of`], [`Selection`] |
+//! | A4: the digest of what the user consents to; the selection parsed against the recomputed plan | [`ConsentView::digest`], [`Selection`], [`Planned::choose`] gives a [`Chosen`] |
+//! | A5: every signing input a `Sign` effect; the signatures parsed against them, each verifying under its key | [`Chosen::prepare`] gives [`Sign`]s, [`Prepared::finish`] |
 //! | A6: the SD-JWT `aud` | [`Chosen::prepare`] |
 //! | A7: the SessionTranscript of the request's `Handover` | [`Chosen::prepare`] |
 //! | A8: one `vp_token`; `access_denied` on a decline; the record names the instances used | [`Prepared::finish`], [`Planned::decline`] |
 //! | A9: the wallet's display, and its refusal in a background fulfilment | [`WalletDisplay::of`], [`Fulfilment`] |
-//! | N2: the nym_auth request of a verified request | [`siros_zkp_req_nym_auth::request::NymAuthRequest`], built by [`plan`] |
+//! | N2: the nym_auth request of a verified request, its `verifier_id` from the request's certificate | [`siros_zkp_req_nym_auth::request::NymAuthRequest`], built by [`plan`] from [`PlanInput::verifier_id`] |
 //!
 //! Without the default feature `wallet` the crate holds the matching ([`Matching`], [`Offers`],
 //! [`WalletDisplay`]): what the credential picker runs over its registration projection. It
@@ -57,8 +57,8 @@ mod respond;
 pub use error::PresentationError;
 #[cfg(feature = "wallet")]
 pub use plan::{
-    plan, refusal, AdditionView, ConsentView, Fetches, MemberView, OfferView, PlanInput, PlanStep,
-    Planned, Shown,
+    plan, refusal, AdditionView, ConsentView, CredentialView, Fetches, MemberView, NoSeed,
+    OfferView, PlanInput, PlanStep, Planned, Shown,
 };
 #[cfg(feature = "wallet")]
 pub use respond::{Chosen, Fulfilment, Prepared, Response, Selection, Sign, SignId};

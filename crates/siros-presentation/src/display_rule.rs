@@ -23,17 +23,22 @@ pub struct DisplayFacts {
     pub rows_whole: bool,
     /// The offer has optional additions to choose.
     pub additions: bool,
+    /// A member of the offer answers a `multiple` query with more than one candidate, a subset
+    /// of which the user chooses.
+    pub multiple: bool,
 }
 
 impl WalletDisplay {
     /// The display an offer of `facts` needs: none of the wallet's when every member is
     /// presentable without the UI, the request carries no `transaction_data`, every row is
-    /// shown whole, and nothing is left to choose.
+    /// shown whole, and nothing is left to choose: no addition, no subset of a `multiple`
+    /// query.
     pub fn of(facts: &DisplayFacts) -> Self {
         if facts.presentable_without_ui
             && !facts.transaction_data
             && facts.rows_whole
             && !facts.additions
+            && !facts.multiple
         {
             Self::NotNeeded
         } else {

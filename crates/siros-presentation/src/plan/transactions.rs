@@ -14,6 +14,9 @@ use crate::error::PresentationError;
 use crate::matching::Answered;
 use crate::offers::Member;
 
+/// The position of a member in its offer, and the index of one of its candidates.
+pub(crate) type Bound = (usize, usize);
+
 /// The answers of a request over the wallet's usable credentials.
 pub(crate) type Wallet<'a> = Answered<'a, UsableCredential<'a>>;
 
@@ -21,15 +24,20 @@ pub(crate) type Wallet<'a> = Answered<'a, UsableCredential<'a>>;
 /// credentials that answer a query they name.
 pub(crate) struct Transactions<'a> {
     entries: Vec<Entry>,
-    named: Vec<usize>,
     metadata: Vec<(CredentialId, ScaMetadata<'a>)>,
 }
 
 impl<'a> Transactions<'a> {
     /// The entries of `request` at the time `now`, and the type metadata of each SD-JWT VC
     /// that answers a query an entry names, from `fetches`. The step is a fetch while the host
-    /// has not given a document. A credential whose metadata does not fetch or read authorizes
+    /// has not given a document. A credential whose `vct` locates no type metadata authorizes
     /// no entry.
+    ///
+    /// # Errors
+    ///
+    /// [`PresentationError::TransactionData`] for an entry that breaks its rules, and for a
+    /// fetched type metadata document that does not read: its status, its `vct`, its integrity
+    /// or its shape.
     pub(crate) fn read(
         request: &VerifiedRequest,
         answered: &Wallet<'a>,
@@ -73,15 +81,11 @@ impl<'a> Transactions<'a> {
             let Some(response) = fetches.response(&fetch) else {
                 return Ok(Step::Fetch(fetch));
             };
-            if let Ok(read) = ScaMetadata::parse(credential, response) {
-                metadata.push((id, read));
-            }
+            let read = ScaMetadata::parse(credential, response)
+                .map_err(PresentationError::TransactionData)?;
+            metadata.push((id, read));
         }
-        Ok(Step::Done(Self {
-            entries,
-            named,
-            metadata,
-        }))
+        Ok(Step::Done(Self { entries, metadata }))
     }
 
     /// Whether an entry names only Credential Queries no credential answers: its credentials are
@@ -115,39 +119,60 @@ impl<'a> Transactions<'a> {
             .collect()
     }
 
-    /// Whether an entry names the Credential Query at `query` in its `credential_ids`.
-    pub(crate) fn names(&self, query: usize) -> bool {
-        self.named.contains(&query)
+    /// For each entry, the indexes of the Credential Queries its `credential_ids` name.
+    pub(crate) fn named(&self, answered: &Wallet<'a>) -> Vec<Vec<usize>> {
+        self.entries
+            .iter()
+            .map(|entry| {
+                answered
+                    .queries()
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, answers)| entry.credential_ids().contains(&answers.query().id))
+                    .map(|(index, _)| index)
+                    .collect()
+            })
+            .collect()
     }
 
     /// The entries bound to the credentials of the offer of `members`, each binding with the
-    /// index of its member. A request without entries binds none.
+    /// position of its member and the index of its candidate. A request without entries binds
+    /// none; a credential without type metadata authorizes none.
     ///
     /// # Errors
     ///
-    /// [`TransactionDataError`] when no credential of the offer authorizes an entry, or the
-    /// entries bound to one credential share no hash algorithm.
+    /// [`PresentationError::TransactionData`] when no credential of the offer authorizes an
+    /// entry, or the entries bound to one credential share no hash algorithm, and
+    /// [`PresentationError::AnswerMismatch`] for a member the matching lacks.
     pub(crate) fn bind<'t>(
         &'t self,
         answered: &Wallet<'a>,
         members: &[Member],
-    ) -> Result<Vec<(usize, MemberBinding<'t, 't>)>, TransactionDataError> {
+    ) -> Result<Vec<(Bound, MemberBinding<'t, 't>)>, PresentationError> {
         if self.entries.is_empty() {
             return Ok(Vec::new());
         }
-        let presented: Vec<(usize, Presented<'t>)> = members
-            .iter()
-            .enumerate()
-            .filter_map(|(at, member)| {
-                let answers = answered.queries().get(member.query())?;
-                let credential = answers.candidates().get(member.candidate())?.credential();
-                let id = credential.credential().entry().credential_id();
-                let (_, metadata) = self.metadata.iter().find(|(m, _)| *m == id)?;
-                Some((at, Presented::new(&answers.query().id, metadata)))
-            })
-            .collect();
+        let mut presented: Vec<(Bound, Presented<'t>)> = Vec::new();
+        for (at, member) in members.iter().enumerate() {
+            let answers = answered
+                .queries()
+                .get(member.query())
+                .ok_or(PresentationError::AnswerMismatch)?;
+            for &index in member.candidates() {
+                let candidate = answers
+                    .candidates()
+                    .get(index)
+                    .ok_or(PresentationError::AnswerMismatch)?;
+                let id = candidate.credential().credential().entry().credential_id();
+                if let Some((_, metadata)) = self.metadata.iter().find(|(m, _)| *m == id) {
+                    presented.push(((at, index), Presented::new(&answers.query().id, metadata)));
+                }
+            }
+        }
         let offer: Vec<Presented<'t>> = presented.iter().map(|(_, p)| *p).collect();
-        bind(&self.entries, &offer)?
+        let fail = PresentationError::TransactionData;
+        bind(&self.entries, &offer)
+            .map_err(fail)?
             .into_iter()
             .map(|binding| {
                 let bound = binding.presented();
@@ -158,7 +183,7 @@ impl<'a> Transactions<'a> {
                             && p.credential().entry() == bound.credential().entry();
                         same.then_some(*at)
                     })
-                    .ok_or(TransactionDataError::CredentialUnavailable)?;
+                    .ok_or(fail(TransactionDataError::CredentialUnavailable))?;
                 Ok((at, binding))
             })
             .collect()

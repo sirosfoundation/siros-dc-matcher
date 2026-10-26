@@ -369,7 +369,7 @@ pub fn respond(input: &PlanInput<'_>) -> (Vec<u8>, Response) {
     let planned = ready(input).unwrap();
     let chosen = planned
         .choose(
-            &Selection::new(&digest, 0, Vec::new()).unwrap(),
+            &Selection::new(&digest, 0, Vec::new(), Vec::new()).unwrap(),
             Fulfilment::WalletUi,
         )
         .unwrap();
@@ -414,26 +414,28 @@ pub fn view_texts(view: &siros_presentation::ConsentView<'_>) -> Vec<String> {
     }
     fn member(member: &MemberView, out: &mut Vec<String>) {
         out.push(member.query_id().to_owned());
-        let card = member.card();
-        out.push(card.title().as_str().to_owned());
-        out.extend(card.issuer().map(|i| i.as_str().to_owned()));
-        match member.shown() {
-            Shown::Claims(rows) => rows.iter().for_each(|r| row(r, out)),
-            Shown::Proof(rows) => {
-                for proof in rows {
-                    out.push(proof.label().as_str().to_owned());
-                    out.extend(proof.value().map(|v| v.as_str().to_owned()));
+        for credential in member.credentials() {
+            let card = credential.card();
+            out.push(card.title().as_str().to_owned());
+            out.extend(card.issuer().map(|i| i.as_str().to_owned()));
+            match credential.shown() {
+                Shown::Claims(rows) => rows.iter().for_each(|r| row(r, out)),
+                Shown::Proof(rows) => {
+                    for proof in rows {
+                        out.push(proof.label().as_str().to_owned());
+                        out.extend(proof.value().map(|v| v.as_str().to_owned()));
+                    }
                 }
             }
-        }
-        for transaction in member.transactions() {
-            out.push(transaction.affirmative_action_label().as_str().to_owned());
-            for row in transaction.rows() {
-                out.push(row.label().as_str().to_owned());
-                match row.value() {
-                    RowValue::Text(t) | RowValue::Number(t) => out.push(t.as_str().to_owned()),
-                    RowValue::Image(url) => out.push(url.clone()),
-                    _ => {}
+            for transaction in credential.transactions() {
+                out.push(transaction.affirmative_action_label().as_str().to_owned());
+                for row in transaction.rows() {
+                    out.push(row.label().as_str().to_owned());
+                    match row.value() {
+                        RowValue::Text(t) | RowValue::Number(t) => out.push(t.as_str().to_owned()),
+                        RowValue::Image(url) => out.push(url.clone()),
+                        _ => {}
+                    }
                 }
             }
         }

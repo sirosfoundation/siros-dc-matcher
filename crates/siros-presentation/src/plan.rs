@@ -16,7 +16,8 @@ use siros_oid4vp::{ErrorCode, Fetch, Submission, VerifiedRequest};
 use siros_transaction_data::{Amr, Step, TransactionDataError};
 use siros_wallet_state::{CredentialId, KeyId, PresentationRecord};
 use siros_zkp_req_nym_auth::attestation::UsableAttestation;
-use siros_zkp_req_nym_auth::presenter::Answer as NymAnswer;
+use siros_zkp_req_nym_auth::outcome::ZkpError;
+use siros_zkp_req_nym_auth::presenter::{Answer as NymAnswer, ProveError};
 use siros_zkp_req_nym_auth::request::NymAuthRequest;
 use siros_zkp_req_nym_auth::system::NymAuthSystem;
 use siros_zkp_req_nym_auth::verifier_id::VerifierIdForm;
@@ -29,7 +30,8 @@ use transactions::{Transactions, Wallet};
 use view::Sources;
 
 pub use fetches::Fetches;
-pub use view::{AdditionView, ConsentView, MemberView, OfferView, Shown};
+pub use seed::NoSeed;
+pub use view::{AdditionView, ConsentView, CredentialView, MemberView, OfferView, Shown};
 
 /// What a plan is made from. Phase 2 makes the plan again from the same input.
 #[derive(Clone, Copy)]
@@ -115,7 +117,8 @@ pub fn plan<'a>(input: &PlanInput<'a>) -> Result<PlanStep<'a>, PresentationError
         policy,
     )
     .answer(|credential, zkp| {
-        let (attestation, seed) = tested(credential, zkp, input.now)?;
+        // A credential that fails a test answers no option.
+        let (attestation, seed) = tested(credential, zkp, input.now).ok()?;
         zkp.choices().iter().position(|choice| {
             zkp.pair(choice)
                 .is_some_and(|pair| NymAnswer::new(pair, attestation.clone(), &seed).is_ok())
@@ -137,11 +140,11 @@ pub fn plan<'a>(input: &PlanInput<'a>) -> Result<PlanStep<'a>, PresentationError
                 false
             }
         },
-        |query| transactions.names(query),
+        &transactions.named(&answered),
     );
     if offers.offers().is_empty() {
         return Err(match refused {
-            Some(error) => PresentationError::TransactionData(error),
+            Some(error) => error,
             None if transactions.unavailable(&answered) => {
                 PresentationError::TransactionData(TransactionDataError::CredentialUnavailable)
             }
@@ -162,7 +165,11 @@ pub fn plan<'a>(input: &PlanInput<'a>) -> Result<PlanStep<'a>, PresentationError
         Step::Fetch(fetch) => return Ok(PlanStep::Fetch(fetch)),
         Step::Done(view) => view,
     };
-    let digest = digest::digest(request, &answered, &offers, view.offers())?;
+    let verifier_id = nym_auth
+        .as_ref()
+        .ok()
+        .map(|nym_auth| nym_auth.session().verifier_id.as_str());
+    let digest = digest::digest(request, verifier_id, &answered, &offers, view.offers())?;
     let view = view.with_digest(base64url::encode(&digest));
     Ok(PlanStep::Ready(Box::new(Planned {
         input: *input,
@@ -210,14 +217,20 @@ pub fn refusal(
 
 /// The answer of `choice` by `credential` at `now`, which opens the attestation's `ssc` for
 /// this use.
+///
+/// # Errors
+///
+/// [`PresentationError`]: the attestation's failed tests, the seed, the option's failed
+/// items, or a choice of another query.
 pub(crate) fn nym_answer<'z>(
     credential: &UsableCredential<'_>,
     zkp: &'z ZkpQuery,
     choice: &ProofChoice,
     now: DateTime,
-) -> Option<NymAnswer<'z>> {
+) -> Result<NymAnswer<'z>, PresentationError> {
     let (attestation, seed) = tested(credential, zkp, now)?;
-    NymAnswer::new(zkp.pair(choice)?, attestation, &seed).ok()
+    let pair = zkp.pair(choice).ok_or(PresentationError::AnswerMismatch)?;
+    NymAnswer::new(pair, attestation, &seed).map_err(|e| PresentationError::Prove(e.into()))
 }
 
 /// The usable attestation of `credential`'s mdoc for `zkp` at `now`, and the `secret_seed` its
@@ -226,9 +239,9 @@ fn tested(
     credential: &UsableCredential<'_>,
     zkp: &ZkpQuery,
     now: DateTime,
-) -> Option<(UsableAttestation, Zeroizing<[u8; 16]>)> {
+) -> Result<(UsableAttestation, Zeroizing<[u8; 16]>), PresentationError> {
     let Parsed::Mdoc(mdoc) = credential.credential().parsed() else {
-        return None;
+        return Err(PresentationError::AnswerMismatch);
     };
     // No input resolves `trusted_authorities` to anchors: a query that names authorities finds
     // every issuer untrusted.
@@ -238,9 +251,19 @@ fn tested(
         .trusted_authorities
         .as_ref()
         .map(|_| &[][..]);
-    let attestation = UsableAttestation::of(mdoc, anchors, now).ok()?;
-    let seed = seed::delivered(credential.credential()).ok()?;
-    Some((attestation, seed))
+    let attestation = UsableAttestation::of(mdoc, anchors, now).map_err(|unusable| {
+        let codes = unusable.codes();
+        if codes.is_empty() {
+            return PresentationError::AnswerMismatch;
+        }
+        let failed = codes
+            .iter()
+            .map(|&code| ZkpError::Credential(code))
+            .collect();
+        PresentationError::Prove(ProveError::Rejected(failed))
+    })?;
+    let seed = seed::delivered(credential.credential()).map_err(PresentationError::Seed)?;
+    Ok((attestation, seed))
 }
 
 /// The OpenID4VP 1.0, Section 8.5 code of a `zkp_req.md`, Section 5 code.

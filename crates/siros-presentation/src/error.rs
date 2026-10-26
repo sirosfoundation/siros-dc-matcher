@@ -11,6 +11,8 @@ use siros_sdjwt::KeyBindingError;
 use siros_transaction_data::TransactionDataError;
 use siros_zkp_req_nym_auth::presenter::ProveError;
 
+use crate::plan::NoSeed;
+
 /// Why the core gives no plan, no chosen offer or no response.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PresentationError {
@@ -33,6 +35,17 @@ pub enum PresentationError {
     /// The selection names an addition twice, or two additions that answer one Credential
     /// Query (A4).
     AdditionConflict,
+    /// The selection names a subset for no member of a `multiple` query of the chosen offer
+    /// (A3).
+    SubsetUnknown,
+    /// The selection names two subsets for one member (A3).
+    SubsetRepeated,
+    /// A subset is empty (A3).
+    SubsetEmpty,
+    /// A subset names a position out of the member's credentials, or one twice (A3).
+    SubsetOutOfRange,
+    /// A subset drops a credential a transaction entry is bound to (T4).
+    SubsetDropsEntry,
     /// A fulfilment without the wallet's UI chose an offer that needs it (A9).
     WalletDisplayNeeded,
     /// A member's credential names no key pair.
@@ -51,8 +64,12 @@ pub enum PresentationError {
     KeyBinding(KeyBindingError),
     /// The mdoc elements are no disclosure (M2, M3). The code is its own.
     Disclosure(DisclosureError),
-    /// The nym_auth proof failed. The code is its own.
+    /// The nym_auth proof failed, or its credential no longer passes its tests. The code is
+    /// its own.
     Prove(ProveError),
+    /// The issuer delivered no usable `secret_seed` with a nym_auth credential. The code is its
+    /// own.
+    Seed(NoSeed),
     /// No signature answers a `Sign` effect (A5).
     SignatureMissing,
     /// Two signatures answer one `Sign` effect (A5).
@@ -61,6 +78,8 @@ pub enum PresentationError {
     SignatureUnknown,
     /// A signature is not 64 bytes, `r ‖ s`.
     SignatureLength,
+    /// A signature does not verify under the key its `Sign` effect names (A5).
+    SignatureInvalid,
     /// The `vp_token` or its submission could not be built. The code is its own.
     Response(ResponseError),
 }
@@ -77,6 +96,11 @@ impl PresentationError {
             Self::OfferUnknown => "selection_offer_unknown",
             Self::AdditionUnknown => "selection_addition_unknown",
             Self::AdditionConflict => "selection_addition_conflict",
+            Self::SubsetUnknown => "selection_subset_unknown",
+            Self::SubsetRepeated => "selection_subset_repeated",
+            Self::SubsetEmpty => "selection_subset_empty",
+            Self::SubsetOutOfRange => "selection_subset_out_of_range",
+            Self::SubsetDropsEntry => "selection_subset_drops_entry",
             Self::WalletDisplayNeeded => "wallet_display_needed",
             Self::KeyMissing => "key_missing",
             Self::KeyFactorsMissing => "key_factors_missing",
@@ -87,10 +111,12 @@ impl PresentationError {
             Self::KeyBinding(e) => e.code(),
             Self::Disclosure(e) => e.code(),
             Self::Prove(e) => e.code(),
+            Self::Seed(e) => e.code(),
             Self::SignatureMissing => "signature_missing",
             Self::SignatureRepeated => "signature_repeated",
             Self::SignatureUnknown => "signature_unknown",
             Self::SignatureLength => "signature_length",
+            Self::SignatureInvalid => "signature_invalid",
             Self::Response(e) => e.code(),
         }
     }

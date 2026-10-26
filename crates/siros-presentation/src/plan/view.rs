@@ -37,9 +37,15 @@ pub struct AdditionView {
     members: Vec<MemberView>,
 }
 
-/// A credential of an offer as the user sees it.
+/// A member of an offer as the user sees it: its Credential Query and its credentials, one
+/// unless the query sets `multiple`.
 pub struct MemberView {
     query_id: String,
+    credentials: Vec<CredentialView>,
+}
+
+/// A credential of a member as the user sees it.
+pub struct CredentialView {
     card: Card,
     shown: Shown,
     entries: Vec<usize>,
@@ -116,11 +122,19 @@ impl AdditionView {
 }
 
 impl MemberView {
-    /// The Credential Query the credential answers.
+    /// The Credential Query the member answers.
     pub fn query_id(&self) -> &str {
         &self.query_id
     }
 
+    /// The credentials, in the order of the member's candidates: the selection chooses a
+    /// subset of them by their positions here.
+    pub fn credentials(&self) -> &[CredentialView] {
+        &self.credentials
+    }
+}
+
+impl CredentialView {
     /// The credential's card.
     pub fn card(&self) -> &Card {
         &self.card
@@ -189,24 +203,27 @@ fn offer_view(
 ) -> Result<Step<OfferView>, PresentationError> {
     let bindings = sources
         .transactions
-        .bind(sources.answered, offer.members())
-        .map_err(PresentationError::TransactionData)?;
+        .bind(sources.answered, offer.members())?;
     let mut members = Vec::with_capacity(offer.members().len());
     for (at, member) in offer.members().iter().enumerate() {
-        let mut entries = Vec::new();
-        let mut transactions = Vec::new();
-        for (_, binding) in bindings.iter().filter(|(bound, _)| *bound == at) {
+        let mut bound = Vec::with_capacity(member.candidates().len());
+        for &candidate in member.candidates() {
+            let mut entries = Vec::new();
+            let mut transactions = Vec::new();
             let fail = PresentationError::TransactionData;
-            match binding
-                .views(sources.fetched, sources.locales)
-                .map_err(fail)?
-            {
-                Step::Fetch(fetch) => return Ok(Step::Fetch(fetch)),
-                Step::Done(views) => transactions.extend(views),
+            for (_, binding) in bindings.iter().filter(|(key, _)| *key == (at, candidate)) {
+                match binding
+                    .views(sources.fetched, sources.locales)
+                    .map_err(fail)?
+                {
+                    Step::Fetch(fetch) => return Ok(Step::Fetch(fetch)),
+                    Step::Done(views) => transactions.extend(views),
+                }
+                entries.extend(sources.transactions.positions(binding).map_err(fail)?);
             }
-            entries.extend(sources.transactions.positions(binding).map_err(fail)?);
+            bound.push((entries, transactions));
         }
-        members.push(member_view(member, (entries, transactions), sources)?);
+        members.push(member_view(member, bound, sources)?);
     }
     let additions = offer
         .additions()
@@ -219,21 +236,25 @@ fn offer_view(
                 members: addition
                     .members()
                     .iter()
-                    .map(|member| member_view(member, (Vec::new(), Vec::new()), sources))
+                    .map(|member| member_view(member, Vec::new(), sources))
                     .collect::<Result<_, PresentationError>>()?,
             })
         })
         .collect::<Result<Vec<_>, PresentationError>>()?;
+    let mut presentable = true;
+    for member in offer.members() {
+        for id in credential_ids(sources.answered, member)? {
+            presentable &= sources.background.contains(&id);
+        }
+    }
     let facts = DisplayFacts {
-        presentable_without_ui: offer.members().iter().all(|member| {
-            credential_id(sources.answered, member)
-                .is_some_and(|id| sources.background.contains(&id))
-        }),
+        presentable_without_ui: presentable,
         transaction_data: sources.transaction_data,
         // Each disclosed claim and each proof statement has a row of `DisplayText`, which holds
         // its text whole.
         rows_whole: true,
         additions: !additions.is_empty(),
+        multiple: offer.members().iter().any(|m| m.candidates().len() > 1),
     };
     Ok(Step::Done(OfferView {
         purpose: purpose::line(offer.purposes()),
@@ -244,17 +265,33 @@ fn offer_view(
     }))
 }
 
-/// The `credentialId` of the instance `member` presents.
-fn credential_id(answered: &Wallet<'_>, member: &Member) -> Option<CredentialId> {
-    let answers = answered.queries().get(member.query())?;
-    let candidate = answers.candidates().get(member.candidate())?;
-    Some(candidate.credential().credential().entry().credential_id())
+/// The `credentialId` of each instance `member` presents.
+fn credential_ids(
+    answered: &Wallet<'_>,
+    member: &Member,
+) -> Result<Vec<CredentialId>, PresentationError> {
+    let answers = answered
+        .queries()
+        .get(member.query())
+        .ok_or(PresentationError::AnswerMismatch)?;
+    member
+        .candidates()
+        .iter()
+        .map(|&index| {
+            let candidate = answers
+                .candidates()
+                .get(index)
+                .ok_or(PresentationError::AnswerMismatch)?;
+            Ok(candidate.credential().credential().entry().credential_id())
+        })
+        .collect()
 }
 
-/// The view of `member`, with the positions and the views of the entries bound to it.
+/// The view of `member`, with the positions and the views of the entries bound to each of its
+/// credentials; none bound when `bound` is empty.
 fn member_view(
     member: &Member,
-    (entries, transactions): (Vec<usize>, Vec<TransactionView>),
+    mut bound: Vec<(Vec<usize>, Vec<TransactionView>)>,
     sources: &Sources<'_, '_>,
 ) -> Result<MemberView, PresentationError> {
     let answers = sources
@@ -262,35 +299,42 @@ fn member_view(
         .queries()
         .get(member.query())
         .ok_or(PresentationError::AnswerMismatch)?;
-    let candidate = answers
-        .candidates()
-        .get(member.candidate())
-        .ok_or(PresentationError::AnswerMismatch)?;
-    let credential = candidate.credential().credential();
-    let display = |e| PresentationError::Display(e);
-    let shown = match candidate.answer() {
-        Answer::Claims(claims) => Shown::Claims(
-            sources
+    bound.resize_with(member.candidates().len(), Default::default);
+    let mut credentials = Vec::with_capacity(member.candidates().len());
+    for (&index, (entries, transactions)) in member.candidates().iter().zip(bound) {
+        let candidate = answers
+            .candidates()
+            .get(index)
+            .ok_or(PresentationError::AnswerMismatch)?;
+        let credential = candidate.credential().credential();
+        let display = PresentationError::Display;
+        let shown = match candidate.answer() {
+            Answer::Claims(claims) => Shown::Claims(
+                sources
+                    .display
+                    .claim_rows(credential, claims.pointers(), sources.locales)
+                    .map_err(display)?,
+            ),
+            Answer::Proof(choice) => {
+                let zkp = answers.zkp().ok_or(PresentationError::AnswerMismatch)?;
+                let option = zkp
+                    .option(choice)
+                    .ok_or(PresentationError::AnswerMismatch)?;
+                Shown::Proof(verified_rows(zkp.query().query(), option).map_err(display)?)
+            }
+        };
+        credentials.push(CredentialView {
+            card: sources
                 .display
-                .claim_rows(credential, claims.pointers(), sources.locales)
+                .card(credential, sources.locales)
                 .map_err(display)?,
-        ),
-        Answer::Proof(choice) => {
-            let zkp = answers.zkp().ok_or(PresentationError::AnswerMismatch)?;
-            let option = zkp
-                .option(choice)
-                .ok_or(PresentationError::AnswerMismatch)?;
-            Shown::Proof(verified_rows(zkp.query().query(), option).map_err(display)?)
-        }
-    };
+            shown,
+            entries,
+            transactions,
+        });
+    }
     Ok(MemberView {
         query_id: answers.query().id.clone(),
-        card: sources
-            .display
-            .card(credential, sources.locales)
-            .map_err(display)?,
-        shown,
-        entries,
-        transactions,
+        credentials,
     })
 }
