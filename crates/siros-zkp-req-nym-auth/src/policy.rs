@@ -5,7 +5,7 @@ use std::fmt;
 
 use serde_json::Value;
 
-use siros_oid4vp::{ec_jwk_thumbprint, Handover};
+use siros_oid4vp::{ec_jwk_thumbprint, Handover, JwkThumbprint};
 
 use crate::verifier_id::VerifierIdRule;
 
@@ -204,17 +204,17 @@ impl CheckedRequest {
     /// [`KeyNotInRequest`] when no key of `client_metadata.jwks` has that thumbprint: the
     /// session binds only values of the validated Request Object.
     pub fn handover(&self, jwk_thumbprint: &[u8; 32]) -> Result<Handover, KeyNotInRequest> {
-        let known = self
-            .encryption_keys
-            .iter()
-            .any(|k| ec_jwk_thumbprint(k).as_ref() == Some(jwk_thumbprint));
+        let known = self.encryption_keys.iter().any(|k| {
+            ec_jwk_thumbprint(k).as_ref().map(JwkThumbprint::as_bytes) == Some(jwk_thumbprint)
+        });
         if !known {
             return Err(KeyNotInRequest);
         }
+        let thumbprint = JwkThumbprint::new(*jwk_thumbprint);
         Ok(match &self.endpoint {
-            Endpoint::Origin(origin) => Handover::dc_api(origin, &self.nonce, Some(jwk_thumbprint)),
+            Endpoint::Origin(origin) => Handover::dc_api(origin, &self.nonce, Some(&thumbprint)),
             Endpoint::ResponseUri(uri) => {
-                Handover::redirect(&self.client_id, &self.nonce, Some(jwk_thumbprint), uri)
+                Handover::redirect(&self.client_id, &self.nonce, Some(&thumbprint), uri)
             }
         })
     }

@@ -11,7 +11,7 @@ use siros_codec::date::DateTime;
 use siros_credential::Credential;
 use siros_dcql::QueryId;
 use siros_display::{DisplayCache, Locale};
-use siros_oid4vp::{FetchResponse, VerifiedRequest};
+use siros_oid4vp::{FetchResponse, HttpStatus, VerifiedRequest};
 use siros_presentation::{
     plan, AdditionIndex, Fetches, Fulfilment, OfferIndex, PlanInput, PlanStep, Planned,
     PresentationError, Response, Selection, SignId, Subset,
@@ -353,7 +353,7 @@ impl Wallet {
                 .iter()
                 .find(|(url, _)| url == fetch.url().as_str())
                 .map(|(_, r)| r.clone())
-                .unwrap_or_else(|| FetchResponse::new(404, None, Vec::new()));
+                .unwrap_or_else(|| FetchResponse::new(HttpStatus::new(404), None, Vec::new()));
             fetches.answer(&fetch, response).unwrap();
         }
     }

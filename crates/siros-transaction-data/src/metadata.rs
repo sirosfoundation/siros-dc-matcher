@@ -6,7 +6,7 @@ use std::collections::hash_map::Entry;
 use rustc_hash::FxHashMap;
 use siros_credential::{ClaimPointer, Credential, Format, TypedValue};
 use siros_dcql::{PathComponent, PathError};
-use siros_oid4vp::{Fetch, FetchResponse, HttpsUrl};
+use siros_oid4vp::{BodyLimit, Fetch, FetchResponse, HttpStatus, HttpsUrl, MediaType};
 
 use crate::error::TransactionDataError;
 use crate::integrity::Integrity;
@@ -14,11 +14,8 @@ use crate::json::{Fields, Json};
 use crate::kind;
 use crate::labels::{ClaimMetadata, DisplayMetadata, UiLabels};
 
-/// The largest metadata document read, in bytes.
-const MAX_DOCUMENT: usize = 256 * 1024;
-
-/// The media type a metadata fetch accepts.
-const JSON: &str = "application/json";
+/// The largest metadata document read.
+const MAX_DOCUMENT: BodyLimit = BodyLimit::bytes(256 * 1024);
 
 /// The SCA Attestation metadata of a credential: the `category` and `transaction_data_types`
 /// of its SD-JWT VC Type Metadata (SD-JWT VC, Section 6; EC TS12 v1.0.1, Sections 2.3 and 4.1).
@@ -104,7 +101,7 @@ impl<'c> ScaMetadata<'c> {
         }
         let url = HttpsUrl::parse(credential.credential_type())
             .ok_or(TransactionDataError::VctNotHttps)?;
-        Ok(Fetch::get(url, JSON, MAX_DOCUMENT))
+        Ok(Fetch::get(url, MediaType::JSON, MAX_DOCUMENT))
     }
 
     /// The SCA Attestation metadata of `credential` in `response`, the response to
@@ -271,7 +268,7 @@ fn resolve<T: Clone>(
         Source::Referenced(reference) => match fetched.0.get(&reference.url) {
             None => Ok(Step::Fetch(Fetch::get(
                 reference.url.clone(),
-                JSON,
+                MediaType::JSON,
                 MAX_DOCUMENT,
             ))),
             Some(response) => Ok(Step::Done(parse(read(
@@ -287,11 +284,11 @@ fn read(
     response: &FetchResponse,
     integrity: Option<&Integrity>,
 ) -> Result<Json, TransactionDataError> {
-    if response.status() != 200 {
+    if response.status() != HttpStatus::OK {
         return Err(TransactionDataError::FetchStatus);
     }
     let body = response.body();
-    if body.len() > MAX_DOCUMENT {
+    if !MAX_DOCUMENT.admits(body) {
         return Err(TransactionDataError::FetchTooLarge);
     }
     if let Some(integrity) = integrity {

@@ -6,7 +6,8 @@ use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use siros_codec::base64url;
 
-use super::{aead, ResponseError};
+use super::aead::{self, ContentKey};
+use super::{EncryptionFault, ResponseError};
 use crate::verified::{ContentEncryption, Encryption};
 
 /// The Concat KDF of RFC 7518, Section 4.6.2, for the Direct Key Agreement mode: the content
@@ -21,9 +22,11 @@ pub fn concat_kdf(
     enc: ContentEncryption,
     party_u: &[u8],
     party_v: &[u8],
-) -> Result<Vec<u8>, ResponseError> {
-    let len = |part: &[u8]| u32::try_from(part.len()).map_err(|_| ResponseError::EncryptionFailed);
-    let key_len = enc.key_len();
+) -> Result<ContentKey, ResponseError> {
+    let len = |part: &[u8]| {
+        u32::try_from(part.len())
+            .map_err(|_| ResponseError::EncryptionFailed(EncryptionFault::KdfInput))
+    };
     let mut round = Sha256::new();
     // One round: SHA-256 yields 256 bits, and no `enc` here needs more.
     round.update(1u32.to_be_bytes());
@@ -34,11 +37,7 @@ pub fn concat_kdf(
     }
     // SuppPubInfo: the key length in bits.
     round.update(enc.key_bits().to_be_bytes());
-    round
-        .finalize()
-        .get(..key_len)
-        .map(<[u8]>::to_vec)
-        .ok_or(ResponseError::EncryptionFailed)
+    ContentKey::of(enc, &round.finalize())
 }
 
 /// `payload` encrypted to the chosen key, with an ephemeral key and an IV from `rng`.
@@ -55,11 +54,11 @@ pub(super) fn encrypt(
     epk.insert("crv".into(), "P-256".into());
     epk.insert(
         "x".into(),
-        base64url::encode(&agreement.x).into_string().into(),
+        String::from(base64url::encode(&agreement.x)).into(),
     );
     epk.insert(
         "y".into(),
-        base64url::encode(&agreement.y).into_string().into(),
+        String::from(base64url::encode(&agreement.y)).into(),
     );
     let mut header = Map::new();
     header.insert("alg".into(), "ECDH-ES".into());
@@ -71,7 +70,7 @@ pub(super) fn encrypt(
     let protected = base64url::encode(Value::Object(header).to_string().as_bytes());
     let iv = aead::iv(rng);
     // RFC 7516, Section 5.1, step 14: the AAD is the encoded protected header.
-    let (ciphertext, tag) = aead::seal(
+    let sealed = aead::seal(
         encryption.enc,
         &cek,
         iv,
@@ -82,7 +81,7 @@ pub(super) fn encrypt(
     Ok(format!(
         "{protected}..{}.{}.{}",
         base64url::encode(&iv),
-        base64url::encode(&ciphertext),
-        base64url::encode(&tag)
+        base64url::encode(&sealed.ciphertext),
+        base64url::encode(&sealed.tag)
     ))
 }

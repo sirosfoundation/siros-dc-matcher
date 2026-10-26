@@ -98,16 +98,16 @@ fn request_part(request: &VerifiedRequest, verifier_id: Option<&VerifierId>) -> 
     let transaction_data = request
         .transaction_data()
         .iter()
-        .map(|entry| Value::text(entry))
+        .map(|entry| Value::text(entry.as_str()))
         .collect();
     Value::Array(vec![
         Value::text(request.response_mode().as_str()),
         optional(verifier.client_id().map(|c| c.as_str())),
-        Value::Bool(verifier.trusted()),
-        optional(request.origin()),
+        Value::Bool(verifier.verdict().into()),
+        optional(request.origin().map(|origin| origin.as_str())),
         optional(request.response_uri().map(|u| u.as_str())),
-        Value::text(request.nonce()),
-        optional(request.state()),
+        Value::text(request.nonce().as_str()),
+        optional(request.state().map(|state| state.as_str())),
         Value::text(&request.dcql_query_json().to_string()),
         Value::Array(transaction_data),
         optional(verifier_id.map(VerifierId::as_str)),

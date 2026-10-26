@@ -17,9 +17,11 @@ use p256::ecdsa::{DerSignature, Signature, SigningKey, VerifyingKey};
 use rand_core::{CryptoRng, RngCore};
 use serde_json::{json, Map, Value};
 use siros_codec::base64url;
+pub use siros_codec::date::DateTime;
+pub use siros_oid4vp::HttpStatus;
 use siros_oid4vp::{
-    Effect, EffectResult, FetchResponse, IntakeError, IntakeState, KeyMaterial, Step, TrustAnswer,
-    VerifiedRequest,
+    Effect, EffectResult, FetchResponse, IntakeError, IntakeState, KeyMaterial, Kid, Step,
+    TrustAnswer, VerifiedRequest,
 };
 use x509_cert::builder::{Builder, CertificateBuilder, Profile};
 use x509_cert::der::asn1::{Ia5String, UtcTime};
@@ -34,6 +36,16 @@ use x509_cert::time::{Time, Validity};
 
 /// 2026-10-26T00:00:00Z.
 pub const NOW: u64 = 1_792_972_800;
+
+/// The Credential Query id `text`.
+pub fn query_id(text: &str) -> siros_dcql::QueryId {
+    siros_dcql::QueryId::parse(text).unwrap()
+}
+
+/// [`NOW`] as a time.
+pub fn now() -> DateTime {
+    DateTime::from_unix(NOW as i64).unwrap()
+}
 
 /// A deterministic generator (SplitMix64) standing in for the host's CSPRNG.
 pub struct Rng(pub u64);
@@ -264,19 +276,19 @@ impl Host {
                     .iter()
                     .find(|(url, _)| url == fetch.url().as_str())
                     .map(|(_, response)| response.clone())
-                    .unwrap_or_else(|| FetchResponse::new(404, None, Vec::new())),
+                    .unwrap_or_else(|| FetchResponse::new(HttpStatus::new(404), None, Vec::new())),
             ),
             Effect::Trust(trust) => match trust.key() {
                 KeyMaterial::Resolve { kid, trust_chain } => {
                     let key = self
                         .keys
                         .iter()
-                        .find(|(k, _)| Some(k) == kid.as_ref())
+                        .find(|(k, _)| Some(k.as_str()) == kid.as_ref().map(Kid::as_str))
                         .map(|(_, jwk)| jwk.clone());
                     let metadata = trust_chain.as_ref().and(self.metadata.clone());
-                    EffectResult::Trusted(TrustAnswer::new(self.trusted, key, metadata))
+                    EffectResult::Trusted(TrustAnswer::new(self.trusted.into(), key, metadata))
                 }
-                _ => EffectResult::Trusted(TrustAnswer::new(self.trusted, None, None)),
+                _ => EffectResult::Trusted(TrustAnswer::new(self.trusted.into(), None, None)),
             },
         }
     }
@@ -285,7 +297,7 @@ impl Host {
 /// A Request Object response from a Request URI.
 pub fn request_object(jws: &str) -> FetchResponse {
     FetchResponse::new(
-        200,
+        HttpStatus::OK,
         Some("application/oauth-authz-req+jwt".into()),
         jws.as_bytes().to_vec(),
     )

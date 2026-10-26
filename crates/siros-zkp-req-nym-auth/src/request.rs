@@ -1,7 +1,7 @@
 //! A verified request that meets the nym_auth policy (N2; nym_auth catalogue, "Binding",
 //! "Response confidentiality" and "Verifier identity").
 
-use siros_oid4vp::{ClientIdPrefix, Protocol, ResponseMode, VerifiedRequest};
+use siros_oid4vp::{ClientIdPrefix, Protocol, ResponseMode, Verdict, VerifiedRequest};
 
 use crate::policy::{PolicyRule, RequestRefusal};
 use crate::presenter::Session;
@@ -50,7 +50,7 @@ impl<'r> NymAuthRequest<'r> {
         if request.dc_api_protocol() == Some(Protocol::Multisigned) {
             return Err(policy(PolicyRule::Multisigned));
         }
-        if !verifier.trusted() {
+        if verifier.verdict() == Verdict::Untrusted {
             return Err(policy(PolicyRule::Untrusted));
         }
         let encrypted = matches!(

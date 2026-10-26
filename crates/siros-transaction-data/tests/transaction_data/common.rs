@@ -7,7 +7,7 @@ use siros_codec::cbor::Value as Cbor;
 use siros_codec::date::DateTime;
 use siros_credential::Credential;
 use siros_dcql::DcqlQuery;
-use siros_oid4vp::FetchResponse;
+use siros_oid4vp::{FetchResponse, HttpStatus};
 use siros_wallet_state::WalletState;
 
 pub const PAYMENT: &str = "urn:eudi:sca:payment:1";
@@ -266,7 +266,7 @@ pub fn inline_payment_type() -> Value {
 /// A `200` response holding the JSON text of `document`.
 pub fn response(document: &Value) -> FetchResponse {
     FetchResponse::new(
-        200,
+        HttpStatus::OK,
         Some("application/json".to_owned()),
         document.to_string().into_bytes(),
     )

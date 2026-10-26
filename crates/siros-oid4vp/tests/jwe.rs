@@ -17,7 +17,9 @@ use p256::{PublicKey, SecretKey};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use siros_codec::base64url;
-use siros_oid4vp::{ErrorCode, IntakeState, Method, Presentation, Submission, VerifiedRequest};
+use siros_oid4vp::{
+    ErrorCode, IntakeState, Method, Origin, Presentation, Submission, VerifiedRequest,
+};
 use support::*;
 
 /// The verifier's encryption key.
@@ -112,8 +114,8 @@ fn dc_api_request(kid: Option<&str>, enc: Option<Value>) -> VerifiedRequest {
     });
     let state = IntakeState::dc_api(
         &dc_api("openid4vp-v1-unsigned", data),
-        "https://verifier.example",
-        NOW,
+        Origin::new("https://verifier.example"),
+        now(),
     );
     let host = Host::trusting();
     run(state, |e| host.answer(e)).unwrap().0
@@ -132,7 +134,7 @@ fn direct_post_request() -> VerifiedRequest {
         ("dcql_query", &query),
         ("client_metadata", &metadata),
     ]);
-    let state = IntakeState::redirect(&uri, formats(), NOW, &mut Rng(31));
+    let state = IntakeState::redirect(&uri, formats(), now(), &mut Rng(31));
     let host = Host::trusting();
     run(state, |e| host.answer(e)).unwrap().0
 }
@@ -145,7 +147,7 @@ fn jwe_of(submission: Submission) -> String {
             let Method::Post { content_type, body } = post.method() else {
                 panic!("a POST")
             };
-            assert_eq!(*content_type, "application/x-www-form-urlencoded");
+            assert_eq!(content_type.as_str(), "application/x-www-form-urlencoded");
             let fields = form(std::str::from_utf8(body).unwrap());
             assert_eq!(fields.len(), 1);
             assert_eq!(fields[0].0, "response");
@@ -158,7 +160,7 @@ fn jwe_of(submission: Submission) -> String {
 fn a_produced_response_decrypts_to_its_payload() {
     let presentations = || {
         vec![(
-            "pid".to_owned(),
+            query_id("pid"),
             vec![Presentation::text("eyJ...~WyJ...~".into())],
         )]
     };
@@ -193,7 +195,7 @@ fn a_produced_response_decrypts_to_its_payload() {
             let token = request.vp_token(presentations()).unwrap();
             let mut expected = json!({"vp_token": vp_token});
             if let Some(state) = request.state() {
-                expected["state"] = state.into();
+                expected["state"] = state.as_str().into();
             }
             (token.submission(&mut rng).unwrap(), expected)
         };

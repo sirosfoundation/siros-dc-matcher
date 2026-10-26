@@ -18,13 +18,14 @@ mod trust;
 use rand_core::CryptoRngCore;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use siros_codec::base64url;
+use siros_codec::date::DateTime;
 
-pub use error::{IntakeError, VerifierInfoRule};
-pub use trust::{KeyMaterial, Trust, TrustAnswer, TrustSubject};
+pub use error::{AttestationFault, ChainFault, IntakeError, JwsError, JwsFault, VerifierInfoRule};
+pub use trust::{KeyMaterial, Trust, TrustAnswer, TrustSubject, Verdict};
 
 use crate::fetch::{Fetch, FetchResponse};
 use crate::response::Submission;
+use crate::values::{Origin, WalletNonce};
 use crate::verified::VerifiedRequest;
 
 /// An effect intake asks the host to perform.
@@ -58,7 +59,8 @@ pub enum Step {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IntakeState {
     start: Start,
-    now_unix: u64,
+    #[serde(rename = "now_unix", with = "unix_seconds")]
+    now: DateTime,
     answers: Vec<EffectResult>,
 }
 
@@ -68,10 +70,27 @@ enum Start {
     Redirect {
         uri: String,
         vp_formats_supported: Map<String, Value>,
-        wallet_nonce: String,
+        wallet_nonce: WalletNonce,
     },
     /// A DC API request and the origin the platform attests.
-    DcApi { request: Vec<u8>, origin: String },
+    DcApi { request: Vec<u8>, origin: Origin },
+}
+
+/// The time on the wire: seconds since 1970-01-01T00:00:00Z.
+mod unix_seconds {
+    use serde::de::Error;
+    use serde::{Deserialize, Deserializer, Serializer};
+    use siros_codec::date::DateTime;
+
+    pub(super) fn serialize<S: Serializer>(time: &DateTime, out: S) -> Result<S::Ok, S::Error> {
+        out.serialize_i64(time.unix())
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(input: D) -> Result<DateTime, D::Error> {
+        let unix = i64::deserialize(input)?;
+        DateTime::from_unix(unix)
+            .ok_or_else(|| D::Error::custom("a time outside the years 0000 to 9999"))
+    }
 }
 
 impl IntakeState {
@@ -79,12 +98,11 @@ impl IntakeState {
     ///
     /// `vp_formats_supported` is the wallet's, for the `wallet_metadata` of a
     /// `request_uri_method=post` fetch (Section 5.10); `rng` draws its `wallet_nonce`.
-    /// `now_unix` is the host's time in seconds since the Unix epoch, against which a Verifier
-    /// Attestation JWT's validity is judged.
+    /// `now` is the host's time, against which a Verifier Attestation JWT's validity is judged.
     pub fn redirect(
         uri: &str,
         vp_formats_supported: Map<String, Value>,
-        now_unix: u64,
+        now: DateTime,
         rng: &mut impl CryptoRngCore,
     ) -> Self {
         let mut nonce = [0u8; 16];
@@ -93,9 +111,9 @@ impl IntakeState {
             start: Start::Redirect {
                 uri: uri.to_owned(),
                 vp_formats_supported,
-                wallet_nonce: base64url::encode(&nonce).into_string(),
+                wallet_nonce: WalletNonce::new(nonce),
             },
-            now_unix,
+            now,
             answers: Vec::new(),
         }
     }
@@ -106,13 +124,13 @@ impl IntakeState {
     /// The entry is the one the credential picker reads: the first whose protocol is one of
     /// A.1 and whose data has that protocol's shape (`crate::UnverifiedRequest`).
     #[must_use]
-    pub fn dc_api(request: &[u8], origin: &str, now_unix: u64) -> Self {
+    pub fn dc_api(request: &[u8], origin: Origin, now: DateTime) -> Self {
         Self {
             start: Start::DcApi {
                 request: request.to_vec(),
-                origin: origin.to_owned(),
+                origin,
             },
-            now_unix,
+            now,
             answers: Vec::new(),
         }
     }
@@ -142,10 +160,10 @@ impl IntakeState {
                     vp_formats_supported,
                     nonce: wallet_nonce,
                 };
-                redirect::intake(uri, &wallet, self.now_unix, &mut answers)
+                redirect::intake(uri, &wallet, self.now, &mut answers)
             }
             Start::DcApi { request, origin } => {
-                dc_api::intake(request, origin, self.now_unix, &mut answers)
+                dc_api::intake(request, origin, self.now, &mut answers)
             }
         };
         match outcome {

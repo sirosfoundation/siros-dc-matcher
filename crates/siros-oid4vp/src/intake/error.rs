@@ -2,6 +2,8 @@
 
 use std::fmt;
 
+use siros_codec::Base64Error;
+
 use crate::client_id::ClientIdError;
 use crate::error_code::ErrorCode;
 
@@ -28,8 +30,8 @@ pub enum IntakeError {
     FetchContentType,
     /// The Request URI answered with more bytes than the fetch allowed.
     FetchTooLarge,
-    /// A JWS is not three base64url segments with a JSON object header and a 64-byte signature.
-    JwsMalformed,
+    /// A JWS breaks its serialization.
+    JwsMalformed(JwsFault),
     /// The JWS `alg` is not `ES256`.
     AlgorithmUnsupported,
     /// The JWS header has `crit` (RFC 7515, Section 4.1.11).
@@ -52,8 +54,8 @@ pub enum IntakeError {
     SignedRedirectUri,
     /// An unsigned request uses a prefix other than `redirect_uri` (Section 5.9.3).
     UnsignedNeedsRedirectUri,
-    /// `x5c` is missing, not base64 DER, or its leaf has no P-256 key.
-    CertificateChainInvalid,
+    /// `x5c` breaks its rules.
+    CertificateChainInvalid(ChainFault),
     /// No dNSName SAN of the leaf certificate is the `x509_san_dns` value.
     SanMismatch,
     /// The SHA-256 of the leaf certificate is not the `x509_hash` value.
@@ -63,7 +65,7 @@ pub enum IntakeError {
     /// The host's trust answer carries no P-256 JWK for a key it was asked to resolve.
     KeyNotResolved,
     /// The `jwt` Header Parameter is not a Verifier Attestation JWT (Section 12).
-    AttestationInvalid,
+    AttestationInvalid(AttestationFault),
     /// The attestation's `sub` is not the `verifier_attestation` value.
     AttestationSubjectMismatch,
     /// The attestation's `exp` has passed, or its `nbf` has not come.
@@ -131,6 +133,69 @@ pub enum IntakeError {
     UnusedAnswer,
 }
 
+/// The rule a JWS breaks (RFC 7515, Sections 7.1 and 7.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum JwsFault {
+    /// A Compact Serialization is not three segments.
+    Segments,
+    /// A segment is not unpadded base64url.
+    Encoding(Base64Error),
+    /// The protected header is not a JSON object.
+    Header,
+    /// The signature is not the 64 bytes of an ES256 `r ‖ s`.
+    Signature,
+    /// A JSON Serialization lacks a string `payload` or an array `signatures`, or a signature
+    /// lacks a string `protected` or `signature`.
+    Serialization,
+    /// The `trust_chain` Header Parameter is not an array of strings.
+    TrustChain,
+    /// The fetched Request Object is not UTF-8 text.
+    NotUtf8,
+}
+
+/// Why a JWS is refused: its serialization, its algorithm, or a critical extension.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum JwsError {
+    /// The serialization breaks a rule.
+    Malformed(JwsFault),
+    /// `alg` is not `ES256`.
+    AlgorithmUnsupported,
+    /// The header has `crit` (RFC 7515, Section 4.1.11).
+    CriticalHeader,
+}
+
+/// The rule an `x5c` Header Parameter breaks (RFC 7515, Section 4.1.6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ChainFault {
+    /// `x5c` is absent, not an array, or empty.
+    Absent,
+    /// A certificate is not a string.
+    NotString,
+    /// A certificate is not base64 with padding.
+    Encoding(Base64Error),
+    /// The leaf is not a DER X.509 certificate.
+    LeafNotCertificate,
+    /// The leaf's key is not a P-256 key.
+    LeafKey,
+    /// The leaf's SubjectAltName extension does not decode.
+    SubjectAltName,
+}
+
+/// The rule the `jwt` Header Parameter of a `verifier_attestation` request breaks (Section 12).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AttestationFault {
+    /// The request has no string `jwt` Header Parameter.
+    Absent,
+    /// `jwt` is not a JWS this wallet reads.
+    Jws(JwsError),
+    /// The attestation's `typ` is not `verifier-attestation+jwt`.
+    Typ,
+    /// The attestation's claims lack a string `iss` or `sub`, a numeric `exp`, or a P-256
+    /// `cnf.jwk`, or have a non-numeric `nbf` or a `redirect_uris` other than an array of
+    /// strings.
+    Claims,
+}
+
 /// A rule of `verifier_info` (Section 5.1) that a request breaks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum VerifierInfoRule {
@@ -180,7 +245,7 @@ impl IntakeError {
             Self::FetchStatus => "fetch_status",
             Self::FetchContentType => "fetch_content_type",
             Self::FetchTooLarge => "fetch_too_large",
-            Self::JwsMalformed => "jws_malformed",
+            Self::JwsMalformed(_) => "jws_malformed",
             Self::AlgorithmUnsupported => "algorithm_unsupported",
             Self::CriticalHeader => "critical_header",
             Self::TypMismatch => "typ_mismatch",
@@ -192,12 +257,12 @@ impl IntakeError {
             Self::ClientId(e) => e.code(),
             Self::SignedRedirectUri => "signed_redirect_uri",
             Self::UnsignedNeedsRedirectUri => "unsigned_needs_redirect_uri",
-            Self::CertificateChainInvalid => "certificate_chain_invalid",
+            Self::CertificateChainInvalid(_) => "certificate_chain_invalid",
             Self::SanMismatch => "san_mismatch",
             Self::CertificateHashMismatch => "certificate_hash_mismatch",
             Self::KidNotOfClient => "kid_not_of_client",
             Self::KeyNotResolved => "key_not_resolved",
-            Self::AttestationInvalid => "attestation_invalid",
+            Self::AttestationInvalid(_) => "attestation_invalid",
             Self::AttestationSubjectMismatch => "attestation_subject_mismatch",
             Self::AttestationExpired => "attestation_expired",
             Self::AttestationSignatureInvalid => "attestation_signature_invalid",
@@ -245,7 +310,7 @@ impl IntakeError {
             | Self::FetchStatus
             | Self::FetchContentType
             | Self::FetchTooLarge
-            | Self::JwsMalformed
+            | Self::JwsMalformed(_)
             | Self::AlgorithmUnsupported
             | Self::CriticalHeader
             | Self::TypMismatch
@@ -257,12 +322,12 @@ impl IntakeError {
             | Self::ClientId(_)
             | Self::SignedRedirectUri
             | Self::UnsignedNeedsRedirectUri
-            | Self::CertificateChainInvalid
+            | Self::CertificateChainInvalid(_)
             | Self::SanMismatch
             | Self::CertificateHashMismatch
             | Self::KidNotOfClient
             | Self::KeyNotResolved
-            | Self::AttestationInvalid
+            | Self::AttestationInvalid(_)
             | Self::AttestationSubjectMismatch
             | Self::AttestationExpired
             | Self::AttestationSignatureInvalid
@@ -299,6 +364,16 @@ impl IntakeError {
 impl From<ClientIdError> for IntakeError {
     fn from(error: ClientIdError) -> Self {
         Self::ClientId(error)
+    }
+}
+
+impl From<JwsError> for IntakeError {
+    fn from(error: JwsError) -> Self {
+        match error {
+            JwsError::Malformed(fault) => Self::JwsMalformed(fault),
+            JwsError::AlgorithmUnsupported => Self::AlgorithmUnsupported,
+            JwsError::CriticalHeader => Self::CriticalHeader,
+        }
     }
 }
 

@@ -21,32 +21,24 @@ pub(crate) fn parse(text: &str) -> Option<FxHashMap<String, String>> {
 /// `pairs` as a form-encoded string, every byte outside the unreserved set of RFC 3986,
 /// Section 2.3 percent-encoded.
 pub(crate) fn encode(pairs: &[(&str, &str)]) -> String {
-    let mut out = String::new();
-    for (index, (name, value)) in pairs.iter().enumerate() {
-        if index > 0 {
-            out.push('&');
-        }
-        escape(name, &mut out);
-        out.push('=');
-        escape(value, &mut out);
-    }
-    out
+    pairs
+        .iter()
+        .map(|(name, value)| format!("{}={}", escape(name), escape(value)))
+        .collect::<Vec<_>>()
+        .join("&")
 }
 
-fn escape(text: &str, out: &mut String) {
-    const HEX: &[u8; 16] = b"0123456789ABCDEF";
-    for &byte in text.as_bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
-            out.push(char::from(byte));
-        } else {
-            out.push('%');
-            for nibble in [byte >> 4, byte & 0x0f] {
-                out.push(char::from(
-                    HEX.get(usize::from(nibble)).copied().unwrap_or(b'0'),
-                ));
+/// `text` with every byte outside the unreserved set percent-encoded.
+fn escape(text: &str) -> String {
+    text.bytes()
+        .map(|byte| {
+            if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+                char::from(byte).to_string()
+            } else {
+                format!("%{byte:02X}")
             }
-        }
-    }
+        })
+        .collect()
 }
 
 fn decode(text: &str) -> Option<String> {

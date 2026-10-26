@@ -437,7 +437,7 @@ pub fn zkp_req_session(
 pub fn zkp_req_jwk_thumbprint(jwk_json: String) -> Result<Vec<u8>, ZkpReqError> {
     let jwk = json(&jwk_json, "jwk_not_json")?;
     ec_jwk_thumbprint(&jwk)
-        .map(|t| t.to_vec())
+        .map(|t| t.as_bytes().to_vec())
         .ok_or_else(|| host("jwk_not_ec"))
 }
 

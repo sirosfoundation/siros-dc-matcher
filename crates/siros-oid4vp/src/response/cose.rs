@@ -7,7 +7,8 @@ use rand_core::CryptoRngCore;
 use sha2::Sha256;
 use siros_codec::cbor::Value as Cbor;
 
-use super::{aead, ResponseError};
+use super::aead::{self, ContentKey};
+use super::{EncryptionFault, ResponseError};
 use crate::verified::{ContentEncryption, Encryption};
 
 /// The CBOR tag of `COSE_Encrypt` (RFC 9052, Section 2).
@@ -41,7 +42,7 @@ fn recipient_protected() -> Vec<u8> {
 /// # Errors
 ///
 /// [`ResponseError::EncryptionFailed`] when HKDF refuses the length.
-pub fn cose_kdf(shared_secret: &[u8], enc: ContentEncryption) -> Result<Vec<u8>, ResponseError> {
+pub fn cose_kdf(shared_secret: &[u8], enc: ContentEncryption) -> Result<ContentKey, ResponseError> {
     let party = || Cbor::Array(vec![Cbor::Null, Cbor::Null, Cbor::Null]);
     let context = Cbor::Array(vec![
         Cbor::Unsigned(enc.cose_alg()),
@@ -55,8 +56,8 @@ pub fn cose_kdf(shared_secret: &[u8], enc: ContentEncryption) -> Result<Vec<u8>,
     let mut key = vec![0u8; enc.key_len()];
     Hkdf::<Sha256>::new(None, shared_secret)
         .expand(&context.encode(), &mut key)
-        .map_err(|_| ResponseError::EncryptionFailed)?;
-    Ok(key)
+        .map_err(|_| ResponseError::EncryptionFailed(EncryptionFault::KdfLength))?;
+    ContentKey::of(enc, &key)
 }
 
 /// `plaintext` in a `COSE_Encrypt` to the chosen key, with an ephemeral key and an IV from
@@ -81,17 +82,20 @@ pub(super) fn encrypt(
     ])
     .encode();
     let iv = aead::iv(rng);
-    let (ciphertext, tag) = aead::seal(encryption.enc, &cek, iv, &aad, plaintext)?;
+    let sealed = aead::seal(encryption.enc, &cek, iv, &aad, plaintext)?;
     // RFC 9053, Section 7.1.1: an EC2 key (1: 2) on P-256 (-1: 1) with x (-2) and y (-3).
     let ephemeral = Cbor::Map(vec![
         (Cbor::Unsigned(1), Cbor::Unsigned(2)),
         (Cbor::Negative(0), Cbor::Unsigned(1)),
-        (Cbor::Negative(1), Cbor::Bytes(agreement.x)),
-        (Cbor::Negative(2), Cbor::Bytes(agreement.y)),
+        (Cbor::Negative(1), Cbor::Bytes(agreement.x.to_vec())),
+        (Cbor::Negative(2), Cbor::Bytes(agreement.y.to_vec())),
     ]);
     let mut unprotected = vec![(Cbor::Negative(EPHEMERAL_KEY), ephemeral)];
     if let Some(kid) = &encryption.kid {
-        unprotected.push((Cbor::Unsigned(KID), Cbor::Bytes(kid.as_bytes().to_vec())));
+        unprotected.push((
+            Cbor::Unsigned(KID),
+            Cbor::Bytes(kid.as_str().as_bytes().to_vec()),
+        ));
     }
     // Direct key agreement: the recipient's ciphertext is empty.
     let recipient = Cbor::Array(vec![
@@ -102,7 +106,7 @@ pub(super) fn encrypt(
     let message = Cbor::Array(vec![
         Cbor::Bytes(protected),
         Cbor::Map(vec![(Cbor::Unsigned(IV), Cbor::Bytes(iv.to_vec()))]),
-        Cbor::Bytes([ciphertext, tag].concat()),
+        Cbor::Bytes([sealed.ciphertext, sealed.tag].concat()),
         Cbor::Array(vec![recipient]),
     ]);
     Ok(Cbor::Tag(COSE_ENCRYPT, Box::new(message)).encode())

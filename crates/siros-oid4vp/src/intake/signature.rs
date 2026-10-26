@@ -4,11 +4,13 @@
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use siros_codec::base64url;
+use siros_codec::date::DateTime;
 
-use super::trust::{self, KeyMaterial, TrustSubject};
-use super::{attestation, Answers, Halt, IntakeError};
+use super::trust::{self, KeyMaterial, MetadataAnswer, TrustSubject, Verdict};
+use super::{attestation, Answers, Halt, IntakeError, JwsFault};
 use crate::client_id::{ClientId, ClientIdPrefix};
 use crate::jose::Signed;
+use crate::values::{Kid, TrustChain};
 use crate::verified::AccessCertificate;
 use crate::x509::Chain;
 
@@ -18,7 +20,7 @@ const REQUEST_OBJECT_TYP: &str = "oauth-authz-req+jwt";
 /// Who sent a request, as intake established it.
 pub(super) struct Verifier {
     pub(super) client_id: ClientId,
-    pub(super) trusted: bool,
+    pub(super) trusted: Verdict,
     /// The access certificate of an `x509_san_dns` or `x509_hash` client.
     pub(super) certificate: Option<AccessCertificate>,
     pub(super) metadata: Metadata,
@@ -37,10 +39,12 @@ pub(super) enum Metadata {
 pub(super) enum UriRule {
     /// Any.
     Any,
-    /// Exactly this value; the value when the request omits it (`redirect_uri` prefix).
-    Equals(String),
-    /// A URL whose host is this DNS name (untrusted `x509_san_dns` client).
-    Host(String),
+    /// Exactly the value of the Client Identifier, which a request may omit (`redirect_uri`
+    /// prefix).
+    IsClientIdValue,
+    /// A URL whose host is the DNS name the Client Identifier's value is (untrusted
+    /// `x509_san_dns` client).
+    HostIsClientIdValue,
     /// One of these (`redirect_uris` of a Verifier Attestation JWT).
     OneOf(Vec<String>),
 }
@@ -50,7 +54,7 @@ pub(super) enum UriRule {
 pub(super) fn authenticate(
     signed: &Signed,
     client_id: ClientId,
-    now_unix: u64,
+    now: DateTime,
     answers: &mut Answers<'_>,
 ) -> Result<Verifier, Halt> {
     if signed.text("typ") != Some(REQUEST_OBJECT_TYP) {
@@ -64,19 +68,12 @@ pub(super) fn authenticate(
                 return Err(IntakeError::SanMismatch.into());
             }
             signed.verify(chain.key())?;
-            let dns = client_id.value().to_owned();
-            let certificate = chain.access_certificate();
-            let trusted = trust::verdict(
-                answers,
-                TrustSubject::Client(client_id.clone()),
-                KeyMaterial::X509Chain(chain.into_der()),
-            )?;
+            let (trusted, certificate) = certified(chain, &client_id, answers)?;
             // Section 5.9.3: without trust in the Client Identifier, the FQDN of the Response
             // URI is the DNS name.
-            let response_uri = if trusted {
-                UriRule::Any
-            } else {
-                UriRule::Host(dns)
+            let response_uri = match trusted {
+                Verdict::Trusted => UriRule::Any,
+                Verdict::Untrusted => UriRule::HostIsClientIdValue,
             };
             Ok(Verifier {
                 certificate: Some(certificate),
@@ -85,17 +82,12 @@ pub(super) fn authenticate(
         }
         ClientIdPrefix::X509Hash => {
             let chain = Chain::parse(signed.header().get("x5c"))?;
-            let hash = base64url::encode(&Sha256::digest(chain.leaf()));
-            if hash.as_str() != client_id.value() {
+            let hash = base64url::encode(&Sha256::digest(chain.leaf().as_bytes()));
+            if hash != client_id.value() {
                 return Err(IntakeError::CertificateHashMismatch.into());
             }
             signed.verify(chain.key())?;
-            let certificate = chain.access_certificate();
-            let trusted = trust::verdict(
-                answers,
-                TrustSubject::Client(client_id.clone()),
-                KeyMaterial::X509Chain(chain.into_der()),
-            )?;
+            let (trusted, certificate) = certified(chain, &client_id, answers)?;
             Ok(Verifier {
                 certificate: Some(certificate),
                 ..by_request(client_id, trusted, UriRule::Any)
@@ -109,32 +101,34 @@ pub(super) fn authenticate(
                     kid.strip_prefix(client_id.value())
                         .is_some_and(|fragment| fragment.len() > 1 && fragment.starts_with('#'))
                 })
-                .ok_or(IntakeError::KidNotOfClient)?
-                .to_owned();
+                .map(Kid::new)
+                .ok_or(IntakeError::KidNotOfClient)?;
             let resolved = trust::resolve(
                 answers,
                 TrustSubject::Client(client_id.clone()),
                 Some(kid),
                 None,
-                false,
+                MetadataAnswer::Refused,
             )?;
             signed.verify(&resolved.key)?;
             Ok(by_request(client_id, resolved.trusted, UriRule::Any))
         }
         ClientIdPrefix::VerifierAttestation => {
-            attestation::authenticate(signed, client_id, now_unix, answers)
+            attestation::authenticate(signed, client_id, now, answers)
         }
         ClientIdPrefix::OpenidFederation => {
             let trust_chain = match signed.header().get("trust_chain") {
                 None => None,
-                Some(chain) => Some(strings(chain).ok_or(IntakeError::JwsMalformed)?),
+                Some(chain) => Some(TrustChain::new(
+                    strings(chain).ok_or(IntakeError::JwsMalformed(JwsFault::TrustChain))?,
+                )),
             };
             let resolved = trust::resolve(
                 answers,
                 TrustSubject::Client(client_id.clone()),
-                signed.text("kid").map(str::to_owned),
+                signed.kid(),
                 trust_chain,
-                true,
+                MetadataAnswer::Taken,
             )?;
             signed.verify(&resolved.key)?;
             Ok(Verifier {
@@ -148,8 +142,24 @@ pub(super) fn authenticate(
     }
 }
 
+/// The host's verdict on `client_id` with the `x5c` chain that signed its request, and the
+/// chain's leaf as its access certificate.
+fn certified(
+    chain: Chain,
+    client_id: &ClientId,
+    answers: &mut Answers<'_>,
+) -> Result<(Verdict, AccessCertificate), Halt> {
+    let certificate = chain.access_certificate();
+    let trusted = trust::verdict(
+        answers,
+        TrustSubject::Client(client_id.clone()),
+        KeyMaterial::X509Chain(chain.into_x509()),
+    )?;
+    Ok((trusted, certificate))
+}
+
 /// A Verifier whose metadata is the request's `client_metadata`.
-pub(super) fn by_request(client_id: ClientId, trusted: bool, response_uri: UriRule) -> Verifier {
+pub(super) fn by_request(client_id: ClientId, trusted: Verdict, response_uri: UriRule) -> Verifier {
     Verifier {
         client_id,
         trusted,

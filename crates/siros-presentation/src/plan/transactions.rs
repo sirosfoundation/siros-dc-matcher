@@ -74,7 +74,7 @@ impl<'a> Transactions<'a> {
         let entries: Vec<Entry> = request
             .transaction_data()
             .iter()
-            .map(|raw| Entry::parse(raw, request.dcql_query(), now))
+            .map(|raw| Entry::parse(raw.as_str(), request.dcql_query(), now))
             .try_collect()?;
         let mut metadata = Vec::new();
         for credential in authorizing(answered, &entries) {

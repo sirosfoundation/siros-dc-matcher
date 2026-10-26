@@ -1,12 +1,15 @@
 //! The `vp_token` (OpenID4VP 1.0, Section 8.1) and the Authorization Response that carries it,
 //! in JSON and in CBOR (`zkp_req.md`, Section 6.1).
 
+use rustc_hash::FxHashSet;
 use serde_json::{Map, Value};
 use siros_codec::base64url;
 use siros_codec::cbor::{self, Value as Cbor};
+use siros_dcql::QueryId;
 
 use super::ResponseError;
 use crate::error_code::ErrorCode;
+use crate::values::State;
 use crate::verified::VerifiedRequest;
 
 /// One presentation of a `vp_token`.
@@ -64,7 +67,7 @@ impl Presentation {
 #[derive(Debug, Clone)]
 pub struct VpToken<'r> {
     pub(super) request: &'r VerifiedRequest,
-    entries: Vec<(String, Vec<Presentation>)>,
+    entries: Vec<(QueryId, Vec<Presentation>)>,
 }
 
 impl VerifiedRequest {
@@ -76,27 +79,36 @@ impl VerifiedRequest {
     /// [`ResponseError`]: the first rule of Section 8.1 an entry breaks.
     pub fn vp_token(
         &self,
-        entries: Vec<(String, Vec<Presentation>)>,
+        entries: Vec<(QueryId, Vec<Presentation>)>,
     ) -> Result<VpToken<'_>, ResponseError> {
-        for (index, (id, presentations)) in entries.iter().enumerate() {
-            let query = self
-                .dcql_query
-                .credential(id)
-                .ok_or(ResponseError::UnknownQueryId)?;
-            match presentations.len() {
-                0 => return Err(ResponseError::NoPresentation),
-                1 => {}
-                _ if !query.multiple => return Err(ResponseError::MultipleNotAllowed),
-                _ => {}
+        let mut seen = FxHashSet::default();
+        entries.iter().try_for_each(|(id, presentations)| {
+            self.answers(id, presentations)?;
+            if seen.insert(id) {
+                Ok(())
+            } else {
+                Err(ResponseError::DuplicateQueryId)
             }
-            if entries.iter().take(index).any(|(earlier, _)| earlier == id) {
-                return Err(ResponseError::DuplicateQueryId);
-            }
-        }
+        })?;
         Ok(VpToken {
             request: self,
             entries,
         })
+    }
+
+    /// Refuses `presentations` as the answer to the Credential Query `id` unless the query is
+    /// the request's and they are one presentation, or several for a `multiple` query.
+    fn answers(&self, id: &QueryId, presentations: &[Presentation]) -> Result<(), ResponseError> {
+        let query = self
+            .dcql_query
+            .credential(id)
+            .ok_or(ResponseError::UnknownQueryId)?;
+        match presentations.len() {
+            0 => Err(ResponseError::NoPresentation),
+            1 => Ok(()),
+            _ if !query.multiple => Err(ResponseError::MultipleNotAllowed),
+            _ => Ok(()),
+        }
     }
 }
 
@@ -110,7 +122,7 @@ impl VpToken<'_> {
                 .iter()
                 .map(|(id, presentations)| {
                     let list = presentations.iter().map(Presentation::json).collect();
-                    (id.clone(), Value::Array(list))
+                    (id.to_string(), Value::Array(list))
                 })
                 .collect(),
         )
@@ -125,7 +137,7 @@ pub(super) enum Answer<'a> {
 
 impl Answer<'_> {
     /// The response parameters in JSON, with `state` when given.
-    pub(super) fn json(&self, state: Option<&str>) -> Map<String, Value> {
+    pub(super) fn json(&self, state: Option<&State>) -> Map<String, Value> {
         let mut parameters = Map::new();
         match self {
             Self::VpToken(token) => {
@@ -136,13 +148,13 @@ impl Answer<'_> {
             }
         }
         if let Some(state) = state {
-            parameters.insert("state".into(), state.into());
+            parameters.insert("state".into(), state.as_str().into());
         }
         parameters
     }
 
     /// The Authorization Response in CBOR (`zkp_req.md`, Section 6.1), with `state` when given.
-    pub(super) fn cbor(&self, state: Option<&str>) -> Cbor {
+    pub(super) fn cbor(&self, state: Option<&State>) -> Cbor {
         let mut members = vec![match self {
             Self::VpToken(token) => {
                 let token = token
@@ -158,7 +170,7 @@ impl Answer<'_> {
             Self::Error(code) => (Cbor::text("error"), Cbor::text(code.as_str())),
         }];
         if let Some(state) = state {
-            members.push((Cbor::text("state"), Cbor::text(state)));
+            members.push((Cbor::text("state"), Cbor::text(state.as_str())));
         }
         Cbor::Map(members)
     }

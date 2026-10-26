@@ -6,9 +6,11 @@ use siros_dcql::DcqlQuery;
 
 use crate::client_id::ClientId;
 use crate::fetch::HttpsUrl;
-use crate::handover::Handover;
+use crate::handover::{Handover, JwkThumbprint};
+use crate::intake::Verdict;
 use crate::protocol::Protocol;
 use crate::semantic::{SemanticIdError, SemanticIdentifier};
+use crate::values::{Kid, Nonce, Origin, State, TransactionDataItem};
 
 /// An OpenID4VP request that intake verified. Only intake constructs it.
 ///
@@ -32,15 +34,15 @@ use crate::semantic::{SemanticIdError, SemanticIdentifier};
 #[derive(Debug, Clone)]
 pub struct VerifiedRequest {
     pub(crate) channel: Channel,
-    pub(crate) trusted: bool,
+    pub(crate) trusted: Verdict,
     pub(crate) access_certificate: Option<AccessCertificate>,
     pub(crate) verifier_info: Vec<AttestationFormat>,
-    pub(crate) nonce: String,
-    pub(crate) state: Option<String>,
+    pub(crate) nonce: Nonce,
+    pub(crate) state: Option<State>,
     pub(crate) dcql_query: DcqlQuery,
     pub(crate) dcql_query_json: Value,
     pub(crate) client_metadata: Option<Value>,
-    pub(crate) transaction_data: Vec<String>,
+    pub(crate) transaction_data: Vec<TransactionDataItem>,
 }
 
 /// Where the response goes, and who sent the request.
@@ -57,7 +59,7 @@ pub(crate) enum Channel {
     DcApi {
         protocol: Protocol,
         client_id: Option<ClientId>,
-        origin: String,
+        origin: Origin,
         encryption: Option<Encryption>,
     },
 }
@@ -163,16 +165,16 @@ impl ContentEncryption {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Encryption {
     pub(crate) key: PublicKey,
-    pub(crate) kid: Option<String>,
+    pub(crate) kid: Option<Kid>,
     pub(crate) enc: ContentEncryption,
-    pub(crate) thumbprint: [u8; 32],
+    pub(crate) thumbprint: JwkThumbprint,
 }
 
 impl Encryption {
     /// The `kid` of the chosen JWK, which the JWE header repeats.
     #[must_use]
-    pub fn kid(&self) -> Option<&str> {
-        self.kid.as_deref()
+    pub fn kid(&self) -> Option<&Kid> {
+        self.kid.as_ref()
     }
 
     /// The content encryption.
@@ -237,7 +239,7 @@ impl AttestationFormat {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VerifierView<'a> {
     client_id: Option<&'a ClientId>,
-    trusted: bool,
+    verdict: Verdict,
     display: &'a str,
 }
 
@@ -251,8 +253,8 @@ impl<'a> VerifierView<'a> {
     /// The host's trust verdict on the Client Identifier, or on the origin of an unsigned DC
     /// API request.
     #[must_use]
-    pub fn trusted(&self) -> bool {
-        self.trusted
+    pub fn verdict(&self) -> Verdict {
+        self.verdict
     }
 
     /// The name the trust verdict is about: the original Client Identifier, or the origin of
@@ -281,7 +283,7 @@ impl VerifiedRequest {
         };
         VerifierView {
             client_id,
-            trusted: self.trusted,
+            verdict: self.trusted,
             display,
         }
     }
@@ -309,7 +311,7 @@ impl VerifiedRequest {
 
     /// The calling origin of a DC API request.
     #[must_use]
-    pub fn origin(&self) -> Option<&str> {
+    pub fn origin(&self) -> Option<&Origin> {
         match &self.channel {
             Channel::DcApi { origin, .. } => Some(origin),
             Channel::Redirect { .. } => None,
@@ -355,14 +357,14 @@ impl VerifiedRequest {
 
     /// `nonce`.
     #[must_use]
-    pub fn nonce(&self) -> &str {
+    pub fn nonce(&self) -> &Nonce {
         &self.nonce
     }
 
     /// `state`, which a redirect response returns.
     #[must_use]
-    pub fn state(&self) -> Option<&str> {
-        self.state.as_deref()
+    pub fn state(&self) -> Option<&State> {
+        self.state.as_ref()
     }
 
     /// `dcql_query`, as `siros-dcql` parsed it.
@@ -387,7 +389,7 @@ impl VerifiedRequest {
 
     /// The `transaction_data` strings as received; empty when the request has none.
     #[must_use]
-    pub fn transaction_data(&self) -> &[String] {
+    pub fn transaction_data(&self) -> &[TransactionDataItem] {
         &self.transaction_data
     }
 
@@ -404,11 +406,13 @@ impl VerifiedRequest {
                 ..
             } => Handover::redirect(
                 client_id.as_str(),
-                &self.nonce,
+                self.nonce.as_str(),
                 thumbprint,
                 response_uri.as_str(),
             ),
-            Channel::DcApi { origin, .. } => Handover::dc_api(origin, &self.nonce, thumbprint),
+            Channel::DcApi { origin, .. } => {
+                Handover::dc_api(origin.as_str(), self.nonce.as_str(), thumbprint)
+            }
         }
     }
 }
