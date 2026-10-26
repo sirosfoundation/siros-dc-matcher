@@ -44,7 +44,7 @@ pub use digest::{DigestError, PlanDigest};
 pub use fetches::Fetches;
 pub(crate) use proof::nym_answer;
 pub use proof::{OptionRefusal, Unproven};
-pub use seed::NoSeed;
+pub use seed::{JsonCause, NoSeed};
 pub use transactions::EntryPosition;
 pub(crate) use transactions::{offered, Bound, MemberPosition, Offered};
 pub use view::{AdditionView, ConsentView, CredentialView, MemberView, OfferView, Shown};
@@ -127,14 +127,13 @@ fn planned<'a>(input: &PlanInput<'a>) -> Result<Step<Planned<'a>>, PresentationE
         input.now
     )?);
     let offers = offers(&answered, &transactions)?;
-    let fetched = input.fetches.fetched();
     let sources = Sources {
         answered: &answered,
         transactions: &transactions,
         display: input.display,
         locales: input.locales,
         background: input.background,
-        fetched: &fetched,
+        fetched: input.fetches.fetched(),
         transaction_data: if request.transaction_data().is_empty() {
             TransactionData::Absent
         } else {

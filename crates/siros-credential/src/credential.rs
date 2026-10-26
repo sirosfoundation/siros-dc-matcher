@@ -6,7 +6,7 @@ use siros_wallet_state::{
     BatchId, CredentialEntry, CredentialId, InstanceId, KeyId, MetadataValue,
 };
 
-use crate::error::{CredentialError, HolderKeyError};
+use crate::error::CredentialError;
 use crate::sd_jwt_vc::SdJwtVc;
 use crate::usable::Validity;
 use crate::value;
@@ -183,15 +183,12 @@ impl Credential {
     }
 
     /// The public key a presentation of the credential proves possession of: the P-256 key of
-    /// an SD-JWT VC's `cnf.jwk`, or an mdoc's `deviceKey`.
-    ///
-    /// # Errors
-    ///
-    /// [`HolderKeyError`]: an SD-JWT VC without `cnf`, or whose `cnf` holds no P-256 `jwk`.
-    pub fn holder_key(&self) -> Result<P256Key, HolderKeyError> {
+    /// an SD-JWT VC's `cnf.jwk`, or an mdoc's `deviceKey`. `None` for an SD-JWT VC without
+    /// `cnf`, which is bound to no key.
+    pub fn holder_key(&self) -> Option<P256Key> {
         match &self.body {
             Body::SdJwtVc(vc) => vc.holder_key(),
-            Body::Mdoc(mdoc) => Ok(*mdoc.mso().device_key()),
+            Body::Mdoc(mdoc) => Some(*mdoc.mso().device_key()),
         }
     }
 

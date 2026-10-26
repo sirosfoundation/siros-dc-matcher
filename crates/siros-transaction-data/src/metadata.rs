@@ -70,6 +70,30 @@ impl Fetched {
     pub fn insert(&mut self, fetch: &Fetch, response: FetchResponse) -> Option<FetchResponse> {
         self.0.insert(fetch.url().clone(), response)
     }
+
+    /// Records `response`, the host's first response to `fetch`.
+    ///
+    /// # Errors
+    ///
+    /// `response`, back, when a response for the URL is recorded already.
+    pub fn insert_first(
+        &mut self,
+        fetch: &Fetch,
+        response: FetchResponse,
+    ) -> Result<(), FetchResponse> {
+        if self.0.contains_key(fetch.url()) {
+            return Err(response);
+        }
+        self.0
+            .insert(fetch.url().clone(), response)
+            .map_or(Ok(()), Err)
+    }
+
+    /// The response recorded for the URL of `fetch`.
+    #[must_use]
+    pub fn response(&self, fetch: &Fetch) -> Option<&FetchResponse> {
+        self.0.get(fetch.url())
+    }
 }
 
 impl<'c> ScaMetadata<'c> {

@@ -216,34 +216,37 @@ impl<'r, C: MatchCredential + Clone> Matching<'r, C> {
         let queries = self
             .queries
             .into_iter()
-            .map(|(asked, outcome)| match outcome {
-                Outcome::Claims(found) => Answers::claims(asked, found),
-                Outcome::Proof { zkp, credentials } => {
-                    let (candidates, excluded) =
-                        credentials.into_iter().partition_map(|credential| {
-                            match choose(&credential, &zkp) {
-                                Ok(choice) => Either::Left(Candidate {
-                                    credential,
-                                    answer: Answer::Proof(choice),
-                                }),
-                                Err(reason) => Either::Right(Excluded { credential, reason }),
-                            }
-                        });
-                    Answers {
-                        asked,
-                        candidates,
-                        zkp: Some(zkp),
-                        refusal: None,
-                        excluded,
+            .map(|(asked, outcome)| {
+                let outcome = match outcome {
+                    Outcome::Claims(found) => QueryOutcome::Claims(
+                        found
+                            .into_iter()
+                            .map(|(credential, claims)| Candidate {
+                                credential,
+                                answer: Answer::Claims(claims),
+                            })
+                            .collect(),
+                    ),
+                    Outcome::Proof { zkp, credentials } => {
+                        let (candidates, excluded) =
+                            credentials.into_iter().partition_map(|credential| {
+                                match choose(&credential, &zkp) {
+                                    Ok(choice) => Either::Left(Candidate {
+                                        credential,
+                                        answer: Answer::Proof(choice),
+                                    }),
+                                    Err(reason) => Either::Right(Excluded { credential, reason }),
+                                }
+                            });
+                        QueryOutcome::Proof {
+                            zkp,
+                            candidates,
+                            excluded,
+                        }
                     }
-                }
-                Outcome::Refused(refusal) => Answers {
-                    asked,
-                    candidates: Vec::new(),
-                    zkp: None,
-                    refusal: Some(refusal),
-                    excluded: Vec::new(),
-                },
+                    Outcome::Refused(refusal) => QueryOutcome::Refused(refusal),
+                };
+                Answers { asked, outcome }
             })
             .collect();
         Answered {
@@ -363,10 +366,22 @@ pub struct Answered<'r, C, R> {
 /// The candidates of one Credential Query.
 pub struct Answers<'r, C, R> {
     asked: AskedQuery<'r>,
-    candidates: Vec<Candidate<C>>,
-    zkp: Option<Box<ZkpQuery>>,
-    refusal: Option<QueryRefusal>,
-    excluded: Vec<Excluded<C, R>>,
+    outcome: QueryOutcome<C, R>,
+}
+
+/// What the matching gives a Credential Query.
+enum QueryOutcome<C, R> {
+    /// The credentials that disclose the claims it asks.
+    Claims(Vec<Candidate<C>>),
+    /// The nym_auth query of a `zkp_req` query, the credentials that answer an option, and
+    /// those that answer none.
+    Proof {
+        zkp: Box<ZkpQuery>,
+        candidates: Vec<Candidate<C>>,
+        excluded: Vec<Excluded<C, R>>,
+    },
+    /// The query is refused whatever the wallet holds.
+    Refused(QueryRefusal),
 }
 
 /// A credential that answers a Credential Query, and its answer.
@@ -426,43 +441,38 @@ impl<'r, C, R> Answers<'r, C, R> {
 
     /// The credentials that answer it, in the order of the wallet's credentials.
     pub fn candidates(&self) -> &[Candidate<C>] {
-        &self.candidates
+        match &self.outcome {
+            QueryOutcome::Claims(candidates) | QueryOutcome::Proof { candidates, .. } => candidates,
+            QueryOutcome::Refused(_) => &[],
+        }
     }
 
     /// The candidate at `index`.
     pub fn candidate(&self, index: CandidateIndex) -> Option<&Candidate<C>> {
-        self.candidates.get(index.value())
+        self.candidates().get(index.value())
     }
 
     /// The nym_auth query of a `zkp_req` query that has a usable pair.
     pub fn zkp(&self) -> Option<&ZkpQuery> {
-        self.zkp.as_deref()
+        match &self.outcome {
+            QueryOutcome::Proof { zkp, .. } => Some(zkp),
+            QueryOutcome::Claims(_) | QueryOutcome::Refused(_) => None,
+        }
     }
 
     /// Why the query has no candidate whatever the wallet holds.
     pub fn refusal(&self) -> Option<&QueryRefusal> {
-        self.refusal.as_ref()
+        match &self.outcome {
+            QueryOutcome::Refused(refusal) => Some(refusal),
+            QueryOutcome::Claims(_) | QueryOutcome::Proof { .. } => None,
+        }
     }
 
     /// The credentials that matched a `zkp_req` query and answer none of its options.
     pub fn excluded(&self) -> &[Excluded<C, R>] {
-        &self.excluded
-    }
-
-    /// The answers of the credentials of `found`, each disclosing its claims.
-    fn claims(asked: AskedQuery<'r>, found: Vec<(C, Claims)>) -> Self {
-        Self {
-            asked,
-            candidates: found
-                .into_iter()
-                .map(|(credential, claims)| Candidate {
-                    credential,
-                    answer: Answer::Claims(claims),
-                })
-                .collect(),
-            zkp: None,
-            refusal: None,
-            excluded: Vec::new(),
+        match &self.outcome {
+            QueryOutcome::Proof { excluded, .. } => excluded,
+            QueryOutcome::Claims(_) | QueryOutcome::Refused(_) => &[],
         }
     }
 }

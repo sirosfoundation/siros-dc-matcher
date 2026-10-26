@@ -47,7 +47,7 @@ impl MatchCredential for UsableCredential<'_> {
     fn key_holding(&self) -> KeyHolding {
         let credential = self.credential();
         match (credential.key_id(), credential.holder_key()) {
-            (Some(_), Ok(_)) => KeyHolding::Held,
+            (Some(_), Some(_)) => KeyHolding::Held,
             _ => KeyHolding::NotHeld,
         }
     }

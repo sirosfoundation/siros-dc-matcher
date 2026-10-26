@@ -25,7 +25,7 @@ const PERMANENT: [&str; 8] = [
 pub(crate) struct SdJwtVc {
     sd_jwt: SdJwt,
     vct: String,
-    holder_key: Result<P256Key, HolderKeyError>,
+    holder_key: Option<P256Key>,
     validity: Validity,
 }
 
@@ -44,8 +44,10 @@ impl SdJwtVc {
             _ => return Err(CredentialError::Vct),
         };
         let holder_key = match claims.get("cnf").map(Claim::value) {
-            None => Err(HolderKeyError::Unbound),
-            Some(ClaimValue::Object(cnf)) => p256_jwk(cnf),
+            None => None,
+            Some(ClaimValue::Object(cnf)) => {
+                Some(p256_jwk(cnf).map_err(CredentialError::HolderKey)?)
+            }
             Some(_) => return Err(CredentialError::Cnf),
         };
         let validity = Validity::new(
@@ -71,15 +73,15 @@ impl SdJwtVc {
     /// Whether `cnf` names a holder key: the KB-JWT must be secured by that key (Section
     /// 2.2.2.3).
     pub(crate) fn bound(&self) -> bool {
-        self.holder_key != Err(HolderKeyError::Unbound)
+        self.holder_key.is_some()
     }
 
     pub(crate) fn validity(&self) -> Validity {
         self.validity
     }
 
-    /// The P-256 key of `cnf.jwk` (RFC 7800, Section 3.2).
-    pub(crate) fn holder_key(&self) -> Result<P256Key, HolderKeyError> {
+    /// The P-256 key of `cnf.jwk` (RFC 7800, Section 3.2); `None` without `cnf`.
+    pub(crate) fn holder_key(&self) -> Option<P256Key> {
         self.holder_key
     }
 }

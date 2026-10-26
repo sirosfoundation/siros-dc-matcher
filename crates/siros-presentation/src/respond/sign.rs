@@ -98,7 +98,7 @@ impl Sign {
     /// # Errors
     ///
     /// [`PresentationError::KeyIdMissing`] for a credential that names no key pair, and
-    /// [`PresentationError::HolderKey`] for one without a P-256 holder key.
+    /// [`PresentationError::HolderKeyMissing`] for one bound to no key.
     pub(crate) fn new(
         id: SignId,
         credential: &Credential,
@@ -108,7 +108,9 @@ impl Sign {
             id,
             key: key_id(credential)?,
             input,
-            holder: credential.holder_key()?,
+            holder: credential
+                .holder_key()
+                .ok_or(PresentationError::HolderKeyMissing)?,
         })
     }
 

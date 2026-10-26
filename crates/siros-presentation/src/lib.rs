@@ -66,8 +66,8 @@ pub use error::{Inconsistency, PresentationError};
 #[cfg(feature = "wallet")]
 pub use plan::{
     plan, refusal, AdditionView, ConsentView, CredentialView, DigestError, EntryPosition, Fetches,
-    MemberView, NoSeed, OfferView, OptionRefusal, PlanDigest, PlanInput, PlanStep, Planned, Shown,
-    Unproven,
+    JsonCause, MemberView, NoSeed, OfferView, OptionRefusal, PlanDigest, PlanInput, PlanStep,
+    Planned, Shown, Unproven,
 };
 #[cfg(feature = "wallet")]
 pub use respond::{

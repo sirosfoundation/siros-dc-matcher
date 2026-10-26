@@ -92,7 +92,7 @@ pub fn card(extra: Value) -> Value {
     let card = json!({
         "iss": "https://bank.example",
         "vct": VCT,
-        "cnf": {"jwk": {"kty": "EC", "crv": "P-256", "x": "AQ", "y": "Ag"}}
+        "cnf": {"jwk": {"kty": "EC", "crv": "P-256", "x": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE", "y": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI"}}
     });
     with(card, extra)
 }

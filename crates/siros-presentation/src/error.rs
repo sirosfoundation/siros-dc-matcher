@@ -3,11 +3,10 @@
 
 use std::fmt;
 
-use siros_credential::HolderKeyError;
 use siros_dcql::PathError;
 use siros_display::DisplayError;
 use siros_mdoc::DisclosureError;
-use siros_oid4vp::{ErrorCode, ResponseError};
+use siros_oid4vp::{ErrorCode, HttpsUrl, ResponseError};
 use siros_sdjwt::KeyBindingError;
 use siros_transaction_data::TransactionDataError;
 use siros_wallet_state::KeyId;
@@ -33,6 +32,8 @@ pub enum PresentationError {
     TransactionData(TransactionDataError),
     /// The consent view cannot show a credential. The code is the display's.
     Display(DisplayError),
+    /// The host answered a fetch of this URL twice.
+    FetchRepeated(HttpsUrl),
     /// The selection's plan digest does not read.
     Digest(DigestError),
     /// The selection was made on another plan (A4).
@@ -60,8 +61,8 @@ pub enum PresentationError {
     WalletDisplayNeeded,
     /// A member's credential names no key pair.
     KeyIdMissing,
-    /// A member's credential has no P-256 holder key to verify its signature under.
-    HolderKey(HolderKeyError),
+    /// A member's credential is an SD-JWT VC bound to no key: it has no `cnf`.
+    HolderKeyMissing,
     /// The host reported no authentication factors for this key, whose KB-JWT carries `amr`
     /// (H3).
     KeyFactorsMissing(KeyId),
@@ -133,6 +134,7 @@ impl PresentationError {
             Self::NoOffer(failure) => failure.code(),
             Self::TransactionData(e) => e.code(),
             Self::Display(e) => e.code(),
+            Self::FetchRepeated(_) => "fetch_repeated",
             Self::Digest(e) => e.code(),
             Self::DigestMismatch => "selection_digest_mismatch",
             Self::OfferUnknown(_) => "selection_offer_unknown",
@@ -146,7 +148,7 @@ impl PresentationError {
             Self::SubsetDropsEntry(_) => "selection_subset_drops_entry",
             Self::WalletDisplayNeeded => "wallet_display_needed",
             Self::KeyIdMissing => "key_id_missing",
-            Self::HolderKey(e) => e.code(),
+            Self::HolderKeyMissing => "holder_key_missing",
             Self::KeyFactorsMissing(_) => "key_factors_missing",
             Self::Time => "time_before_epoch",
             Self::AudienceMissing => "audience_missing",
@@ -173,7 +175,34 @@ impl PresentationError {
             Self::NoOffer(failure) => oid4vp_code(failure.error_code()),
             Self::TransactionData(e) => e.error_code(),
             Self::Prove(e) => oid4vp_code(e.error_code()),
-            _ => ErrorCode::AccessDenied,
+            Self::Display(_)
+            | Self::FetchRepeated(_)
+            | Self::Digest(_)
+            | Self::DigestMismatch
+            | Self::OfferUnknown(_)
+            | Self::AdditionUnknown(_)
+            | Self::AdditionSetRepeated(_)
+            | Self::AdditionQueryRepeated(_)
+            | Self::SubsetQuery(_)
+            | Self::SubsetMember(_)
+            | Self::SubsetRepeated(_)
+            | Self::Subset(_)
+            | Self::SubsetDropsEntry(_)
+            | Self::WalletDisplayNeeded
+            | Self::KeyIdMissing
+            | Self::HolderKeyMissing
+            | Self::KeyFactorsMissing(_)
+            | Self::Time
+            | Self::AudienceMissing
+            | Self::Inconsistent(_)
+            | Self::Choice(_)
+            | Self::Unproven(_)
+            | Self::Unanswerable(_)
+            | Self::Pointer(_)
+            | Self::KeyBinding(_)
+            | Self::Disclosure(_)
+            | Self::Signature(_)
+            | Self::Response(_) => ErrorCode::AccessDenied,
         }
     }
 }
@@ -215,7 +244,6 @@ causes! {
     DisplayError => Display,
     DigestError => Digest,
     SubsetError => Subset,
-    HolderKeyError => HolderKey,
     Inconsistency => Inconsistent,
     ChoiceError => Choice,
     Unproven => Unproven,

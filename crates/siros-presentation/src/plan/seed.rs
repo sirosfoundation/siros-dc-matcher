@@ -5,6 +5,7 @@
 use std::fmt;
 
 use itertools::Itertools;
+use serde_json::error::Category;
 use serde_json::Value;
 use siros_codec::base64url;
 use siros_credential::Credential;
@@ -16,10 +17,10 @@ use zeroize::Zeroizing;
 const SSC: [&str; 2] = [MDOC_DOCTYPE, "ssc"];
 
 /// Why a credential gives no `secret_seed`. A credential without one answers no nym_auth query.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NoSeed {
     /// An `auxiliary_data` value is no JSON array of entries.
-    Entries,
+    Entries(JsonCause),
     /// No `hash_commitment` entry names `ssc`.
     Missing,
     /// Several do (Credential Auxiliary Data, Section 3).
@@ -36,13 +37,46 @@ impl NoSeed {
     /// A stable identifier.
     pub fn code(self) -> &'static str {
         match self {
-            Self::Entries => "seed_entries",
+            Self::Entries(_) => "seed_entries",
             Self::Missing => "seed_missing",
             Self::Repeated => "seed_repeated",
             Self::Algorithm => "seed_algorithm",
             Self::Encoding => "seed_encoding",
             Self::Opening => "seed_opening",
         }
+    }
+}
+
+/// Why a JSON text does not read: serde_json's category of the error, and where it is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct JsonCause {
+    category: Category,
+    line: usize,
+    column: usize,
+}
+
+impl JsonCause {
+    fn of(error: &serde_json::Error) -> Self {
+        Self {
+            category: error.classify(),
+            line: error.line(),
+            column: error.column(),
+        }
+    }
+
+    /// The kind of the error: syntax, data of another shape, or an early end.
+    pub fn category(&self) -> Category {
+        self.category
+    }
+
+    /// The line of the error, from 1.
+    pub fn line(&self) -> usize {
+        self.line
+    }
+
+    /// The column of the error, from 1.
+    pub fn column(&self) -> usize {
+        self.column
     }
 }
 
@@ -60,7 +94,10 @@ pub(crate) fn delivered(credential: &Credential) -> Result<SecretSeed, NoSeed> {
     let entries: Vec<Value> = credential
         .auxiliary_data()
         .iter()
-        .map(|value| serde_json::from_str::<Vec<Value>>(value.json()).map_err(|_| NoSeed::Entries))
+        .map(|value| {
+            serde_json::from_str::<Vec<Value>>(value.json())
+                .map_err(|error| NoSeed::Entries(JsonCause::of(&error)))
+        })
         .flatten_ok()
         .try_collect()?;
     let entry = entries
