@@ -185,8 +185,9 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
   | `direct_post.jwt` | `response` |
   | `dc_api` | `{vp_token}` |
   | `dc_api.jwt` | `{response}` |
+  | `direct_post.cwt` (`zkp_req.md` §6.2) | an `application/cwt` body: a `COSE_Encrypt` of the CBOR Authorization Response |
 
-  Encryption is ECDH-ES with the request's first supported `enc` (A128GCM, A256GCM); A128GCM when none is stated.
+  JWE encryption is ECDH-ES with the request's first supported `enc` (A128GCM, A256GCM); A128GCM when none is stated. `direct_post.cwt` uses COSE ECDH-ES + HKDF-256 (-25) with AES-GCM from the same list (A128GCM, A192GCM, A256GCM), and its handover thumbprint is that of the key it encrypted to.
 - **P5.** A refusal MAY produce an error submission only when the response target is verified.
 
 ### 4.7 `zkp_req`
