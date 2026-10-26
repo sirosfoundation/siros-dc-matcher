@@ -56,9 +56,7 @@ pub fn match_query(input: &MatchInput<'_>) -> Result<NymAuthMatch, HostError> {
     let d = proof_time.date();
     let plans: Vec<OptionPlan<'_>> = parsed
         .query
-        .query()
-        .options
-        .iter()
+        .options()
         .map(|option| plan_option(&parsed, option, input.systems, d))
         .collect();
     if plans.iter().all(|p| p.pair.is_none()) {
@@ -110,15 +108,15 @@ fn candidates_or_rejections(
     let mut candidates = Vec::new();
     let mut rejected: Vec<Judged<ZkpError>> = Vec::new();
     for plan in plans {
-        let Some((system, backend)) = &plan.pair else {
+        let Some(pair) = &plan.pair else {
             continue;
         };
         for (credential, attestation) in tested {
             match judge(query, plan, attestation) {
                 Some(Ok(())) => candidates.push(Candidate {
                     credential_id: credential.id.clone(),
-                    system_id: system.id().to_owned(),
-                    proof_backend: backend.clone(),
+                    system_id: pair.system().id().to_owned(),
+                    proof_backend: pair.backend().to_owned(),
                     req_set: plan.option.req_set,
                     items: plan.option.items.clone(),
                     inputs: Vec::new(),

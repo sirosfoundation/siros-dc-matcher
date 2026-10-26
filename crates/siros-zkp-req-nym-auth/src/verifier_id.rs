@@ -90,6 +90,36 @@ impl VerifierId {
     }
 }
 
+/// The form of `verifier_id` the Verifier's trust framework fixes, with what the Wallet takes
+/// it from.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum VerifierIdForm {
+    /// `semantic`, with the end Relying Party's semantic identifier from the registration
+    /// certificate when present, else from the access certificate.
+    Semantic(String),
+    /// `x509_san_dns`, with whether the registration certificate names an intermediary.
+    X509SanDns {
+        /// Whether the registration certificate names an intermediary.
+        registration_names_intermediary: bool,
+    },
+}
+
+impl VerifierIdForm {
+    /// The `verifier_id` of this form for the Client Identifier `client_id`, prefix included.
+    ///
+    /// # Errors
+    ///
+    /// [`VerifierIdRule`]: the rule of the form the identifier breaks.
+    pub fn verifier_id(&self, client_id: &str) -> Result<VerifierId, VerifierIdRule> {
+        match self {
+            Self::Semantic(identifier) => VerifierId::semantic(identifier),
+            Self::X509SanDns {
+                registration_names_intermediary,
+            } => VerifierId::x509_san_dns(client_id, *registration_names_intermediary),
+        }
+    }
+}
+
 /// `verifier_input` of a `pseudonym` (the table of "Configurations").
 pub fn verifier_input(pseudonym: &Pseudonym, verifier_id: &VerifierId) -> [u8; 32] {
     let id = sha256(verifier_id.as_str().as_bytes());

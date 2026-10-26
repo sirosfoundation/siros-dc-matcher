@@ -7,6 +7,8 @@ use serde_json::Value;
 
 use siros_oid4vp::{ec_jwk_thumbprint, Handover};
 
+use crate::verifier_id::VerifierIdRule;
+
 /// The channel a request arrived on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Channel {
@@ -64,6 +66,34 @@ impl fmt::Display for PolicyRule {
 }
 
 impl std::error::Error for PolicyRule {}
+
+/// Why a verified request is no nym_auth request: a rule of the policy, or of the Verifier
+/// identity. Each makes a nym_auth query invalid.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RequestRefusal {
+    /// A rule of the signed-request and encrypted-response policy.
+    Policy(PolicyRule),
+    /// A rule of the `verifier_id` of the trust framework's form.
+    VerifierId(VerifierIdRule),
+}
+
+impl RequestRefusal {
+    /// The rule's stable identifier.
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Policy(rule) => rule.code(),
+            Self::VerifierId(rule) => rule.code(),
+        }
+    }
+}
+
+impl fmt::Display for RequestRefusal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.code())
+    }
+}
+
+impl std::error::Error for RequestRefusal {}
 
 /// The channel's own value in the `Handover`.
 #[derive(Debug, Clone, PartialEq, Eq)]

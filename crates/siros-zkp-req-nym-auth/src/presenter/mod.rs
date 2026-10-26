@@ -5,6 +5,7 @@
 //! and runs a system's prover on the [`ProofJob`](crate::prover::ProofJob). The presenter keeps
 //! nothing between calls: `prove` checks everything again.
 
+mod answer;
 mod matching;
 mod proving;
 
@@ -12,8 +13,9 @@ use std::fmt;
 
 use serde_json::Value;
 use siros_codec::date::Date;
-use siros_zkp_req::{usable_backend, PairRefusal, QueryOption, ZkpFormats, ZkpReqQuery};
+use siros_zkp_req::{PairRefusal, QueryOption, ZkpFormats, ZkpReqQuery};
 
+pub use answer::{Answer, Unanswerable};
 pub use matching::{match_query, MatchInput, NymAuthMatch};
 pub use proving::{
     prepare, present, Prepared, ProveError, ProveInput, Session, SignFailure, Signer,
@@ -21,8 +23,9 @@ pub use proving::{
 
 use crate::age::Bounds;
 use crate::attestation::{Credential, Unusable, UsableAttestation};
-use crate::catalogue::{Function, Item, NymAuthQuery};
-use crate::outcome::{InvalidRequest, ItemCode, ZkpError};
+use crate::catalogue::NymAuthQuery;
+use crate::outcome::{InvalidRequest, ZkpError};
+use crate::pair::{failed_assertions, NymAuthOption, UsablePair};
 use crate::system::{NymAuthSystem, Unsupported};
 
 /// The largest `zk_proof` the proof backends read (`longfellow-libzk-v1`, `vega-v1`).
@@ -85,29 +88,25 @@ fn parse(query: &Value, client_metadata: &Value) -> Result<Option<Parsed>, Inval
 struct OptionPlan<'q> {
     option: &'q QueryOption,
     bounds: Bounds,
-    pair: Option<(NymAuthSystem, String)>,
+    pair: Option<UsablePair<'q>>,
     refusals: Vec<(String, PairRefusal<Unsupported>)>,
 }
 
 fn plan_option<'q>(
     parsed: &'q Parsed,
-    option: &'q QueryOption,
+    option: NymAuthOption<'q>,
     systems: &[NymAuthSystem],
     d: Date,
 ) -> OptionPlan<'q> {
-    let bounds = parsed.query.option_bounds(option, d);
-    let items: Vec<&Item> = parsed.query.option_items(option).map(|(_, i)| i).collect();
+    let bounds = parsed.query.option_bounds(option.option(), d);
     let mut refusals = Vec::new();
     for &system in systems {
-        let ty = &parsed.query.query().credential_type;
-        match usable_backend(&parsed.formats, ty, &system, |s| {
-            s.supports(items.iter().copied(), &bounds)
-        }) {
-            Ok(backend) => {
+        match option.pair(&parsed.formats, system, d) {
+            Ok(pair) => {
                 return OptionPlan {
-                    option,
+                    option: option.option(),
                     bounds,
-                    pair: Some((system, backend.to_owned())),
+                    pair: Some(pair),
                     refusals,
                 }
             }
@@ -115,7 +114,7 @@ fn plan_option<'q>(
         }
     }
     OptionPlan {
-        option,
+        option: option.option(),
         bounds,
         pair: None,
         refusals,
@@ -158,15 +157,5 @@ fn item_errors(
     credential: &Credential,
 ) -> Vec<ZkpError> {
     let birth_date = *credential.mdoc().birth_date().value();
-    query
-        .option_items(plan.option)
-        .filter_map(|(index, item)| match item.function {
-            Function::AgeCheck(_) if !plan.bounds.holds(birth_date) => Some(ZkpError::Item {
-                option: plan.option.req_set,
-                item: index,
-                code: ItemCode::AgeOutOfRange,
-            }),
-            _ => None,
-        })
-        .collect()
+    failed_assertions(query, plan.option, &plan.bounds, birth_date)
 }
