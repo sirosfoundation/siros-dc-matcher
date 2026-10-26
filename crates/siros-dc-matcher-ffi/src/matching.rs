@@ -28,8 +28,8 @@ use std::collections::HashMap;
 
 use siros_dc_matcher_core::db::CredentialDatabase;
 use siros_dc_matcher_core::evaluator::{credentials, resolve, ProfilePolicy};
-use siros_dc_matcher_core::request::{self, RequestContext};
 use siros_dcql::{execute, DcqlQuery};
+use siros_oid4vp::{UnverifiedQuery, UnverifiedRequest};
 
 use crate::FfiCapability;
 
@@ -210,9 +210,10 @@ pub fn match_dc_api_request(
     // which meant the two entry points disagreed about what a request is: the
     // picker would offer a credential for a signed request that this path
     // declined. One reader, or they drift again.
-    let found = request::first_supported_context_in(&parsed, &db.profile, None)
-        .and_then(|context| Some((context.matching_query()?, context)));
-    let (query, context) = match found {
+    let registered = |label: &str| db.profile.parser_for(label).is_some();
+    let found = UnverifiedRequest::first_registered(request_json.as_bytes(), &registered)
+        .and_then(|unverified| Some((unverified.query().matching_query()?, unverified)));
+    let (query, unverified) = match found {
         Some(found) => found,
         None => {
             let offered: Vec<String> = requests
@@ -224,19 +225,22 @@ pub fn match_dc_api_request(
             // not base64url, not JSON, or shaped for a different label — the
             // two have to be told apart, or a caller debugging a malformed
             // signed request is sent to look at its protocol list.
-            return Err(
-                if offered.iter().any(|p| db.profile.parser_for(p).is_some()) {
-                    MatchError::Request {
-                        reason: request::diagnose(request_json.as_bytes(), &db.profile),
-                    }
-                } else {
-                    MatchError::UnsupportedProtocol { offered }
-                },
-            );
+            return Err(if offered.iter().any(|p| registered(p)) {
+                MatchError::Request {
+                    reason: siros_oid4vp::diagnose(request_json.as_bytes(), &registered),
+                }
+            } else {
+                MatchError::UnsupportedProtocol { offered }
+            });
         }
     };
 
-    Ok(evaluate(&db, &query, &context))
+    Ok(evaluate(
+        &db,
+        &query,
+        unverified.query(),
+        unverified.client_metadata(),
+    ))
 }
 
 /// Match a bare DCQL query.
@@ -278,7 +282,7 @@ pub fn match_dcql_with_context(
         .transpose()?;
 
     let strict = DcqlQuery::from_json(&dcql_json);
-    let context = RequestContext::from_dcql(raw, client_metadata).map_err(|e| {
+    let unverified = UnverifiedQuery::parse(raw).map_err(|e| {
         request_err(
             strict
                 .as_ref()
@@ -290,14 +294,14 @@ pub fn match_dcql_with_context(
         Ok(query) => query,
         // The identifier checks `from_json` makes still apply to anything that
         // is DCQL; only a `zkp_req` query DCQL cannot represent is let past.
-        Err(e) if context.dcql_query.is_some() => return Err(request_err(e)),
+        Err(e) if unverified.typed().is_some() => return Err(request_err(e)),
         Err(e) => {
-            let query = context.matching_query().ok_or_else(|| request_err(&e))?;
+            let query = unverified.matching_query().ok_or_else(|| request_err(&e))?;
             query.validate().map_err(request_err)?;
             query
         }
     };
-    Ok(evaluate(&db, &query, &context))
+    Ok(evaluate(&db, &query, &unverified, client_metadata.as_ref()))
 }
 
 fn decode(blob: &[u8]) -> Result<CredentialDatabase, MatchError> {
@@ -318,10 +322,11 @@ fn request_err(e: impl core::fmt::Display) -> MatchError {
 fn evaluate(
     db: &CredentialDatabase,
     query: &DcqlQuery,
-    context: &RequestContext,
+    unverified: &UnverifiedQuery,
+    client_metadata: Option<&serde_json::Value>,
 ) -> FfiMatchOutcome {
     let held = credentials(db);
-    let policy = ProfilePolicy::new(&db.profile).with_context(context);
+    let policy = ProfilePolicy::new(&db.profile).with_context(unverified, client_metadata);
     let result = execute(query, &held, &policy);
     let enumerated = result.combinations(MAX_COMBINATIONS);
     let dropped_count = u32::try_from(enumerated.dropped.count()).unwrap_or(u32::MAX);

@@ -6,6 +6,7 @@ members = [
     "crates/siros-codec",
     "crates/siros-dcql",
     "crates/siros-mdoc",
+    "crates/siros-oid4vp",
     "crates/siros-dc-matcher-core",
     "crates/siros-dc-matcher-wasm",
     "crates/siros-dc-matcher-ffi",
@@ -21,15 +22,17 @@ license = "BSD-2-Clause"
 repository = "https://github.com/sirosfoundation/siros-dc-matcher"
 authors = ["SIROS Foundation"]
 # Held by everything that ships inside the credential picker — siros-dcql,
-# -core, -wasm, the two zkp_req crates and the two android-credman crates —
-# and checked on 1.82 in CI. The -ffi and -testhost crates override this
-# upward: uniffi's bindgen chain and wasmtime both need more.
+# siros-oid4vp without `crypto`, -core, -wasm, the two zkp_req crates and the
+# two android-credman crates — and by siros-mdoc and siros-sdjwt, and checked
+# on 1.82 in CI. The -ffi and -testhost crates override this upward: uniffi's
+# bindgen chain and wasmtime both need more.
 rust-version = "1.82"
 
 [workspace.dependencies]
 siros-codec = { path = "crates/siros-codec" }
 siros-dcql = { version = "0.12.0", path = "crates/siros-dcql" }
 siros-mdoc = { path = "crates/siros-mdoc" }
+siros-oid4vp = { path = "crates/siros-oid4vp" }
 siros-sdjwt = { path = "crates/siros-sdjwt" }
 siros-dc-matcher-core = { path = "crates/siros-dc-matcher-core" }
 siros-zkp-req = { path = "crates/siros-zkp-req" }

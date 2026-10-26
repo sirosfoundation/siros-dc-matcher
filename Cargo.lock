@@ -1975,6 +1975,7 @@ dependencies = [
  "serde_json",
  "siros-dc-matcher-core",
  "siros-dcql",
+ "siros-oid4vp",
  "siros-zkp-req",
  "siros-zkp-req-nym-auth",
 ]
@@ -1987,6 +1988,7 @@ dependencies = [
  "serde_json",
  "siros-dc-matcher-core",
  "siros-dcql",
+ "siros-oid4vp",
  "siros-zkp-req",
  "siros-zkp-req-nym-auth",
  "thiserror 2.0.20",
@@ -2012,6 +2014,7 @@ dependencies = [
  "serde_json",
  "siros-dc-matcher-core",
  "siros-dcql",
+ "siros-oid4vp",
  "siros-zkp-req",
 ]
 
@@ -2033,6 +2036,23 @@ dependencies = [
  "rustc-hash",
  "sha2",
  "siros-codec",
+ "x509-cert",
+]
+
+[[package]]
+name = "siros-oid4vp"
+version = "0.11.0"
+dependencies = [
+ "der",
+ "p256",
+ "rand_core",
+ "rustc-hash",
+ "serde",
+ "serde_json",
+ "sha2",
+ "siros-codec",
+ "siros-dcql",
+ "siros-oid4vp",
  "x509-cert",
 ]
 

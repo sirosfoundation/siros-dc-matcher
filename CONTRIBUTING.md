@@ -87,6 +87,7 @@ Two floors are checked separately, because they differ on purpose:
 cargo +1.82 check --locked --all-features \
   -p siros-dcql -p siros-dc-matcher-core -p siros-dc-matcher-wasm \
   -p siros-zkp-req -p siros-zkp-req-nym-auth
+cargo +1.82 check --locked -p siros-oid4vp
 
 # siros-dcql's public API against the version it declares.
 # Unlike fmt and clippy this is not part of the toolchain:

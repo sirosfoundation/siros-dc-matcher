@@ -9,7 +9,6 @@
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
 
-pub mod base64url;
 pub mod circuit_capabilities;
 pub mod db;
 
@@ -18,4 +17,3 @@ pub mod evaluator;
 pub mod fixtures;
 pub mod profile;
 pub mod purpose;
-pub mod request;
