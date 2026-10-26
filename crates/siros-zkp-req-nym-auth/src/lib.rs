@@ -10,9 +10,9 @@
 //! | [`age`] | `range`, E and C | `age_check` |
 //! | [`verifier_id`] | `verifier_id`, `verifier_input`, the `sha-256` pseudonym | `pseudonym` |
 //! | [`system`] | The systems and the options each supports | System rulebooks, Sections 1 to 3 |
-//! | [`session`] | The `Handover`, the device message, e2 | Binding; system rulebooks, Section 5 |
+//! | [`session`] | The `Handover` | Binding |
 //! | [`policy`] | Signed requests, encrypted responses | Binding, Response confidentiality |
-//! | [`mdoc`] | The ISO/IEC 18013-5 attestation | Attestation |
+//! | [`mdoc`] | The nym_auth form of the ISO/IEC 18013-5 attestation | Attestation |
 //! | [`checks`] | The Wallet's tests of a credential | System rulebooks, Section 7 |
 //! | [`presenter`] | `match`, then `prove` in phases | `zkp_req`, Sections 1.3, 2.1, 3, 4 |
 //! | [`prover`] | The statement and the prover interface | System rulebooks, Sections 3, 4, 7 |
@@ -45,7 +45,6 @@
 
 pub mod age;
 pub mod catalogue;
-pub mod date;
 pub mod outcome;
 pub mod policy;
 pub mod session;
@@ -62,8 +61,6 @@ pub mod presenter;
 pub mod prover;
 #[cfg(feature = "credential")]
 pub mod verify;
-#[cfg(feature = "credential")]
-pub mod x509;
 
 #[cfg(feature = "test-fixtures")]
 pub mod testing;

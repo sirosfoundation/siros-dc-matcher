@@ -8,10 +8,11 @@
 )]
 
 use serde_json::Value;
+use siros_codec::date::Date;
+use siros_mdoc::{device_signing_digest, DeviceNameSpaces};
 use siros_zkp_req_nym_auth::age::{AgeRange, Bound, Bounds};
 use siros_zkp_req_nym_auth::catalogue::{Config, Prf, Pseudonym};
-use siros_zkp_req_nym_auth::date::Date;
-use siros_zkp_req_nym_auth::session::{challenge_digest, Handover};
+use siros_zkp_req_nym_auth::session::Handover;
 use siros_zkp_req_nym_auth::verifier_id::{pseudonym_sha256, verifier_input, VerifierId};
 
 /// A range, D, E, C, and where the case comes from.
@@ -32,6 +33,11 @@ fn hex(text: &str) -> Vec<u8> {
         .step_by(2)
         .map(|i| u8::from_str_radix(&text[i..i + 2], 16).unwrap())
         .collect()
+}
+
+/// e2: the digest of the data the device key signs, with no `DeviceSigned` element.
+fn challenge_digest(session_transcript: &[u8], doc_type: &str) -> [u8; 32] {
+    device_signing_digest(session_transcript, doc_type, &DeviceNameSpaces::empty())
 }
 
 fn vectors(name: &str) -> Value {

@@ -1,21 +1,19 @@
 //! The Wallet's tests of a credential (system rulebooks, Section 7, step 1), with the codes of
 //! Section 9.
 
-use p256::ecdsa::signature::Verifier;
-use p256::ecdsa::{Signature, VerifyingKey};
+use siros_codec::date::DateTime;
+use siros_mdoc::{chains_to, es256_verifies, CertificateError, MdocError, P256Certificate};
 
-use crate::date::DateTime;
-use crate::mdoc::{self, MdocError, NymAuthMdoc, P256Key, Reading, SignedElement};
+use crate::mdoc::{self, FormError, NymAuthMdoc, Reading};
 use crate::outcome::CredentialCode;
 use crate::verifier_id::sha256;
-use crate::x509::{chains_to, CertificateError, P256Certificate};
 
 /// A nym_auth credential with its Document Signer certificate read.
 #[derive(Debug, Clone)]
 pub struct Credential {
     /// The attestation.
     pub mdoc: NymAuthMdoc,
-    /// `x5chain[0]`.
+    /// The Document Signer certificate.
     pub certificate: P256Certificate,
 }
 
@@ -23,7 +21,7 @@ pub struct Credential {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Unreadable {
     /// The mdoc.
-    Mdoc(MdocError),
+    Form(FormError),
     /// The Document Signer certificate.
     Certificate(CertificateError),
 }
@@ -35,6 +33,8 @@ pub enum Checked {
     OtherDocType,
     /// The credential cannot be read in the nym_auth form.
     Unreadable(Unreadable),
+    /// The MSO lists another digest of an element, or none: `issuer_signature`.
+    Unlisted,
     /// The credential, and the checks it fails at the proof time. Empty when it passes.
     Read(Box<Credential>, Vec<CredentialCode>),
 }
@@ -46,15 +46,19 @@ pub fn check(data: &str, anchors: Option<&[Vec<u8>]>, proof_time: DateTime) -> C
     let mdoc = match mdoc::read(data) {
         Ok(Reading::NymAuth(mdoc)) => *mdoc,
         Ok(Reading::OtherDocType) => return Checked::OtherDocType,
-        Err(e) => return Checked::Unreadable(Unreadable::Mdoc(e)),
+        Err(FormError::Mdoc(MdocError::ItemDigest)) => return Checked::Unlisted,
+        Err(e) => return Checked::Unreadable(Unreadable::Form(e)),
     };
-    let certificate = match mdoc.x5chain.first().map(|der| P256Certificate::parse(der)) {
-        Some(Ok(certificate)) => certificate,
-        Some(Err(e)) => return Checked::Unreadable(Unreadable::Certificate(e)),
-        None => return Checked::Unreadable(Unreadable::Mdoc(MdocError::X5chain)),
+    let certificate = match P256Certificate::parse(&mdoc.document_signer) {
+        Ok(certificate) => certificate,
+        Err(e) => return Checked::Unreadable(Unreadable::Certificate(e)),
     };
     let mut failures = Vec::new();
-    if !issuer_signed(&mdoc, &certificate.key) {
+    if !es256_verifies(
+        certificate.key(),
+        &mdoc.sig_structure,
+        &mdoc.issuer_signature,
+    ) {
         failures.push(CredentialCode::IssuerSignature);
     }
     if anchors.is_some_and(|anchors| !chains_to(&certificate, anchors)) {
@@ -64,33 +68,6 @@ pub fn check(data: &str, anchors: Option<&[Vec<u8>]>, proof_time: DateTime) -> C
         failures.push(CredentialCode::Validity);
     }
     Checked::Read(Box::new(Credential { mdoc, certificate }), failures)
-}
-
-/// Whether `issuerAuth` verifies under `key` and the MSO lists the digest of every element.
-fn issuer_signed(mdoc: &NymAuthMdoc, key: &P256Key) -> bool {
-    es256_verifies(key, &mdoc.sig_structure, &mdoc.issuer_signature)
-        && listed(mdoc, &mdoc.birth_date)
-        && listed(mdoc, &mdoc.ssc)
-        && mdoc.psc.as_ref().is_none_or(|p| listed(mdoc, p))
-}
-
-/// Whether the MSO lists the digest of `element` under its `digestID`.
-fn listed<T>(mdoc: &NymAuthMdoc, element: &SignedElement<T>) -> bool {
-    let digest = sha256(&element.bytes);
-    mdoc.value_digests
-        .iter()
-        .any(|(id, d)| *id == element.digest_id && d.as_slice() == digest.as_slice())
-}
-
-/// Whether `signature` (`r ‖ s`) is an ES256 signature of `message` under `key`.
-pub fn es256_verifies(key: &P256Key, message: &[u8], signature: &[u8; 64]) -> bool {
-    let (Ok(key), Ok(signature)) = (
-        VerifyingKey::from_sec1_bytes(&key.sec1()),
-        Signature::from_slice(signature),
-    ) else {
-        return false;
-    };
-    key.verify(message, &signature).is_ok()
 }
 
 /// Whether `SHA-256(secret_seed)` is the credential's `ssc`.

@@ -9,7 +9,7 @@
 )]
 
 use serde_json::Value;
-use siros_zkp_req_nym_auth::date::DateTime;
+use siros_codec::date::DateTime;
 use siros_zkp_req_nym_auth::verify::Tolerance;
 
 #[test]
