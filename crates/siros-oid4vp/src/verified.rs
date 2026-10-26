@@ -132,6 +132,33 @@ impl ContentEncryption {
             Self::A256Gcm => "A256GCM",
         }
     }
+
+    /// The COSE algorithm value (RFC 9053, Section 4.1).
+    pub(crate) fn cose_alg(self) -> u64 {
+        match self {
+            Self::A128Gcm => 1,
+            Self::A192Gcm => 2,
+            Self::A256Gcm => 3,
+        }
+    }
+
+    /// The key length in bits.
+    pub(crate) fn key_bits(self) -> u32 {
+        match self {
+            Self::A128Gcm => 128,
+            Self::A192Gcm => 192,
+            Self::A256Gcm => 256,
+        }
+    }
+
+    /// The key length in bytes.
+    pub(crate) fn key_len(self) -> usize {
+        match self {
+            Self::A128Gcm => 16,
+            Self::A192Gcm => 24,
+            Self::A256Gcm => 32,
+        }
+    }
 }
 
 /// The key and `enc` an encrypted response uses (Section 8.3).

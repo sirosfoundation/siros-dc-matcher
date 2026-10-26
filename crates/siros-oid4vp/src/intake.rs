@@ -26,6 +26,7 @@ pub use error::{
 pub use trust::{KeyMaterial, Trust, TrustAnswer, TrustSubject, Verdict};
 
 use crate::fetch::{Fetch, FetchResponse};
+use crate::response::Submission;
 use crate::values::{Origin, WalletNonce};
 use crate::verified::VerifiedRequest;
 
@@ -172,6 +173,20 @@ impl IntakeState {
             Ok(verified) => Ok(Step::Verified(Box::new(verified))),
             Err(Halt::Pending(effect)) => Ok(Step::Effect(effect)),
             Err(Halt::Failed(error) | Halt::HostFault(error)) => Err(error),
+        }
+    }
+
+    /// The error submission for a refusal of this request, when its response target is
+    /// verified (P5).
+    ///
+    /// Over the DC API the platform returns the response to the origin it attests, so a
+    /// refusal is `{"error": …}` (A.2, A.4). Over redirects no target is verified before
+    /// intake succeeds, and the answer is `None`.
+    #[must_use]
+    pub fn error_submission(&self, error: IntakeError) -> Option<Submission> {
+        match self.start {
+            Start::DcApi { .. } => Some(Submission::dc_api_error(error.error_code())),
+            Start::Redirect { .. } => None,
         }
     }
 }
