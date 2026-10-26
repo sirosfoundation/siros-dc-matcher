@@ -47,7 +47,9 @@ fn all_optional_sets_offer_each_option() {
     let usable = wallet.usable();
     let fetches = wallet.fetches(&request, &usable);
     let planned = ready(&wallet.input(&request, &usable, &fetches)).unwrap();
-    let offers: Vec<(Option<&str>, Vec<&str>, Vec<Vec<&str>>)> = planned
+    // (purpose, the queries of the members, the queries of each addition)
+    type Shape<'v> = (Option<&'v str>, Vec<&'v str>, Vec<Vec<&'v str>>);
+    let offers: Vec<Shape<'_>> = planned
         .view()
         .offers()
         .iter()

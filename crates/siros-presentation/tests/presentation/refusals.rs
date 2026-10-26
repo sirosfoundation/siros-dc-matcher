@@ -48,7 +48,14 @@ fn selections_and_signatures_parse_against_the_plan() {
     let other = b64(&[0; 32]);
 
     // A4: (case, digest, offer, additions, refusal)
-    let selections: [(&str, &str, usize, Vec<usize>, Option<PresentationError>); 6] = [
+    type Case<'d> = (
+        &'d str,
+        &'d str,
+        usize,
+        Vec<usize>,
+        Option<PresentationError>,
+    );
+    let selections: [Case<'_>; 6] = [
         ("the plan's offer and addition", &digest, 0, vec![0], None),
         (
             "a digest not of 32 bytes",
