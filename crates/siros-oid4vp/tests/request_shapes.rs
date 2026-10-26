@@ -75,7 +75,7 @@ fn an_unsigned_request_still_works() {
     let found = first_supported_request(&envelope("openid4vp-v1-unsigned", data), &siros_default);
     let (protocol, query) = found.expect("unsigned request should be answered");
     assert_eq!(protocol, "openid4vp-v1-unsigned");
-    assert_eq!(query.credentials.len(), 1);
+    assert_eq!(query.credentials().len(), 1);
 }
 
 /// `openid4vp-v1-signed`: `data.request` is a compact JWS whose middle segment
@@ -86,8 +86,8 @@ fn a_signed_request_is_read_from_the_jws_payload() {
     let found = first_supported_request(&envelope("openid4vp-v1-signed", data), &siros_default);
     let (protocol, query) = found.expect("signed request should be answered");
     assert_eq!(protocol, "openid4vp-v1-signed");
-    assert_eq!(query.credentials.len(), 1);
-    assert_eq!(query.credentials[0].id, "pid");
+    assert_eq!(query.credentials().len(), 1);
+    assert_eq!(*query.credentials()[0].id(), "pid");
 }
 
 /// `openid4vp-v1-multisigned`: `data.request` is a JWS JSON Serialization
@@ -103,7 +103,7 @@ fn a_multisigned_request_is_read_from_the_payload_member() {
     let found =
         first_supported_request(&envelope("openid4vp-v1-multisigned", data), &siros_default);
     let (_, query) = found.expect("multisigned request should be answered");
-    assert_eq!(query.credentials[0].id, "pid");
+    assert_eq!(*query.credentials()[0].id(), "pid");
 }
 
 /// The reference matcher also accepts the serialization at the top level of
@@ -480,7 +480,10 @@ fn an_unsigned_request_yields_its_full_context() {
         Some(&serde_json::json!({"jwks": {"keys": []}}))
     );
     assert_eq!(ctx.query().raw()["credentials"][0]["id"], "pid");
-    assert_eq!(ctx.query().typed().expect("typed").credentials[0].id, "pid");
+    assert_eq!(
+        ctx.query().typed().expect("typed").credentials()[0].id(),
+        "pid"
+    );
 }
 
 #[test]

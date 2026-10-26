@@ -28,7 +28,7 @@ use std::collections::HashMap;
 
 use siros_dc_matcher_core::db::CredentialDatabase;
 use siros_dc_matcher_core::evaluator::{credentials, resolve, ProfilePolicy};
-use siros_dcql::{execute, DcqlQuery};
+use siros_dcql::{execute, DcqlQuery, Satisfaction};
 use siros_oid4vp::{UnverifiedQuery, UnverifiedRequest};
 
 use crate::FfiCapability;
@@ -295,11 +295,9 @@ pub fn match_dcql_with_context(
         // The identifier checks `from_json` makes still apply to anything that
         // is DCQL; only a `zkp_req` query DCQL cannot represent is let past.
         Err(e) if unverified.typed().is_some() => return Err(request_err(e)),
-        Err(e) => {
-            let query = unverified.matching_query().ok_or_else(|| request_err(&e))?;
-            query.validate().map_err(request_err)?;
-            query
-        }
+        // The query DCQL parses without the `zkp_req` query's `claims` is parsed, with the
+        // same identifier checks.
+        Err(e) => unverified.matching_query().ok_or_else(|| request_err(&e))?,
     };
     Ok(evaluate(&db, &query, &unverified, client_metadata.as_ref()))
 }
@@ -329,9 +327,9 @@ fn evaluate(
     let policy = ProfilePolicy::new(&db.profile).with_context(unverified, client_metadata);
     let result = execute(query, &held, &policy);
     let enumerated = result.combinations(MAX_COMBINATIONS);
-    let dropped_count = u32::try_from(enumerated.dropped.count()).unwrap_or(u32::MAX);
+    let dropped_count = u32::try_from(enumerated.dropped().count()).unwrap_or(u32::MAX);
 
-    let member = |query_id: &String, candidate: &siros_dcql::Candidate| {
+    let member = |query_id: &str, candidate: &siros_dcql::Candidate| {
         // Resolved by core, not here: the matcher binary derives exactly the
         // same details for its picker metadata, and two derivations are how
         // the two would come to disagree about which capability satisfied a
@@ -340,8 +338,8 @@ fn evaluate(
             .credential(query_id)
             .map(|cq| resolve(&policy, cq, candidate));
         FfiMatchedCredential {
-            query_id: query_id.clone(),
-            credential_id: candidate.credential_id.clone(),
+            query_id: query_id.to_owned(),
+            credential_id: candidate.credential_id().to_owned(),
             claims: resolved
                 .as_ref()
                 .map(|r| r.claims.clone())
@@ -373,29 +371,29 @@ fn evaluate(
     };
 
     let matches = result
-        .matches
+        .matches()
         .iter()
         .map(|query_match| FfiQueryMatch {
-            query_id: query_match.query_id.to_string(),
+            query_id: query_match.query_id().to_string(),
             credentials: query_match
-                .candidates
+                .candidates()
                 .iter()
-                .map(|candidate| member(&query_match.query_id.to_string(), candidate))
+                .map(|candidate| member(query_match.query_id(), candidate))
                 .collect(),
         })
         .collect();
 
     let combinations = enumerated
-        .combinations
+        .combinations()
         .iter()
         .map(|combination| FfiCombination {
             members: combination
-                .members
+                .members()
                 .iter()
                 .map(|(query_id, candidate)| member(query_id, candidate))
                 .collect(),
             purposes: combination
-                .purposes
+                .purposes()
                 .iter()
                 .map(siros_display::purpose::display)
                 .collect(),
@@ -404,14 +402,14 @@ fn evaluate(
 
     FfiMatchOutcome {
         matches,
-        satisfiable: result.satisfiable,
+        satisfiable: result.satisfaction() == Satisfaction::Satisfiable,
         combinations,
         dropped: dropped_count,
         // Exact only if the engine's count was exact *and* it survived the
         // narrowing. A clamped value reported as exact would say u32::MAX
         // combinations were dropped and mean it — the same overstated
         // precision this field exists to prevent, reintroduced by the cast.
-        dropped_is_exact: enumerated.dropped.is_exact()
-            && usize::try_from(dropped_count) == Ok(enumerated.dropped.count()),
+        dropped_is_exact: enumerated.dropped().is_exact()
+            && usize::try_from(dropped_count) == Ok(enumerated.dropped().count()),
     }
 }

@@ -13,7 +13,9 @@ use siros_zkp_req_nym_auth::verifier_id::VerifierId;
 use super::transactions::EntryPosition;
 use super::view::{AdditionView, CredentialView, MemberView, OfferView};
 use crate::display_rule::WalletDisplay;
-use crate::matching::{Answer, HolderBinding};
+use siros_dcql::HolderBinding;
+
+use crate::matching::Answer;
 
 /// The domain of the digest, which names this encoding.
 const DOMAIN: &str = "siros-presentation plan 2";

@@ -2,6 +2,7 @@
 
 use siros_codec::base64url;
 use siros_codec::date::DateTime;
+use siros_dcql::CryptographicBinding;
 use siros_mdoc::P256Key;
 use siros_sdjwt::{Claim, ClaimValue, Element, Object, SdJwt};
 
@@ -72,8 +73,11 @@ impl SdJwtVc {
 
     /// Whether `cnf` names a holder key: the KB-JWT must be secured by that key (Section
     /// 2.2.2.3).
-    pub(crate) fn bound(&self) -> bool {
-        self.holder_key.is_some()
+    pub(crate) fn binding(&self) -> CryptographicBinding {
+        match self.holder_key {
+            Some(_) => CryptographicBinding::Bound,
+            None => CryptographicBinding::Unbound,
+        }
     }
 
     pub(crate) fn validity(&self) -> Validity {

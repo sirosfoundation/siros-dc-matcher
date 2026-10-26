@@ -3,7 +3,7 @@
 
 use std::fmt;
 
-use siros_dcql::QueryId;
+use siros_dcql::{Multiplicity, QueryId};
 use siros_wallet_state::CredentialId;
 
 use crate::display_rule::WalletDisplay;
@@ -206,7 +206,7 @@ impl<'a> Planned<'a> {
             .filter(|&index| {
                 self.answered
                     .answers(index)
-                    .is_some_and(|answers| answers.query().multiple)
+                    .is_some_and(|answers| answers.query().multiplicity() == Multiplicity::Several)
             })
             .ok_or_else(|| PresentationError::SubsetQuery(id.clone()))
     }

@@ -7,7 +7,7 @@ mod joining;
 
 use itertools::{Either, Itertools};
 use serde_json::Value;
-use siros_dcql::{CredentialSetQuery, Dropped};
+use siros_dcql::{CredentialSetQuery, Dropped, SetRequirement};
 
 use crate::ids::{CandidateIndex, QueryIndex, SetIndex};
 use crate::matching::Answered;
@@ -235,7 +235,7 @@ fn sets(
         .enumerate()
         .partition_map(|(index, set)| {
             let choices = Choices::of_set(space, set);
-            if set.required {
+            if set.requirement() == SetRequirement::Required {
                 Either::Left(choices)
             } else {
                 let index = SetIndex::at(index);

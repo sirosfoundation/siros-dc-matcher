@@ -3,7 +3,7 @@
 use std::fmt;
 
 use itertools::Itertools;
-use siros_dcql::QueryId;
+use siros_dcql::{Multiplicity, QueryId};
 use siros_wallet_state::CredentialId;
 
 use super::selection::{Selection, Subset};
@@ -254,9 +254,7 @@ impl Planned<'_> {
             .answered
             .answers(picks.query)
             .ok_or(Inconsistency::Query(picks.query))?;
-        Ok(answers
-            .query()
-            .multiple
+        Ok((answers.query().multiplicity() == Multiplicity::Several)
             .then(|| Subset::new(picks.id.clone(), picks.credentials.clone())))
     }
 }

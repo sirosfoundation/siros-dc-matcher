@@ -85,15 +85,15 @@ fn run(db: &CredentialDatabase, request: &[u8]) -> Outcome {
     let Some(matched) = result.query("nym") else {
         return none;
     };
-    let first = matched.candidates.first().map(|candidate| {
+    let first = matched.candidates().first().map(|candidate| {
         let cq = query.credential("nym").expect("query");
         resolve(&policy, cq, candidate)
     });
     Outcome {
         ids: matched
-            .candidates
+            .candidates()
             .iter()
-            .map(|c| c.credential_id.clone())
+            .map(|c| c.credential_id().to_owned())
             .collect(),
         claims: first.as_ref().map(|r| r.claims.clone()).unwrap_or_default(),
         selection: first.and_then(|r| r.zkp_req.map(|z| z.to_json())),

@@ -180,7 +180,7 @@ impl<'a> Transactions<'a> {
                 member.candidates.iter().filter_map(|&(_, candidate)| {
                     let metadata = self.metadata_of(candidate)?;
                     let bound = Bound::of(member.answers, candidate);
-                    Some((bound, Presented::new(&member.answers.query().id, metadata)))
+                    Some((bound, Presented::new(member.answers.query().id(), metadata)))
                 })
             })
             .collect();

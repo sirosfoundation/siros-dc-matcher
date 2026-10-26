@@ -17,7 +17,9 @@ use super::forms::{DeviceResponse, Form};
 use super::selection::Chosen;
 use super::sign::{key_id, Sign, SignId, SigningInput};
 use crate::error::{Inconsistency, PresentationError};
-use crate::matching::{Answer, Claims, HolderBinding, ProofChoice};
+use siros_dcql::HolderBinding;
+
+use crate::matching::{Answer, Claims, ProofChoice};
 use crate::plan::{nym_answer, Bound, Offered};
 use siros_dcql::QueryId;
 

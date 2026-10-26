@@ -51,7 +51,7 @@ use android_credman::{CallingAppError, SetSink};
 use picker::{emit_set, Member};
 use siros_dc_matcher_core::db::CredentialDatabase;
 use siros_dc_matcher_core::evaluator::{credentials, resolve, ProfilePolicy};
-use siros_dcql::execute;
+use siros_dcql::{execute, Satisfaction};
 use siros_oid4vp::{diagnose, UnverifiedRequest};
 
 /// Prefix for the per-entry set ids.
@@ -167,11 +167,11 @@ fn run(input: &Input<'_>, sets: &mut impl SetSink) {
     // Credential(s)" — OpenID4VP 1.0 §6.4. Offering the half that matched
     // would be worse than offering nothing: the user consents to a
     // presentation that cannot satisfy the verifier.
-    if !result.satisfiable {
+    if result.satisfaction() == Satisfaction::Unsatisfiable {
         diag.emit(sets, "unsatisfiable", || {
             format!(
                 "{protocol}: parsed {} cred queries, not satisfiable",
-                query.credentials.len()
+                query.credentials().len()
             )
         });
         return;
@@ -181,7 +181,7 @@ fn run(input: &Input<'_>, sets: &mut impl SetSink) {
     // member is presented together and consented to as a unit. Alternatives
     // are separate combinations, and therefore separate sets.
     let enumerated = result.combinations(MAX_COMBINATIONS);
-    if enumerated.combinations.is_empty() {
+    if enumerated.combinations().is_empty() {
         diag.emit(sets, "zero", || {
             format!(
                 "{protocol}: satisfiable but zero combinations ({} held)",
@@ -191,19 +191,19 @@ fn run(input: &Input<'_>, sets: &mut impl SetSink) {
         return;
     }
 
-    'combinations: for (index, combination) in enumerated.combinations.iter().enumerate() {
+    'combinations: for (index, combination) in enumerated.combinations().iter().enumerate() {
         // Resolve every member before declaring the set. Skipping one after
         // the fact would leave the declared length disagreeing with the
         // entries actually added, and a gap in the positions — which the host
         // is right to treat as a matcher bug. A combination we cannot fully
         // emit is not offered at all.
         let resolved: Option<Vec<_>> = combination
-            .members
+            .members()
             .iter()
             .map(|(query_id, candidate)| {
                 db.credentials
                     .iter()
-                    .find(|c| c.id == candidate.credential_id)
+                    .find(|c| c.id == candidate.credential_id())
                     .map(|credential| (query_id, candidate, credential))
             })
             .collect();
@@ -218,7 +218,7 @@ fn run(input: &Input<'_>, sets: &mut impl SetSink) {
         // belong to the credential sets the combination satisfies, and the
         // combination is what the user is consenting to as a unit, so every
         // card in it is being offered for those reasons.
-        let purpose = siros_display::purpose::line(&combination.purposes);
+        let purpose = siros_display::purpose::line(combination.purposes());
 
         let mut members = Vec::with_capacity(resolved.len());
         for (query_id, candidate, credential) in &resolved {
@@ -258,8 +258,8 @@ fn run(input: &Input<'_>, sets: &mut impl SetSink) {
                 // when the product overflowed `usize`, not a wrapped value —
                 // but a wallet cannot tell a count from a bound by looking, so
                 // the second field says which this is.
-                "combinations_dropped": enumerated.dropped.count(),
-                "combinations_dropped_is_exact": enumerated.dropped.is_exact(),
+                "combinations_dropped": enumerated.dropped().count(),
+                "combinations_dropped_is_exact": enumerated.dropped().is_exact(),
             })
             .to_string();
 
@@ -310,12 +310,12 @@ fn disclosed_fields(
     candidate: &siros_dcql::Candidate,
 ) -> Vec<(String, String)> {
     candidate
-        .claims
+        .claims()
         .iter()
         .filter_map(|claim| {
             credential.claims.iter().find(|c| {
                 c.path.iter().map(String::as_str).eq(claim
-                    .path
+                    .path()
                     .iter()
                     .filter_map(siros_dcql::PathComponent::as_key))
             })

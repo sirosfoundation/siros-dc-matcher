@@ -7,22 +7,15 @@ use std::ops::Deref;
 
 use itertools::Itertools;
 use serde_json::Value;
-use siros_dcql::{CredentialSetQuery, Dropped};
+use siros_dcql::{CredentialSetQuery, Dropped, Multiplicity};
 
 use super::{Member, MAX_EXAMINED};
 use crate::ids::{CandidateIndex, QueryIndex};
 use crate::matching::Answered;
 
-/// How a query is answered in one combination.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Multiplicity {
-    /// By one of its candidates.
-    One,
-    /// By every candidate: the query sets `multiple`.
-    Every,
-}
-
-/// A Credential Query of an option, and its candidates.
+/// A Credential Query of an option, and its candidates. A query of [`Multiplicity::One`] is
+/// answered by one of its candidates in one combination, one of [`Multiplicity::Several`] by
+/// every candidate.
 #[derive(Debug, Clone, Copy)]
 struct Slot {
     query: QueryIndex,
@@ -35,7 +28,7 @@ impl Slot {
     fn width(self) -> usize {
         match self.multiplicity {
             Multiplicity::One => self.candidates.get(),
-            Multiplicity::Every => 1,
+            Multiplicity::Several => 1,
         }
     }
 
@@ -47,7 +40,7 @@ impl Slot {
     fn member(self, way: usize) -> Member {
         let candidates = match self.multiplicity {
             Multiplicity::One => vec![CandidateIndex::at(way)],
-            Multiplicity::Every => (0..self.candidates.get()).map(CandidateIndex::at).collect(),
+            Multiplicity::Several => (0..self.candidates.get()).map(CandidateIndex::at).collect(),
         };
         Member {
             query: self.query,
@@ -66,11 +59,7 @@ impl<'a> Space<'a> {
         let queries = answered
             .indexed()
             .map(|(query, answers)| {
-                let multiplicity = if answers.query().multiple {
-                    Multiplicity::Every
-                } else {
-                    Multiplicity::One
-                };
+                let multiplicity = answers.query().multiplicity();
                 let slot = NonZeroUsize::new(answers.candidates().len()).map(|candidates| Slot {
                     query,
                     multiplicity,
@@ -112,10 +101,10 @@ impl Choices {
     /// the request lacks is one no credential satisfies (Section 6.4).
     pub(super) fn of_set(space: &Space<'_>, set: &CredentialSetQuery) -> Self {
         let options = set
-            .options
+            .options()
             .iter()
             .map(|ids| ids.iter().map(|id| space.slot(id)).collect());
-        Self::of_options(set.purpose.clone(), options)
+        Self::of_options(set.purpose().cloned(), options)
     }
 
     /// The choices of the `options` that have a slot for each query.

@@ -223,7 +223,7 @@ pub fn diagnose(request: &[u8], registered: &dyn Fn(&str) -> bool) -> String {
         match strict_query(protocol, data) {
             Ok(q) => parts.push(format!(
                 "{protocol}: dcql_query parsed ({} credential queries) - should not have reached here",
-                q.credentials.len()
+                q.credentials().len()
             )),
             Err(e) => parts.push(format!("{protocol}: {}", e.reason())),
         }

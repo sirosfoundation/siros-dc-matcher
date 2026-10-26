@@ -281,9 +281,9 @@ fn offered(db: &CredentialDatabase, query: Value) -> Vec<String> {
     execute(&typed, &credentials(db), &policy)
         .query("nym")
         .map(|m| {
-            m.candidates
+            m.candidates()
                 .iter()
-                .map(|c| c.credential_id.clone())
+                .map(|c| c.credential_id().to_owned())
                 .collect()
         })
         .unwrap_or_default()
@@ -538,7 +538,7 @@ fn the_verifiers_circuit_lists_still_apply_with_capabilities() {
             .with_context(context.query(), context.client_metadata());
         execute(&typed, &credentials(&db), &policy)
             .query("nym")
-            .map_or(0, |m| m.candidates.len())
+            .map_or(0, |m| m.candidates().len())
     };
     assert_eq!(run(&[CIRCUIT]), 1);
     assert_eq!(run(&["urn:other"]), 0);

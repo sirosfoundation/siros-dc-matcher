@@ -3,7 +3,7 @@
 use siros_codec::base64url;
 use siros_codec::date::DateTime;
 use siros_credential::Format;
-use siros_dcql::{DcqlQuery, QueryId};
+use siros_dcql::{DcqlQuery, HolderBinding, QueryId};
 
 use crate::binding::Binding;
 use crate::error::TransactionDataError;
@@ -53,15 +53,15 @@ impl Entry {
             let credential = query
                 .credential(id)
                 .ok_or(TransactionDataError::UnknownCredentialId)?;
-            if credential.format != body.format().identifier() {
+            if *credential.format() != body.format().identifier() {
                 return Err(TransactionDataError::QueryFormat);
             }
-            if credential.format == Format::SdJwtVc.identifier()
-                && !credential.require_cryptographic_holder_binding
+            if *credential.format() == Format::SdJwtVc.identifier()
+                && credential.holder_binding() == HolderBinding::Optional
             {
                 return Err(TransactionDataError::HolderBindingNotRequired);
             }
-            credential_ids.push(credential.id.clone());
+            credential_ids.push(credential.id().clone());
         }
         Ok(Self {
             raw: raw.to_owned(),

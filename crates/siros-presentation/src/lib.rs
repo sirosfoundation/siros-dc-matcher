@@ -47,7 +47,7 @@ pub use display_rule::{Choice, DisplayFacts, Presentability, TransactionData, Wa
 pub use ids::{AdditionIndex, CandidateIndex, OfferIndex, OptionIndex, QueryIndex, SetIndex};
 pub use matching::{
     Answer, Answered, Answers, Asked, AskedError, Candidate, ChoiceError, Claims, Excluded,
-    Failure, HolderBinding, Matching, ProofChoice, QueryRefusal, ZkpQuery, ZkpRefusal,
+    Failure, Matching, ProofChoice, QueryRefusal, ZkpQuery, ZkpRefusal,
 };
 pub use offers::{
     Addition, EntryCarriers, EntryQueries, Member, Offer, Offers, Refusal, MAX_ADDITIONS,

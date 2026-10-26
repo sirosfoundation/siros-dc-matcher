@@ -4,6 +4,7 @@
 use serde_json::{Map, Value};
 use siros_codec::base64url;
 use siros_codec::cbor::{self, Value as Cbor};
+use siros_dcql::Multiplicity;
 
 use super::ResponseError;
 use crate::error_code::ErrorCode;
@@ -86,7 +87,9 @@ impl VerifiedRequest {
             match presentations.len() {
                 0 => return Err(ResponseError::NoPresentation),
                 1 => {}
-                _ if !query.multiple => return Err(ResponseError::MultipleNotAllowed),
+                _ if query.multiplicity() == Multiplicity::One => {
+                    return Err(ResponseError::MultipleNotAllowed)
+                }
                 _ => {}
             }
             if entries.iter().take(index).any(|(earlier, _)| earlier == id) {

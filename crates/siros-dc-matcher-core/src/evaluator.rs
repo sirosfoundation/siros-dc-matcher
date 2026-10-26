@@ -23,7 +23,9 @@
 use std::collections::BTreeMap;
 
 use serde_json::Value;
-use siros_dcql::{Credential as _, CredentialQuery, PathComponent, PathError};
+use siros_dcql::{
+    Credential as _, CredentialQuery, CryptographicBinding, PathComponent, PathError,
+};
 
 use crate::circuit_capabilities::{Capabilities, RequestedItem};
 use crate::db::{Claim, Credential, CredentialDatabase};
@@ -65,8 +67,8 @@ impl siros_dcql::Credential for BlobCredential<'_> {
     /// type without holder binding ever becomes registrable, the blob needs a
     /// field and this needs to read it; answering `true` on its behalf would
     /// hand a verifier exactly what it said it would not accept.
-    fn has_cryptographic_holder_binding(&self) -> bool {
-        true
+    fn binding(&self) -> CryptographicBinding {
+        CryptographicBinding::Bound
     }
 
     /// Resolve a claims path pointer against the claims the wallet registered.
@@ -132,7 +134,7 @@ fn trigger_is_required(trigger: &crate::profile::MetaTrigger, query: &Credential
     // Anything other than a JSON boolean is not a `false`, and not a claim
     // that a proof is optional either, so it reads as absent.
     query
-        .meta
+        .meta()
         .get(flag)
         .and_then(Value::as_bool)
         .unwrap_or(false)
@@ -261,7 +263,7 @@ impl<'a> ProfilePolicy<'a> {
             .get("credentials")?
             .as_array()?
             .iter()
-            .find(|c| c.get("id").and_then(Value::as_str) == Some(query.id.as_str()))?;
+            .find(|c| c.get("id").and_then(Value::as_str) == Some(query.id().as_str()))?;
         let parsed = ZkpReqQuery::parse(raw).ok()?;
         // zkp_req, Section 1.2: the Verifier MUST send both lists.
         let formats = ZkpFormats::from_client_metadata(context.client_metadata?).ok()?;
@@ -303,12 +305,12 @@ impl<'a> ProfilePolicy<'a> {
     fn requirements(&self, query: &CredentialQuery) -> Vec<crate::profile::Requirement> {
         let mut out: Vec<crate::profile::Requirement> = self
             .profile
-            .format_rule(&query.format)
+            .format_rule(query.format().as_str())
             .map(|rule| rule.requires.clone())
             .unwrap_or_default();
 
         for trigger in &self.profile.meta_triggers {
-            if !query.meta.contains_key(&trigger.when_meta_present) {
+            if !query.meta().contains_key(&trigger.when_meta_present) {
                 continue;
             }
             // Named systems, but the verifier said a proof is not required.
@@ -339,12 +341,12 @@ impl<'a> ProfilePolicy<'a> {
     fn applicable_capabilities(&self, query: &CredentialQuery) -> Vec<crate::profile::Requirement> {
         let mut out: Vec<crate::profile::Requirement> = self
             .profile
-            .format_rule(&query.format)
+            .format_rule(query.format().as_str())
             .map(|rule| rule.requires.clone())
             .unwrap_or_default();
 
         for trigger in &self.profile.meta_triggers {
-            if !query.meta.contains_key(&trigger.when_meta_present) {
+            if !query.meta().contains_key(&trigger.when_meta_present) {
                 continue;
             }
             let requirement = crate::profile::Requirement {
@@ -371,7 +373,7 @@ impl<'a> ProfilePolicy<'a> {
         let mut chosen = Vec::new();
         for requirement in format_rule_requires {
             let held = self.profile.capabilities.get(&requirement.capability)?;
-            let requested = query.meta.get(&requirement.from_meta)?.as_array()?;
+            let requested = query.meta().get(&requirement.from_meta)?.as_array()?;
 
             // Verifier preference order: the first entry this wallet can
             // actually satisfy wins, mirroring how claim_sets is handled.
@@ -553,9 +555,9 @@ fn is_nym_auth(credential: &crate::db::Credential) -> bool {
 /// one, or no `claims` at all (which asks for the whole attestation).
 fn discloses_nym_auth_secrets(query: &CredentialQuery) -> bool {
     use siros_dcql::PathComponent;
-    query.claims.is_empty()
-        || query.claims.iter().any(|claim| {
-            claim.path.iter().any(|component| match component {
+    query.claims().is_empty()
+        || query.claims().iter().any(|claim| {
+            claim.path().iter().any(|component| match component {
                 PathComponent::Key(k) => NYM_AUTH_UNDISCLOSABLE.contains(&k.as_str()),
                 PathComponent::Null => true,
                 PathComponent::Index(_) => false,
@@ -567,7 +569,7 @@ impl siros_dcql::Policy<BlobCredential<'_>> for ProfilePolicy<'_> {
     fn matches(&self, query: &CredentialQuery, credential: &BlobCredential<'_>) -> bool {
         let stored = credential.format();
 
-        match self.profile.format_rule(&query.format) {
+        match self.profile.format_rule(query.format().as_str()) {
             Some(rule) => {
                 if !rule.stored_formats.iter().any(|f| f == stored) {
                     return false;
@@ -584,7 +586,7 @@ impl siros_dcql::Policy<BlobCredential<'_>> for ProfilePolicy<'_> {
 
         // `zkp_req` is answered from its plan, not from claims, and an
         // invalid or unservable request is no match rather than a fallback.
-        if query.format == ZKP_REQ_FORMAT {
+        if *query.format() == ZKP_REQ_FORMAT {
             match self.zkp_req_selection(query) {
                 // The proof is made over the stored attestation itself.
                 Some(selection) if selection.query.credential_type.source_format() == stored => {}
@@ -627,7 +629,7 @@ fn meta_matches(
     if rule.op == Op::Ignore {
         return true;
     }
-    let Some(requested) = query.meta.get(&rule.meta_key) else {
+    let Some(requested) = query.meta().get(&rule.meta_key) else {
         return true;
     };
     let Some(field) = rule
@@ -712,7 +714,7 @@ pub fn resolve<'a>(
 
     // A `zkp_req` match discloses nothing: whatever the typed query says
     // about claims, none are selected.
-    let zkp_req = if query.format == ZKP_REQ_FORMAT {
+    let zkp_req = if *query.format() == ZKP_REQ_FORMAT {
         policy.zkp_req_selection(query)
     } else {
         None
@@ -721,7 +723,7 @@ pub fn resolve<'a>(
     let claims = if zkp_req.is_some() {
         &[][..]
     } else {
-        &candidate.claims[..]
+        candidate.claims()
     };
 
     Resolved {
@@ -730,7 +732,7 @@ pub fn resolve<'a>(
             .iter()
             .map(|claim| {
                 claim
-                    .path
+                    .path()
                     .iter()
                     .filter_map(PathComponent::as_key)
                     .map(str::to_owned)
@@ -739,7 +741,7 @@ pub fn resolve<'a>(
             .collect(),
         capabilities,
         meta: query
-            .meta
+            .meta()
             .iter()
             .filter_map(|(key, value)| {
                 // Scalars only: a nested object has no single string form, and

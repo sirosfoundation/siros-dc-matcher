@@ -4,7 +4,7 @@
 use serde_json::{Map, Value as Json};
 use siros_codec::base64url;
 use siros_codec::cbor::Value as Cbor;
-use siros_dcql::{mdoc_components, resolve, PathComponent, PathError};
+use siros_dcql::{mdoc_components, resolve, CryptographicBinding, PathComponent, PathError};
 use siros_mdoc::{IssuerSignedItem, Mdoc};
 use siros_sdjwt::{Node, NodeValue};
 
@@ -99,10 +99,10 @@ impl siros_dcql::Credential for Credential {
     }
 
     /// An SD-JWT VC is bound when it has `cnf`; an mdoc always has its MSO's device key.
-    fn has_cryptographic_holder_binding(&self) -> bool {
+    fn binding(&self) -> CryptographicBinding {
         match &self.body {
-            Body::SdJwtVc(vc) => vc.bound(),
-            Body::Mdoc(_) => true,
+            Body::SdJwtVc(vc) => vc.binding(),
+            Body::Mdoc(_) => CryptographicBinding::Bound,
         }
     }
 }
@@ -121,8 +121,8 @@ impl siros_dcql::Credential for UsableCredential<'_> {
         self.credential().claim(path)
     }
 
-    fn has_cryptographic_holder_binding(&self) -> bool {
-        self.credential().has_cryptographic_holder_binding()
+    fn binding(&self) -> CryptographicBinding {
+        self.credential().binding()
     }
 }
 

@@ -10,7 +10,8 @@ use siros_codec::date::Date;
 use siros_credential::{least_used, ClaimPointer, Format, PointerError};
 use siros_dcql::eval::select_claims;
 use siros_dcql::{
-    CredentialQuery, CredentialSetQuery, DcqlQuery, PathComponent, PathError, QueryId,
+    CredentialQuery, CredentialSetQuery, CryptographicBinding, DcqlQuery, HolderBinding,
+    PathComponent, PathError, QueryId,
 };
 use siros_wallet_state::PresentationRecord;
 use siros_zkp_req_nym_auth::catalogue::{BBS_SCHEMA_ID, MDOC_DOCTYPE};
@@ -59,10 +60,10 @@ impl<'r> Asked<'r> {
             .and_then(Value::as_array)
             .map_or(&[], Vec::as_slice);
         let queries = query
-            .credentials
+            .credentials()
             .iter()
             .map(|credential| {
-                let id = credential.id.clone();
+                let id = credential.id().clone();
                 let sent = sent_queries
                     .iter()
                     .find(|c| c.get("id").and_then(Value::as_str) == Some(id.as_str()))
@@ -76,7 +77,7 @@ impl<'r> Asked<'r> {
             .try_collect()?;
         Ok(Self {
             queries,
-            credential_sets: query.credential_sets.as_deref(),
+            credential_sets: query.credential_sets(),
             client_metadata,
         })
     }
@@ -97,27 +98,6 @@ pub enum Answer {
 pub struct Claims {
     pointers: Vec<ClaimPointer>,
     holder_binding: HolderBinding,
-}
-
-/// Whether a Credential Query requires cryptographic holder binding (OpenID4VP 1.0, Section
-/// 6.1).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum HolderBinding {
-    /// The presentation proves possession of the credential's key.
-    Required,
-    /// The presentation may go without a proof of possession.
-    Optional,
-}
-
-impl HolderBinding {
-    /// What `query`'s `require_cryptographic_holder_binding` asks.
-    fn of(query: &CredentialQuery) -> Self {
-        if query.require_cryptographic_holder_binding {
-            Self::Required
-        } else {
-            Self::Optional
-        }
-    }
 }
 
 impl Claims {
@@ -181,7 +161,7 @@ impl<'r, C: MatchCredential + Clone> Matching<'r, C> {
             .queries
             .into_iter()
             .map(|asked| {
-                let outcome = match asked.query.format.as_str() {
+                let outcome = match asked.query.format().as_str() {
                     "zkp_req" => {
                         match ZkpQuery::read(asked.sent, client_metadata, policy, systems, date) {
                             Ok(zkp) => Outcome::Proof {
@@ -285,7 +265,7 @@ fn claims<C: MatchCredential>(
     query: &CredentialQuery,
     credential: &C,
 ) -> Result<Option<Claims>, PointerError> {
-    let holder_binding = HolderBinding::of(query);
+    let holder_binding = query.holder_binding();
     let Some(format) = asked_format(query, credential) else {
         return Ok(None);
     };
@@ -306,7 +286,7 @@ fn claims<C: MatchCredential>(
     };
     let pointers = selected
         .into_iter()
-        .map(|claim| ClaimPointer::parse(claim.path))
+        .map(|claim| ClaimPointer::parse(claim.into_path()))
         .try_collect()?;
     Ok(Some(Claims {
         pointers,
@@ -317,13 +297,13 @@ fn claims<C: MatchCredential>(
 /// The format `query` asks for, when its `meta` names `credential`'s type (A1).
 fn asked_format<C: MatchCredential>(query: &CredentialQuery, credential: &C) -> Option<Format> {
     let credential_type = Some(credential.credential_type());
-    match query.format.as_str() {
+    match query.format().as_str() {
         "mso_mdoc" => {
-            let doctype = query.meta.get("doctype_value").and_then(Value::as_str);
+            let doctype = query.meta().get("doctype_value").and_then(Value::as_str);
             (doctype == credential_type).then_some(Format::Mdoc)
         }
         "dc+sd-jwt" => {
-            let vcts = query.meta.get("vct_values").and_then(Value::as_array);
+            let vcts = query.meta().get("vct_values").and_then(Value::as_array);
             let listed =
                 vcts.is_some_and(|vcts| vcts.iter().any(|v| v.as_str() == credential_type));
             listed.then_some(Format::SdJwtVc)
@@ -351,8 +331,11 @@ impl<C: MatchCredential> siros_dcql::Credential for Held<'_, C> {
         self.credential.claim_values(path)
     }
 
-    fn has_cryptographic_holder_binding(&self) -> bool {
-        self.credential.key_holding() == KeyHolding::Held
+    fn binding(&self) -> CryptographicBinding {
+        match self.credential.key_holding() {
+            KeyHolding::Held => CryptographicBinding::Bound,
+            KeyHolding::NotHeld => CryptographicBinding::Unbound,
+        }
     }
 }
 
