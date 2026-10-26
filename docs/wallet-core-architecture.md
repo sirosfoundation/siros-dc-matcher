@@ -253,8 +253,8 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
 - **D1.** It is the only metadata merger: it MUST remove `auxiliary_data` before any merge (privatedata §5A.3).
 - **D2.** Locale choice MUST be: exact tag, then primary language, then the first entry.
 - **D3.** Format-specific display (SD-JWT VC type metadata) wins over OpenID4VCI `credential_metadata`, which is the fallback (OpenID4VCI 1.0 §12.2.4).
-- **D4.** Values MUST be typed for display (text, boolean, integer, number, date, date-time, image, list, group). The UI formats dates and numbers for its locale.
-- **D5.** Bytes are shown only by length, except a claim the metadata declares as an image.
+- **D4.** Values MUST be typed for display (null, text, boolean, integer, number, date, date-time, bytes, list, group). The UI formats dates and numbers for its locale.
+- **D5.** Bytes are shown only by their length. No metadata in the ecosystem declares a claim as an image: vc's MDDL types the mDL portrait as `bstr`, and SD-JWT VC type metadata and OpenID4VCI 1.0 claims carry no value type.
 
 ### 4.12 Transaction data
 
