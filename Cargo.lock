@@ -1873,6 +1873,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "p384"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe42f1670a52a47d448f14b6a5c61dd78fce51856e68edaa38f7ae3a46b8d6b6"
+dependencies = [
+ "ecdsa",
+ "elliptic-curve",
+ "primeorder",
+ "sha2",
+]
+
+[[package]]
 name = "parking_lot"
 version = "0.12.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2608,6 +2620,21 @@ dependencies = [
  "siros-display",
  "siros-oid4vp",
  "siros-wallet-state",
+]
+
+[[package]]
+name = "siros-trust"
+version = "0.11.0"
+dependencies = [
+ "der",
+ "p256",
+ "p384",
+ "serde_json",
+ "sha2",
+ "siros-codec",
+ "siros-dcql",
+ "siros-trust",
+ "x509-cert",
 ]
 
 [[package]]

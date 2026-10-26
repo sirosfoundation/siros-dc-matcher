@@ -16,6 +16,7 @@ members = [
     "crates/siros-dc-matcher-testhost",
     "crates/siros-sdjwt",
     "crates/siros-transaction-data",
+    "crates/siros-trust",
     "crates/siros-wallet-state",
     "crates/siros-zkp-req",
     "crates/siros-zkp-req-nym-auth",
@@ -42,6 +43,7 @@ siros-mdoc = { path = "crates/siros-mdoc" }
 siros-oid4vp = { path = "crates/siros-oid4vp" }
 siros-sdjwt = { path = "crates/siros-sdjwt" }
 siros-transaction-data = { path = "crates/siros-transaction-data" }
+siros-trust = { path = "crates/siros-trust", default-features = false }
 siros-wallet-state = { path = "crates/siros-wallet-state" }
 siros-dc-matcher-core = { path = "crates/siros-dc-matcher-core" }
 siros-zkp-req = { path = "crates/siros-zkp-req" }
