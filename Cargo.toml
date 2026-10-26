@@ -4,6 +4,7 @@ members = [
     "crates/android-credman-sys",
     "crates/android-credman",
     "crates/siros-codec",
+    "crates/siros-credential",
     "crates/siros-dcql",
     "crates/siros-mdoc",
     "crates/siros-oid4vp",
@@ -31,6 +32,7 @@ rust-version = "1.82"
 
 [workspace.dependencies]
 siros-codec = { path = "crates/siros-codec" }
+siros-credential = { path = "crates/siros-credential" }
 siros-dcql = { version = "0.12.0", path = "crates/siros-dcql" }
 siros-mdoc = { path = "crates/siros-mdoc" }
 siros-oid4vp = { path = "crates/siros-oid4vp" }

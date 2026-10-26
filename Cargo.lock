@@ -1965,6 +1965,20 @@ name = "siros-codec"
 version = "0.11.0"
 
 [[package]]
+name = "siros-credential"
+version = "0.11.0"
+dependencies = [
+ "rustc-hash",
+ "serde_json",
+ "sha2",
+ "siros-codec",
+ "siros-dcql",
+ "siros-mdoc",
+ "siros-sdjwt",
+ "siros-wallet-state",
+]
+
+[[package]]
 name = "siros-dc-matcher-core"
 version = "0.11.0"
 dependencies = [
