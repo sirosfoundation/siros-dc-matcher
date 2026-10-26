@@ -4,6 +4,7 @@
 //! | --- | --- | --- |
 //! | Read a stored credential | [`SdJwt::parse`] | S1: the checks of RFC 9901, Section 7.1 |
 //! | Walk its claims | [`SdJwt::claims`], [`Object`], [`Claim`], [`ClaimValue`], [`Element`] | S2: issued array positions |
+//! | Resolve a claims path pointer | [`SdJwt::root`] gives the [`Node`] that [`siros_dcql::resolve`] walks | Q4 |
 //! | Select disclosures | [`SdJwt::select`] gives a [`Presentation`] | S3 |
 //! | Bind the presentation to a key | [`Presentation::key_binding`] gives a [`KeyBinding`] | S4 |
 //!
@@ -34,6 +35,7 @@ mod alg;
 mod error;
 mod json;
 mod key_binding;
+mod node;
 mod process;
 mod sd_jwt;
 mod select;
@@ -41,6 +43,7 @@ mod tree;
 
 pub use error::{KeyBindingError, ParseError};
 pub use key_binding::{KeyBinding, Presentation};
+pub use node::{Children, Node, NodeValue};
 pub use process::MAX_DEPTH;
 pub use sd_jwt::SdJwt;
 pub use tree::{Claim, ClaimValue, DisclosureId, Element, Object};

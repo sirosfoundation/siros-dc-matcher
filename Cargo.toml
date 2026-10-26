@@ -4,6 +4,7 @@ members = [
     "crates/android-credman-sys",
     "crates/android-credman",
     "crates/siros-codec",
+    "crates/siros-credential",
     "crates/siros-dcql",
     "crates/siros-mdoc",
     "crates/siros-oid4vp",
@@ -12,6 +13,7 @@ members = [
     "crates/siros-dc-matcher-ffi",
     "crates/siros-dc-matcher-testhost",
     "crates/siros-sdjwt",
+    "crates/siros-wallet-state",
     "crates/siros-zkp-req",
     "crates/siros-zkp-req-nym-auth",
 ]
@@ -33,6 +35,8 @@ siros-codec = { path = "crates/siros-codec" }
 siros-dcql = { version = "0.11.0", path = "crates/siros-dcql" }
 siros-mdoc = { path = "crates/siros-mdoc" }
 siros-oid4vp = { path = "crates/siros-oid4vp" }
+siros-sdjwt = { path = "crates/siros-sdjwt" }
+siros-wallet-state = { path = "crates/siros-wallet-state" }
 siros-dc-matcher-core = { path = "crates/siros-dc-matcher-core" }
 siros-zkp-req = { path = "crates/siros-zkp-req" }
 siros-zkp-req-nym-auth = { path = "crates/siros-zkp-req-nym-auth", default-features = false }
