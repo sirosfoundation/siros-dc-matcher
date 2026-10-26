@@ -197,7 +197,7 @@ fn offers(
     answered: &Wallet<'_>,
     transactions: &Transactions<'_>,
 ) -> Result<Offers, PresentationError> {
-    let entries = transactions.entry_queries(answered);
+    let entries = transactions.carriers(answered);
     let (offers, refusal) = Offers::of(answered, &entries, |members| {
         transactions.bind(answered, members).map(drop)
     });

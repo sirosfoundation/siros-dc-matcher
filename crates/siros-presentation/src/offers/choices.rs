@@ -81,14 +81,6 @@ impl<'a> Space<'a> {
         Self { queries }
     }
 
-    /// The position of the Credential Query `id`.
-    pub(super) fn index(&self, id: &str) -> Option<QueryIndex> {
-        self.queries
-            .iter()
-            .position(|(query, _)| *query == id)
-            .map(QueryIndex::at)
-    }
-
     /// The slot of the Credential Query `id`; `None` when no query has the id or the query has
     /// no candidate.
     fn slot(&self, id: &str) -> Option<Slot> {

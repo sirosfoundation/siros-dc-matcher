@@ -25,9 +25,14 @@ pub fn payment() -> String {
 
 /// The payment entry of `transaction_data` naming the query `query`.
 pub fn payment_for(query: &str) -> String {
+    payment_naming(&[query])
+}
+
+/// The payment entry of `transaction_data` naming the queries `queries`.
+pub fn payment_naming(queries: &[&str]) -> String {
     let entry = json!({
         "type": PAYMENT,
-        "credential_ids": [query],
+        "credential_ids": queries,
         "transaction_data_hashes_alg": ["sha-256"],
         "payload": {
             "transaction_id": "tx-0001",
@@ -41,13 +46,18 @@ pub fn payment_for(query: &str) -> String {
 
 /// The SCA Attestation type metadata of [`VCT`], listing the payment type with its labels.
 pub fn type_metadata() -> FetchResponse {
+    type_metadata_of(VCT)
+}
+
+/// The SCA Attestation type metadata of `vct`, listing the payment type with its labels.
+pub fn type_metadata_of(vct: &str) -> FetchResponse {
     let claim = |path: &[&str], label: &str| {
         let mut full = vec!["payload"];
         full.extend_from_slice(path);
         json!({"path": full, "display": [{"lang": "en", "label": label}]})
     };
     let document = json!({
-        "vct": VCT,
+        "vct": vct,
         "name": "Pay Card",
         "category": "urn:eu:europa:ec:eudi:sua:sca",
         "transaction_data_types": {PAYMENT: {

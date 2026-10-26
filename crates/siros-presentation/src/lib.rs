@@ -50,8 +50,8 @@ pub use matching::{
     Failure, HolderBinding, Matching, ProofChoice, QueryRefusal, ZkpQuery, ZkpRefusal,
 };
 pub use offers::{
-    Addition, EntryQueries, Member, Offer, Offers, SubsetError, MAX_ADDITIONS, MAX_EXAMINED,
-    MAX_OFFERS,
+    Addition, EntryCarriers, EntryQueries, Member, Offer, Offers, SubsetError, MAX_ADDITIONS,
+    MAX_EXAMINED, MAX_OFFERS,
 };
 
 #[cfg(feature = "wallet")]

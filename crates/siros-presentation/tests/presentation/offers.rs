@@ -12,7 +12,7 @@ use siros_presentation::{
 };
 use siros_zkp_req_nym_auth::testing::Spec;
 
-use crate::sd_jwt::{payment_for, type_metadata};
+use crate::sd_jwt::{payment_naming, type_metadata_of};
 use crate::verifier::{dc_api_unsigned, redirect_unsigned, NONCE, STATE};
 use crate::wallet::{mdoc, nym_auth, ready, respond_to, sd_jwt, Held, Wallet, MDL, MDL_NS, VCT};
 
@@ -265,28 +265,6 @@ fn offers_of_credential_sets() {
         Some(PresentationError::AdditionSetRepeated(set))
     );
 
-    // An optional set that alone carries a transaction entry joins the offer.
-    let mut wallet = Wallet::new(vec![mdl(1), pid(2)]);
-    wallet.documents.push((VCT.to_owned(), type_metadata()));
-    let pay = json!({"id": "pay", "format": "dc+sd-jwt", "meta": {"vct_values": [VCT]}});
-    let request = redirect_unsigned(&json!({
-        "response_type": "vp_token", "response_mode": "direct_post", "nonce": NONCE,
-        "state": STATE, "transaction_data": [payment_for("pay")],
-        "dcql_query": {"credentials": [mdl_query(false), pay],
-            "credential_sets": [{"options": [["mdl"]]}, {"options": [["pay"]], "required": false}]}
-    }));
-    let fetches = wallet.fetches(&request);
-    let input = wallet.input(&request, &fetches);
-    let planned = ready(&input).unwrap();
-    let [offer] = planned.view().offers() else {
-        panic!("one offer")
-    };
-    let members = vec![("mdl".to_owned(), 1), ("pay".to_owned(), 1)];
-    assert_eq!(shape(offer), (members, Vec::new()));
-    let entries = offer.members()[1].credentials()[0].entries();
-    assert_eq!(entries.iter().map(|e| e.value()).collect::<Vec<_>>(), [0]);
-    respond_to(&input, 0, Vec::new(), Vec::new()).unwrap();
-
     // The limits: 40 candidates give MAX_OFFERS offers and MAX_ADDITIONS additions, and two
     // required sets of one query examine MAX_EXAMINED of the 1600 combinations, 25 of them one.
     let mut held: Vec<Held> = (1..=40).map(mdl).collect();
@@ -331,5 +309,97 @@ fn offers_of_credential_sets() {
             additions_unexamined,
             "{dcql}"
         );
+    }
+}
+
+/// A3: when no member of an offer can carry a transaction entry, each optional set whose
+/// credentials can carry it joins the offer, in an offer of its own; a credential without type
+/// metadata carries nothing.
+#[test]
+fn optional_sets_join_an_offer_that_carries_no_entry() {
+    const VCT2: &str = "https://issuer.example/pay2";
+    const UNLOCATED: &str = "urn:example:pay";
+    let card = |id, vct: &str| {
+        Held::new(
+            id,
+            "dc+sd-jwt",
+            sd_jwt(vct, &[("given_name", json!("Erika"))]),
+        )
+    };
+    let mut wallet = Wallet::new(vec![
+        mdl(1),
+        card(2, VCT),
+        card(3, VCT2),
+        card(4, UNLOCATED),
+    ]);
+    wallet
+        .documents
+        .push((VCT.to_owned(), type_metadata_of(VCT)));
+    wallet
+        .documents
+        .push((VCT2.to_owned(), type_metadata_of(VCT2)));
+    let query = |id: &str, vct: &str| json!({"id": id, "format": "dc+sd-jwt", "meta": {"vct_values": [vct]}});
+    let optional = |options: Value| json!({"options": options, "required": false});
+    // (case, queries, credential sets, the members of each offer with the entries each binds)
+    type Members = Vec<(&'static str, Vec<usize>)>;
+    let cases: [(&str, Vec<Value>, Value, Vec<Members>); 3] = [
+        (
+            "each optional set that carries the entry gives an offer",
+            vec![mdl_query(false), query("pay", VCT), query("pay2", VCT2)],
+            json!([{"options": [["mdl"]]}, optional(json!([["pay"]])), optional(json!([["pay2"]]))]),
+            vec![
+                vec![("mdl", vec![]), ("pay", vec![0])],
+                vec![("mdl", vec![]), ("pay2", vec![0])],
+            ],
+        ),
+        (
+            "an offer that carries the entry joins nothing",
+            vec![mdl_query(false), query("pay", VCT), query("pay2", VCT2)],
+            json!([{"options": [["mdl"], ["pay"]]}, optional(json!([["pay2"]]))]),
+            vec![
+                vec![("mdl", vec![]), ("pay2", vec![0])],
+                vec![("pay", vec![0])],
+            ],
+        ),
+        (
+            "a required credential without type metadata carries nothing",
+            vec![query("pay", UNLOCATED), query("pay2", VCT2)],
+            json!([{"options": [["pay"]]}, optional(json!([["pay2"]]))]),
+            vec![vec![("pay", vec![]), ("pay2", vec![0])]],
+        ),
+    ];
+    for (case, queries, sets, expected) in cases {
+        let request = redirect_unsigned(&json!({
+            "response_type": "vp_token", "response_mode": "direct_post", "nonce": NONCE,
+            "state": STATE, "transaction_data": [payment_naming(&["pay", "pay2"])],
+            "dcql_query": {"credentials": queries, "credential_sets": sets}
+        }));
+        let fetches = wallet.fetches(&request);
+        let input = wallet.input(&request, &fetches);
+        let planned = ready(&input).unwrap();
+        let offers: Vec<Vec<(String, Vec<usize>)>> = planned
+            .view()
+            .offers()
+            .iter()
+            .map(|offer| {
+                offer
+                    .members()
+                    .iter()
+                    .map(|member| {
+                        let entries = member.credentials()[0].entries();
+                        let entries = entries.iter().map(|e| e.value()).collect();
+                        (member.query_id().as_str().to_owned(), entries)
+                    })
+                    .collect()
+            })
+            .collect();
+        let expected: Vec<Vec<(String, Vec<usize>)>> = expected
+            .into_iter()
+            .map(|offer| offer.into_iter().map(|(q, e)| (q.to_owned(), e)).collect())
+            .collect();
+        assert_eq!(offers, expected, "{case}");
+        for offer in 0..offers.len() {
+            respond_to(&input, offer, Vec::new(), Vec::new()).unwrap();
+        }
     }
 }

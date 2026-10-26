@@ -117,14 +117,27 @@ pub fn bind<'e, 'a>(
         .collect()
 }
 
-/// The position in `offer` of the credential `entry` binds to.
+/// The position in `offer` of the credential `entry` binds to: the first that carries it, for the
+/// first of its `credential_ids` one does.
 fn authorizing(entry: &Entry, offer: &[Presented<'_>]) -> Option<usize> {
-    let body = entry.body();
     entry.credential_ids().iter().find_map(|id| {
         offer
             .iter()
-            .position(|presented| presented.query_id == id && body.authorizes(presented.metadata))
+            .position(|presented| presented.query_id == id && entry.carried_by(presented))
     })
+}
+
+impl Entry {
+    /// Whether `presented` can carry the entry: it answers a Credential Query the entry's
+    /// `credential_ids` name, and its SCA Attestation metadata authorizes the entry's type
+    /// (OpenID4VP 1.0, Section 5.1; EC TS12 v1.0.1, Section 4.1).
+    #[must_use]
+    pub fn carried_by(&self, presented: &Presented<'_>) -> bool {
+        self.credential_ids()
+            .iter()
+            .any(|id| id == presented.query_id)
+            && self.body().authorizes(presented.metadata)
+    }
 }
 
 /// `jti`: a fresh, random KB-JWT identifier (RFC 7519, Section 4.1.7; EC TS12 v1.0.1, Section

@@ -15,7 +15,7 @@ use super::Unproven;
 use crate::error::{Inconsistency, PresentationError};
 use crate::ids::{position, CandidateIndex, QueryIndex};
 use crate::matching::{Answered, Answers, Candidate};
-use crate::offers::{EntryQueries, Member};
+use crate::offers::{EntryCarriers, EntryQueries, Member};
 
 position!(
     /// The position of an entry in the request's `transaction_data`.
@@ -90,16 +90,11 @@ impl<'a> Transactions<'a> {
     /// available in the wallet (Section 8.5).
     pub(crate) fn available(&self, answered: &Wallet<'a>) -> Result<(), TransactionDataError> {
         let unavailable = self.entries.iter().any(|entry| {
+            let named = named(answered, entry);
             answered
-                .queries()
-                .iter()
-                .filter(|answers| {
-                    entry
-                        .credential_ids()
-                        .iter()
-                        .any(|id| answers.id() == id.as_str())
-                })
-                .all(|answers| answers.candidates().is_empty())
+                .indexed()
+                .filter(|(query, _)| named.names(*query))
+                .all(|(_, answers)| answers.candidates().is_empty())
         });
         if unavailable {
             return Err(TransactionDataError::CredentialUnavailable);
@@ -125,12 +120,30 @@ impl<'a> Transactions<'a> {
             .collect()
     }
 
-    /// The Credential Queries each entry names.
-    pub(crate) fn entry_queries(&self, answered: &Wallet<'a>) -> Vec<EntryQueries> {
+    /// Each entry with the candidates that can carry it: those answering a query it names whose
+    /// type metadata authorizes its type.
+    pub(crate) fn carriers(&self, answered: &Wallet<'a>) -> Vec<EntryCarriers> {
         self.entries
             .iter()
-            .map(|entry| answered.entry_queries(entry.credential_ids().iter().map(String::as_str)))
+            .map(|entry| {
+                named(answered, entry).carriers(answered, |answers, candidate| {
+                    self.metadata_of(candidate).is_some_and(|metadata| {
+                        let query_id = answers.query().id.as_str();
+                        entry.carried_by(&Presented::new(query_id, metadata))
+                    })
+                })
+            })
             .collect()
+    }
+
+    /// The SCA Attestation metadata of `candidate`'s credential; none when its `vct` locates
+    /// none.
+    fn metadata_of(&self, candidate: &Candidate<UsableCredential<'a>>) -> Option<&ScaMetadata<'a>> {
+        let id = candidate.credential().credential().entry().credential_id();
+        self.metadata
+            .iter()
+            .find(|(credential, _)| *credential == id)
+            .map(|(_, metadata)| metadata)
     }
 
     /// The entries bound to the credentials of the offer of `members`, each binding with the
@@ -156,8 +169,7 @@ impl<'a> Transactions<'a> {
             .iter()
             .flat_map(|member| {
                 member.candidates.iter().filter_map(|&(index, candidate)| {
-                    let id = candidate.credential().credential().entry().credential_id();
-                    let (_, metadata) = self.metadata.iter().find(|(m, _)| *m == id)?;
+                    let metadata = self.metadata_of(candidate)?;
                     let query_id = member.answers.query().id.as_str();
                     Some((member.bound(index), Presented::new(query_id, metadata)))
                 })
@@ -182,23 +194,22 @@ impl<'a> Transactions<'a> {
     }
 }
 
+/// The Credential Queries `entry` names among `answered`'s.
+fn named(answered: &Wallet<'_>, entry: &Entry) -> EntryQueries {
+    answered.entry_queries(entry.credential_ids().iter().map(String::as_str))
+}
+
 /// The SD-JWT VCs that answer a query an entry of `entries` names, each once.
 fn authorizing<'w, 'a: 'w>(
     answered: &'w Wallet<'a>,
     entries: &'w [Entry],
 ) -> impl Iterator<Item = &'a Credential> + 'w {
+    let named: Vec<EntryQueries> = entries.iter().map(|e| named(answered, e)).collect();
     let mut seen: Vec<CredentialId> = Vec::new();
     answered
-        .queries()
-        .iter()
-        .filter(move |answers| {
-            entries.iter().any(|e| {
-                e.credential_ids()
-                    .iter()
-                    .any(|id| answers.id() == id.as_str())
-            })
-        })
-        .flat_map(Answers::candidates)
+        .indexed()
+        .filter(move |(query, _)| named.iter().any(|entry| entry.names(*query)))
+        .flat_map(|(_, answers)| answers.candidates())
         .map(|candidate| candidate.credential().credential())
         .filter(|credential| credential.format() == Format::SdJwtVc)
         .filter(move |credential| {
