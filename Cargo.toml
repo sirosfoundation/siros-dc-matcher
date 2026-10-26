@@ -26,7 +26,7 @@ rust-version = "1.82"
 
 [workspace.dependencies]
 siros-codec = { path = "crates/siros-codec" }
-siros-dcql = { version = "0.11.0", path = "crates/siros-dcql" }
+siros-dcql = { version = "0.12.0", path = "crates/siros-dcql" }
 siros-dc-matcher-core = { path = "crates/siros-dc-matcher-core" }
 siros-zkp-req = { path = "crates/siros-zkp-req" }
 siros-zkp-req-nym-auth = { path = "crates/siros-zkp-req-nym-auth", default-features = false }

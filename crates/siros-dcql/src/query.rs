@@ -12,6 +12,7 @@ use rustc_hash::FxHashSet;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use crate::id::{QueryId, QueryIdError};
 use crate::path::PathComponent;
 
 /// A complete DCQL query (§6).
@@ -32,7 +33,7 @@ pub struct DcqlQuery {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CredentialQuery {
     /// Identifies this query in the response and in `credential_sets`.
-    pub id: String,
+    pub id: QueryId,
     /// The requested credential format.
     pub format: String,
     /// Whether more than one credential may be returned for this query.
@@ -126,33 +127,25 @@ fn is_true(b: &bool) -> bool {
 /// that does not exist is not, because an option the wallet cannot satisfy is
 /// simply an option it does not offer.
 ///
-/// In particular the character restrictions §6.1 and §6.3 place on an `id` are
-/// *not* enforced. They carry no meaning for matching, and rejecting a
-/// verifier over a dot in an identifier would fail a request that is perfectly
-/// well understood.
+/// A credential query `id` is a [`QueryId`]: the parse refuses one that
+/// breaks §6.1, because the response keys the presentations by it.
 #[derive(Debug)]
 pub enum QueryError {
     /// Not well-formed JSON, or not shaped like a DCQL query.
     Json(serde_json::Error),
-    /// A credential query `id` is empty. "MUST be a non-empty string" (§6.1).
-    ///
-    /// Rejected rather than read past because an identifier that identifies
-    /// nothing is not something this crate can interpret on the verifier's
-    /// behalf — not because a reference to it would fail to resolve, since
-    /// `""` is a perfectly good JSON string and `credential_sets` could name
-    /// it.
-    EmptyCredentialId,
+    /// A credential query `id` breaks §6.1.
+    Id(QueryIdError),
     /// Two credential queries share this `id`. §6.1 requires it to "be unique
     /// across all Credential Query objects": a reference from
     /// `credential_sets` to a duplicated id names two different requests, and
     /// answering the first silently drops the second.
-    DuplicateCredentialId(String),
+    DuplicateCredentialId(QueryId),
     /// Two claims queries within one credential query share this `id`. §6.3
     /// requires uniqueness "within the particular claims array", for the same
     /// reason one level down: `claim_sets` refers to claims by id.
     DuplicateClaimId {
         /// The `id` of the credential query holding the duplicate.
-        credential: String,
+        credential: QueryId,
         /// The duplicated claims query `id`.
         claim: String,
     },
@@ -162,9 +155,7 @@ impl core::fmt::Display for QueryError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Json(e) => write!(f, "not a DCQL query: {e}"),
-            Self::EmptyCredentialId => {
-                write!(f, "a credential query has an empty id (§6.1)")
-            }
+            Self::Id(e) => write!(f, "not a DCQL query: {e}"),
             Self::DuplicateCredentialId(id) => {
                 write!(f, "two credential queries share the id {id:?} (§6.1)")
             }
@@ -180,7 +171,8 @@ impl std::error::Error for QueryError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Json(e) => Some(e),
-            _ => None,
+            Self::Id(e) => Some(e),
+            Self::DuplicateCredentialId(_) | Self::DuplicateClaimId { .. } => None,
         }
     }
 }
@@ -204,7 +196,11 @@ impl DcqlQuery {
     /// [`QueryError`]: the document is not a well-formed DCQL query, or its
     /// identifiers are not usable. Unknown properties are not an error (§6).
     pub fn from_json(json: &str) -> Result<Self, QueryError> {
-        let query: Self = serde_json::from_str(json)?;
+        let document: Value = serde_json::from_str(json)?;
+        if let Some(error) = credential_ids(&document).find_map(|id| QueryId::parse(id).err()) {
+            return Err(QueryError::Id(error));
+        }
+        let query = Self::deserialize(document)?;
         query.validate()?;
         Ok(query)
     }
@@ -216,15 +212,12 @@ impl DcqlQuery {
     ///
     /// # Errors
     ///
-    /// [`QueryError`], excluding [`QueryError::Json`] which only parsing can
-    /// produce.
+    /// [`QueryError`], excluding [`QueryError::Json`] and [`QueryError::Id`],
+    /// which only parsing can produce.
     pub fn validate(&self) -> Result<(), QueryError> {
-        let mut seen: FxHashSet<&str> =
+        let mut seen: FxHashSet<&QueryId> =
             FxHashSet::with_capacity_and_hasher(self.credentials.len(), Default::default());
         for credential in &self.credentials {
-            if credential.id.is_empty() {
-                return Err(QueryError::EmptyCredentialId);
-            }
             if !seen.insert(&credential.id) {
                 return Err(QueryError::DuplicateCredentialId(credential.id.clone()));
             }
@@ -235,8 +228,18 @@ impl DcqlQuery {
 
     /// The credential query with the given id.
     pub fn credential(&self, id: &str) -> Option<&CredentialQuery> {
-        self.credentials.iter().find(|c| c.id == id)
+        self.credentials.iter().find(|c| c.id == *id)
     }
+}
+
+/// The string `id` of each credential query of `document`, a DCQL query.
+fn credential_ids(document: &Value) -> impl Iterator<Item = &str> {
+    document
+        .get("credentials")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|credential| credential.get("id")?.as_str())
 }
 
 impl CredentialQuery {
@@ -270,6 +273,7 @@ impl CredentialQuery {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+    use crate::id::QueryIdError;
 
     /// Defaults the spec states explicitly, all of which change behaviour if
     /// got wrong: a missing `required` would make a mandatory set optional,
@@ -364,26 +368,25 @@ mod tests {
         assert_eq!(q.credentials[0].claims.len(), 2);
     }
 
-    /// "MUST be a non-empty string" (§6.1). An empty id cannot be referred to
-    /// from `credential_sets`, so it is rejected rather than read past.
+    /// §6.1: an `id` is "a non-empty string consisting of alphanumeric,
+    /// underscore (_), or hyphen (-) characters". One rule per row.
     #[test]
-    fn an_empty_credential_id_is_rejected() {
-        let err = DcqlQuery::from_json(r#"{"credentials":[{"id":"","format":"mso_mdoc"}]}"#)
-            .expect_err("an empty id is not usable");
-        assert!(matches!(err, QueryError::EmptyCredentialId), "got {err:?}");
-    }
-
-    /// The line this crate draws: reject what cannot be interpreted, tolerate
-    /// what can. §6.1 also restricts an id's characters, and a dot in one
-    /// changes nothing about what the verifier asked for — failing the request
-    /// over it would be a worse outcome than answering it.
-    #[test]
-    fn ids_outside_the_specified_character_set_are_tolerated() {
-        let q = DcqlQuery::from_json(
-            r#"{"credentials":[{"id":"eu.europa.ec.eudi.pid.1","format":"mso_mdoc"}]}"#,
-        )
-        .expect("a dotted id is unusual, not ambiguous");
-        assert!(q.credential("eu.europa.ec.eudi.pid.1").is_some());
+    fn credential_ids_follow_section_6_1() {
+        let cases = [
+            ("pid_1-a", Ok(())),
+            ("", Err(QueryIdError::Empty)),
+            ("eu.europa.ec.eudi.pid.1", Err(QueryIdError::Character('.'))),
+            ("pïd", Err(QueryIdError::Character('ï'))),
+        ];
+        for (id, outcome) in cases {
+            assert_eq!(QueryId::parse(id).map(drop), outcome, "{id:?}");
+            let json = format!(r#"{{"credentials":[{{"id":"{id}","format":"mso_mdoc"}}]}}"#);
+            let parsed = DcqlQuery::from_json(&json).map(drop).map_err(|e| match e {
+                QueryError::Id(e) => Some(e),
+                _ => None,
+            });
+            assert_eq!(parsed, outcome.map_err(Some), "{id:?}");
+        }
     }
 
     /// A `credential_sets` option naming a query that does not exist is not

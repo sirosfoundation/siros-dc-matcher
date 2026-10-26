@@ -9,6 +9,8 @@
 //! credentials do not each reinvent the processing rules — which is where the
 //! subtle mistakes live, since the spec distinguishes carefully between
 //! *removing an element from the selection* and *aborting with an error*.
+//! [`resolve`] is the one §7.1 implementation: any claim tree that implements
+//! [`ClaimNode`] walks it, a JSON value and an SD-JWT claim tree alike.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -75,22 +77,62 @@ impl core::fmt::Display for PathError {
     }
 }
 
-/// Process a claims path pointer against a JSON credential (§7.1.1).
+impl PathError {
+    /// A stable identifier.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::TypeMismatch { .. } => "path_type_mismatch",
+            Self::Empty => "path_selects_nothing",
+            Self::Malformed => "path_malformed",
+        }
+    }
+}
+
+/// What one component of a claims path pointer finds at one node (§7.1.1, steps 2.1 and 2.3).
+pub enum Lookup<N> {
+    /// The member or element the component names.
+    Found(N),
+    /// The node has the right kind and lacks the member, or the position is out of range or
+    /// withheld. The node leaves the selection.
+    Absent,
+    /// The node is not an object (for a key) or not an array (for an index). Processing
+    /// aborts.
+    WrongKind,
+}
+
+/// A node of a claim tree as a claims path pointer walks it (§7.1).
 ///
-/// Returns the selected elements. Follows the specified steps exactly,
+/// An array counts its issued positions. A position may be withheld, as an undisclosed
+/// SD-JWT array element is.
+pub trait ClaimNode: Sized {
+    /// The present elements of an array node, in order.
+    type Elements: Iterator<Item = Self>;
+
+    /// The member named `key` of an object node.
+    fn member(&self, key: &str) -> Lookup<Self>;
+
+    /// The element at position `index` of an array node.
+    fn element(&self, index: u64) -> Lookup<Self>;
+
+    /// The present elements of an array node. `None` when the node is not an array.
+    fn elements(&self) -> Option<Self::Elements>;
+}
+
+/// Process a claims path pointer against the claim tree under `root` (§7.1.1).
+///
+/// Returns the selected nodes. Follows the specified steps exactly,
 /// including the asymmetry that gives this function its shape: a component of
 /// the wrong *type* aborts, whereas a key or index that simply is not there
-/// drops that element from the selection and processing continues.
+/// drops that element from the selection and processing continues. An index
+/// on a withheld position selects nothing, and `null` selects the present
+/// elements.
 ///
 /// # Errors
 ///
 /// [`PathError::Malformed`] for an empty pointer, [`PathError::TypeMismatch`]
 /// per steps 2.1–2.3, and [`PathError::Empty`] per step 3 when the selection
 /// ends up empty.
-pub fn resolve_json<'a>(
-    root: &'a Value,
-    path: &[PathComponent],
-) -> Result<Vec<&'a Value>, PathError> {
+pub fn resolve<N: ClaimNode>(root: N, path: &[PathComponent]) -> Result<Vec<N>, PathError> {
     // §7: "A claims path pointer MUST be a non-empty array". Processing an
     // empty one would fall through to step 3 with the root still selected and
     // hand back the entire credential — a query too malformed to say what it
@@ -100,40 +142,25 @@ pub fn resolve_json<'a>(
     }
 
     // Step 1: select the root element.
-    let mut selected: Vec<&Value> = vec![root];
+    let mut selected = vec![root];
 
     // Step 2: process components from left to right.
     for (at, component) in path.iter().enumerate() {
-        let mut next: Vec<&Value> = Vec::new();
-        match component {
-            // 2.1 — string: select the key. Non-object aborts; a missing key
-            // removes that element rather than aborting.
-            PathComponent::Key(key) => {
-                for element in &selected {
-                    let object = element.as_object().ok_or(PathError::TypeMismatch { at })?;
-                    if let Some(v) = object.get(key) {
-                        next.push(v);
-                    }
+        let mut next = Vec::new();
+        for node in &selected {
+            match component {
+                // 2.1 — string: select the key. Non-object aborts; a missing
+                // key removes that element rather than aborting.
+                PathComponent::Key(key) => take(node.member(key), &mut next, at)?,
+                // 2.2 — null: select all elements of the selected array(s).
+                // Non-array aborts. Note there is no "missing" case here: an
+                // empty array contributes nothing and that is not an error yet.
+                PathComponent::Null => {
+                    next.extend(node.elements().ok_or(PathError::TypeMismatch { at })?);
                 }
-            }
-            // 2.2 — null: select all elements of the selected array(s).
-            // Non-array aborts. Note there is no "missing" case here: an
-            // empty array contributes nothing and that is not an error yet.
-            PathComponent::Null => {
-                for element in &selected {
-                    let array = element.as_array().ok_or(PathError::TypeMismatch { at })?;
-                    next.extend(array.iter());
-                }
-            }
-            // 2.3 — integer: select that index. Non-array aborts; an index
-            // past the end removes that array rather than aborting.
-            PathComponent::Index(i) => {
-                for element in &selected {
-                    let array = element.as_array().ok_or(PathError::TypeMismatch { at })?;
-                    if let Some(v) = usize::try_from(*i).ok().and_then(|i| array.get(i)) {
-                        next.push(v);
-                    }
-                }
+                // 2.3 — integer: select that index. Non-array aborts; an index
+                // past the end removes that array rather than aborting.
+                PathComponent::Index(i) => take(node.element(*i), &mut next, at)?,
             }
         }
         selected = next;
@@ -144,6 +171,54 @@ pub fn resolve_json<'a>(
         return Err(PathError::Empty);
     }
     Ok(selected)
+}
+
+/// Add what component `at` found to the selection `next`.
+fn take<N>(found: Lookup<N>, next: &mut Vec<N>, at: usize) -> Result<(), PathError> {
+    match found {
+        Lookup::Found(child) => next.push(child),
+        Lookup::Absent => {}
+        Lookup::WrongKind => return Err(PathError::TypeMismatch { at }),
+    }
+    Ok(())
+}
+
+impl<'a> ClaimNode for &'a Value {
+    type Elements = std::slice::Iter<'a, Value>;
+
+    fn member(&self, key: &str) -> Lookup<Self> {
+        match self.as_object() {
+            Some(object) => object.get(key).map_or(Lookup::Absent, Lookup::Found),
+            None => Lookup::WrongKind,
+        }
+    }
+
+    fn element(&self, index: u64) -> Lookup<Self> {
+        match self.as_array() {
+            Some(array) => usize::try_from(index)
+                .ok()
+                .and_then(|i| array.get(i))
+                .map_or(Lookup::Absent, Lookup::Found),
+            None => Lookup::WrongKind,
+        }
+    }
+
+    fn elements(&self) -> Option<Self::Elements> {
+        self.as_array().map(|array| array.iter())
+    }
+}
+
+/// Process a claims path pointer against a JSON credential (§7.1.1): [`resolve`]
+/// over a [`serde_json::Value`].
+///
+/// # Errors
+///
+/// [`PathError`] as [`resolve`] gives it.
+pub fn resolve_json<'a>(
+    root: &'a Value,
+    path: &[PathComponent],
+) -> Result<Vec<&'a Value>, PathError> {
+    resolve(root, path)
 }
 
 /// Validate a claims path pointer for an ISO mdoc credential (§7.2.1 step 1)

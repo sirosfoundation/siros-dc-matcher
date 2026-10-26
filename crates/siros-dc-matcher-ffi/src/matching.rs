@@ -371,11 +371,11 @@ fn evaluate(
         .matches
         .iter()
         .map(|query_match| FfiQueryMatch {
-            query_id: query_match.query_id.clone(),
+            query_id: query_match.query_id.to_string(),
             credentials: query_match
                 .candidates
                 .iter()
-                .map(|candidate| member(&query_match.query_id, candidate))
+                .map(|candidate| member(&query_match.query_id.to_string(), candidate))
                 .collect(),
         })
         .collect();
