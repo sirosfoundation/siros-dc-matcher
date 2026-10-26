@@ -53,7 +53,6 @@ use siros_dc_matcher_core::db::CredentialDatabase;
 use siros_dc_matcher_core::evaluator::{credentials, resolve, ProfilePolicy};
 use siros_dcql::execute;
 use siros_oid4vp::{diagnose, UnverifiedRequest};
-use siros_zkp_req::ReqItem;
 
 /// Prefix for the per-entry set ids.
 ///
@@ -192,7 +191,7 @@ fn run(input: &Input<'_>, sets: &mut impl SetSink) {
         return;
     }
 
-    for (index, combination) in enumerated.combinations.iter().enumerate() {
+    'combinations: for (index, combination) in enumerated.combinations.iter().enumerate() {
         // Resolve every member before declaring the set. Skipping one after
         // the fact would leave the declared length disagreeing with the
         // entries actually added, and a gap in the positions — which the host
@@ -209,7 +208,7 @@ fn run(input: &Input<'_>, sets: &mut impl SetSink) {
             })
             .collect();
         let Some(resolved) = resolved else {
-            continue;
+            continue 'combinations;
         };
 
         let set_id = format!("{SET_PREFIX}-{index}");
@@ -219,7 +218,7 @@ fn run(input: &Input<'_>, sets: &mut impl SetSink) {
         // belong to the credential sets the combination satisfies, and the
         // combination is what the user is consenting to as a unit, so every
         // card in it is being offered for those reasons.
-        let purpose = siros_dc_matcher_core::purpose::line(&combination.purposes);
+        let purpose = siros_display::purpose::line(&combination.purposes);
 
         let mut members = Vec::with_capacity(resolved.len());
         for (query_id, candidate, credential) in &resolved {
@@ -267,7 +266,10 @@ fn run(input: &Input<'_>, sets: &mut impl SetSink) {
             // A `zkp_req` match discloses no claims, so its rows describe
             // the proof being asked for instead, from the plan.
             let fields = match zk {
-                Some(zk) => zkp_req_rows(zk.items()),
+                Some(zk) => match siros_display::proof::rows(&zk.query, &zk.option) {
+                    Ok(rows) => rows,
+                    Err(_) => continue 'combinations,
+                },
                 None => disclosed_fields(credential, candidate),
             };
             members.push(Member {
@@ -321,58 +323,6 @@ fn disclosed_fields(
             (stored.display.clone(), value.to_owned())
         })
         .collect()
-}
-
-// ============================================================================
-// zkp_req rows
-// ============================================================================
-
-/// The longest row value emitted. The values are verifier-supplied strings, and
-/// a picker row is not the place for a paragraph of them.
-const ROW_MAX_CHARS: usize = 80;
-
-/// Said on every row, because every row is the request describing itself: the
-/// matcher has not checked the signature, so these are claims about what is
-/// being asked, not facts.
-const UNVERIFIED: &str = "(unverified request)";
-
-/// Picker rows for the answered option of a `zkp_req` request: one per item, no claim
-/// fields.
-///
-/// Text comes from the unverified request, so each row says so. Opaque values (`config`,
-/// `range`) are shown as given and truncated, and nothing is judged: whether the request is
-/// acceptable is the wallet's call.
-fn zkp_req_rows<'q>(items: impl Iterator<Item = &'q ReqItem>) -> Vec<(String, String)> {
-    items
-        .map(|item| {
-            let param = |name: &str| item.params.get(name).and_then(serde_json::Value::as_str);
-            let (label, detail) = match item.fn_id.as_str() {
-                "age_check" => ("Age check", param("range").map(|r| format!("age {r}"))),
-                "pseudonym" => ("Pseudonym", param("config").map(|c| format!("config {c}"))),
-                other => (other, None),
-            };
-            // Clip the detail, never the marker: the marker is the part that
-            // must survive.
-            let value = match detail {
-                None => UNVERIFIED.to_string(),
-                Some(detail) => format!(
-                    "{} {UNVERIFIED}",
-                    clip(&detail, ROW_MAX_CHARS - UNVERIFIED.len() - 1)
-                ),
-            };
-            (clip(label, ROW_MAX_CHARS), value)
-        })
-        .collect()
-}
-
-/// At most `max` characters, ending in an ellipsis if it had to cut.
-fn clip(text: &str, max: usize) -> String {
-    if text.chars().count() <= max {
-        return text.to_string();
-    }
-    let mut out: String = text.chars().take(max.saturating_sub(1)).collect();
-    out.push('\u{2026}');
-    out
 }
 
 // ============================================================================
@@ -614,27 +564,6 @@ mod tests {
                     invoke(zkp_req_request(query.clone()).as_bytes(), &blob, Ok(""));
                 }
             }
-        }
-    }
-
-    #[test]
-    fn zkp_req_rows_say_they_are_unverified_and_are_bounded() {
-        let query = siros_zkp_req::ZkpReqQuery::parse(&serde_json::json!({"id": "q",
-            "format": "zkp_req", "meta": {"source_format": "mso_mdoc", "doctype_value": "d"},
-            "_req": [
-                {"fn_id": "age_check", "params": {"range": "13-17"}},
-                {"fn_id": "pseudonym", "return": "n", "params": {"config": "c".repeat(500)}},
-                {"fn_id": "mystery", "return": "m"},
-                {"fn_id": "age_check", "return": "b"}]}))
-        .unwrap();
-        let rows = zkp_req_rows(query.items.iter());
-        assert_eq!(rows.len(), 4, "one row per item");
-        assert_eq!(rows[0].0, "Age check");
-        assert!(rows[0].1.starts_with("age 13-17"));
-        assert_eq!(rows[2], ("mystery".to_string(), UNVERIFIED.to_string()));
-        for (name, value) in &rows {
-            assert!(value.ends_with(UNVERIFIED), "{name}: {value}");
-            assert!(value.chars().count() <= ROW_MAX_CHARS, "{name}: {value}");
         }
     }
 }

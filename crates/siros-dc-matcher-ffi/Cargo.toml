@@ -29,6 +29,7 @@ bindgen = ["uniffi/cli"]
 [dependencies]
 siros-dc-matcher-core = { workspace = true }
 siros-dcql = { workspace = true }
+siros-display = { workspace = true }
 siros-oid4vp = { workspace = true }
 siros-codec = { workspace = true }
 siros-zkp-req = { workspace = true }
