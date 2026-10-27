@@ -13,6 +13,16 @@ this file.
 
 ## Unreleased
 
+### Added
+
+- `PathError` implements `std::error::Error`.
+
+### Changed
+
+- `PathError` and `QueryError` derive `Display` and `Error` with
+  `thiserror`, a new dependency. Their text and `QueryError::source` are
+  unchanged.
+
 ### Fixed
 
 - `DcqlQuery::validate` hashes with `rustc-hash`'s `FxHashSet`, whose hasher
