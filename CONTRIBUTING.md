@@ -70,7 +70,7 @@ structural resemblance to the oracle as a blocker.
 cargo test                      # everything, host targets
 cargo clippy --all-targets -- -D warnings
 cargo fmt --all -- --check
-cargo build -p siros-dc-matcher-wasm --target wasm32-wasip1 --release
+cargo build -p siros-picker --target wasm32-wasip1 --release
 ```
 
 `proving/` is a second workspace: the proof backends, which depend on edition-2024 crates that
@@ -85,7 +85,7 @@ Two floors are checked separately, because they differ on purpose:
 ```sh
 # Everything that ships inside the credential picker holds Rust 1.82.
 cargo +1.82 check --locked --all-features \
-  -p siros-dcql -p siros-dc-matcher-core -p siros-dc-matcher-wasm \
+  -p siros-dcql -p siros-dc-matcher-core -p siros-picker \
   -p siros-zkp-req -p siros-zkp-req-nym-auth -p siros-trust
 cargo +1.82 check --locked -p siros-oid4vp
 cargo +1.82 check --locked -p siros-trust
@@ -98,7 +98,7 @@ cargo semver-checks --package siros-dcql
 
 `cargo +1.82` needs that toolchain present: `rustup toolchain install 1.82`.
 
-`siros-dc-matcher-ffi` and `-testhost` declare 1.88 in their own manifests —
+`siros-dc-matcher-ffi` and `siros-picker-testhost` declare 1.88 in their own manifests —
 uniffi's bindgen chain and wasmtime need it — and neither ships in the picker.
 The `proving/` workspace holds 1.95. If you raise a floor, raise it in the manifest that owns it and say
 why there.

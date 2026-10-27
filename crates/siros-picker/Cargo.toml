@@ -1,5 +1,5 @@
 [package]
-name = "siros-dc-matcher-wasm"
+name = "siros-picker"
 version = "0.1.0"
 description = "The SIROS DC API matcher, built for the Android Credential Manager WASM sandbox"
 publish = false

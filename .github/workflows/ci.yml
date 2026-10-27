@@ -50,7 +50,7 @@ jobs:
       - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
       # The binary that actually ships is the wasm one; host-target lints alone
       # would not cover the cfg(target_arch = "wasm32") ABI code at all.
-      - run: cargo clippy --locked -p siros-dc-matcher-wasm --target wasm32-wasip1 --profile wasm-release -- -D warnings
+      - run: cargo clippy --locked -p siros-picker --target wasm32-wasip1 --profile wasm-release -- -D warnings
       # The host calls of the credman crates exist on wasm32 only.
       - run: cargo clippy --locked -p android-credman-sys -p android-credman --target wasm32-wasip1 -- -D warnings
 
@@ -209,7 +209,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
       # siros-dcql is on crates.io, so its `rust-version` is a promise to
-      # people outside this repository. -core and -wasm inherit the same floor
+      # people outside this repository. -core and siros-picker inherit the same floor
       # because they are what runs inside the credential picker, where the
       # toolchain is whatever the wallet's build uses, not ours.
       #
@@ -224,12 +224,12 @@ jobs:
       # it. siros-trust holds it without `chain`, the admission rule the picker
       # runs, and with it.
       #
-      # -ffi and -testhost are deliberately excluded: they declare 1.88 in
+      # -ffi and siros-picker-testhost are deliberately excluded: they declare 1.88 in
       # their own manifests. Checking them here would only re-discover that.
       - name: The 1.82 crates build on 1.82
         run: |
           cargo check --locked --all-features \
-            -p siros-codec -p siros-dcql -p siros-dc-matcher-core -p siros-dc-matcher-wasm \
+            -p siros-codec -p siros-dcql -p siros-dc-matcher-core -p siros-picker \
             -p android-credman-sys -p android-credman \
             -p siros-zkp-req -p siros-zkp-req-nym-auth -p siros-sdjwt -p siros-mdoc \
             -p siros-wallet-state -p siros-credential -p siros-display -p siros-transaction-data \
@@ -239,7 +239,7 @@ jobs:
           cargo check --locked -p siros-presentation --no-default-features
           cargo check --locked -p siros-transaction-data --no-default-features
           cargo check --locked --all-features --target wasm32-wasip1 \
-            -p siros-dc-matcher-wasm -p android-credman-sys -p android-credman
+            -p siros-picker -p android-credman-sys -p android-credman
 
   semver:
     name: siros-dcql API matches its version

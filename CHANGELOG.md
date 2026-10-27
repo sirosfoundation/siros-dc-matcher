@@ -21,6 +21,9 @@ against the 307,200-byte budget (303,418 at v0.11.0).
 
 ### Changed
 
+- The matcher crate `siros-dc-matcher-wasm` is `siros-picker`, and its test host
+  `siros-dc-matcher-testhost` is `siros-picker-testhost`. `make matcher` builds `matcher.wasm`
+  as before.
 - **BREAKING (request):** a query's options are its `_req_sets`, arrays of `_req` indexes;
   without `_req_sets`, `_req` is the one option (`zkp_req`, Section 2.1). `return` is optional
   except on `pseudonym`. `vp_formats_supported.zkp_req` requires both `proof_backend_values`

@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 use siros_dc_matcher_core::db::CredentialDatabase;
 use siros_dc_matcher_core::fixtures;
 use siros_dc_matcher_core::profile::{Capability, MatchProfile};
-use siros_dc_matcher_testhost::{run, Captured, CapturedEntry, Invocation};
+use siros_picker_testhost::{run, Captured, CapturedEntry, Invocation};
 
 mod signed;
 mod zkp_req;
@@ -60,7 +60,7 @@ fn build_matcher_wasm() -> Vec<u8> {
         .args([
             "build",
             "-p",
-            "siros-dc-matcher-wasm",
+            "siros-picker",
             "--target",
             "wasm32-wasip1",
             "--profile",

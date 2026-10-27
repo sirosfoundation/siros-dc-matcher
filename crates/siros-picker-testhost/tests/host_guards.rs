@@ -5,7 +5,7 @@
 //! guards are unexercised code — and a test host whose guards do not fire is
 //! worth less than no test host, because it reports success either way.
 
-use siros_dc_matcher_testhost::{run, Invocation};
+use siros_picker_testhost::{run, Invocation};
 
 /// A guest that adds one entry as `cred-a`, then attaches a field claiming
 /// `field_cred_id`.

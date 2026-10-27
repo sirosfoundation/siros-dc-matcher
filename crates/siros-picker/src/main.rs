@@ -39,7 +39,7 @@ mod simple_allocator;
 // export. The shipped build is `wasm32-wasip1` (see the Makefile); this
 // target is the WASI-free alternative and builds on the pinned toolchain:
 //
-//     cargo build -p siros-dc-matcher-wasm --target wasm32-unknown-unknown \
+//     cargo build -p siros-picker --target wasm32-unknown-unknown \
 //         --profile wasm-release
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 #[unsafe(no_mangle)]

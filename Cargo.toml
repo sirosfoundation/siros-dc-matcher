@@ -11,9 +11,9 @@ members = [
     "crates/siros-oid4vp",
     "crates/siros-presentation",
     "crates/siros-dc-matcher-core",
-    "crates/siros-dc-matcher-wasm",
+    "crates/siros-picker",
     "crates/siros-dc-matcher-ffi",
-    "crates/siros-dc-matcher-testhost",
+    "crates/siros-picker-testhost",
     "crates/siros-sdjwt",
     "crates/siros-transaction-data",
     "crates/siros-trust",
@@ -28,9 +28,9 @@ license = "BSD-2-Clause"
 repository = "https://github.com/sirosfoundation/siros-dc-matcher"
 authors = ["SIROS Foundation"]
 # Held by everything that ships inside the credential picker — siros-dcql,
-# siros-oid4vp without `crypto`, -core, -wasm, the two zkp_req crates, siros-trust
+# siros-oid4vp without `crypto`, -core, siros-picker, the two zkp_req crates, siros-trust
 # and the two android-credman crates — and by siros-mdoc and siros-sdjwt, and checked
-# on 1.82 in CI. The -ffi and -testhost crates override this upward: uniffi's
+# on 1.82 in CI. -ffi and siros-picker-testhost override this upward: uniffi's
 # bindgen chain and wasmtime both need more.
 rust-version = "1.82"
 

@@ -5,7 +5,7 @@
 //   node scripts/run_matcher.mjs path/to/request.json  # one you captured
 //
 // Why this exists: the Rust integration tests in
-// crates/siros-dc-matcher-testhost cover the same ground and are what CI runs.
+// crates/siros-picker-testhost cover the same ground and are what CI runs.
 // This is for the other situation — a request captured off a real verifier that
 // produces no picker entry, where the question is "what does the binary
 // actually do with these bytes", and the answer needs to arrive in seconds

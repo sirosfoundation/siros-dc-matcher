@@ -2502,29 +2502,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "siros-dc-matcher-testhost"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "serde_json",
- "siros-dc-matcher-core",
- "wasmtime",
- "wasmtime-wasi",
-]
-
-[[package]]
-name = "siros-dc-matcher-wasm"
-version = "0.1.0"
-dependencies = [
- "android-credman",
- "serde_json",
- "siros-dc-matcher-core",
- "siros-dcql",
- "siros-display",
- "siros-oid4vp",
-]
-
-[[package]]
 name = "siros-dcql"
 version = "0.12.0"
 dependencies = [
@@ -2577,6 +2554,29 @@ dependencies = [
  "siros-dcql",
  "siros-oid4vp",
  "x509-cert",
+]
+
+[[package]]
+name = "siros-picker"
+version = "0.1.0"
+dependencies = [
+ "android-credman",
+ "serde_json",
+ "siros-dc-matcher-core",
+ "siros-dcql",
+ "siros-display",
+ "siros-oid4vp",
+]
+
+[[package]]
+name = "siros-picker-testhost"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde_json",
+ "siros-dc-matcher-core",
+ "wasmtime",
+ "wasmtime-wasi",
 ]
 
 [[package]]

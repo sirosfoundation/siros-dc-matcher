@@ -36,7 +36,7 @@ make matcher                            # target/wasm32-wasip1/wasm-release/matc
 ```
 
 `cargo test` covers the matcher binary too, not just the libraries.
-`siros-dc-matcher-testhost` is a wasmtime host implementing the Credential
+`siros-picker-testhost` is a wasmtime host implementing the Credential
 Manager ABI, so its `tests/matcher_wasm/` drives the same `.wasm` a device
 would run. It builds the module on demand, so `make matcher` is not a
 prerequisite — but without the wasm target installed those tests **fail**,
@@ -48,7 +48,7 @@ Before pushing, what CI will check:
 ```sh
 cargo fmt --all -- --check
 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-cargo clippy --locked -p siros-dc-matcher-wasm --target wasm32-wasip1 \
+cargo clippy --locked -p siros-picker --target wasm32-wasip1 \
   --profile wasm-release -- -D warnings
 cargo clippy --locked -p android-credman-sys -p android-credman \
   --target wasm32-wasip1 -- -D warnings
@@ -122,9 +122,9 @@ Two profile details are load-bearing and easy to undo:
 | [`android-credman`](crates/android-credman) | any | The host ABI as types: nullability, version gating, set shape. |
 | [`siros-dcql`](crates/siros-dcql) | any | OpenID4VP 1.0 DCQL: claims-path pointers (§7), credential and credential-set queries (§6.1–6.3), selection (§6.4). No I/O, no platform. Published to crates.io. |
 | [`siros-dc-matcher-core`](crates/siros-dc-matcher-core) | any | The credential blob and its CBOR codec, the match profile and its evaluator, protocol dispatch. |
-| [`siros-dc-matcher-wasm`](crates/siros-dc-matcher-wasm) | `wasm32-wasip1` | The matcher binary. Ships `matcher.wasm`. |
+| [`siros-picker`](crates/siros-picker) | `wasm32-wasip1` | The matcher binary. Ships `matcher.wasm`. |
 | [`siros-dc-matcher-ffi`](crates/siros-dc-matcher-ffi) | UniFFI | Kotlin and Swift surface: build the registration blob, run the same match in-process, and present and verify `zkp_req`. |
-| [`siros-dc-matcher-testhost`](crates/siros-dc-matcher-testhost) | native, dev | A wasmtime host implementing the Credential Manager ABI, so the shipping `.wasm` is testable off-device. |
+| [`siros-picker-testhost`](crates/siros-picker-testhost) | native, dev | A wasmtime host implementing the Credential Manager ABI, so the shipping `.wasm` is testable off-device. |
 | [`siros-zkp-req`](crates/siros-zkp-req) | any | The `zkp_req` protocol layer: the query and its options, the usable pair, the presentation and the `vp_token`, the Verifier's structural checks. |
 | [`siros-zkp-req-nym-auth`](crates/siros-zkp-req-nym-auth) | any | The nym_auth catalogue and its Longfellow and Vega systems: session binding, credential checks, the presenter and verifier around a host's prover. |
 | [`siros-zkp-backend-longfellow`](proving/siros-zkp-backend-longfellow) | any | The Longfellow nym_auth system on `longfellow-libzk-v1`: zk-cred-longfellow behind the rulebook's artifact pins. In `proving/`. |

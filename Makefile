@@ -66,7 +66,7 @@ matcher:
 	us=$$(printf '\037'); \
 	base="$${CARGO_ENCODED_RUSTFLAGS:-$$(printf '%s' "$${RUSTFLAGS:-}" | tr -s ' ' | sed 's/^ //; s/ $$//' | tr ' ' "$$us")}"; \
 	export CARGO_ENCODED_RUSTFLAGS="$${base:+$$base$$us}--remap-path-prefix=$(REMAP_FIRST)$${us}--remap-path-prefix=$(REMAP_LAST)"; \
-	cargo build --locked -p siros-dc-matcher-wasm --target wasm32-wasip1 --profile wasm-release
+	cargo build --locked -p siros-picker --target wasm32-wasip1 --profile wasm-release
 	# rustc's wasm32-wasip1 CRT startup (crt1-command.o) unconditionally
 	# imports wasi_snapshot_preview1.environ_get/environ_sizes_get, whether
 	# or not the program touches env vars - and this one never does. The

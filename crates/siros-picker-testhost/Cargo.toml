@@ -1,5 +1,5 @@
 [package]
-name = "siros-dc-matcher-testhost"
+name = "siros-picker-testhost"
 version = "0.1.0"
 description = "A Credential Manager host implementation, so the matcher is testable off-device"
 publish = false
