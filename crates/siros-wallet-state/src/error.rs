@@ -13,9 +13,9 @@ pub enum WalletStateError {
     /// `schemaVersion` is neither 3 nor 4.
     UnsupportedSchemaVersion(FoundVersion),
     /// `credentials` is absent or not an array.
-    Credentials,
+    Credentials(ArrayFault),
     /// An entry of `credentials` is not an object.
-    CredentialEntry,
+    CredentialEntry(JsonTextError),
     /// A member of Section 6.0 of a credential entry breaks its rule. The number members are
     /// non-negative integers of 64 bits; the others are strings.
     CredentialMember(Member, MemberFault),
@@ -25,7 +25,7 @@ pub enum WalletStateError {
     /// `value`.
     Metadata(MetadataFault),
     /// `keypairs` is absent or not an array.
-    Keypairs,
+    Keypairs(ArrayFault),
     /// `presentations` is not an array of the records of `new_presentation`.
     Presentations(PresentationsFault),
 }
@@ -78,24 +78,44 @@ impl Member {
     }
 }
 
+/// Why a member that holds an array is refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ArrayFault {
+    /// The member is absent.
+    Absent,
+    /// The member holds no array.
+    NotArray(JsonTextError),
+}
+
 /// The rule `metadata` breaks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MetadataFault {
     /// `metadata` is not an array.
-    NotArray,
+    NotArray(JsonTextError),
     /// An entry is not an object.
-    EntryNotObject,
+    EntryNotObject(JsonTextError),
     /// An entry has no non-empty string `type`.
-    Type,
+    Type(TypeFault),
     /// An entry has no `value`.
     Value,
+}
+
+/// Why a `metadata` entry has no `type`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TypeFault {
+    /// The entry has no `type`.
+    Absent,
+    /// `type` is not a string.
+    NotString(JsonTextError),
+    /// `type` is the empty string.
+    Empty,
 }
 
 /// The rule `presentations` breaks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PresentationsFault {
     /// `presentations` is absent or not an array.
-    NotArray,
+    NotArray(ArrayFault),
     /// An entry lacks one of the six members of `new_presentation`, or one of them has the
     /// wrong type: `presentationId` and `transactionId` non-negative integers of 64 bits,
     /// `usedCredentialIds` an array of them, `presentationTimestampSeconds` an integer, and
@@ -111,12 +131,12 @@ impl WalletStateError {
         match self {
             Self::Malformed(_) => "state_malformed",
             Self::UnsupportedSchemaVersion(_) => "schema_version_unsupported",
-            Self::Credentials => "credentials_malformed",
-            Self::CredentialEntry => "credential_entry_malformed",
+            Self::Credentials(_) => "credentials_malformed",
+            Self::CredentialEntry(_) => "credential_entry_malformed",
             Self::CredentialMember(..) => "credential_member_malformed",
             Self::RepeatedCredentialId => "credential_id_repeated",
             Self::Metadata(_) => "metadata_malformed",
-            Self::Keypairs => "keypairs_malformed",
+            Self::Keypairs(_) => "keypairs_malformed",
             Self::Presentations(_) => "presentations_malformed",
         }
     }

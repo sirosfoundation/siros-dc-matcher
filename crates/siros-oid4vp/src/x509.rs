@@ -15,7 +15,7 @@ use x509_cert::ext::pkix::{CertificatePolicies, SubjectAltName};
 use x509_cert::name::Name;
 use x509_cert::{Certificate, TbsCertificate};
 
-use crate::intake::{ChainFault, IntakeError};
+use crate::intake::{ChainFault, IntakeError, LeafKeyFault};
 use crate::semantic::{Person, SemanticIdError, SemanticIdentifier};
 use crate::verified::{AccessCertificate, CertificateDer};
 
@@ -68,7 +68,7 @@ impl Chain {
         let leaf = Certificate::from_der(chain.first())
             .map_err(|error| invalid(ChainFault::LeafNotCertificate(error)))?;
         let tbs = &leaf.tbs_certificate;
-        let key = p256_key(tbs).ok_or(invalid(ChainFault::LeafKey))?;
+        let key = p256_key(tbs).map_err(|fault| invalid(ChainFault::LeafKey(fault)))?;
         let dns_names = match tbs.get::<SubjectAltName>() {
             Ok(Some((_, san))) => san
                 .0
@@ -123,19 +123,26 @@ impl Chain {
 }
 
 /// The P-256 key of the certificate of `tbs`.
-fn p256_key(tbs: &TbsCertificate) -> Option<PublicKey> {
+fn p256_key(tbs: &TbsCertificate) -> Result<PublicKey, LeafKeyFault> {
     let spki = &tbs.subject_public_key_info;
+    if spki.algorithm.oid != EC_PUBLIC_KEY {
+        return Err(LeafKeyFault::Algorithm(spki.algorithm.oid));
+    }
     let curve = spki
         .algorithm
         .parameters
         .as_ref()
-        .and_then(|p| p.decode_as::<ObjectIdentifier>().ok());
-    if spki.algorithm.oid != EC_PUBLIC_KEY || curve != Some(PRIME256V1) {
-        return None;
+        .ok_or(LeafKeyFault::CurveAbsent)?
+        .decode_as::<ObjectIdentifier>()
+        .map_err(LeafKeyFault::Curve)?;
+    if curve != PRIME256V1 {
+        return Err(LeafKeyFault::OtherCurve(curve));
     }
-    spki.subject_public_key
+    let point = spki
+        .subject_public_key
         .as_bytes()
-        .and_then(|point| PublicKey::from_sec1_bytes(point).ok())
+        .ok_or(LeafKeyFault::Unaligned)?;
+    PublicKey::from_sec1_bytes(point).map_err(|_| LeafKeyFault::Point)
 }
 
 /// The semantics identifier of the subject of `tbs`: under a natural-person policy its one

@@ -1,7 +1,5 @@
 //! Client Identifiers and their prefixes (OpenID4VP 1.0, Section 5.9).
 
-use std::fmt;
-
 /// A Client Identifier Prefix this wallet supports (OpenID4VP 1.0, Section 5.9.3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ClientIdPrefix {
@@ -77,11 +75,7 @@ impl ClientIdError {
     }
 }
 
-impl fmt::Display for ClientIdError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(ClientIdError);
 
 impl std::error::Error for ClientIdError {}
 

@@ -1,8 +1,6 @@
 //! The rules of the signed-request and encrypted-response policy of nym_auth (nym_auth
 //! catalogue, "Binding" and "Response confidentiality").
 
-use std::fmt;
-
 use siros_oid4vp::ClientIdError;
 
 use crate::verifier_id::VerifierIdRule;
@@ -61,11 +59,7 @@ impl PolicyRule {
     }
 }
 
-impl fmt::Display for PolicyRule {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(PolicyRule);
 
 impl std::error::Error for PolicyRule {}
 
@@ -90,10 +84,6 @@ impl RequestRefusal {
     }
 }
 
-impl fmt::Display for RequestRefusal {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(RequestRefusal);
 
 impl std::error::Error for RequestRefusal {}

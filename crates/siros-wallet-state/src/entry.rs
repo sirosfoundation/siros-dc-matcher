@@ -3,9 +3,10 @@
 use rustc_hash::FxHashMap;
 use serde::de::DeserializeOwned;
 use serde_json::value::RawValue;
+use siros_codec::json::JsonTextError;
 use siros_codec::member::MemberFault;
 
-use crate::error::{Member, MetadataFault, WalletStateError};
+use crate::error::{Member, MetadataFault, TypeFault, WalletStateError};
 use crate::ids::{
     known, BatchId, ConfigurationId, CredentialId, FormatIdentifier, InstanceId, IssuerIdentifier,
     KeyId,
@@ -16,13 +17,21 @@ use crate::ids::{
 pub(crate) type Members<'a> = FxHashMap<String, &'a RawValue>;
 
 /// The members of the object `raw` holds.
-pub(crate) fn object(raw: &RawValue) -> Option<Members<'_>> {
-    serde_json::from_str(raw.get()).ok()
+///
+/// # Errors
+///
+/// [`JsonTextError`]: `raw` holds no object.
+pub(crate) fn object(raw: &RawValue) -> Result<Members<'_>, JsonTextError> {
+    serde_json::from_str(raw.get()).map_err(|error| JsonTextError::of(&error))
 }
 
 /// The elements of the array `raw` holds.
-pub(crate) fn array(raw: &RawValue) -> Option<Vec<&RawValue>> {
-    serde_json::from_str(raw.get()).ok()
+///
+/// # Errors
+///
+/// [`JsonTextError`]: `raw` holds no array.
+pub(crate) fn array(raw: &RawValue) -> Result<Vec<&RawValue>, JsonTextError> {
+    serde_json::from_str(raw.get()).map_err(|error| JsonTextError::of(&error))
 }
 
 /// A credential entry: the eight members of Section 6.0 and its `metadata`.
@@ -52,7 +61,7 @@ impl CredentialData {
 impl CredentialEntry {
     /// The entry `raw` holds: the members of Section 6.0 and `metadata`.
     pub(crate) fn parse(raw: &RawValue) -> Result<Self, WalletStateError> {
-        let members = object(raw).ok_or(WalletStateError::CredentialEntry)?;
+        let members = object(raw).map_err(WalletStateError::CredentialEntry)?;
         let text = |name: Member| member::<String>(&members, name);
         Ok(Self {
             credential_id: CredentialId::new(member(&members, Member::CredentialId)?),
@@ -181,17 +190,23 @@ impl MetadataValue {
 /// The entries of the `metadata` member `raw`.
 fn metadata(raw: &RawValue) -> Result<Vec<MetadataEntry>, WalletStateError> {
     let fault = WalletStateError::Metadata;
-    let entries = array(raw).ok_or(fault(MetadataFault::NotArray))?;
+    let entries = array(raw).map_err(|error| fault(MetadataFault::NotArray(error)))?;
     entries
         .into_iter()
         .map(|entry| {
-            let members = object(entry).ok_or(fault(MetadataFault::EntryNotObject))?;
+            let members =
+                object(entry).map_err(|error| fault(MetadataFault::EntryNotObject(error)))?;
             let kind = members
                 .get("type")
-                .and_then(|kind| serde_json::from_str::<String>(kind.get()).ok())
-                .and_then(known)
+                .ok_or(fault(MetadataFault::Type(TypeFault::Absent)))?;
+            let kind = serde_json::from_str::<String>(kind.get()).map_err(|error| {
+                fault(MetadataFault::Type(TypeFault::NotString(
+                    JsonTextError::of(&error),
+                )))
+            })?;
+            let kind = known(kind)
                 .map(MetadataType)
-                .ok_or(fault(MetadataFault::Type))?;
+                .ok_or(fault(MetadataFault::Type(TypeFault::Empty)))?;
             let value = members.get("value").ok_or(fault(MetadataFault::Value))?;
             Ok(MetadataEntry {
                 kind,

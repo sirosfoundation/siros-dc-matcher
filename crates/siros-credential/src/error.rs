@@ -219,11 +219,7 @@ impl ValidityError {
     }
 }
 
-impl fmt::Display for ValidityError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(ValidityError);
 
 impl std::error::Error for ValidityError {}
 
@@ -272,10 +268,6 @@ impl HolderKeyError {
     }
 }
 
-impl fmt::Display for HolderKeyError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(HolderKeyError);
 
 impl std::error::Error for HolderKeyError {}

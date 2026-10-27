@@ -92,11 +92,7 @@ impl ProveError {
     }
 }
 
-impl fmt::Display for ProveError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(ProveError);
 
 impl std::error::Error for ProveError {}
 

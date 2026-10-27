@@ -1,7 +1,5 @@
 //! Why display refuses an input. Each error has a stable code.
 
-use std::fmt;
-
 use siros_dcql::{ClaimPathError, PathError};
 
 use crate::locale::LocaleError;
@@ -39,7 +37,7 @@ pub enum DisplayError {
     /// A `logo` breaks its rules.
     Logo(LogoFault),
     /// A colour is no numerical colour value of CSS Color Module Level 3.
-    Colour,
+    Colour(ColourFault),
     /// A `claims` array, a claim description or one of its `display` entries breaks its rules.
     Claims(EntryFault),
     /// A claim `path` is no claims path pointer.
@@ -76,6 +74,23 @@ pub enum DisplayError {
     PointerUnlabelled,
     /// A number has no `f64` value.
     NumberUnrepresentable,
+}
+
+/// Why text is no numerical colour value of CSS Color Module Level 3, Section 4.2.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ColourFault {
+    /// The member is no string.
+    NotString,
+    /// The text after `#` is other than three or six hexadecimal digits.
+    Hexadecimal,
+    /// The text has no `(`, or does not end with `)`.
+    Notation,
+    /// The function is none of `rgb`, `rgba`, `hsl` and `hsla` with its number of arguments; it
+    /// has this many.
+    Function(usize),
+    /// The argument at this position is no `<integer>`, `<number>` or `<percentage>` as its
+    /// place takes.
+    Argument(usize),
 }
 
 /// The rule an array of metadata entries, or one of its entries, breaks.
@@ -122,7 +137,7 @@ impl DisplayError {
             Self::Display(_) => "display_malformed",
             Self::DisplayLocaleRepeated => "display_locale_repeated",
             Self::Logo(_) => "logo_malformed",
-            Self::Colour => "colour_malformed",
+            Self::Colour(_) => "colour_malformed",
             Self::Claims(_) => "claims_malformed",
             Self::ClaimPath(_) => "claim_path_malformed",
             Self::ClaimRepeated => "claim_repeated",
@@ -143,10 +158,6 @@ impl DisplayError {
     }
 }
 
-impl fmt::Display for DisplayError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(DisplayError);
 
 impl std::error::Error for DisplayError {}

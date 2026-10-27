@@ -1,5 +1,5 @@
-//! The macros that declare value newtypes: a position in a list, and a text whose role is its
-//! type.
+//! The macros that declare value newtypes, a position in a list and a text whose role is its
+//! type, and the macro that shows an error by its stable code.
 
 /// Declares a position among the items of one list: a number, from 0. The visibility before
 /// the name is the constructor's: `pub(crate)` for a position the crate takes as it enumerates
@@ -84,5 +84,19 @@ macro_rules! text_value {
                 f.write_str(&self.0)
             }
         }
+    };
+}
+
+/// Implements `Display` for each type, showing its stable code: what its `code()` returns.
+#[macro_export]
+macro_rules! display_code {
+    ($($name:ty),+ $(,)?) => {
+        $(
+            impl ::core::fmt::Display for $name {
+                fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                    f.write_str(self.code())
+                }
+            }
+        )+
     };
 }

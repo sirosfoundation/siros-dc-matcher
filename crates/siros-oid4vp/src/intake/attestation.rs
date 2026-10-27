@@ -4,10 +4,12 @@
 
 use serde_json::{Map, Value};
 use siros_codec::date::DateTime;
+use siros_codec::json::JsonTextError;
+use siros_codec::member::MemberFault;
 
 use super::signature::{by_request, strings, UriRule, Verifier};
 use super::trust::{self, KeyMaterial, MetadataAnswer, TrustSubject};
-use super::{Answers, AttestationFault, Halt, IntakeError};
+use super::{Answers, AttestationClaim, AttestationFault, ClaimsFault, Halt, IntakeError};
 use crate::client_id::ClientId;
 use crate::jose::{self, Signed};
 use crate::values::AttestationIssuer;
@@ -37,7 +39,8 @@ pub(super) fn authenticate(
     if attestation.text("typ") != Some(ATTESTATION_TYP) {
         return Err(invalid(AttestationFault::Typ).into());
     }
-    let claims = Claims::parse(&payload).ok_or(invalid(AttestationFault::Claims))?;
+    let claims =
+        Claims::parse(&payload).map_err(|fault| invalid(AttestationFault::Claims(fault)))?;
     if claims.sub != client_id.value() {
         return Err(IntakeError::AttestationSubjectMismatch.into());
     }
@@ -82,8 +85,12 @@ pub(super) fn authenticate(
 struct NumericDate(f64);
 
 impl NumericDate {
-    fn of(value: &Value) -> Option<Self> {
-        value.as_f64().map(Self)
+    /// The date of the claim `claim`, `value`.
+    fn of(claim: AttestationClaim, value: &Value) -> Result<Self, ClaimsFault> {
+        value
+            .as_f64()
+            .map(Self)
+            .ok_or(ClaimsFault::Claim(claim, MemberFault::WrongType))
     }
 
     /// Whether `now` is at or after this date.
@@ -103,23 +110,45 @@ struct Claims {
 }
 
 impl Claims {
-    fn parse(payload: &[u8]) -> Option<Self> {
-        let claims: Map<String, Value> = serde_json::from_slice(payload).ok()?;
-        let text = |name: &str| claims.get(name).and_then(Value::as_str).map(str::to_owned);
-        let nbf = match claims.get("nbf") {
-            None => None,
-            Some(nbf) => Some(NumericDate::of(nbf)?),
+    fn parse(payload: &[u8]) -> Result<Self, ClaimsFault> {
+        let claims: Map<String, Value> = serde_json::from_slice(payload)
+            .map_err(|error| ClaimsFault::NotObject(JsonTextError::of(&error)))?;
+        let claim = |claim: AttestationClaim, name: &str| {
+            claims
+                .get(name)
+                .ok_or(ClaimsFault::Claim(claim, MemberFault::Absent))
         };
-        let redirect_uris = match claims.get("redirect_uris") {
-            None => None,
-            Some(uris) => Some(strings(uris)?),
+        let text = |name: AttestationClaim, member: &str| {
+            claim(name, member)?
+                .as_str()
+                .map(str::to_owned)
+                .ok_or(ClaimsFault::Claim(name, MemberFault::WrongType))
         };
-        Some(Self {
-            iss: AttestationIssuer::new(text("iss")?),
-            sub: text("sub")?,
-            exp: NumericDate::of(claims.get("exp")?)?,
+        let nbf = claims
+            .get("nbf")
+            .map(|nbf| NumericDate::of(AttestationClaim::Nbf, nbf))
+            .transpose()?;
+        let redirect_uris = claims
+            .get("redirect_uris")
+            .map(|uris| {
+                strings(uris).ok_or(ClaimsFault::Claim(
+                    AttestationClaim::RedirectUris,
+                    MemberFault::WrongType,
+                ))
+            })
+            .transpose()?;
+        let jwk = claim(AttestationClaim::Cnf, "cnf")?
+            .get("jwk")
+            .ok_or(ClaimsFault::Claim(
+                AttestationClaim::Cnf,
+                MemberFault::WrongType,
+            ))?;
+        Ok(Self {
+            iss: AttestationIssuer::new(text(AttestationClaim::Iss, "iss")?),
+            sub: text(AttestationClaim::Sub, "sub")?,
+            exp: NumericDate::of(AttestationClaim::Exp, claim(AttestationClaim::Exp, "exp")?)?,
             nbf,
-            cnf: jose::p256_key(claims.get("cnf")?.get("jwk")?)?,
+            cnf: jose::p256_key(jwk).map_err(ClaimsFault::Key)?,
             redirect_uris,
         })
     }

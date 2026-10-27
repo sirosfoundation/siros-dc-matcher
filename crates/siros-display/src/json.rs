@@ -4,7 +4,7 @@ use rustc_hash::FxHashSet;
 use serde_json::{Map, Value};
 
 use crate::colour::Colour;
-use crate::error::{DisplayError, EntryFault};
+use crate::error::{ColourFault, DisplayError, EntryFault};
 use crate::locale::Locale;
 use crate::text::DisplayText;
 
@@ -61,7 +61,7 @@ pub(crate) fn colour(
     object: &Map<String, Value>,
     name: &str,
 ) -> Result<Option<Colour>, DisplayError> {
-    string(object, name, DisplayError::Colour)?
+    string(object, name, DisplayError::Colour(ColourFault::NotString))?
         .map(Colour::parse)
         .transpose()
 }

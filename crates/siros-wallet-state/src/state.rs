@@ -5,7 +5,7 @@ use serde_json::value::RawValue;
 use siros_codec::json::JsonTextError;
 
 use crate::entry::{array, object, CredentialEntry, Members};
-use crate::error::{FoundVersion, PresentationsFault, WalletStateError};
+use crate::error::{ArrayFault, FoundVersion, PresentationsFault, WalletStateError};
 use crate::ids::KeyId;
 use crate::presentation::PresentationRecord;
 
@@ -45,11 +45,9 @@ impl WalletState {
             .into_iter()
             .filter_map(key_id)
             .collect();
-        let presentations = elements(
-            &members,
-            "presentations",
-            WalletStateError::Presentations(PresentationsFault::NotArray),
-        )?
+        let presentations = elements(&members, "presentations", |fault| {
+            WalletStateError::Presentations(PresentationsFault::NotArray(fault))
+        })?
         .into_iter()
         .map(PresentationRecord::parse)
         .collect::<Result<Vec<_>, _>>()?;
@@ -86,18 +84,25 @@ fn schema_version(members: &Members<'_>) -> FoundVersion {
     }
 }
 
-/// The elements of the array member `name`.
+/// The elements of the array member `name`; `error` gives the refusal of its fault.
 fn elements<'a>(
     members: &Members<'a>,
     name: &str,
-    error: WalletStateError,
+    error: fn(ArrayFault) -> WalletStateError,
 ) -> Result<Vec<&'a RawValue>, WalletStateError> {
-    members.get(name).copied().and_then(array).ok_or(error)
+    let member = members.get(name).ok_or(error(ArrayFault::Absent))?;
+    array(member).map_err(|fault| error(ArrayFault::NotArray(fault)))
 }
 
 /// The `kid` of a `keypairs` entry. Privatedata 3.1, Section 6 keeps entries a reader cannot
 /// parse; those name no key.
 fn key_id(entry: &RawValue) -> Option<KeyId> {
-    let kid = object(entry)?.get("kid").copied()?;
-    KeyId::known(serde_json::from_str(kid.get()).ok()?)
+    let Ok(members) = object(entry) else {
+        return None;
+    };
+    let kid = members.get("kid")?;
+    let Ok(kid) = serde_json::from_str::<String>(kid.get()) else {
+        return None;
+    };
+    KeyId::known(kid)
 }

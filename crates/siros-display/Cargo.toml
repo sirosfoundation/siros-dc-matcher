@@ -13,12 +13,12 @@ rust-version.workspace = true
 default = ["credential"]
 # Display metadata, credential cards and claim rows. The matcher links the purpose lines and the
 # proof statement rows only, and builds without it.
-credential = ["dep:siros-codec", "dep:siros-credential", "dep:siros-wallet-state"]
+credential = ["dep:siros-credential", "dep:siros-wallet-state"]
 
 [dependencies]
 rustc-hash = { workspace = true }
 serde_json = { workspace = true }
-siros-codec = { workspace = true, optional = true }
+siros-codec = { workspace = true }
 siros-credential = { workspace = true, optional = true }
 siros-dcql = { workspace = true }
 siros-wallet-state = { workspace = true, optional = true }

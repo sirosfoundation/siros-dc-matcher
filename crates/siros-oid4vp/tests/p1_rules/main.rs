@@ -8,20 +8,20 @@
     clippy::indexing_slicing
 )]
 
+mod requests;
+#[path = "../support/mod.rs"]
 mod support;
 
-use p256::ecdsa::SigningKey;
-use serde_json::{json, Value};
+use serde_json::json;
 use sha2::{Digest, Sha256};
+use siros_codec::member::MemberFault;
 use siros_oid4vp::{
-    Effect, EffectResult, FetchResponse, IntakeError, IntakeState, Origin, TrustSubject,
+    AttestationClaim, AttestationFault, ClaimsFault, Coordinate, EffectResult, FetchResponse,
+    IntakeError, IntakeState, JwkFault,
 };
-use support::*;
 
-const ORIGIN: &str = "https://verifier.example";
-const DNS: &str = "verifier.example";
-const ATTESTATION_ISSUER: &str = "https://attestation-issuer.example";
-const FEDERATION: &str = "openid_federation:https://federation-verifier.example";
+use requests::*;
+use support::*;
 
 /// What a fixture must give: a refusal, or a request of this client and trust verdict.
 enum Expect {
@@ -32,175 +32,11 @@ enum Expect {
     },
 }
 
-type Answer = Box<dyn Fn(&Effect) -> EffectResult>;
-
 struct Fixture {
     rule: &'static str,
     state: IntakeState,
     answer: Answer,
     expect: Expect,
-}
-
-fn honest(host: Host) -> Answer {
-    Box::new(move |e| host.answer(e))
-}
-
-/// The parameters of a redirect request of `client_id`.
-fn redirect_payload(client_id: &str) -> Value {
-    json!({
-        "client_id": client_id,
-        "response_type": "vp_token",
-        "response_mode": "direct_post",
-        "response_uri": "https://verifier.example/post",
-        "nonce": "n-0S6_WzA2Mj",
-        "dcql_query": query(),
-    })
-}
-
-/// The parameters of a signed DC API request of `client_id`.
-fn dc_api_payload(client_id: &str) -> Value {
-    json!({
-        "client_id": client_id,
-        "expected_origins": [ORIGIN],
-        "response_type": "vp_token",
-        "response_mode": "dc_api",
-        "nonce": "n-0S6_WzA2Mj",
-        "dcql_query": query(),
-    })
-}
-
-/// A Request Object by value under the `client_id` parameter `outer`.
-fn by_value(outer: &str, jws: &str) -> IntakeState {
-    let uri = authorization_uri(&[("client_id", outer), ("request", jws)]);
-    IntakeState::redirect(&uri, formats(), now(), &mut Rng(1))
-}
-
-/// An `x509_san_dns` request by value: `x5c` holds a certificate of `certified` naming
-/// `san`, and `signer` signs.
-fn x509_san_dns(
-    san: &str,
-    certified: &SigningKey,
-    signer: &SigningKey,
-    payload: Value,
-) -> IntakeState {
-    let jws = sign(
-        &x5c_header(&certificate(certified, &[san])),
-        &payload,
-        signer,
-    );
-    by_value(payload["client_id"].as_str().unwrap(), &jws)
-}
-
-fn x509_client() -> String {
-    format!("x509_san_dns:{DNS}")
-}
-
-fn signed_dc_api(payload: Value, origin: &str) -> IntakeState {
-    let key = key(1);
-    let jws = sign(&x5c_header(&certificate(&key, &[DNS])), &payload, &key);
-    IntakeState::dc_api(
-        &dc_api("openid4vp-v1-signed", json!({"request": jws})),
-        Origin::new(origin),
-        now(),
-    )
-}
-
-fn unsigned_dc_api(change: impl Fn(&mut Value)) -> IntakeState {
-    let mut data = json!({
-        "response_type": "vp_token",
-        "response_mode": "dc_api",
-        "nonce": "n-0S6_WzA2Mj",
-        "dcql_query": query(),
-    });
-    change(&mut data);
-    IntakeState::dc_api(
-        &dc_api("openid4vp-v1-unsigned", data),
-        Origin::new(ORIGIN),
-        now(),
-    )
-}
-
-/// A `decentralized_identifier` request by value whose `kid` is `kid`, signed by `signer`;
-/// the host resolves `did:example:123#key-1` to `key(3)`.
-fn did(kid: &str, signer: &SigningKey) -> (IntakeState, Answer) {
-    let client_id = "decentralized_identifier:did:example:123";
-    let header = json!({"alg": "ES256", "typ": "oauth-authz-req+jwt", "kid": kid});
-    let jws = sign(&header, &redirect_payload(client_id), signer);
-    let host = Host {
-        keys: vec![("did:example:123#key-1".into(), jwk(key(3).verifying_key()))],
-        ..Host::trusting()
-    };
-    (by_value(client_id, &jws), honest(host))
-}
-
-/// A `verifier_attestation` request by value. `issuer` signs the attestation under its `x5c`;
-/// `cnf` is the attested key; `signer` signs the request.
-fn attestation(
-    sub: &str,
-    exp: u64,
-    issuer: &SigningKey,
-    cnf: &SigningKey,
-    signer: &SigningKey,
-) -> IntakeState {
-    let issuer_certificate = certificate(&key(4), &["attestation-issuer.example"]);
-    let attestation = sign(
-        &json!({"alg": "ES256", "typ": "verifier-attestation+jwt", "x5c": [b64_padded(&issuer_certificate)]}),
-        &json!({"iss": ATTESTATION_ISSUER, "sub": sub, "exp": exp, "cnf": {"jwk": jwk(cnf.verifying_key())}}),
-        issuer,
-    );
-    let client_id = format!("verifier_attestation:{DNS}");
-    let header = json!({"alg": "ES256", "typ": "oauth-authz-req+jwt", "jwt": attestation});
-    let jws = sign(&header, &redirect_payload(&client_id), signer);
-    by_value(&client_id, &jws)
-}
-
-/// An `openid_federation` request by value signed by `signer`; the host resolves `fed-1` to
-/// `key(6)`, with the Trust Chain's metadata.
-fn federation(signer: &SigningKey) -> (IntakeState, Answer) {
-    let header = json!({"alg": "ES256", "typ": "oauth-authz-req+jwt", "kid": "fed-1", "trust_chain": ["eyJ.e.s"]});
-    let jws = sign(&header, &redirect_payload(FEDERATION), signer);
-    let host = Host {
-        keys: vec![("fed-1".into(), jwk(key(6).verifying_key()))],
-        metadata: Some(json!({"vp_formats_supported": {"dc+sd-jwt": {}}})),
-        ..Host::trusting()
-    };
-    (by_value(FEDERATION, &jws), honest(host))
-}
-
-/// An `openid4vp-v1-multisigned` request with one signature per `(dns, certified, signer)`.
-fn multisigned(signers: &[(&str, &SigningKey, &SigningKey)], payload: Value) -> IntakeState {
-    let payload_b64 = b64(payload.to_string().as_bytes());
-    let signatures: Vec<Value> = signers
-        .iter()
-        .map(|(dns, certified, signer)| {
-            let mut protected = x5c_header(&certificate(certified, &[dns]));
-            protected["client_id"] = format!("x509_san_dns:{dns}").into();
-            signature_object(&protected, &payload_b64, signer)
-        })
-        .collect();
-    let data = json!({"request": {"payload": payload_b64, "signatures": signatures}});
-    IntakeState::dc_api(
-        &dc_api("openid4vp-v1-multisigned", data),
-        Origin::new(ORIGIN),
-        now(),
-    )
-}
-
-fn multisigned_payload() -> Value {
-    let mut payload = dc_api_payload("");
-    payload.as_object_mut().unwrap().remove("client_id");
-    payload
-}
-
-/// A host that trusts only the Client Identifier `trusted`.
-fn trusting_only(trusted: &'static str) -> Answer {
-    Box::new(move |effect| match effect {
-        Effect::Trust(trust) => {
-            let yes = matches!(trust.subject(), TrustSubject::Client(c) if c.as_str() == trusted);
-            EffectResult::Trusted(siros_oid4vp::TrustAnswer::new(yes.into(), None, None))
-        }
-        Effect::Fetch(_) => panic!("no fetch"),
-    })
 }
 
 fn fixtures() -> Vec<Fixture> {
@@ -246,6 +82,32 @@ fn fixtures() -> Vec<Fixture> {
             state: did("did:example:123#key-1", &a).0,
             answer: did("did:example:123#key-1", &a).1,
             expect: Expect::Refused(IntakeError::SignatureInvalid),
+        },
+        Fixture {
+            rule: "verifier_attestation: the attestation has an exp",
+            state: attested(
+                json!({"iss": ATTESTATION_ISSUER, "sub": DNS,
+                    "cnf": {"jwk": jwk(key(5).verifying_key())}}),
+                &key(4),
+                &key(5),
+            ),
+            answer: honest(Host::trusting()),
+            expect: Expect::Refused(IntakeError::AttestationInvalid(AttestationFault::Claims(
+                ClaimsFault::Claim(AttestationClaim::Exp, MemberFault::Absent),
+            ))),
+        },
+        Fixture {
+            rule: "decentralized_identifier: the resolved JWK is a P-256 key",
+            state: did("did:example:123#key-1", &key(3)).0,
+            answer: did_resolving("did:example:123#key-1", &key(3), {
+                let mut resolved = jwk(key(3).verifying_key());
+                drop(resolved.as_object_mut().unwrap().remove("x"));
+                resolved
+            })
+            .1,
+            expect: Expect::Refused(IntakeError::ResolvedKeyInvalid(JwkFault::CoordinateAbsent(
+                Coordinate::X,
+            ))),
         },
         Fixture {
             rule: "verifier_attestation: the attestation's sub is the client",
@@ -432,6 +294,20 @@ fn fixtures() -> Vec<Fixture> {
             }),
             answer: honest(Host::trusting()),
             expect: Expect::Refused(IntakeError::EncryptionKeyMissing),
+        },
+        Fixture {
+            rule: "an encrypted mode's P-256 ECDH-ES key is a P-256 key",
+            state: unsigned_dc_api(|data| {
+                data["response_mode"] = "dc_api.jwt".into();
+                let mut key = jwk(key(8).verifying_key());
+                key["alg"] = "ECDH-ES".into();
+                key["y"] = b64(&[1; 31]).into();
+                data["client_metadata"] = json!({"jwks": {"keys": [key]}});
+            }),
+            answer: honest(Host::trusting()),
+            expect: Expect::Refused(IntakeError::EncryptionKeyInvalid(
+                JwkFault::CoordinateLength(Coordinate::Y, 31),
+            )),
         },
         Fixture {
             rule: "an encrypted mode has an enc this wallet supports",

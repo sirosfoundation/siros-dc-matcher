@@ -31,7 +31,10 @@ mod presentation;
 mod state;
 
 pub use entry::{CredentialData, CredentialEntry, MetadataEntry, MetadataType, MetadataValue};
-pub use error::{FoundVersion, Member, MetadataFault, PresentationsFault, WalletStateError};
+pub use error::{
+    ArrayFault, FoundVersion, Member, MetadataFault, PresentationsFault, TypeFault,
+    WalletStateError,
+};
 pub use ids::{
     BatchId, ConfigurationId, CredentialId, EmptyIdentifier, FormatIdentifier, InstanceId,
     IssuerIdentifier, KeyId, PresentationId, TransactionId,

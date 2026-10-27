@@ -45,7 +45,7 @@ pub use digest::{DigestError, PlanDigest};
 pub use fetches::Fetches;
 pub(crate) use proof::nym_answer;
 pub use proof::{OptionRefusal, Unproven};
-pub use seed::{JsonCause, NoSeed};
+pub use seed::NoSeed;
 pub use transactions::EntryPosition;
 pub(crate) use transactions::{offered, Bound, Offered};
 pub use view::{AdditionView, ConsentView, CredentialView, MemberView, OfferView, Shown};

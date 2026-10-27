@@ -44,11 +44,7 @@ impl DigestError {
     }
 }
 
-impl fmt::Display for DigestError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(DigestError);
 
 impl std::error::Error for DigestError {}
 

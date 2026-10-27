@@ -1,8 +1,6 @@
 //! An X.509 certificate (RFC 5280), as issuer trust reads it: its names, validity, key,
 //! signature, and the extensions [`extensions`](crate::extensions) processes.
 
-use std::fmt;
-
 use der::asn1::ObjectIdentifier;
 use der::{Decode, Encode, Header, Reader, SliceReader, Tag};
 use p256::ecdsa::signature::Verifier;
@@ -167,11 +165,7 @@ impl CertificateError {
     }
 }
 
-impl fmt::Display for CertificateError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(CertificateError);
 
 impl std::error::Error for CertificateError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
@@ -225,11 +219,7 @@ impl IssuanceRefusal {
     }
 }
 
-impl fmt::Display for IssuanceRefusal {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(IssuanceRefusal);
 
 impl std::error::Error for IssuanceRefusal {}
 

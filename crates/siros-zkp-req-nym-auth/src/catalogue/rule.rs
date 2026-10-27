@@ -1,7 +1,5 @@
 //! The rules of the nym_auth catalogue a query breaks, with what breaks them.
 
-use std::fmt;
-
 use siros_zkp_req::{ItemIndex, ReqSetIndex};
 
 use super::{Prf, VerifierContextError};
@@ -136,10 +134,6 @@ impl CatalogueRule {
     }
 }
 
-impl fmt::Display for CatalogueRule {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(CatalogueRule);
 
 impl std::error::Error for CatalogueRule {}

@@ -1,8 +1,6 @@
 //! `trusted_authorities` (§6.1.1): the authorities a Verifier names for the issuer of a
 //! Credential. Which credential an authority admits is the caller's to decide.
 
-use core::fmt;
-
 use serde::Serialize;
 use serde_json::Value;
 
@@ -142,10 +140,6 @@ impl TrustedAuthorityError {
     }
 }
 
-impl fmt::Display for TrustedAuthorityError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+crate::display_code!(TrustedAuthorityError);
 
 impl std::error::Error for TrustedAuthorityError {}

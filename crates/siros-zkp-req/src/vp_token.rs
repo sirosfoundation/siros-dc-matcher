@@ -1,8 +1,6 @@
 //! Reading the presentations of one query from a JSON `vp_token` (`zkp_req`, Section 6.1;
 //! OpenID4VP 1.0, Section 8.1).
 
-use std::fmt;
-
 use siros_codec::json::{Json, JsonFault};
 use siros_codec::{base64url, Base64Error};
 use siros_dcql::{Multiplicity, QueryId};
@@ -55,11 +53,7 @@ impl VpTokenError {
     }
 }
 
-impl fmt::Display for VpTokenError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(VpTokenError);
 
 impl std::error::Error for VpTokenError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {

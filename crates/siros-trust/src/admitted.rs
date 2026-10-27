@@ -2,8 +2,6 @@
 //! query, from its chain and the trust store at a given time, and the facts it records for the
 //! picker.
 
-use std::fmt;
-
 use siros_codec::date::DateTime;
 use siros_dcql::QueryId;
 
@@ -41,11 +39,7 @@ impl ChainRefusal {
     }
 }
 
-impl fmt::Display for ChainRefusal {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(ChainRefusal);
 
 impl std::error::Error for ChainRefusal {}
 

@@ -1,8 +1,6 @@
 //! `zkp_req` matching (A2): the options in the Verifier's order, each with the first available
 //! system that forms a usable pair for it.
 
-use std::fmt;
-
 use itertools::Itertools;
 use serde_json::Value;
 use siros_codec::date::Date;
@@ -84,11 +82,7 @@ impl ZkpRefusal {
     }
 }
 
-impl fmt::Display for ZkpRefusal {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(ZkpRefusal);
 
 impl std::error::Error for ZkpRefusal {}
 
@@ -111,11 +105,7 @@ impl ChoiceError {
     }
 }
 
-impl fmt::Display for ChoiceError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(ChoiceError);
 
 impl std::error::Error for ChoiceError {}
 

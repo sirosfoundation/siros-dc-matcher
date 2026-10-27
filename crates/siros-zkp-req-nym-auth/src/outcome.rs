@@ -1,8 +1,6 @@
 //! What a nym_auth query, credential or proof can fail on, as typed values with the codes of
 //! the specs.
 
-use std::fmt;
-
 use siros_zkp_req::{ItemIndex, ReqSetIndex, RequestRule};
 
 use crate::catalogue::CatalogueRule;
@@ -26,11 +24,7 @@ impl InvalidRequest {
     }
 }
 
-impl fmt::Display for InvalidRequest {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(InvalidRequest);
 
 impl std::error::Error for InvalidRequest {}
 
@@ -117,8 +111,4 @@ impl ZkpError {
     }
 }
 
-impl fmt::Display for ZkpError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(ZkpError);

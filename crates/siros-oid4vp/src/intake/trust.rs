@@ -156,11 +156,8 @@ pub(super) fn resolve(
     if answer.metadata.is_some() && metadata == MetadataAnswer::Refused {
         return Err(Halt::HostFault(IntakeError::UnexpectedTrustKey));
     }
-    let key = answer
-        .key
-        .as_ref()
-        .and_then(jose::p256_key)
-        .ok_or(IntakeError::KeyNotResolved)?;
+    let jwk = answer.key.as_ref().ok_or(IntakeError::KeyNotResolved)?;
+    let key = jose::p256_key(jwk).map_err(IntakeError::ResolvedKeyInvalid)?;
     Ok(Resolved {
         trusted: answer.trusted,
         key,

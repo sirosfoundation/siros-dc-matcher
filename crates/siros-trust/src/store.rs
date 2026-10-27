@@ -130,11 +130,7 @@ impl EntryError {
     }
 }
 
-impl fmt::Display for EntryError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(EntryError);
 
 impl std::error::Error for EntryError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {

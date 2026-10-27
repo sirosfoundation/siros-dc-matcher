@@ -42,11 +42,7 @@ macro_rules! identifier {
             }
         }
 
-        impl fmt::Display for $error {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str(self.code())
-            }
-        }
+        crate::display_code!($error);
 
         impl std::error::Error for $error {}
 

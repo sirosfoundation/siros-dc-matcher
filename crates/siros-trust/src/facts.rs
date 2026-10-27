@@ -1,8 +1,6 @@
 //! The issuer facts the wallet records for the picker (TR5): what the admission rule reads of a
 //! credential, without its chain or the trust store.
 
-use std::fmt;
-
 use crate::admission::Issuer;
 use crate::authority::{KeyIdentifier, StoreAuthority};
 
@@ -35,11 +33,7 @@ impl FactRefusal {
     }
 }
 
-impl fmt::Display for FactRefusal {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(FactRefusal);
 
 impl std::error::Error for FactRefusal {}
 

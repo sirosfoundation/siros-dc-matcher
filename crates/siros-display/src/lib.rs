@@ -31,7 +31,7 @@ pub mod proof;
 pub mod purpose;
 mod text;
 
-pub use error::{DisplayError, EntryFault, LogoFault};
+pub use error::{ColourFault, DisplayError, EntryFault, LogoFault};
 pub use locale::{choose, preferred, Locale, LocaleError, Localized};
 pub use text::{DisplayText, TextError, LABEL_MAX, VALUE_MAX};
 
@@ -62,7 +62,6 @@ pub use cache::DisplayCache;
 pub use card::Card;
 #[cfg(feature = "credential")]
 pub use colour::Colour;
-#[cfg(feature = "credential")]
 #[cfg(feature = "credential")]
 pub use issuer::IssuerMetadata;
 #[cfg(feature = "credential")]

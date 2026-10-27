@@ -1,7 +1,5 @@
 //! The `Sign` effects of a chosen offer, and the host's signatures parsed against them (A5).
 
-use std::fmt;
-
 use siros_codec::signature::Es256Signature;
 use siros_credential::Credential;
 use siros_mdoc::{es256_verifies, P256Key};
@@ -74,11 +72,7 @@ impl SignatureError {
     }
 }
 
-impl fmt::Display for SignatureError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(SignatureError);
 
 impl std::error::Error for SignatureError {}
 

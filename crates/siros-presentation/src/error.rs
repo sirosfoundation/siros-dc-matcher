@@ -1,8 +1,6 @@
 //! Why a plan, a selection or a response failed. Each error has a stable code and the
 //! OpenID4VP 1.0, Section 8.5 code the verifier receives.
 
-use std::fmt;
-
 use siros_credential::EntryRef;
 use siros_dcql::PathError;
 use siros_display::DisplayError;
@@ -219,11 +217,7 @@ fn oid4vp_code(code: siros_zkp_req::ErrorCode) -> ErrorCode {
     }
 }
 
-impl fmt::Display for PresentationError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(PresentationError);
 
 impl std::error::Error for PresentationError {}
 

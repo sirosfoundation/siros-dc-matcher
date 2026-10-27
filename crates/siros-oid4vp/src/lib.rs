@@ -60,9 +60,9 @@ pub use unverified::{diagnose, CompactFault, NoQuery, PayloadFault, UnverifiedRe
 pub use fetch::{BodyLimit, Fetch, FetchResponse, HttpStatus, HttpsUrl, MediaType, Method};
 #[cfg(feature = "crypto")]
 pub use intake::{
-    AttestationFault, ChainFault, Effect, EffectResult, FormFault, IntakeError, IntakeState,
-    JsonParameter, JwsError, JwsFault, KeyMaterial, Step, Trust, TrustAnswer, TrustSubject,
-    Verdict, VerifierInfoRule,
+    AttestationClaim, AttestationFault, ChainFault, ClaimsFault, Coordinate, Effect, EffectResult,
+    FormFault, IntakeError, IntakeState, JsonParameter, JwkFault, JwsError, JwsFault, KeyMaterial,
+    LeafKeyFault, Step, Trust, TrustAnswer, TrustSubject, Verdict, VerifierInfoRule,
 };
 #[cfg(feature = "crypto")]
 pub use response::{

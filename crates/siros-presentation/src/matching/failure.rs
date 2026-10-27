@@ -1,8 +1,6 @@
 //! Why a request cannot be matched, why a Credential Query has no candidate, and why a request
 //! has no offer.
 
-use std::fmt;
-
 use siros_dcql::QueryId;
 use siros_trust::AuthorityError;
 use siros_zkp_req::ErrorCode;
@@ -37,11 +35,7 @@ impl QueryRefusal {
     }
 }
 
-impl fmt::Display for QueryRefusal {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(QueryRefusal);
 
 impl std::error::Error for QueryRefusal {}
 

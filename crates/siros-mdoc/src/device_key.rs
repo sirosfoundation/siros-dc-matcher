@@ -21,11 +21,7 @@ impl PointError {
     }
 }
 
-impl std::fmt::Display for PointError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(PointError);
 
 impl std::error::Error for PointError {}
 

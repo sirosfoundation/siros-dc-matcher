@@ -1,8 +1,6 @@
 //! The Verifier's identity, and `verifier_input` and the `sha-256` pseudonym it selects
 //! (nym_auth catalogue, `pseudonym`: "Verifier identity" and "Configurations").
 
-use std::fmt;
-
 use sha2::{Digest, Sha256};
 use siros_oid4vp::{ClientId, ClientIdPrefix, SemanticIdError, SemanticIdentifier};
 
@@ -43,11 +41,7 @@ impl VerifierIdRule {
     }
 }
 
-impl fmt::Display for VerifierIdRule {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(VerifierIdRule);
 
 impl std::error::Error for VerifierIdRule {}
 

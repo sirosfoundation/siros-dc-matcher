@@ -1,8 +1,6 @@
 //! The authorities a Credential Query names in `trusted_authorities` (OpenID4VP 1.0, Section
 //! 6.1.1), read for the admission rule (TR3).
 
-use std::fmt;
-
 use siros_codec::{base64url, Base64Error};
 use siros_dcql::{AuthorityType, AuthorityValue, CredentialQuery, QueryId, TrustedAuthorities};
 
@@ -28,11 +26,7 @@ impl KeyIdentifierError {
     }
 }
 
-impl fmt::Display for KeyIdentifierError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(KeyIdentifierError);
 
 impl std::error::Error for KeyIdentifierError {}
 
@@ -186,11 +180,7 @@ impl AkiError {
     }
 }
 
-impl fmt::Display for AkiError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(AkiError);
 
 impl std::error::Error for AkiError {}
 
@@ -217,11 +207,7 @@ impl AuthorityError {
     }
 }
 
-impl fmt::Display for AuthorityError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(AuthorityError);
 
 impl std::error::Error for AuthorityError {}
 

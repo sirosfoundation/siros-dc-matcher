@@ -3,8 +3,6 @@
 //!
 //! `urn:mms:bbs-cd:nym_auth:v1` is not listed: no Wallet proves it yet.
 
-use std::fmt;
-
 use siros_codec::date::Date;
 use siros_zkp_req::{CredentialType, PairRefusal, ProofBackend, SystemId, ZkProof};
 
@@ -54,11 +52,7 @@ impl Unsupported {
     }
 }
 
-impl fmt::Display for Unsupported {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(Unsupported);
 
 /// The stable identifier of a pair refusal (`zkp_req`, Section 1.3) for a nym_auth system.
 pub fn pair_code(refusal: &PairRefusal<Unsupported>) -> &'static str {

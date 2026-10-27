@@ -70,11 +70,7 @@ impl ClaimPathError {
     }
 }
 
-impl fmt::Display for ClaimPathError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+crate::display_code!(ClaimPathError);
 
 impl std::error::Error for ClaimPathError {}
 

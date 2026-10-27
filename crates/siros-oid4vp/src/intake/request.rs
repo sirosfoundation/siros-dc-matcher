@@ -6,7 +6,7 @@ use siros_dcql::DcqlQuery;
 
 use super::signature::{strings, Metadata, UriRule, Verifier};
 use super::trust::Verdict;
-use super::{IntakeError, VerifierInfoRule};
+use super::{IntakeError, JwkFault, VerifierInfoRule};
 use crate::client_id::ClientId;
 use crate::fetch::HttpsUrl;
 use crate::handover::ec_jwk_thumbprint;
@@ -339,9 +339,14 @@ fn encryption(
             if !usable {
                 return None;
             }
-            Some((jwk, jose::p256_key(jwk)?))
+            match jose::p256_key(jwk) {
+                Ok(key) => Some(Ok((jwk, key))),
+                // A key of another type or curve: the next one may be P-256.
+                Err(JwkFault::OtherKey) => None,
+                Err(fault) => Some(Err(IntakeError::EncryptionKeyInvalid(fault))),
+            }
         })
-        .ok_or(IntakeError::EncryptionKeyMissing)?;
+        .ok_or(IntakeError::EncryptionKeyMissing)??;
     let thumbprint = ec_jwk_thumbprint(jwk).ok_or(IntakeError::EncryptionKeyMissing)?;
     let enc = match metadata.and_then(|m| m.get("encrypted_response_enc_values_supported")) {
         None => ContentEncryption::A128Gcm,

@@ -1,8 +1,6 @@
 //! The wallet's tests of a nym_auth candidate (A2; N3, N4): a usable attestation at the proof
 //! time, the `secret_seed` its issuer delivered, and an option it answers.
 
-use std::fmt;
-
 use itertools::Itertools;
 use siros_codec::date::DateTime;
 use siros_credential::{Parsed, UsableCredential};
@@ -36,7 +34,7 @@ pub enum Unproven {
     Options(Vec<OptionRefusal>),
 }
 
-/// Why a credential answers an option of a nym_auth query.
+/// Why an option of a nym_auth query refuses a credential.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OptionRefusal {
     /// The option's pair is not usable again.
@@ -61,11 +59,7 @@ impl Unproven {
     }
 }
 
-impl fmt::Display for Unproven {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(Unproven);
 
 impl std::error::Error for Unproven {}
 

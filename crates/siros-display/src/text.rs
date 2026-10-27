@@ -94,10 +94,6 @@ impl TextError {
     }
 }
 
-impl fmt::Display for TextError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(TextError);
 
 impl std::error::Error for TextError {}

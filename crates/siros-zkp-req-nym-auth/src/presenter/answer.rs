@@ -1,8 +1,6 @@
 //! The answer of an option: a usable pair, a usable attestation and the seed that opens it, for
 //! which every item of the option holds (system rulebooks, Section 7, step 1).
 
-use std::fmt;
-
 use crate::attestation::{Credential, OpenedSeed, SecretSeed, SeedMismatch, UsableAttestation};
 use crate::outcome::{ItemCode, ZkpError};
 use crate::pair::{failed_assertions, UsablePair};
@@ -41,11 +39,7 @@ impl Unanswerable {
     }
 }
 
-impl fmt::Display for Unanswerable {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(Unanswerable);
 
 impl std::error::Error for Unanswerable {}
 

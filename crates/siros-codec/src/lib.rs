@@ -5,8 +5,9 @@
 //!
 //! It also holds the internals several components share: [`MemberFault`](member::MemberFault),
 //! the member fault of a decoded structure; the [`position!`] and [`text_value!`] macros that
-//! declare value newtypes; and [`CertificateChain`](chain::CertificateChain), the DER
-//! certificate chain an mdoc `x5chain` and an `x5c` carry.
+//! declare value newtypes; the [`display_code!`] macro that shows an error by its code; and
+//! [`CertificateChain`](chain::CertificateChain), the DER certificate chain an mdoc `x5chain`
+//! and an `x5c` carry.
 //!
 //! Nothing here panics on any input: the matcher runs this code inside the credential picker,
 //! where a trap reads as "no matching credential".

@@ -53,11 +53,7 @@ impl DocumentSignerError {
     }
 }
 
-impl fmt::Display for DocumentSignerError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(DocumentSignerError);
 
 impl std::error::Error for DocumentSignerError {}
 
@@ -187,11 +183,7 @@ impl Unusable {
     }
 }
 
-impl fmt::Display for Unusable {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(Unusable);
 
 impl std::error::Error for Unusable {}
 
@@ -277,11 +269,7 @@ impl OtherIssuer {
     }
 }
 
-impl fmt::Display for OtherIssuer {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(OtherIssuer);
 
 impl std::error::Error for OtherIssuer {}
 
@@ -345,11 +333,7 @@ impl SeedMismatch {
     }
 }
 
-impl fmt::Display for SeedMismatch {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(SeedMismatch);
 
 impl std::error::Error for SeedMismatch {}
 

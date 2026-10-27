@@ -13,13 +13,34 @@ use siros_mdoc::{
 
 use crate::catalogue::MDOC_DOCTYPE;
 
-/// Why an element of the nym_auth namespace is refused.
+/// Why an element of the nym_auth namespace is refused: `F` is why its value has another form
+/// than the catalogue gives it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ElementFault {
+pub enum ElementFault<F> {
     /// The namespace lacks it.
     Absent,
-    /// Its value has another form than the catalogue gives it.
-    Form,
+    /// Its value has another form.
+    Form(F),
+}
+
+/// Why a value is no `full-date = #6.1004(tstr)` (RFC 8943).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FullDateFault {
+    /// The value is not under tag 1004.
+    Tag,
+    /// The tagged value is not a text string.
+    NotText,
+    /// The text is no RFC 3339 `full-date`.
+    Date,
+}
+
+/// Why a value is no 32-byte commitment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CommitmentFault {
+    /// The value is not a byte string.
+    NotBytes,
+    /// The byte string has this many bytes.
+    Length(usize),
 }
 
 /// Why an mdoc is out of the nym_auth form.
@@ -36,11 +57,11 @@ pub enum FormError {
     /// The namespace holds this element, other than `birth_date`, `ssc` and `psc`.
     Element(ElementIdentifier),
     /// `psc` is not a 32-byte string.
-    Psc,
+    Psc(CommitmentFault),
     /// `birth_date` is missing or not a tag-1004 `full-date`.
-    BirthDate(ElementFault),
+    BirthDate(ElementFault<FullDateFault>),
     /// `ssc` is missing or not a 32-byte string.
-    Ssc(ElementFault),
+    Ssc(ElementFault<CommitmentFault>),
 }
 
 impl FormError {
@@ -52,7 +73,7 @@ impl FormError {
             Self::Signature(_) => "issuer_signature_length",
             Self::DigestAlgorithm(_) => "nym_auth_digest_algorithm",
             Self::NameSpace => "nym_auth_name_space",
-            Self::Element(_) | Self::Psc => "nym_auth_element",
+            Self::Element(_) | Self::Psc(_) => "nym_auth_element",
             Self::BirthDate(_) => "birth_date",
             Self::Ssc(_) => "ssc",
         }
@@ -258,16 +279,17 @@ fn read_elements(items: &[IssuerSignedItem]) -> Result<Elements, FormError> {
         let bytes = item.bytes().to_vec();
         match item.identifier().as_str() {
             "birth_date" => {
-                let value =
-                    full_date(item.value()).ok_or(FormError::BirthDate(ElementFault::Form))?;
+                let value = full_date(item.value())
+                    .map_err(|fault| FormError::BirthDate(ElementFault::Form(fault)))?;
                 elements.birth_date = Some(SignedElement { value, bytes });
             }
             "ssc" => {
-                let value = commitment(item.value()).ok_or(FormError::Ssc(ElementFault::Form))?;
+                let value = commitment(item.value())
+                    .map_err(|fault| FormError::Ssc(ElementFault::Form(fault)))?;
                 elements.ssc = Some(SignedElement { value, bytes });
             }
             "psc" => {
-                let value = commitment(item.value()).ok_or(FormError::Psc)?;
+                let value = commitment(item.value()).map_err(FormError::Psc)?;
                 elements.psc = Some(SignedElement { value, bytes });
             }
             _ => return Err(FormError::Element(item.identifier().clone())),
@@ -277,20 +299,22 @@ fn read_elements(items: &[IssuerSignedItem]) -> Result<Elements, FormError> {
 }
 
 /// `full-date = #6.1004(tstr)` (RFC 8943).
-fn full_date(value: &Value) -> Option<Date> {
-    match value {
-        Value::Tag(1004, text) => match text.as_ref() {
-            Value::Text(text) => Date::parse(text),
-            _ => None,
-        },
-        _ => None,
-    }
+fn full_date(value: &Value) -> Result<Date, FullDateFault> {
+    let Value::Tag(1004, text) = value else {
+        return Err(FullDateFault::Tag);
+    };
+    let Value::Text(text) = text.as_ref() else {
+        return Err(FullDateFault::NotText);
+    };
+    Date::parse(text).ok_or(FullDateFault::Date)
 }
 
 /// A 32-byte string.
-fn commitment(value: &Value) -> Option<Commitment> {
+fn commitment(value: &Value) -> Result<Commitment, CommitmentFault> {
     let Value::Bytes(value) = value else {
-        return None;
+        return Err(CommitmentFault::NotBytes);
     };
-    <[u8; 32]>::try_from(value.as_slice()).ok().map(Commitment)
+    <[u8; 32]>::try_from(value.as_slice())
+        .map(Commitment)
+        .map_err(|_| CommitmentFault::Length(value.len()))
 }

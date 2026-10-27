@@ -172,6 +172,15 @@ fn cases() -> Vec<Case> {
             }),
         ),
         case(
+            "a signature algorithm of another curve than the signer's key",
+            signed_by(&iaca, |ds| ds.signed_with(Key::p384(0x39))),
+            etsi_tl(LIST),
+            path(PathRefusal::IssuerKey {
+                certificate: first,
+                signer: anchor,
+            }),
+        ),
+        case(
             "an issuer-name mismatch",
             signed_by(&iaca, |ds| ds.issuer_named("Another IACA")),
             etsi_tl(LIST),
