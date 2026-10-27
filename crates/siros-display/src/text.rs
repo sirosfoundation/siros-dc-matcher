@@ -14,7 +14,14 @@ pub const LABEL_MAX: usize = 500;
 /// The most characters of a value. The TS12 mandate text holds at most 1000.
 pub const VALUE_MAX: usize = 2_000;
 
-/// A card's title or issuer line: a label with a character other than white space.
+/// The most characters of an issuer template's text around the issuer's name.
+pub const TEMPLATE_MAX: usize = 100;
+
+/// The most characters of a card's title or issuer line: a label within an issuer template.
+pub const CARD_TEXT_MAX: usize = LABEL_MAX + TEMPLATE_MAX;
+
+/// A card's title or issuer line: display text of at most [`CARD_TEXT_MAX`] characters, one of
+/// them other than white space.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CardText(DisplayText);
 
@@ -23,12 +30,12 @@ impl CardText {
     ///
     /// # Errors
     ///
-    /// [`TextError::Empty`] for white space alone; the rule of [`DisplayText::label`] it breaks.
+    /// [`TextError::Empty`] for white space alone; the rule of [`DisplayText`] it breaks.
     pub fn new(text: &str) -> Result<Self, TextError> {
         if text.chars().all(char::is_whitespace) {
             return Err(TextError::Empty);
         }
-        DisplayText::label(text).map(Self)
+        DisplayText::new(text, CARD_TEXT_MAX).map(Self)
     }
 
     /// The line `text`, when it has a character other than white space.
@@ -71,7 +78,8 @@ impl DisplayText {
         Self::new(text, VALUE_MAX)
     }
 
-    fn new(text: &str, max: usize) -> Result<Self, TextError> {
+    /// Text of at most `max` characters.
+    pub(crate) fn new(text: &str, max: usize) -> Result<Self, TextError> {
         if text.chars().any(unsafe_to_show) {
             return Err(TextError::Unsafe);
         }

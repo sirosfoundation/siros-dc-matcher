@@ -9,7 +9,7 @@ use std::process::ExitCode;
 use serde_json::json;
 use siros_codec::cbor::Value as Cbor;
 use siros_codec::date::DateTime;
-use siros_display::{CardFallback, CardText, DisplayCache, IssuerMetadata};
+use siros_display::{CardText, CardWording, DisplayCache, IssuerMetadata, IssuerTemplate};
 use siros_presentation::testing::verifier::NOW;
 use siros_presentation::testing::wallet::{mdoc, Held, Wallet, MDL, MDL_NS};
 use siros_registration::{write, Diagnostics, RasterIcon, RegistrationInput};
@@ -37,9 +37,12 @@ fn registration() -> Result<Vec<u8>, String> {
     let mut wallet = Wallet::new(vec![Held::new(1, "mso_mdoc", mdoc(MDL, MDL_NS, &items))]);
     wallet.display = display()?;
     let now = DateTime::from_unix(NOW).ok_or("the fixtures' time is no date")?;
-    let card_fallback = CardFallback {
+    let card_wording = CardWording {
         title: CardText::new("Credential").map_err(|e| e.to_string())?,
         issuer: CardText::new("Unknown issuer").map_err(|e| e.to_string())?,
+        issuer_template: Some(
+            IssuerTemplate::parse("Issued by {issuer}").map_err(|e| e.to_string())?,
+        ),
     };
     let default_icon = RasterIcon::parse(ICON_PNG.to_vec()).map_err(|e| e.to_string())?;
     write(&RegistrationInput {
@@ -47,7 +50,7 @@ fn registration() -> Result<Vec<u8>, String> {
         records: wallet.records(),
         display: &wallet.display,
         language: &wallet.language,
-        card_fallback: &card_fallback,
+        card_wording: &card_wording,
         held: &wallet.metadata,
         configuration: &wallet.configuration,
         trust: &wallet.trust,

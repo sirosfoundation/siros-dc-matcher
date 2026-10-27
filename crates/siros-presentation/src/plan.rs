@@ -10,7 +10,7 @@ mod view;
 use rand_core::CryptoRngCore;
 use siros_codec::date::DateTime;
 use siros_credential::{Credential, UsableCredential};
-use siros_display::{CardFallback, DisplayCache, Locale};
+use siros_display::{CardWording, DisplayCache, Locale};
 use siros_oid4vp::{ErrorCode, Submission, VerifiedRequest};
 use siros_transaction_data::{Amr, Configuration, HeldMetadata, TransactionDataError};
 use siros_trust::TrustStore;
@@ -52,9 +52,9 @@ pub struct PlanInput<'a> {
     pub display: &'a DisplayCache,
     /// The wallet's language, which every display array is shown in (PaSO View, Section 4).
     pub language: &'a Locale,
-    /// The title and issuer line the host shows, in the wallet's language, for a credential
-    /// whose display metadata names none.
-    pub card_fallback: &'a CardFallback,
+    /// The texts the host gives cards in the wallet's language: the title and issuer line of a
+    /// credential whose display metadata names none, and the template of a named issuer's line.
+    pub card_wording: &'a CardWording,
     /// The transaction data types the host configures.
     pub configuration: &'a Configuration,
     /// The transaction metadata the host holds: signed credential metadata, Type Metadata and
@@ -108,7 +108,7 @@ pub fn plan<'a>(input: &PlanInput<'a>) -> Result<Planned<'a>, PresentationError>
         transactions: &transactions,
         display: input.display,
         language: input.language,
-        card_fallback: input.card_fallback,
+        card_wording: input.card_wording,
         background: input.background,
         transaction_data: TransactionData::of(&transactions),
     };

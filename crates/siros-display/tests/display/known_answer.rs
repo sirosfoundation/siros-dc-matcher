@@ -11,7 +11,10 @@ use serde_json::{json, Value};
 use siros_codec::base64url;
 use siros_credential::Credential;
 use siros_dcql::{ClaimPath, PathComponent};
-use siros_display::{CardFallback, CardText, DisplayCache, DisplayValue, IssuerMetadata, Locale};
+use siros_display::{
+    CardText, CardWording, DisplayCache, DisplayValue, IssuerMetadata, IssuerTemplate, Locale,
+    TemplateError, TextError, TEMPLATE_MAX,
+};
 use siros_wallet_state::WalletState;
 
 const CONFIGURATIONS: &str = r##"{
@@ -174,7 +177,7 @@ fn the_card_and_the_labels_of_the_example() {
     ];
     for (language, given_name, family_name, address) in table {
         let language = Locale::parse(language).unwrap();
-        let card = cache.card(&credential, &language, &fallback());
+        let card = cache.card(&credential, &language, &wording(None));
         // The Credential Issuer's display names no issuer: the issuer line is the host's.
         assert_eq!(card.issuer().as_str(), "Unknown issuer", "{language}");
         // The display has one entry, en-US: another language has no entry, and the title is
@@ -240,7 +243,7 @@ fn the_configuration_serves_a_language_the_type_metadata_lacks() {
         ("it", "Credential", "given_name"),
     ] {
         let language = Locale::parse(language).unwrap();
-        let card = cache.card(&credential, &language, &fallback());
+        let card = cache.card(&credential, &language, &wording(None));
         assert_eq!(card.title().as_str(), title, "{language}");
         let rows = cache
             .claim_rows(&credential, &[pointer(&["given_name"])], &language)
@@ -249,10 +252,68 @@ fn the_configuration_serves_a_language_the_type_metadata_lacks() {
     }
 }
 
-/// The host's card title and issuer line.
-fn fallback() -> CardFallback {
-    CardFallback {
+/// The host's card wording, its issuer line `template`.
+fn wording(template: Option<&str>) -> CardWording {
+    CardWording {
         title: CardText::new("Credential").unwrap(),
         issuer: CardText::new("Unknown issuer").unwrap(),
+        issuer_template: template.map(|template| IssuerTemplate::parse(template).unwrap()),
+    }
+}
+
+/// A named issuer's line is the name in the host's template; an issuer without a name has the
+/// host's issuer line (the owner's wallet's `displaySubtitle` and `displaySubtitleFallback`).
+#[test]
+fn the_issuer_line_is_the_name_in_the_hosts_template() {
+    let configurations: Value = serde_json::from_str(CONFIGURATIONS).unwrap();
+    let language = Locale::parse("en-US").unwrap();
+    let card = |display: Option<Value>, template: Option<&str>| {
+        let mut issuer_metadata = json!({
+            "credential_issuer": ISSUER,
+            "credential_endpoint": "https://issuer.example/credential",
+            "credential_configurations_supported": configurations
+        });
+        if let Some(display) = display {
+            issuer_metadata["display"] = display;
+        }
+        let metadata = IssuerMetadata::merge(&issuer_metadata, CONFIGURATION, None).unwrap();
+        let cache = DisplayCache::new(vec![metadata], vec![]).unwrap();
+        let card = cache.card(&credential(), &language, &wording(template));
+        card.issuer().as_str().to_owned()
+    };
+    let named = || Some(json!([{"name": "Example University", "locale": "en-US"}]));
+    let rows = [
+        (named(), None, "Example University"),
+        (
+            named(),
+            Some("Issued by {issuer}"),
+            "Issued by Example University",
+        ),
+        (None, Some("Issued by {issuer}"), "Unknown issuer"),
+    ];
+    for (display, template, line) in rows {
+        assert_eq!(card(display, template), line, "{template:?}");
+    }
+}
+
+#[test]
+fn an_issuer_template_has_its_placeholder_once_in_safe_text() {
+    let long = format!("{}{{issuer}}", "a".repeat(TEMPLATE_MAX + 1));
+    let rows: [(&str, Result<(), TemplateError>); 5] = [
+        ("{issuer}, issuer", Ok(())),
+        ("Issued by", Err(TemplateError::Placeholder)),
+        ("{issuer} and {issuer}", Err(TemplateError::Placeholder)),
+        (
+            "\u{202e}{issuer}",
+            Err(TemplateError::Text(TextError::Unsafe)),
+        ),
+        (&long, Err(TemplateError::Text(TextError::TooLong))),
+    ];
+    for (template, expected) in rows {
+        assert_eq!(
+            IssuerTemplate::parse(template).map(|_| ()),
+            expected,
+            "{template}"
+        );
     }
 }

@@ -14,7 +14,7 @@ use siros_codec::cbor::Value as Cbor;
 use siros_codec::date::DateTime;
 use siros_credential::Credential;
 use siros_dcql::QueryId;
-use siros_display::{CardFallback, CardText, DisplayCache, Locale};
+use siros_display::{CardText, CardWording, DisplayCache, Locale};
 use siros_oid4vp::VerifiedRequest;
 use siros_transaction_data::{Amr, Configuration, Factor, HeldMetadata, Inherence, Possession};
 use siros_trust::TrustStore;
@@ -259,11 +259,12 @@ impl Held {
     }
 }
 
-/// The host's card fallbacks of the fixtures, in English.
-pub fn card_fallback() -> CardFallback {
-    CardFallback {
+/// The host's card wording of the fixtures, in English: an issuer line of the name alone.
+pub fn card_wording() -> CardWording {
+    CardWording {
         title: CardText::new("Credential").unwrap(),
         issuer: CardText::new("Unknown issuer").unwrap(),
+        issuer_template: None,
     }
 }
 
@@ -272,8 +273,8 @@ pub struct Wallet {
     pub credentials: Vec<Credential>,
     pub display: DisplayCache,
     pub language: Locale,
-    /// The host's card title and issuer line for a credential whose metadata names none.
-    pub card_fallback: CardFallback,
+    /// The host's card wording.
+    pub card_wording: CardWording,
     pub configuration: Configuration,
     pub systems: Vec<NymAuthSystem>,
     pub verifier_id: VerifierIdForm,
@@ -355,7 +356,7 @@ impl Wallet {
             credentials,
             display: issuer_display(),
             language: Locale::parse("en").unwrap(),
-            card_fallback: card_fallback(),
+            card_wording: card_wording(),
             configuration: Configuration::default(),
             systems: NymAuthSystem::ALL.to_vec(),
             verifier_id: VerifierIdForm::X509SanDns,
@@ -390,7 +391,7 @@ impl Wallet {
             records: self.state.presentations(),
             display: &self.display,
             language: &self.language,
-            card_fallback: &self.card_fallback,
+            card_wording: &self.card_wording,
             configuration: &self.configuration,
             held: &self.metadata,
             systems: &self.systems,

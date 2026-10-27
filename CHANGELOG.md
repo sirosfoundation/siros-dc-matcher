@@ -207,9 +207,11 @@ the 307,200-byte budget (303,418 at v0.11.0), sha256
   host gives: RFC 4647 Lookup, then the entry without `locale` (PaSO View, Section 4). A card's
   title and a claim's label come from the Type Metadata, else, for a language it has no entry for,
   from the configuration's `credential_metadata` (OpenID4VCI 1.0, Section 12.2.4). A card's title
-  and issuer line are `CardText`, labels with a character other than white space: the display
-  entry's name and the Credential Issuer's display name, else the host's `CardFallback` in the
-  wallet's language (the owner's wallet's `displayTitleFallback` and `displaySubtitleFallback`).
+  and issuer line are `CardText`, text with a character other than white space: the display
+  entry's name and the Credential Issuer's display name, the name in the host's
+  `IssuerTemplate` when it gives one, else the title and issuer line of the host's
+  `CardWording` in the wallet's language (the owner's wallet's `displayTitleFallback`,
+  `displaySubtitle` and `displaySubtitleFallback`).
   `DisplayCache` keys Type Metadata by siros-dcql's `Vct` and issuer metadata by
   siros-wallet-state's `IssuerIdentifier` and `ConfigurationId`, and gives a credential's issuer
   metadata (`DisplayCache::issuer_metadata`). A `DisplayError` carries its cause: a colour that is
@@ -428,8 +430,9 @@ the 307,200-byte budget (303,418 at v0.11.0), sha256
     match (Core, Section 7.4): a candidate of a targeted query that takes no entry is excluded,
     an entry no presented credential takes stays unused, and an entry of a type no source
     defines refuses the request unless every credential it targets takes an entry (OpenID4VP
-    1.0, Section 5.1). `PlanInput` takes the wallet's language, the host's `CardFallback`, the host's transaction data
-    `Configuration`, and the transaction metadata the host holds (`HeldMetadata`).
+    1.0, Section 5.1). `PlanInput` takes the wallet's language, the host's `CardWording`, the
+    host's transaction data `Configuration`, and the transaction metadata the host holds
+    (`HeldMetadata`).
   - The plan also gives the entry each presented credential binds, the credential named by
     `credentialId` and instance (T4); the plan's digest over the request, its trust verdict,
     the nym_auth `verifier_id` and every offer's credentials by `credentialId` and instance,
@@ -497,20 +500,20 @@ the 307,200-byte budget (303,418 at v0.11.0), sha256
 - `siros-registration`, the registration the wallet writes for the picker (K1, TR5), format
   version 2 in CBOR. Per credential it holds the entry reference, format and type, holder-key
   presence, the typed claim tree without nym_auth's undisclosable attributes, the card and the
-  claim labels in the wallet's language, whether the wallet presents it without its UI, the
-  TR5 facts, the card's title, issuer line and icon, and for each transaction data type the
-  projected definition that serves it or why none does; each definition and icon is stored
-  once. It also holds the system ids the wallet proves, the time of registration, the
-  diagnostics flag and the wallet's default icon. `Registration::read`
-  refuses a format `Version` other than `Version::CURRENT` (2) and every unexpected member, with a `RegistrationError` or the
+  claim labels in the wallet's language, whether the wallet presents it without its UI, the TR5
+  facts, the card's title, issuer line and icon, and for each transaction data type the projected
+  definition that serves it or why none does; each definition and icon is stored once. It also
+  holds the system ids the wallet proves, the time of registration, the diagnostics flag and the
+  wallet's default icon. `Registration::read` refuses a format `Version` other than
+  `Version::CURRENT` (2) and every unexpected member, with a `RegistrationError` or the
   credential's `CredentialFault`. The writer (`write`, feature `wallet`) takes the parsed
   credentials, the presentation records, the display cache and language, the held transaction
-  metadata and the configuration, the trust store, the systems, the credentials presented
-  without the wallet's UI, the card fallbacks, the icons, the default icon and the time. An
-  icon is a `RasterIcon`: a PNG or JPEG of 64 to 256 pixels in each direction, read from its
-  header (`IconFault` otherwise). The host rasterises an SVG and resizes an image before it
-  passes it; a credential without an icon of its own gets the default icon. `Unverified` is the picker's transaction
-  data source. It builds with Rust 1.82.
+  metadata and the configuration, the trust store, the systems, the credentials presented without
+  the wallet's UI, the card wording, the icons, the default icon and the time. An icon is a
+  `RasterIcon`: a PNG or JPEG of 64 to 256 pixels in each direction, read from its header
+  (`IconFault` otherwise). The host rasterises an SVG and resizes an image before it passes it; a
+  credential without an icon of its own gets the default icon. `Unverified` is the picker's
+  transaction data source. It builds with Rust 1.82.
 - `scripts/gen_unicode_tables.py` writes the refused-character ranges of siros-display and the
   grapheme break runs of siros-transaction-data from their oracles' tables.
 - siros-registration's example `sample_registration` writes the registration of a sample

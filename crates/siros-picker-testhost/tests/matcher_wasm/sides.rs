@@ -200,7 +200,7 @@ pub fn registration(wallet: &Wallet, icons: &[CredentialIcon]) -> Vec<u8> {
         records: wallet.records(),
         display: &wallet.display,
         language: &wallet.language,
-        card_fallback: &wallet.card_fallback,
+        card_wording: &wallet.card_wording,
         held: &wallet.metadata,
         configuration: &wallet.configuration,
         trust: &wallet.trust,

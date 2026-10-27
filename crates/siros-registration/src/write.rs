@@ -3,7 +3,7 @@
 use siros_codec::cbor::Value as Cbor;
 use siros_codec::date::DateTime;
 use siros_credential::{least_used, ClaimTree, Credential, TreeError, UsableCredential};
-use siros_display::{CardFallback, DescribedLabel, DisplayCache, Locale};
+use siros_display::{CardWording, DescribedLabel, DisplayCache, Locale};
 use siros_presentation::{KeyHolding, MatchCredential};
 use siros_transaction_data::{Configuration, HeldMetadata, Projected, ServedTypes, SourceInputs};
 use siros_trust::{IssuerFacts, TrustStore};
@@ -29,9 +29,9 @@ pub struct RegistrationInput<'a> {
     pub display: &'a DisplayCache,
     /// The wallet's language, which every card, label and definition is projected to (D2).
     pub language: &'a Locale,
-    /// The title and issuer line the host shows, in the wallet's language, for a credential
-    /// whose display metadata names none.
-    pub card_fallback: &'a CardFallback,
+    /// The texts the host gives cards in the wallet's language: the title and issuer line of a
+    /// credential whose display metadata names none, and the template of a named issuer's line.
+    pub card_wording: &'a CardWording,
     /// The transaction metadata the host holds.
     pub held: &'a HeldMetadata,
     /// The transaction data types the host configures.
@@ -240,7 +240,7 @@ fn card(input: &RegistrationInput<'_>, tables: &mut Tables, credential: &Credent
     let id = credential.entry().credential_id();
     let card = input
         .display
-        .card(credential, input.language, input.card_fallback);
+        .card(credential, input.language, input.card_wording);
     let icon = input
         .icons
         .iter()

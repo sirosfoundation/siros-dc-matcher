@@ -4,7 +4,7 @@
 use siros_credential::EntryRef;
 use siros_dcql::Dropped;
 use siros_display::proof::{verified_rows, ProofRow};
-use siros_display::{purpose, Card, CardFallback, ClaimRow, DisplayCache, Locale};
+use siros_display::{purpose, Card, CardWording, ClaimRow, DisplayCache, Locale};
 use siros_oid4vp::VerifierView;
 use siros_transaction_data::{EntryPosition, TransactionView};
 use siros_wallet_state::CredentialId;
@@ -223,7 +223,7 @@ pub(crate) struct Sources<'s, 'a> {
     pub(crate) transactions: &'s Transactions,
     pub(crate) display: &'s DisplayCache,
     pub(crate) language: &'s Locale,
-    pub(crate) card_fallback: &'s CardFallback,
+    pub(crate) card_wording: &'s CardWording,
     pub(crate) background: &'s [CredentialId],
     pub(crate) transaction_data: TransactionData,
 }
@@ -343,7 +343,7 @@ fn credential_view(
         answer: candidate.answer().clone(),
         card: sources
             .display
-            .card(credential, sources.language, sources.card_fallback),
+            .card(credential, sources.language, sources.card_wording),
         shown: shown(member, candidate, sources)?,
         transaction,
     })
