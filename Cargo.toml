@@ -63,6 +63,8 @@ rustc-hash = "2.1.3"
 # Iterator adapters. Only those without a hash map: std's hasher seeds itself from WASI
 # `random_get`, which the picker's host lacks.
 itertools = "0.12.1"
+# Every error type derives `Display` and `Error` with it.
+thiserror = "2"
 
 # Host and mobile builds. Unwinding, deliberately: UniFFI turns panics into
 # errors with `catch_unwind`, which cannot work without it — an aborting build
