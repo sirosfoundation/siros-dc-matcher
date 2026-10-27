@@ -44,8 +44,9 @@ binaryen version_116.
   K4). It reads the registration siros-registration writes, parses the request into
   `UnverifiedRequest`, and runs the presentation component's matching over it: the matching of
   the wallet's plan, issuers admitted by the TR5 facts at the time of registration, and the
-  transaction data selection over the projected definitions, with the K2 exceptions. A wallet
-  registers the projection in place of the v1 blob, which the picker no longer reads. Each
+  transaction data selection over the projected definitions, with the K2 exceptions. The
+  picker reads the projection in place of the v1 blob. No FFI writes the projection yet: the
+  picker ships with the facades wave that gives wallets the writer. Each
   offer is the set `siros-{offer}`, an entry's `cred_id` is the `credentialId`, and the
   standard object's `data` is the pick `{"offer", "query", "credential"}` that
   `Planned::picked` maps to the wallet's selection. An entry's fields are its claim rows, then
@@ -60,6 +61,27 @@ binaryen version_116.
   panics: the picker emits nothing. At host level 7 each entry carries its offer's
   delegation: `Full` for an offer that needs no wallet display (A9), else none. The picker
   reads no calling app origin. `mso_mdoc_zk` matches nothing.
+- The picker and the wallet's plan apply one rule each:
+  - A9's rows: `Rows::of` judges the picker's fields (`Field::of_claim`, `proof::rows`), which
+    the plan computes for each credential (`CredentialView::fields`). A background fulfilment
+    takes what the host showed of the picked entries: `Fulfilment::Background(HostDisplay)`,
+    from their `display_skipped`.
+  - T4: `Transactions::bind` binds each entry to one credential, and the picker shows the
+    transaction on that credential alone.
+  - Display: an offer whose members' or additions' claims or proof statements do not show is
+    left out, by the plan and by the picker alike; the other offers stay, numbered in order.
+    The user consents only to what the wallet shows, and A9 asks a row of each claim.
+  - nym_auth: `policy::admitted` applies the policy and the `x509_san_dns` rule of the
+    wallet's `verifier_id` form, which the registration records. The `semantic` form stays the
+    wallet's: it reads the access certificate.
+  - Request parameters: siros-oid4vp's key-free rules (a nested request, `response_type`,
+    `nonce`, `state`, the Response Mode of the channel, `expected_origins`, `client_metadata`,
+    `verifier_info`) and the Client Identifier rules apply to `UnverifiedRequest` as to
+    intake (`ParameterFault`; `IntakeError::Parameter` replaces the variants it holds).
+    Intake reports the rule of the first entry it skips.
+- **BREAKING (display):** a label is `LabelText`, display text with a character other than
+  white space; display metadata with a blank name or label is refused. A field's name is a
+  `FieldName`. A blank transaction label is `TextFault::Blank`.
 - **BREAKING (request):** a query's options are its `_req_sets`, arrays of `_req` indexes;
   without `_req_sets`, `_req` is the one option (`zkp_req`, Section 2.1). `return` is optional
   except on `pseudonym`. `vp_formats_supported.zkp_req` requires both `proof_backend_values`
@@ -67,11 +89,11 @@ binaryen version_116.
   `client_metadata`; `proof_system_values` is gone. `age_check` takes `range` (`A-B`, `A+`,
   `B-`), and the Wallet derives E and C at the proof date; `ge`, `le` and the 365-day rule are
   gone.
-- **BREAKING (matcher):** a registered circuit is a system of Section 1.3: its `system_id`
-  param is the system and its `system` the proof backend, matched against
-  `proof_backend_values`. The matcher answers the first option a circuit serves, and the picker
-  rows name that option's functions. `FfiMatchedCredential.zkp_req` is
-  `{circuit, proof_backend, req_set?, items}`.
+- **BREAKING (FFI):** the FFI matching reads a registered circuit as a system of Section 1.3:
+  its `system_id` param is the system and its `system` the proof backend, matched against
+  `proof_backend_values`. It answers the first option a circuit serves.
+  `FfiMatchedCredential.zkp_req` is `{circuit, proof_backend, req_set?, items}`. The picker
+  reads the systems the registration names, and its rows name the option's functions.
 - **BREAKING (presentation):** `ZkpPresentation {system_id, proof_backend, ? req_set, proof,
   results}` (Section 4), where `proof` is the CBOR `Proof {inputs: {issuer_key_set,
   proof_time}, zk_proof}` of the proof backends. The CBOR reader allows nesting depth 32
@@ -131,11 +153,10 @@ binaryen version_116.
   `match_dcql` gave `Ok` with `satisfiable: true` and one combination, and a `zkp_req` query
   with an object under `claims` gave `Ok` with `satisfiable: false`.
 - **BREAKING (matcher):** `matcher.wasm` emits nothing for a request whose DCQL query the parse
-  refuses, the same queries as the FFI above. Observed with the test host on the mDL fixture:
-  under `trusted_authorities` `[{"type": "aki"}]` or `[]`, the matcher at `1b0fe3d` emitted the
-  one entry of set `siros-0`, and this build emits nothing. An `aki` value that is no
-  base64url changes nothing: the matcher resolves no `trusted_authorities`, and both emit the
-  entry. A debug build names the parse error in its one entry, in set `siros-debug-request`.
+  refuses, the same queries as the FFI above: under `trusted_authorities` `[{"type": "aki"}]` or
+  `[]`, the matcher at `1b0fe3d` emitted the one entry of set `siros-0` for the mDL fixture. A
+  registration with its diagnostics shown names the parse error in one entry, in set
+  `siros-debug-0`.
 - Vector set digest: `db62a22cfaccb912bf717c63d2a107e41e5437caa72e21594ceb3bb395eab431`.
 
 ### Fixed
@@ -508,14 +529,15 @@ binaryen version_116.
   claim labels in the wallet's language, whether the wallet presents it without its UI, the TR5
   facts, the card's title, issuer line and icon, and for each transaction data type the projected
   definition that serves it or why none does; each definition and icon is stored once. It also
-  holds the system ids the wallet proves, the time of registration, the diagnostics flag and the
-  wallet's default icon. `Registration::read` refuses a format `Version` other than
-  `Version::CURRENT` (2) and every unexpected member, with a `RegistrationError` or the
-  credential's `CredentialFault`. The writer (`write`, feature `wallet`) takes the parsed
-  credentials, the presentation records, the display cache and language, the held transaction
-  metadata and the configuration, the trust store, the systems, the credentials presented without
-  the wallet's UI, the card wording, the icons, the default icon and the time. An icon is a
-  `RasterIcon`: a PNG or JPEG of 64 to 256 pixels in each direction, read from its header
+  holds the system ids the wallet proves, the form of the nym_auth `verifier_id`, the time of
+  registration, the diagnostics flag and the wallet's default icon. `Registration::read` refuses a
+  format `Version` other than `Version::CURRENT` (2), every unexpected member, a reference outside
+  its table and an empty credential type, with a `RegistrationError` or the credential's
+  `CredentialFault`. The writer (`write`, feature `wallet`) takes the parsed credentials, the
+  presentation records, the display cache and language, the held transaction metadata and the
+  configuration, the trust store, the systems, the `verifier_id` form, the credentials presented
+  without the wallet's UI, the card wording, the icons, the default icon and the time. An icon is
+  a `RasterIcon`: a PNG or JPEG of 64 to 256 pixels in each direction, read from its header
   (`IconFault` otherwise). The host rasterises an SVG and resizes an image before it passes it; a
   credential without an icon of its own gets the default icon. `Unverified` is the picker's
   transaction data source. It builds with Rust 1.82.

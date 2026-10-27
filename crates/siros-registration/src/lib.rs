@@ -5,7 +5,7 @@
 //! | --- | --- |
 //! | K1: per credential the entry reference, format and type, holder-key presence, the typed claim tree without the nym_auth undisclosable attributes, the card and claim labels in the wallet's language, presentability without the UI, the issuer facts, and the projected transaction data definitions with their source and rulebook, each definition stored once; the nym_auth systems; the version | [`Registration::read`], [`write()`] (feature `wallet`), [`RegisteredCredential`] |
 //! | TR5: the issuer facts at registration time, and the picker's admission from them alone | [`RegisteredCredential::issuer`], the [`siros_presentation::MatchCredential`] of `&RegisteredCredential` |
-//! | K2: the picker's transaction data selection over the projected definitions, over the Digital Credentials API, deferring ad-hoc metadata to the wallet | [`Unverified`] |
+//! | K2: the picker's transaction data selection over the projected definitions, over the request's channel, deferring ad-hoc metadata to the wallet. The picker has no clock: its facts hold at registration time, the issuers' admission and certificate validity (TR5), the credentials' validity (C4), and the dates of held transaction metadata and TS12 definitions | [`Unverified`], [`Registration::registered_at`] |
 //! | R-G6: no delivered or derived secret, no undisclosable attribute | [`write()`] reads no auxiliary data and removes the undisclosable attributes |
 //! | Cards: a title and an issuer line from the display metadata and the host's wording; an icon of every credential, the host's else the wallet's, a PNG or JPEG of 64 to 256 pixels that the host rasterised and resized | [`RegisteredCard`], [`RasterIcon`] (feature `wallet`), [`RegistrationInput`] |
 //!

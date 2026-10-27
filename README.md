@@ -192,19 +192,25 @@ presentation.
 ## The registration
 
 The wallet registers the projection of its credentials together with
-`matcher.wasm`, and registers again when its credentials, trust store,
-language or transaction metadata change. Per credential it holds the typed
-claims, the card and claim labels in the wallet's language, the issuer facts
-the trust store gave at registration, and the transaction data definitions the
-credential is served by. A card's title and issuer line come from the display
-metadata, else from the texts the host passes in the wallet's language, which
-may also give a named issuer's line as a template. Its icon is a PNG or JPEG
-of 64 to 256 pixels that the host rasterised and resized, else the wallet's
-default icon: Credential Manager drops an entry without an icon, and shows no
-SVG. The picker offers what the wallet's plan offers, except where the plan
-reads what the projection leaves out: the `zkp_req` credential tests and seed,
-the issuer certificates' validity at request time, and ad-hoc transaction
-metadata. The wallet decides those after the pick.
+`matcher.wasm`, and registers again when its credentials, presentation
+records, trust store, language or transaction metadata change: the
+registration fixes the instance of each batch the wallet presents next (C5).
+Per credential it holds the typed claims, the card and claim labels in the
+wallet's language, the issuer facts the trust store gave at registration, and
+the transaction data definitions the credential is served by. A card's title
+and issuer line come from the display metadata, else from the texts the host
+passes in the wallet's language, which may also give a named issuer's line as
+a template. Its icon is a PNG or JPEG of 64 to 256 pixels that the host
+rasterised and resized, else the wallet's default icon: Credential Manager
+drops an entry without an icon, and shows no SVG. The picker has no clock: its
+facts hold at registration time. These are the issuers' admission and the
+validity of the certificates that admit them (TR5), the credentials' validity
+(C4), and the dates of the held transaction metadata and of the TS12
+definitions. The picker offers what the wallet's plan offers, except where the
+plan reads what the projection leaves out: the `zkp_req` credential tests and
+seed, the facts at request time, ad-hoc transaction metadata, and the
+`semantic` form of the nym_auth `verifier_id`, which reads the access
+certificate. The wallet decides those after the pick.
 
 ## Privacy note
 
