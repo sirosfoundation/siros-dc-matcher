@@ -76,7 +76,8 @@ fn unsafe_to_show(c: char) -> bool {
 }
 
 /// Why text is refused for display.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum TextError {
     /// The text holds a control, format, separator, private-use or unassigned character.
     Unsafe,
@@ -93,11 +94,3 @@ impl TextError {
         }
     }
 }
-
-impl fmt::Display for TextError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
-
-impl std::error::Error for TextError {}

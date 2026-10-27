@@ -2423,6 +2423,7 @@ dependencies = [
  "siros-dcql",
  "siros-wallet-state",
  "siros-zkp-req",
+ "thiserror 2.0.20",
  "unicode-general-category",
 ]
 
@@ -2518,6 +2519,7 @@ dependencies = [
  "serde",
  "serde_json",
  "siros-codec",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
