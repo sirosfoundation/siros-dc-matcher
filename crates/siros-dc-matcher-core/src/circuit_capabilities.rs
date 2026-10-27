@@ -40,27 +40,18 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 #![deny(missing_docs)]
 
-use std::fmt;
-
 use serde_json::{Map, Value};
 
 /// The only capabilities schema version this build reads.
 pub const SCHEMA: u64 = 1;
 
 /// A capabilities object that could not be used.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("invalid circuit capabilities: {reason}")]
 pub struct CapabilitiesError {
     /// What is wrong with it.
     pub reason: String,
 }
-
-impl fmt::Display for CapabilitiesError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "invalid circuit capabilities: {}", self.reason)
-    }
-}
-
-impl std::error::Error for CapabilitiesError {}
 
 fn invalid(reason: impl Into<String>) -> CapabilitiesError {
     CapabilitiesError {

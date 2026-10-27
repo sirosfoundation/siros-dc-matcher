@@ -34,6 +34,10 @@ set digest is unchanged: `9f482d7a3fb87cb1381d0dfb7a2fc396b6cd3c1eba07c5d76f44e4
   `{"display_skipped":bool,"host_level":n,"data":{…}}`. The matcher's own
   members moved under `data`; `host_abi` became `host_level`.
 - A NUL inside a picker string becomes a space; it used to end the string.
+- The error types of `siros-dcql` and `siros-dc-matcher-core` derive
+  `Display` and `Error` with `thiserror`; their text is unchanged.
+  `PathError`, `DecodeError` and `NoQuery` implement `std::error::Error`.
+  `NoQuery::reason` is removed: `NoQuery`'s `Display` gives the same text.
 
 ### Fixed
 
