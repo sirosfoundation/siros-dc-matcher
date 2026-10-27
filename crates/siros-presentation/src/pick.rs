@@ -103,12 +103,15 @@ impl Pick {
                 Value::from(self.credential.to_string()),
             ),
         ];
-        Value::Object(
+        // Extended member by member: a map collected at once sorts first, which links a slice
+        // sort into the picker.
+        let mut object = serde_json::Map::new();
+        object.extend(
             members
                 .into_iter()
-                .map(|(member, value)| (member.as_str().to_owned(), value))
-                .collect(),
-        )
+                .map(|(member, value)| (member.as_str().to_owned(), value)),
+        );
+        Value::Object(object)
     }
 
     /// The pick of the JSON value `value`, as [`Pick::to_json`] writes it.

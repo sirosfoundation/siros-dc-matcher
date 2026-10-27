@@ -163,11 +163,16 @@ impl TypedValue<'_> {
             TypedValue::FullDate(d) => Json::String(d.to_string()),
             TypedValue::DateTime(t) => Json::String(t.to_string()),
             TypedValue::Array(a) => Json::Array(a.elements().map(TypedValue::to_json).collect()),
-            TypedValue::Object(o) => Json::Object(
-                o.members()
-                    .map(|(name, value)| (name.to_owned(), value.to_json()))
-                    .collect::<Map<String, Json>>(),
-            ),
+            TypedValue::Object(o) => {
+                // Extended member by member: a map collected at once sorts first, which links a
+                // slice sort into the picker.
+                let mut members = Map::new();
+                members.extend(
+                    o.members()
+                        .map(|(name, value)| (name.to_owned(), value.to_json())),
+                );
+                Json::Object(members)
+            }
         }
     }
 }
