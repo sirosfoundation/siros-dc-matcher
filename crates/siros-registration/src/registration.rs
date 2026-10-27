@@ -67,7 +67,8 @@ pub enum Diagnostics {
 pub struct Icon(Vec<u8>);
 
 /// Why bytes are no icon: there is none.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("registration_icon_empty")]
 pub struct IconEmpty;
 
 /// A credential's type, with the format it belongs to.

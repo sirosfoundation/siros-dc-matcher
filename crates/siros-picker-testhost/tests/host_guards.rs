@@ -76,7 +76,7 @@ fn field_with_the_entrys_credential_id_is_accepted() {
     assert_eq!(entry.credential_id, "cred-a");
     assert_eq!(
         entry.fields,
-        vec![("Field".to_string(), "Value".to_string())]
+        vec![("Field".to_string(), Some("Value".to_string()))]
     );
 }
 

@@ -107,7 +107,8 @@ pub enum ImageRef {
 
 /// Why an image is refused: a PaSO entry is then not compatible (PaSO View, Section 3), and a
 /// TS12 logo is left out.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum ImageFault {
     /// The value is neither a Data URL nor an `https` URL.
     NotHttps,
@@ -116,11 +117,11 @@ pub enum ImageFault {
     /// The `#integrity` sibling is no string.
     IntegrityNotString,
     /// The `#integrity` sibling is no integrity metadata.
-    Integrity(IntegrityFault),
+    Integrity(#[source] IntegrityFault),
     /// The Data URL has no comma, no `;base64`, or a media type other than PNG, JPEG and SVG.
     DataUrl,
     /// The Data URL's payload is no base64.
-    Base64(Base64Error),
+    Base64(#[source] Base64Error),
     /// The Data URL's payload has this many bytes, more than 512 KiB.
     TooLarge(usize),
     /// An `https` URL in a request over the Digital Credentials API, whose images are Data URLs.
@@ -147,10 +148,6 @@ impl ImageFault {
         }
     }
 }
-
-siros_codec::display_code!(ImageFault);
-
-impl std::error::Error for ImageFault {}
 
 impl ImageRef {
     /// The image of a TS12 logo `text`, `integrity` the value of its `#integrity` sibling, which

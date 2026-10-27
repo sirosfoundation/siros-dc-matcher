@@ -50,8 +50,10 @@ pub(crate) fn add_credman(linker: &mut Linker<State>) -> Result<()> {
         "ReadCredentialsBuffer",
         |mut c: Caller<'_, State>, ptr: i32, offset: i32, len: i32| -> Result<i32> {
             let blob = c.data().input.credentials.clone();
-            let start = (offset.max(0) as usize).min(blob.len());
-            let end = start.saturating_add(len.max(0) as usize).min(blob.len());
+            let offset = usize::try_from(offset).context("matcher read at a negative offset")?;
+            let len = usize::try_from(len).context("matcher read a negative length")?;
+            let start = offset.min(blob.len());
+            let end = start.saturating_add(len).min(blob.len());
             let slice = blob.get(start..end).unwrap_or_default().to_vec();
             write_bytes(&mut c, ptr, &slice)?;
             Ok(slice.len() as i32)
@@ -111,7 +113,7 @@ pub(crate) fn add_credman(linker: &mut Linker<State>) -> Result<()> {
                 credential_id: read_cstr(&mut c, cred_id)?,
                 title: read_cstr(&mut c, title)?,
                 subtitle: read_cstr_opt(&mut c, subtitle)?,
-                metadata: read_cstr(&mut c, metadata)?,
+                metadata: read_cstr_opt(&mut c, metadata)?,
                 icon,
                 disclaimer: read_cstr_opt(&mut c, disclaimer)?,
                 warning: read_cstr_opt(&mut c, warning)?,
@@ -214,7 +216,7 @@ pub(crate) fn add_credman(linker: &mut Linker<State>) -> Result<()> {
                 read_cstr(&mut c, cred_id)?,
                 read_cstr(&mut c, set_id)?,
                 read_cstr(&mut c, name)?,
-                read_cstr(&mut c, value)?,
+                read_cstr_opt(&mut c, value)?,
             );
             let entry = entry_at(&mut c.data_mut().out, &set_id, index, &cred_id)?;
             entry.fields.push((name, value));
@@ -316,7 +318,7 @@ fn add_payment(c: &mut Caller<'_, State>, call: &PaymentCall) -> Result<()> {
         credential_id: read_cstr(c, call.cred_id)?,
         title: read_cstr(c, call.method)?,
         subtitle: read_cstr_opt(c, call.method_subtitle)?,
-        metadata: read_cstr(c, call.metadata)?,
+        metadata: read_cstr_opt(c, call.metadata)?,
         icon: read_bytes(c, call.icon.0, call.icon.1)?,
         disclaimer: None,
         warning: None,
@@ -393,26 +395,27 @@ fn write_bytes(c: &mut Caller<'_, State>, ptr: i32, bytes: &[u8]) -> Result<()> 
 
 /// Read `len` bytes from guest memory.
 ///
-/// A null pointer or zero length means "no value", which is how the ABI says
-/// an entry has no icon.
+/// A null pointer with length 0 means "no value", which is how the ABI says
+/// an entry has no icon. A null pointer with another length, and a negative
+/// length, are outside the contract (ABI.md, §2).
 fn read_bytes(c: &mut Caller<'_, State>, ptr: i32, len: i32) -> Result<Vec<u8>> {
-    if ptr == 0 || len <= 0 {
+    let len = usize::try_from(len).context("matcher passed an image of negative length")?;
+    if ptr == 0 {
+        anyhow::ensure!(len == 0, "matcher passed a null image of length {len}");
         return Ok(Vec::new());
     }
     let mem = memory(c)?;
     let data = mem.data(&c);
     let start = ptr as usize;
     let end = start
-        .checked_add(len as usize)
+        .checked_add(len)
         .context("icon length overflows the address space")?;
     data.get(start..end)
         .map(<[u8]>::to_vec)
         .context("matcher passed an icon outside its own memory")
 }
 
-/// Read a NUL-terminated string the guest passed as `char*`.
-/// A C string the matcher may legitimately have omitted.
-///
+/// Read a nullable NUL-terminated UTF-8 string the guest passed as `char*`:
 /// `None` for a null pointer, `Some` for anything else — including a pointer
 /// to `""`, which is a real value the host treats differently from absence.
 fn read_cstr_opt(c: &mut Caller<'_, State>, ptr: i32) -> Result<Option<String>> {
@@ -422,18 +425,24 @@ fn read_cstr_opt(c: &mut Caller<'_, State>, ptr: i32) -> Result<Option<String>> 
     read_cstr(c, ptr).map(Some)
 }
 
+/// Read a required NUL-terminated UTF-8 string the guest passed as `char*`.
 fn read_cstr(c: &mut Caller<'_, State>, ptr: i32) -> Result<String> {
-    if ptr == 0 {
-        return Ok(String::new());
-    }
+    anyhow::ensure!(
+        ptr != 0,
+        "matcher passed a null pointer for a required string"
+    );
     let mem = memory(c)?;
     let data = mem.data(&c);
     let start = ptr as usize;
     let tail = data
         .get(start..)
         .context("matcher passed a pointer outside its own memory")?;
-    let end = tail.iter().position(|&b| b == 0).unwrap_or(tail.len());
-    Ok(String::from_utf8_lossy(tail.get(..end).unwrap_or_default()).into_owned())
+    let text = tail
+        .split(|&b| b == 0)
+        .next()
+        .filter(|text| text.len() < tail.len())
+        .context("matcher passed a string without a NUL in its own memory")?;
+    String::from_utf8(text.to_vec()).context("matcher passed a string that is no UTF-8")
 }
 
 /// Write `value` NUL-padded into a fixed-width ABI field.
@@ -441,6 +450,7 @@ fn write_padded(buf: &mut [u8], offset: usize, width: usize, value: &str) {
     let src = value.as_bytes();
     let n = src.len().min(width.saturating_sub(1));
     if let (Some(dst), Some(src)) = (buf.get_mut(offset..offset + n), src.get(..n)) {
+        // Both slices hold `n` bytes, the length `copy_from_slice` requires.
         dst.copy_from_slice(src);
     }
 }

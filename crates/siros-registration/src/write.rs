@@ -5,9 +5,7 @@ use siros_codec::date::DateTime;
 use siros_credential::{least_used, ClaimTree, Credential, TreeError, UsableCredential};
 use siros_display::{CardFallback, DescribedLabel, DisplayCache, Locale};
 use siros_presentation::{KeyHolding, MatchCredential};
-use siros_transaction_data::{
-    Configuration, HeldMetadata, Projected, ServedTypes, SourceInputs, Unserved,
-};
+use siros_transaction_data::{Configuration, HeldMetadata, Projected, ServedTypes, SourceInputs};
 use siros_trust::{IssuerFacts, TrustStore};
 use siros_wallet_state::{CredentialId, PresentationRecord};
 use siros_zkp_req_nym_auth::catalogue::{ATTESTATION_TYPES, UNDISCLOSABLE};
@@ -67,12 +65,11 @@ pub struct CredentialIcon {
 }
 
 /// Why the wallet's state gives no registration.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum WriteError {
     /// The claims of this credential make no claim tree.
-    Claims(CredentialId, TreeError),
-    /// The sources of this credential give a reason a registration does not record.
-    Unserved(CredentialId, Unserved),
+    Claims(CredentialId, #[source] TreeError),
 }
 
 impl WriteError {
@@ -81,14 +78,9 @@ impl WriteError {
     pub fn code(&self) -> &'static str {
         match self {
             Self::Claims(_, error) => error.code(),
-            Self::Unserved(_, reason) => reason.code(),
         }
     }
 }
-
-siros_codec::display_code!(WriteError);
-
-impl std::error::Error for WriteError {}
 
 /// The tables a registration's credentials refer to, filled as the credentials are written.
 #[derive(Default)]
@@ -130,8 +122,7 @@ fn position_of<T: PartialEq + Clone>(table: &mut Vec<T>, item: &T) -> u64 {
 ///
 /// # Errors
 ///
-/// [`WriteError`]: a card that is no safe text, a claim tree out of CBOR's integers, or a
-/// reason a registration does not record.
+/// [`WriteError::Claims`]: a claim tree out of CBOR's integers.
 pub fn write(input: &RegistrationInput<'_>) -> Result<Vec<u8>, WriteError> {
     let usable: Vec<UsableCredential<'_>> = input
         .credentials
@@ -238,7 +229,7 @@ fn credential(
         (Member::Trust, trust(input, credential)),
         (
             Member::Transactions,
-            transactions(tables, id, &sources.served_types(credential))?,
+            transactions(tables, &sources.served_types(credential)),
         ),
     ]))
 }
@@ -298,27 +289,22 @@ fn trust(input: &RegistrationInput<'_>, credential: &Credential) -> Cbor {
     ])
 }
 
-/// What `served`, the record of the sources of credential `id`, gives each type: the position
-/// of the projected definition in the table, or why there is none.
-fn transactions(
-    tables: &mut Tables,
-    id: CredentialId,
-    served: &ServedTypes<Projected>,
-) -> Result<Cbor, WriteError> {
-    let reason = |reason| wire::unserved(reason).map_err(|reason| WriteError::Unserved(id, reason));
+/// What `served`, the record of a credential's sources, gives each type: the position of the
+/// projected definition in the table, or why there is none.
+fn transactions(tables: &mut Tables, served: &ServedTypes<Projected>) -> Cbor {
     let types = served
         .types()
         .iter()
         .map(|(type_id, served)| {
             let served = match served {
                 Ok(definition) => Cbor::Unsigned(tables.definition(definition.clone())),
-                Err(unserved) => reason(*unserved)?,
+                Err(unserved) => wire::unserved(*unserved),
             };
-            Ok(Cbor::Array(vec![Cbor::text(type_id.as_str()), served]))
+            Cbor::Array(vec![Cbor::text(type_id.as_str()), served])
         })
-        .collect::<Result<Vec<_>, WriteError>>()?;
-    Ok(map([
+        .collect();
+    map([
         (Member::ServedTypes, Cbor::Array(types)),
-        (Member::Otherwise, reason(served.otherwise())?),
-    ]))
+        (Member::Otherwise, wire::unserved(served.otherwise())),
+    ])
 }

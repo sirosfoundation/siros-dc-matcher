@@ -28,7 +28,8 @@ use crate::ts12::Ts12Payload;
 use crate::view::TransactionView;
 
 /// Why an entry is not compatible with a credential (PaSO Core, Section 7.4.2).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum Incompatibility {
     /// The credential is no SD-JWT VC: transaction data binds into an SD-JWT VC's KB-JWT only
     /// (EC TS12 v1.0.1, Section 1.2; OpenID4VP 1.0, B.3.3).
@@ -42,38 +43,38 @@ pub enum Incompatibility {
     /// The entry's ad-hoc metadata JWT is invalid; no other source serves the entry (PaSO Proof
     /// Metadata, Section 5.3).
     #[cfg(feature = "wallet")]
-    AdHoc(SignedFault),
+    AdHoc(#[source] SignedFault),
     /// The host holds no issuer metadata of the credential's configuration, which tells whether
     /// it is a PaSO Credential: the credential is excluded.
     IssuerMetadataNotHeld,
     /// The credential's signed credential metadata is not held or invalid, which excludes the
     /// credential (PaSO Proof Metadata, Sections 3 and 7).
     #[cfg(feature = "wallet")]
-    CredentialMetadata(CredentialMetadataFault),
+    CredentialMetadata(#[source] CredentialMetadataFault),
     /// The credential's TS12 type metadata gives no definition of the type.
     #[cfg(feature = "wallet")]
-    TypeMetadata(Ts12Fault),
+    TypeMetadata(#[source] Ts12Fault),
     /// The definition of this source breaks PaSO Proof Metadata, Section 3, which makes the
     /// type unsupported by the credential (Section 3.3).
-    Definition(SourceKind, DefinitionError),
+    Definition(SourceKind, #[source] DefinitionError),
     /// The credential's registration records that its sources serve no definition of the type
     /// (K1).
-    Registered(Unserved),
+    Registered(#[source] Unserved),
     /// A localised array has no entry for the wallet's language (PaSO View, Section 4).
-    Language(Unmatched),
+    Language(#[source] Unmatched),
     /// The entry has no `transaction_data_hashes_alg`, which a TS12 rulebook requires (EC TS12
     /// v1.0.1, Section 4.2).
     HashesAlgAbsent,
     /// The payload does not conform to the definition.
-    Payload(PayloadFault),
+    Payload(#[source] PayloadFault),
     /// The payload breaks the schema of its TS12 type.
-    Ts12Payload(Ts12PayloadFault),
+    Ts12Payload(#[source] Ts12PayloadFault),
     /// A TS12 payload value at this location is no value of its type.
     Ts12Value(Location, ValueFault),
     /// The image at this location is refused.
-    Image(Location, ImageFault),
+    Image(Location, #[source] ImageFault),
     /// The entry does not render in full (PaSO View, Section 2).
-    Render(RenderFault),
+    Render(#[source] RenderFault),
 }
 
 impl Incompatibility {
@@ -125,10 +126,6 @@ impl Incompatibility {
         }
     }
 }
-
-siros_codec::display_code!(Incompatibility);
-
-impl std::error::Error for Incompatibility {}
 
 /// What serves a credential's definitions: the wallet's sources, or the projections a credential
 /// was registered with.

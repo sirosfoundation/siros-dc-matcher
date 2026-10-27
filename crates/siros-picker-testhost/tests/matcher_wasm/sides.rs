@@ -246,7 +246,7 @@ pub fn picker_run(request: &[u8], registration: Vec<u8>) -> Captured {
 
 /// The pick an entry carries (K3).
 pub fn pick(entry: &CapturedEntry) -> Pick {
-    let picked = Picked::parse(&entry.metadata).unwrap();
+    let picked = Picked::parse(entry.metadata.as_deref().unwrap()).unwrap();
     Pick::parse(picked.data().unwrap()).unwrap()
 }
 
@@ -268,7 +268,7 @@ pub fn picker_offers(captured: &Captured, proofs: &[String]) -> Vec<Offered> {
             fields: entry
                 .fields
                 .iter()
-                .map(|(name, value)| (!proof).then(|| (name.clone(), Some(value.clone()))))
+                .map(|(name, value)| (!proof).then(|| (name.clone(), value.clone())))
                 .collect(),
             payment: entry.payment.as_ref().map(|payment| {
                 let lines = payment

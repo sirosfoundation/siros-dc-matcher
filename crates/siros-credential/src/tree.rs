@@ -57,7 +57,8 @@ pub(crate) enum TreeElement {
 pub(crate) struct Members(Vec<(String, TreeValue)>);
 
 /// Why a CBOR item is no claim tree of a registration.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum TreeError {
     /// The root is no map, or an mdoc namespace is no map.
     Root,
@@ -93,10 +94,6 @@ impl TreeError {
         }
     }
 }
-
-siros_codec::display_code!(TreeError);
-
-impl std::error::Error for TreeError {}
 
 impl ClaimTree {
     /// The claims of `credential`: an SD-JWT VC's processed payload, every member of every

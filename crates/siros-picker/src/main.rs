@@ -11,7 +11,9 @@
 //! tell apart from "you have no matching credential". There is no error
 //! surface at all. That is why `unwrap` and `expect` are denied below rather
 //! than merely discouraged, and why the release profile aborts instead of
-//! unwinding.
+//! unwinding. An input that does not read is a diagnostic. A broken guarantee
+//! of another component is a bug that no entry set recovers from: it panics,
+//! each site under an `#[expect]` that names the guarantee.
 //!
 //! # Two host behaviours every emitter must respect
 //!

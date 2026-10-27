@@ -85,6 +85,17 @@ impl<'a, 'r> OfferEntries<'a, 'r> {
     /// # Errors
     ///
     /// [`Unshown`] for an offer whose rows the registration cannot show.
+    ///
+    /// # Panics
+    ///
+    /// When the presentation component breaks a guarantee of its offers: an offer has a member
+    /// (DCQL refuses an empty `credentials` and an empty option), and each member names a query
+    /// and candidates of the matching it was built from, at least one candidate.
+    #[expect(
+        clippy::expect_used,
+        reason = "an offer that breaks the presentation component's guarantees is a bug of that \
+                  component, and no entry set the picker could emit for it is right"
+    )]
     pub(crate) fn emit(
         &self,
         at: usize,
@@ -110,25 +121,38 @@ impl<'a, 'r> OfferEntries<'a, 'r> {
             .map(|entry| entry.with_delegation(delegation))
             .collect();
         let slots: Vec<Slot<'_, AnyEntry<'_>>> = entries.iter().map(Slot::one).collect();
-        let (first, others) = slots.split_first().ok_or(Unshown::Empty(index))?;
+        // The presentation component's guarantee: an offer has a member, and a member a
+        // candidate. Without one, the matching it was built from is wrong.
+        let (first, others) = slots
+            .split_first()
+            .expect("an offer has a member with a candidate");
         let id = C8String::from_str_lossy(&format!("{SET_PREFIX}-{at}"));
         sets.add_entry_set(&EntrySet::new(&id, *first, others));
         Ok(())
     }
 
     /// Each candidate of each member of `offer`, the offer at `index`, as its entry shows it.
+    #[expect(
+        clippy::expect_used,
+        reason = "an offer that names what its matching lacks is a bug of the presentation \
+                  component, and no entry the picker could emit for it is right"
+    )]
     fn shown(&self, index: OfferIndex, offer: &Offer) -> Result<Vec<Presented<'a>>, Unshown> {
         offer
             .members()
             .iter()
             .flat_map(|member| {
-                let answers = self.answered.answers(member.query());
+                // The presentation component's guarantee: an offer's members name queries and
+                // candidates of the matching it was built from.
+                let answers = self
+                    .answered
+                    .answers(member.query())
+                    .expect("an offer's query is a query of its matching");
                 member.candidates().iter().map(move |&candidate| {
-                    let answers = answers.ok_or(Unshown::Inconsistent(index))?;
                     let selection = self.transactions.selection(member.query(), candidate);
                     let candidate = answers
                         .candidate(candidate)
-                        .ok_or(Unshown::Inconsistent(index))?;
+                        .expect("an offer's candidate is a candidate of its query");
                     let credential: &'a RegisteredCredential = candidate.credential();
                     Ok(Presented {
                         credential,
@@ -194,6 +218,11 @@ impl<'a, 'r> OfferEntries<'a, 'r> {
 
 /// The fields of what `credential` answers for `answers`: the rows of the claims it discloses,
 /// or the proof statement rows of the `zkp_req` option it answers.
+#[expect(
+    clippy::expect_used,
+    reason = "a proof answer without its query's `zkp_req` option is a bug of the presentation \
+              component, and no proof rows the picker could show for it are right"
+)]
 fn fields(
     index: OfferIndex,
     answers: &Answers<'_, &RegisteredCredential, NoChoice>,
@@ -207,10 +236,14 @@ fn fields(
             .map(|rows| rows.iter().map(siros_display::Field::of_claim).collect())
             .map_err(|error| Unshown::Display(index, error.code())),
         Answer::Proof(choice) => {
-            let zkp = answers.zkp().ok_or(Unshown::Inconsistent(index))?;
+            // The presentation component's guarantee: a proof answer belongs to a `zkp_req`
+            // query, and its choice is an option of that query.
+            let zkp = answers
+                .zkp()
+                .expect("a proof answer's query is a zkp_req query");
             let option = zkp
                 .option(choice)
-                .map_err(|error| Unshown::Display(index, error.code()))?;
+                .expect("a proof answer's choice is an option of its query");
             siros_display::proof::rows(zkp.query().query(), option)
                 .map_err(|error| Unshown::Display(index, error.code()))
         }

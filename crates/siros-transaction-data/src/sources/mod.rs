@@ -100,6 +100,28 @@ impl SourceKind {
     }
 }
 
+/// A source of a credential's own definitions, which a registration records: every source but
+/// an entry's ad-hoc metadata.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CredentialSource {
+    /// The credential's signed credential metadata JWT (PaSO Proof Metadata, Section 4).
+    CredentialMetadata,
+    /// The credential's SD-JWT VC Type Metadata (EC TS12 v1.0.1, Section 4.1).
+    TypeMetadata,
+    /// The host's configuration.
+    Configuration,
+}
+
+impl From<CredentialSource> for SourceKind {
+    fn from(source: CredentialSource) -> Self {
+        match source {
+            CredentialSource::CredentialMetadata => Self::CredentialMetadata,
+            CredentialSource::TypeMetadata => Self::TypeMetadata,
+            CredentialSource::Configuration => Self::Configuration,
+        }
+    }
+}
+
 /// The rulebook of an entry's payload.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Rulebook {

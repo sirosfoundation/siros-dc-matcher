@@ -92,7 +92,7 @@ pub use served::{ServedTypes, TypeRepeated, Unserved};
 pub use sets::{SetPosition, SetsFault};
 pub use sources::{
     AdHocMetadata, Configuration, ConfigurationError, ConfigurationMember, Configured,
-    ConfiguredFault, ConfiguredType, Rulebook, SourceKind,
+    ConfiguredFault, ConfiguredType, CredentialSource, Rulebook, SourceKind,
 };
 #[cfg(feature = "wallet")]
 pub use sources::{

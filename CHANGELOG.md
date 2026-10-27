@@ -25,6 +25,13 @@ the 307,200-byte budget (303,418 at v0.11.0), sha256
 - The matcher crate `siros-dc-matcher-wasm` is `siros-picker`, and its test host
   `siros-dc-matcher-testhost` is `siros-picker-testhost`. `make matcher` builds `matcher.wasm`
   as before.
+- The error types of siros-registration, and those this release changes in android-credman,
+  siros-credential, siros-display, siros-oid4vp, siros-presentation and
+  siros-transaction-data, derive `thiserror::Error`. Each `Display` text is unchanged, and
+  `source` gives the cause an error wraps.
+- `siros-picker-testhost` refuses a null pointer for a required string, a string without a NUL
+  or of no UTF-8, a null image with a length, and a negative read. It captures an entry's
+  `metadata` and a field's value as `None` for a null pointer.
 - `make matcher` runs `wasm-opt -Oz` of binaryen version_116 after the strip, and refuses
   another version; `make wasm-opt` installs it (the `wasm-opt` crate 0.116.1). The release's
   `matcher.wasm.sha256` and its notes name the binaryen beside the rustc.
@@ -43,7 +50,9 @@ the 307,200-byte budget (303,418 at v0.11.0), sha256
   amount, and at host level 3 the `additional_info`; its payment method icon is the card's
   icon, and its bank and provider icons are NULL. An absent disclaimer or warning is NULL, and
   each set id is declared once per invocation. A diagnostic entry shows the wallet's default
-  icon. At host level 7 each entry carries its offer's delegation: `Full` for an offer that
+  icon. An offer that breaks the presentation component's guarantees (a member without a
+  candidate, a query or candidate its matching lacks, a proof answer without its option)
+  panics: the picker emits nothing. At host level 7 each entry carries its offer's delegation: `Full` for an offer that
   needs no wallet display (A9), else none. The picker reads no calling app origin.
   `mso_mdoc_zk` matches nothing.
 - **BREAKING (request):** a query's options are its `_req_sets`, arrays of `_req` indexes;
@@ -306,7 +315,8 @@ the 307,200-byte budget (303,418 at v0.11.0), sha256
   - The picker's side, without `wallet`: `Selector::first_match_unverified` runs the first match
     over the projected definitions, and gives `Selection::Deferred` with its `Deferral` for an
     entry with an ad-hoc metadata JWT (K2). `ServedTypes` records per
-    credential the definition each type is served by, or why it is not (`Unserved`).
+    credential the definition each type is served by, or why it is not (`Unserved`); an
+    unserved definition names its `CredentialSource`, a source of the credential's own.
     `Taken::payment` gives the payee and amount of a payment rulebook's entry (`Payment`).
     `grapheme_clusters` counts UAX #29 clusters over a table of 1,117 runs of Unicode 16.0;
     unicode-segmentation is the oracle of a test.

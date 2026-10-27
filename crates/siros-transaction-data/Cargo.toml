@@ -39,7 +39,7 @@ siros-display = { workspace = true }
 siros-oid4vp = { workspace = true }
 siros-trust = { workspace = true, features = ["chain"], optional = true }
 siros-wallet-state = { workspace = true, optional = true }
-# Label lengths in extended grapheme clusters (UAX #29). 1.13 needs Rust 1.85.
+thiserror = { workspace = true }
 
 [dev-dependencies]
 # The oracle of the grapheme cluster count, of the same Unicode version as its table.

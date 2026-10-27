@@ -21,17 +21,18 @@ use siros_dcql::QueryId;
 use siros_transaction_data::EntryPosition;
 
 /// Why the core gives no plan, no chosen offer or no response.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum PresentationError {
     /// The wallet has no offer for the request, and why.
     NoOffer(Failure<Unadmitted<ChainRefusal>, Unproven>),
     /// An entry of `transaction_data`, or its binding to an offer, breaks a rule. The code is
     /// its own.
-    TransactionData(TransactionDataError),
+    TransactionData(#[source] TransactionDataError),
     /// The consent view cannot show a credential. The code is the display's.
-    Display(DisplayError),
+    Display(#[source] DisplayError),
     /// The selection's plan digest does not read.
-    Digest(DigestError),
+    Digest(#[source] DigestError),
     /// The selection was made on another plan (A4).
     DigestMismatch,
     /// The selection names an offer the plan lacks (A4).
@@ -50,7 +51,7 @@ pub enum PresentationError {
     /// The selection names two subsets for the member of this query (A3).
     SubsetRepeated(QueryId),
     /// A subset of a member's credentials is refused (A3).
-    Subset(SubsetError),
+    Subset(#[source] SubsetError),
     /// The selection leaves out the credential the transaction entry at `entry` binds to (T4).
     BoundCredentialOmitted {
         /// The entry's position in `transaction_data`.
@@ -59,7 +60,7 @@ pub enum PresentationError {
         credential: EntryRef,
     },
     /// The picked credential picker entries make no selection (K3).
-    Pick(PickError),
+    Pick(#[source] PickError),
     /// A fulfilment without the wallet's UI chose an offer that needs it (A9).
     WalletDisplayNeeded,
     /// A member's credential names no key pair.
@@ -76,23 +77,23 @@ pub enum PresentationError {
     /// The plan contradicts itself.
     Inconsistent(Inconsistency),
     /// A proof choice gives no option or usable pair of its query.
-    Choice(ChoiceError),
+    Choice(#[source] ChoiceError),
     /// A nym_auth credential no longer passes its tests, or its seed does not open.
-    Unproven(Unproven),
+    Unproven(#[source] Unproven),
     /// A nym_auth credential does not answer its option.
-    Unanswerable(Unanswerable),
+    Unanswerable(#[source] Unanswerable),
     /// A claims path pointer of the plan selects nothing. The code is its own.
-    Pointer(PathError),
+    Pointer(#[source] PathError),
     /// The KB-JWT claims collide (S4). The code is its own.
-    KeyBinding(KeyBindingError),
+    KeyBinding(#[source] KeyBindingError),
     /// The mdoc elements are no disclosure (M2, M3). The code is its own.
-    Disclosure(DisclosureError),
+    Disclosure(#[source] DisclosureError),
     /// The nym_auth proof failed. The code is its own.
-    Prove(ProveError),
+    Prove(#[source] ProveError),
     /// The host's signatures do not answer the `Sign` effects (A5).
-    Signature(SignatureError),
+    Signature(#[source] SignatureError),
     /// The `vp_token` or its submission could not be built. The code is its own.
-    Response(ResponseError),
+    Response(#[source] ResponseError),
 }
 
 /// How a plan contradicts itself: a position or an answer that a list of the plan lacks.
@@ -213,10 +214,6 @@ fn oid4vp_code(code: siros_zkp_req::ErrorCode) -> ErrorCode {
         siros_zkp_req::ErrorCode::AccessDenied => ErrorCode::AccessDenied,
     }
 }
-
-siros_codec::display_code!(PresentationError);
-
-impl std::error::Error for PresentationError {}
 
 /// Each cause that is its own variant converts into it, so `?` carries it.
 macro_rules! causes {

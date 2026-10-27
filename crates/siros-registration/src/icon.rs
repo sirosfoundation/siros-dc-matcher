@@ -40,7 +40,8 @@ pub struct Dimensions {
 pub struct RasterIcon(Icon);
 
 /// Why bytes are no raster icon.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum IconFault {
     /// The bytes start with neither the PNG signature nor the JPEG start of image: an SVG
     /// document, for one, which the host rasterises first.
@@ -68,10 +69,6 @@ impl IconFault {
         }
     }
 }
-
-siros_codec::display_code!(IconFault);
-
-impl std::error::Error for IconFault {}
 
 impl RasterIcon {
     /// The icon `bytes`.

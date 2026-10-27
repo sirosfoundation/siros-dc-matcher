@@ -50,8 +50,9 @@ pub struct CapturedEntry {
     /// Secondary line, typically the issuer: `None` for a null pointer, with the
     /// absent-versus-empty distinction of [`CapturedEntry::disclaimer`].
     pub subtitle: Option<String>,
-    /// Opaque payload handed back to the wallet on selection.
-    pub metadata: String,
+    /// Opaque payload handed back to the wallet on selection; `None` for a
+    /// null pointer.
+    pub metadata: Option<String>,
     /// Icon bytes the matcher passed, if any.
     pub icon: Vec<u8>,
     /// The disclaimer pointer, distinguishing absent from empty.
@@ -64,8 +65,9 @@ pub struct CapturedEntry {
     pub disclaimer: Option<String>,
     /// The warning pointer, with the same absent-versus-empty distinction.
     pub warning: Option<String>,
-    /// Display fields attached to this entry, in emission order.
-    pub fields: Vec<(String, String)>,
+    /// Display fields attached to this entry, in emission order: each name,
+    /// and its value, `None` for a null pointer.
+    pub fields: Vec<(String, Option<String>)>,
     /// The delegation type sent at level 7.
     pub delegation: Option<i32>,
     /// The second disclaimer, link text and link target sent at level 6.

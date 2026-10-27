@@ -34,6 +34,7 @@ siros-trust = { workspace = true }
 siros-wallet-state = { workspace = true }
 siros-zkp-req = { workspace = true }
 siros-zkp-req-nym-auth = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 siros-presentation = { workspace = true, features = ["test-fixtures"] }

@@ -140,6 +140,7 @@ fn sorted_set<T: Ord>(items: impl IntoIterator<Item = T>) -> Vec<T> {
     let mut set = Vec::new();
     for item in items {
         if let Err(at) = set.binary_search(&item) {
+            // `Vec::insert` panics past the end; `binary_search` gives a position up to it.
             set.insert(at, item);
         }
     }

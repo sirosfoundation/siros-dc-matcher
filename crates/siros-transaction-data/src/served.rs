@@ -1,11 +1,12 @@
 //! What a credential's sources serve for each transaction data type, as the wallet records it
 //! at registration and the credential picker serves entries from it (K1, K2).
 
-use crate::sources::SourceKind;
+use crate::sources::CredentialSource;
 use crate::type_id::TypeId;
 
 /// Why a credential's sources serve no definition of a type, as a registration records it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum Unserved {
     /// The credential is no SD-JWT VC.
     Format,
@@ -20,7 +21,7 @@ pub enum Unserved {
     /// The credential's TS12 type metadata gives no definition of the type.
     TypeMetadata,
     /// The definition of this source breaks PaSO Proof Metadata, Section 3.
-    Definition(SourceKind),
+    Definition(CredentialSource),
     /// A localised array of the definition has no entry for the wallet's language.
     Language,
 }
@@ -57,10 +58,6 @@ impl Unserved {
     }
 }
 
-siros_codec::display_code!(Unserved);
-
-impl std::error::Error for Unserved {}
-
 /// What a credential's own metadata and the configuration serve for it: for each type a source
 /// names, the definition in the wallet's language or why there is none, and for every other
 /// type one reason. `D` is the definition: the projection, or its place in a registration.
@@ -71,7 +68,8 @@ pub struct ServedTypes<D> {
 }
 
 /// Why types are no [`ServedTypes`]: this type is named twice.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub struct TypeRepeated(pub TypeId);
 
 impl TypeRepeated {
@@ -81,10 +79,6 @@ impl TypeRepeated {
         "served_type_repeated"
     }
 }
-
-siros_codec::display_code!(TypeRepeated);
-
-impl std::error::Error for TypeRepeated {}
 
 impl<D> ServedTypes<D> {
     /// What `types` names, each type once, and `otherwise` for every other type.

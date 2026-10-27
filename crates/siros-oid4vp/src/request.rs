@@ -45,7 +45,8 @@ impl TransactionDataItem {
 
 /// Why a `transaction_data` parameter is refused: it is no non-empty array of strings (Section
 /// 5.1).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub struct TransactionDataInvalid;
 
 impl TransactionDataInvalid {
@@ -55,10 +56,6 @@ impl TransactionDataInvalid {
         "transaction_data_invalid"
     }
 }
-
-siros_codec::display_code!(TransactionDataInvalid);
-
-impl std::error::Error for TransactionDataInvalid {}
 
 /// The `format` of a `verifier_info` attestation (Section 5.1).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

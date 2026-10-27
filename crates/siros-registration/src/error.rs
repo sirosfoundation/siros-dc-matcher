@@ -73,10 +73,11 @@ pub enum Member {
 }
 
 /// Why bytes are no registration this picker reads.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum RegistrationError {
     /// The bytes are no CBOR item the reader accepts.
-    Cbor(CborError),
+    Cbor(#[source] CborError),
     /// The item is no map.
     NotMap,
     /// The registration has this version; the picker reads its own.
@@ -88,7 +89,7 @@ pub enum RegistrationError {
     /// `registered_at` is no `tdate`.
     RegisteredAt,
     /// `language` is no language tag.
-    Language(LocaleError),
+    Language(#[source] LocaleError),
     /// `systems` names this system, which the picker does not know.
     System(String),
     /// The icon at this position has no byte.
@@ -96,18 +97,19 @@ pub enum RegistrationError {
     /// `default_icon` names an icon at this position, which the registration lacks.
     DefaultIconUnknown(u64),
     /// The definition at this position is no projection.
-    Definition(DefinitionIndex, ProjectionError),
+    Definition(DefinitionIndex, #[source] ProjectionError),
     /// The definition at this position is projected to another language than the
     /// registration's.
     DefinitionLanguage(DefinitionIndex),
     /// The credential at this position breaks a rule.
-    Credential(CredentialIndex, CredentialFault),
+    Credential(CredentialIndex, #[source] CredentialFault),
     /// Two credentials have this `credentialId`, or are instances of one batch.
     EntryRepeated(CredentialIndex),
 }
 
 /// Why a credential of a registration is refused.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum CredentialFault {
     /// The credential is no map.
     NotMap,
@@ -118,19 +120,19 @@ pub enum CredentialFault {
     /// `format` names this format, which is neither `dc+sd-jwt` nor `mso_mdoc`.
     Format(String),
     /// `claims` is no claim tree.
-    Claims(TreeError),
+    Claims(#[source] TreeError),
     /// A label, or the card's title or issuer, is no safe label.
-    Text(TextError),
+    Text(#[source] TextError),
     /// A label's path is no claims path pointer.
-    Path(ClaimPathError),
+    Path(#[source] ClaimPathError),
     /// An AuthorityKeyIdentifier keyIdentifier is empty.
-    KeyIdentifier(KeyIdentifierError),
+    KeyIdentifier(#[source] KeyIdentifierError),
     /// An admitting authority names this `type`, which is no trust store type.
     StoreType(String),
     /// A served type is the empty string.
     TypeId(EmptyTypeId),
     /// A served type is named twice.
-    TypeRepeated(TypeRepeated),
+    TypeRepeated(#[source] TypeRepeated),
     /// The card names an icon at this position, which the registration lacks.
     IconUnknown(u64),
     /// A served type names a definition at this position, which the registration lacks.
@@ -183,9 +185,3 @@ impl CredentialFault {
         }
     }
 }
-
-siros_codec::display_code!(RegistrationError, CredentialFault);
-
-impl std::error::Error for RegistrationError {}
-
-impl std::error::Error for CredentialFault {}

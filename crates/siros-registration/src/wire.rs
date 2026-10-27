@@ -7,7 +7,7 @@ use siros_codec::cbor::{Item, Kind};
 use siros_codec::member::MemberFault;
 use siros_credential::EntryRef;
 use siros_dcql::{AuthorityValue, ClaimPath, ClaimPathError, ComponentIndex, PathComponent};
-use siros_transaction_data::{SourceKind, Unserved};
+use siros_transaction_data::{CredentialSource, Unserved};
 use siros_trust::{StoreAuthority, StoreType};
 use siros_wallet_state::{BatchId, CredentialId, InstanceId};
 
@@ -165,28 +165,37 @@ pub(crate) fn authority(item: &Item<'_>) -> Result<StoreAuthority, CredentialFau
     Ok(StoreAuthority::new(kind, AuthorityValue::new(value)))
 }
 
-/// The reasons a registration records, each with its name.
-const UNSERVED: [(Unserved, &str); 10] = [
-    (Unserved::Format, "format"),
-    (Unserved::TypeUnsupported, "type_unsupported"),
-    (Unserved::TypeUndeclared, "type_undeclared"),
-    (Unserved::IssuerMetadataNotHeld, "issuer_metadata_not_held"),
-    (Unserved::CredentialMetadata, "credential_metadata"),
-    (Unserved::TypeMetadata, "type_metadata"),
-    (
-        Unserved::Definition(SourceKind::CredentialMetadata),
-        "definition_credential_metadata",
-    ),
-    (
-        Unserved::Definition(SourceKind::TypeMetadata),
-        "definition_type_metadata",
-    ),
-    (
-        Unserved::Definition(SourceKind::Configuration),
-        "definition_configuration",
-    ),
-    (Unserved::Language, "language"),
+/// Every reason a registration records.
+const UNSERVED: [Unserved; 10] = [
+    Unserved::Format,
+    Unserved::TypeUnsupported,
+    Unserved::TypeUndeclared,
+    Unserved::IssuerMetadataNotHeld,
+    Unserved::CredentialMetadata,
+    Unserved::TypeMetadata,
+    Unserved::Definition(CredentialSource::CredentialMetadata),
+    Unserved::Definition(CredentialSource::TypeMetadata),
+    Unserved::Definition(CredentialSource::Configuration),
+    Unserved::Language,
 ];
+
+/// The name a registration writes for `reason`.
+fn unserved_name(reason: Unserved) -> &'static str {
+    match reason {
+        Unserved::Format => "format",
+        Unserved::TypeUnsupported => "type_unsupported",
+        Unserved::TypeUndeclared => "type_undeclared",
+        Unserved::IssuerMetadataNotHeld => "issuer_metadata_not_held",
+        Unserved::CredentialMetadata => "credential_metadata",
+        Unserved::TypeMetadata => "type_metadata",
+        Unserved::Definition(CredentialSource::CredentialMetadata) => {
+            "definition_credential_metadata"
+        }
+        Unserved::Definition(CredentialSource::TypeMetadata) => "definition_type_metadata",
+        Unserved::Definition(CredentialSource::Configuration) => "definition_configuration",
+        Unserved::Language => "language",
+    }
+}
 
 /// The reason a text names.
 pub(crate) fn unserved(item: &Item<'_>) -> Result<Unserved, CredentialFault> {
@@ -195,9 +204,8 @@ pub(crate) fn unserved(item: &Item<'_>) -> Result<Unserved, CredentialFault> {
         MemberFault::WrongType,
     ))?;
     UNSERVED
-        .iter()
-        .find(|(_, named)| *named == name)
-        .map(|(reason, _)| *reason)
+        .into_iter()
+        .find(|reason| unserved_name(*reason) == name)
         .ok_or_else(|| CredentialFault::UnservedUnknown(name.to_owned()))
 }
 
@@ -248,11 +256,7 @@ pub(crate) mod write {
     }
 
     /// The name of `reason`.
-    pub(crate) fn unserved(reason: Unserved) -> Result<Cbor, Unserved> {
-        UNSERVED
-            .iter()
-            .find(|(known, _)| *known == reason)
-            .map(|(_, name)| Cbor::text(name))
-            .ok_or(reason)
+    pub(crate) fn unserved(reason: Unserved) -> Cbor {
+        Cbor::text(unserved_name(reason))
     }
 }

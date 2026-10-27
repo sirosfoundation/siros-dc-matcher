@@ -1,8 +1,6 @@
 //! What Credential Manager returns to the wallet for a picked set entry: the standard metadata
 //! object [`SetEntry::metadata`](crate::SetEntry::metadata) writes.
 
-use core::fmt;
-
 use serde_json::{Map, Value};
 
 /// Whether the host shows every text a set entry carries.
@@ -34,13 +32,16 @@ pub enum PickedMember {
 }
 
 /// Why a text is no standard metadata object.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PickedError {
     /// The text is no JSON object.
+    #[error("entry metadata is no JSON object")]
     NotObject,
     /// A member is absent or of the wrong type.
+    #[error("entry metadata member {} malformed", .0.as_str())]
     Member(PickedMember),
     /// The object has this member, which the standard object does not define.
+    #[error("entry metadata member {0:?} unknown")]
     MemberUnknown(String),
 }
 
@@ -56,20 +57,6 @@ impl PickedMember {
 
 /// The member that carries the matcher's JSON.
 const DATA: &str = "data";
-
-impl fmt::Display for PickedError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::NotObject => f.write_str("entry metadata is no JSON object"),
-            Self::Member(member) => {
-                write!(f, "entry metadata member {} malformed", member.as_str())
-            }
-            Self::MemberUnknown(name) => write!(f, "entry metadata member {name:?} unknown"),
-        }
-    }
-}
-
-impl std::error::Error for PickedError {}
 
 impl Picked {
     /// The standard metadata object `metadata`, as the host returns it with a picked entry.

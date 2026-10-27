@@ -2460,6 +2460,7 @@ dependencies = [
  "siros-sdjwt",
  "siros-trust",
  "siros-wallet-state",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -2517,6 +2518,7 @@ dependencies = [
  "siros-dcql",
  "siros-wallet-state",
  "siros-zkp-req",
+ "thiserror 2.0.20",
  "unicode-general-category",
 ]
 
@@ -2549,6 +2551,7 @@ dependencies = [
  "siros-codec",
  "siros-dcql",
  "siros-oid4vp",
+ "thiserror 2.0.20",
  "x509-cert",
 ]
 
@@ -2612,6 +2615,7 @@ dependencies = [
  "siros-wallet-state",
  "siros-zkp-req",
  "siros-zkp-req-nym-auth",
+ "thiserror 2.0.20",
  "x509-cert",
  "zeroize",
 ]
@@ -2632,6 +2636,7 @@ dependencies = [
  "siros-wallet-state",
  "siros-zkp-req",
  "siros-zkp-req-nym-auth",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -2663,6 +2668,7 @@ dependencies = [
  "siros-oid4vp",
  "siros-trust",
  "siros-wallet-state",
+ "thiserror 2.0.20",
  "unicode-segmentation",
  "x509-cert",
 ]

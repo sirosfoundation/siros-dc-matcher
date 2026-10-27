@@ -24,6 +24,7 @@ siros-credential = { workspace = true }
 siros-dcql = { workspace = true }
 siros-wallet-state = { workspace = true, optional = true }
 siros-zkp-req = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 # The oracle of the characters display text refuses.

@@ -42,10 +42,6 @@ pub(crate) enum Unshown {
     Unmatched(&'static str),
     /// The rows of the offer at this position do not show: the error's code.
     Display(OfferIndex, &'static str),
-    /// The offer at this position names a query or a candidate the matching lacks.
-    Inconsistent(OfferIndex),
-    /// The offer at this position has no member.
-    Empty(OfferIndex),
 }
 
 impl Unshown {
@@ -58,8 +54,6 @@ impl Unshown {
             Self::CredentialUnavailable => "transaction data: credential_unavailable".to_owned(),
             Self::Unmatched(code) => format!("no offer: {code}"),
             Self::Display(offer, code) => format!("offer {offer}: {code}"),
-            Self::Inconsistent(offer) => format!("offer {offer}: inconsistent"),
-            Self::Empty(offer) => format!("offer {offer}: no member"),
         }
     }
 }

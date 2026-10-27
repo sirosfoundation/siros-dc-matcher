@@ -29,7 +29,8 @@ pub enum PickMember {
 }
 
 /// Why a JSON value is no pick.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum PickFault {
     /// The value is no object.
     NotObject,
@@ -61,10 +62,6 @@ impl PickFault {
         }
     }
 }
-
-siros_codec::display_code!(PickFault);
-
-impl std::error::Error for PickFault {}
 
 impl Pick {
     /// The entry of the credential `credential` answering the Credential Query `query` in the

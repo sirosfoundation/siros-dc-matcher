@@ -8,7 +8,7 @@ use super::config::Configuration;
 use super::paso::{CredentialMetadata, CredentialMetadataFault};
 use super::signed::Verifier;
 use super::ts12::{Ts12Fault, TypeMetadata};
-use super::{Rulebook, SourceKind};
+use super::{CredentialSource, Rulebook, SourceKind};
 use crate::definition::{Definition, DefinitionError};
 use crate::entry::Entry;
 use crate::projection::{Projected, Unmatched};
@@ -25,7 +25,7 @@ pub(crate) enum NotServed {
     TypeMetadata(Ts12Fault),
     TypeUndeclared,
     TypeUnsupported,
-    Definition(SourceKind, DefinitionError),
+    Definition(CredentialSource, DefinitionError),
     Language(Unmatched),
 }
 
@@ -38,7 +38,7 @@ impl From<NotServed> for Incompatibility {
             NotServed::TypeMetadata(fault) => Self::TypeMetadata(fault),
             NotServed::TypeUndeclared => Self::TypeUndeclared,
             NotServed::TypeUnsupported => Self::TypeUnsupported,
-            NotServed::Definition(source, error) => Self::Definition(source, error),
+            NotServed::Definition(source, error) => Self::Definition(source.into(), error),
             NotServed::Language(unmatched) => Self::Language(unmatched),
         }
     }
@@ -140,7 +140,7 @@ impl<'c> CredentialSources<'c> {
         if let Some(definition) = self.paso.as_ref().and_then(|paso| paso.definition(type_id)) {
             return Some(self.project(
                 definition.clone(),
-                SourceKind::CredentialMetadata,
+                CredentialSource::CredentialMetadata,
                 rulebook,
             ));
         }
@@ -152,7 +152,7 @@ impl<'c> CredentialSources<'c> {
             return Some(match found {
                 Ok((definition, schema)) => self.project(
                     Ok(definition),
-                    SourceKind::TypeMetadata,
+                    CredentialSource::TypeMetadata,
                     Rulebook::Ts12(schema),
                 ),
                 Err(fault) => Err(NotServed::TypeMetadata(fault)),
@@ -162,7 +162,11 @@ impl<'c> CredentialSources<'c> {
             return None;
         }
         let definition = self.configuration.definition(type_id, self.credential)?;
-        Some(self.project(Ok(definition.clone()), SourceKind::Configuration, rulebook))
+        Some(self.project(
+            Ok(definition.clone()),
+            CredentialSource::Configuration,
+            rulebook,
+        ))
     }
 
     /// Why no definition serves a type no source names: type metadata that does not read, a
@@ -195,12 +199,12 @@ impl<'c> CredentialSources<'c> {
     fn project(
         &self,
         definition: Result<Definition, DefinitionError>,
-        source: SourceKind,
+        source: CredentialSource,
         rulebook: Rulebook,
     ) -> Result<Projected, NotServed> {
         definition
             .map_err(|error| NotServed::Definition(source, error))?
-            .project(self.language, source, rulebook)
+            .project(self.language, source.into(), rulebook)
             .map_err(NotServed::Language)
     }
 }
@@ -211,13 +215,12 @@ impl Definitions for CredentialSources<'_> {
     fn serve(&self, entry: &Entry) -> Result<Projected, Incompatibility> {
         let type_id = entry.type_id();
         match entry.metadata() {
-            Some(metadata) => {
-                let definition = metadata
-                    .verify(type_id, self.credential, self.verifier)
-                    .map_err(Incompatibility::AdHoc)?;
-                self.project(definition, SourceKind::AdHoc, Rulebook::of_type(type_id))
-                    .map_err(Incompatibility::from)
-            }
+            Some(metadata) => metadata
+                .verify(type_id, self.credential, self.verifier)
+                .map_err(Incompatibility::AdHoc)?
+                .map_err(|error| Incompatibility::Definition(SourceKind::AdHoc, error))?
+                .project(self.language, SourceKind::AdHoc, Rulebook::of_type(type_id))
+                .map_err(Incompatibility::Language),
             None => self.served(type_id).map_err(Incompatibility::from),
         }
     }
