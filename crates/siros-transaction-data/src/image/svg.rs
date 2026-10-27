@@ -103,7 +103,7 @@ pub(super) fn read(bytes: &[u8], fetched: &Fetched) -> Result<Step<Document>, Sv
     for reference in references(&document)? {
         let (url, integrity) = pinned(&reference)?;
         let body = fetched!(fetched
-            .body_of(image_fetch(url, RESOURCE_LIMIT))
+            .body(image_fetch(url, RESOURCE_LIMIT))
             .map_err(|fault| SvgFault::ReferenceFetch(reference.clone(), fault))?);
         integrity
             .check(body)

@@ -219,8 +219,10 @@ jobs:
       #
       # siros-oid4vp holds it without `crypto`, the part the matcher links;
       # `crypto` builds with the pinned toolchain. siros-presentation holds it
-      # without `wallet`: the matching the picker runs. siros-trust holds it
-      # without `chain`, the admission rule the picker runs, and with it.
+      # without `wallet`: the matching the picker runs. siros-transaction-data
+      # holds it without `wallet`, the selection over a registration, and with
+      # it. siros-trust holds it without `chain`, the admission rule the picker
+      # runs, and with it.
       #
       # -ffi and -testhost are deliberately excluded: they declare 1.88 in
       # their own manifests. Checking them here would only re-discover that.
@@ -235,6 +237,7 @@ jobs:
           cargo check --locked -p siros-oid4vp
           cargo check --locked -p siros-trust
           cargo check --locked -p siros-presentation --no-default-features
+          cargo check --locked -p siros-transaction-data --no-default-features
           cargo check --locked --all-features --target wasm32-wasip1 \
             -p siros-dc-matcher-wasm -p android-credman-sys -p android-credman
 

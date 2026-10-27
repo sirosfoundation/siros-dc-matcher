@@ -77,8 +77,8 @@ pub struct PlanInput<'a> {
 
 /// What a step of planning gives.
 pub enum PlanStep<'a> {
-    /// A document for the host to fetch. Its response goes to [`Fetches::answer`], and the plan
-    /// is made again.
+    /// An image for the host to fetch (PaSO View, Section 3, `image`). Its response goes to
+    /// [`Fetches::answer`], and the plan is made again.
     Fetch(Fetch),
     /// The plan.
     Ready(Box<Planned<'a>>),

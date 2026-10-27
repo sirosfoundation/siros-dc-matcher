@@ -1,4 +1,4 @@
-//! The host's responses to the fetches a plan asks for (H1).
+//! The host's responses to the image fetches a plan asks for (H1).
 
 use siros_oid4vp::{Fetch, FetchResponse};
 use siros_transaction_data::Fetched;

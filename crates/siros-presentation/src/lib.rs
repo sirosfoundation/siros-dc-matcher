@@ -7,14 +7,14 @@
 //! | A1: the format table, `meta`, holder binding, usable credentials, no undisclosable nym_auth attribute; why a request has no offer | [`Matching::new`] over [`MatchCredential`]s, [`Failure`] |
 //! | A2: `zkp_req` matching as one selection, then the usable attestation and the opened seed | [`ZkpQuery`], [`Matching::answer`]; the wallet's tests in [`plan`] |
 //! | A3: offers over the eligible candidates, optional additions (one option per set), all-optional sets, the subset of a `multiple` member by `credentialId` | [`Offers::of`], [`Selection`] with [`Subset`] |
-//! | Transaction data selection (PaSO Core, Section 7.4): the targeted queries in one credential set whose alternatives are transposable; each candidate takes its first compatible entry, a candidate with none excluded; an entry no chosen credential takes unused | [`plan`], [`CredentialView::transaction`] |
+//! | Transaction data selection (PaSO Core, Section 7.4): the targeted queries in one credential set whose alternatives are transposable; each candidate takes its first compatible entry, a candidate with none excluded; an entry no chosen credential takes unused; the transaction metadata the host holds as input | [`plan`], [`PlanInput::held`], [`CredentialView::transaction`] |
 //! | A4: the digest of what the user consents to; the selection parsed against the recomputed plan | [`ConsentView::digest`], [`PlanDigest::parse`], [`Selection`], [`Planned::choose`] gives a [`Chosen`] |
 //! | A5: every signing input a `Sign` effect; the signatures parsed against them, each verifying under its key | [`Chosen::prepare`] gives [`Sign`]s, [`Prepared::finish`] |
 //! | A6: the SD-JWT `aud` | [`Chosen::prepare`] |
 //! | A7: the SessionTranscript of the request's `Handover` | [`Chosen::prepare`] |
 //! | A8: one `vp_token`; `access_denied` on a decline; the record names the instances used | [`Prepared::finish`], [`Planned::decline`] |
 //! | A9: the wallet's display, and its refusal in a background fulfilment | [`WalletDisplay::of`], [`Fulfilment`] |
-//! | T4: each transaction entry bound to one credential, named by `credentialId` and instance in the view and the digest; phase 2 binds by it; a selection that leaves it out refused | [`CredentialView::entry`], [`CredentialView::transaction`], [`PresentationError::BoundCredentialOmitted`] |
+//! | T4: each transaction entry bound to one credential, named by `credentialId` and instance in the view and the digest, with the source and rulebook of its definition; phase 2 binds by it; a selection that leaves it out refused | [`CredentialView::entry`], [`CredentialView::transaction`], [`PresentationError::BoundCredentialOmitted`] |
 //! | K3: the selection from the credential picker's picked entries, checked against the plan | [`Pick`], [`Planned::picked`] |
 //! | N2: the nym_auth request of a verified request, its `verifier_id` from the request's certificate | [`siros_zkp_req_nym_auth::request::NymAuthRequest`], built by [`plan`] from [`PlanInput::verifier_id`] |
 //!
@@ -22,8 +22,9 @@
 //! [`WalletDisplay`]): what the credential picker runs over its registration projection. It
 //! builds with Rust 1.82 and links no crypto, prover or display resolution.
 //!
-//! The crate performs no I/O. The plan asks the host for each fetch, phase 2 asks it for each
-//! signature, randomness comes from the caller's CSPRNG, and the time is an input.
+//! The crate performs no I/O. The plan takes the transaction metadata the host holds as input
+//! and asks the host for each image fetch, phase 2 asks it for each signature, randomness comes
+//! from the caller's CSPRNG, and the time is an input.
 
 #![deny(missing_docs)]
 #![deny(unsafe_code)]

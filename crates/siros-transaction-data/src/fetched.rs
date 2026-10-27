@@ -77,7 +77,7 @@ impl Fetched {
     /// # Errors
     ///
     /// [`FetchFault`]: a status other than 200, or a body over the fetch's limit.
-    pub(crate) fn body_of(&self, fetch: Fetch) -> Result<Step<&[u8]>, FetchFault> {
+    pub(crate) fn body(&self, fetch: Fetch) -> Result<Step<&[u8]>, FetchFault> {
         let Some(response) = self.response(&fetch) else {
             return Ok(Step::Fetch(fetch));
         };

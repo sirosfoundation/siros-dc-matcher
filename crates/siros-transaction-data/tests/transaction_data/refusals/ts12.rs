@@ -7,7 +7,7 @@ use siros_oid4vp::HttpsUrl;
 use siros_transaction_data::{
     ClaimFault, ClaimIndex, DefinitionError, DefinitionMember, EntryFault, ImageFault,
     Incompatibility, IntegrityFault, LabelsFault, Location, LocationStep, Prominence, RenderFault,
-    Selection, SourceKind, TextFault, Ts12Fault, Ts12Member, Ts12Type, UiElementKey,
+    Selection, SourceKind, TextFault, Ts12Fault, Ts12Member, Ts12Type, UiElementKey, Wanted,
 };
 
 use crate::common::{configured, credential_with, entries, query, sri, text, Host, PAYMENT};
@@ -423,4 +423,21 @@ fn the_configuration_serves_only_credentials_without_metadata() {
         cause(host.select(&[&entries[0]], &card).unwrap()),
         Some(Incompatibility::TypeUndeclared)
     );
+}
+
+/// The documents the host should hold for a credential without a chain: its Type Metadata and
+/// its issuer's metadata, then the documents the Type Metadata references.
+#[test]
+fn the_host_learns_the_documents_to_hold() {
+    let card = credential_with(VCT, &[], &json!({}));
+    let issuer_metadata = "https://issuer.bank.example/.well-known/jwt-vc-issuer";
+    let url = |text: &str| Wanted::Document(HttpsUrl::parse(text).unwrap());
+    let mut host = Host::new(json!([]));
+    let wanted = |host: &Host| host.metadata().wanted(&card, &host.display).unwrap();
+    assert_eq!(wanted(&host), [url(VCT), url(issuer_metadata)]);
+    let referenced = document(payment_type(
+        json!({"claims": null, "claims_uri": CLAIMS_URI}),
+    ));
+    host.held = served(&referenced);
+    assert_eq!(wanted(&host), [url(CLAIMS_URI), url(issuer_metadata)]);
 }

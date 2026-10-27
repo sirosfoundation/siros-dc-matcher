@@ -232,7 +232,7 @@ impl ImageRef {
             Self::Data { format, bytes } => (*format, bytes.clone()),
             Self::Remote { url, integrity } => {
                 let body = fetched!(fetched
-                    .body_of(image_fetch(url.clone(), IMAGE_LIMIT))
+                    .body(image_fetch(url.clone(), IMAGE_LIMIT))
                     .map_err(ImageFault::Fetch)?);
                 integrity.check(body).map_err(ImageFault::Integrity)?;
                 (ImageFormat::sniff(body), body.to_vec())
