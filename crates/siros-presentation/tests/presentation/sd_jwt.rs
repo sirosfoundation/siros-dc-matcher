@@ -10,13 +10,13 @@ use siros_presentation::{plan, OfferIndex, Pick, PlanStep, PresentationError, Wa
 use siros_transaction_data::{RowValue, UnsignedWarning};
 use siros_wallet_state::CredentialId;
 
+use crate::host::{holding, label_text};
 use crate::verifier::{
     b64, client_metadata, dc_api_signed, decrypt_jwe, redirect_unsigned, NONCE, NOW, RESPONSE_URI,
     STATE,
 };
 use crate::wallet::{
-    disclosed, holder_signed, holding, label_text, ready, respond, respond_to, respond_with,
-    sd_jwt, Held, Wallet, VCT,
+    disclosed, holder_signed, ready, respond, respond_to, respond_with, sd_jwt, Held, Wallet, VCT,
 };
 
 const PAYMENT: &str = "urn:eudi:sca:payment:1";

@@ -20,12 +20,11 @@ use siros_trust::TrustStore;
 use siros_wallet_state::{ConfigurationId, IssuerIdentifier};
 use siros_zkp_req_nym_auth::testing::Issuer;
 
+use crate::host::{holding_absent, label_text};
 use crate::verifier::{
     b64, client_metadata, dc_api_signed, dc_api_unsigned, decrypt_jwe, NONCE, NOW,
 };
-use crate::wallet::{
-    base64, holding_absent, label_text, ready, respond, sd_jwt, sd_jwt_x5c, Held, Wallet, VCT,
-};
+use crate::wallet::{base64, ready, respond, sd_jwt, sd_jwt_x5c, Held, Wallet, VCT};
 
 const APPROVAL: &str = "urn:paso:sca:com.example:approval:1";
 const METADATA_URI: &str = "https://issuer.example/metadata/pid";

@@ -10,23 +10,20 @@ use siros_codec::cbor::Value as Cbor;
 use siros_codec::date::DateTime;
 use siros_credential::Credential;
 use siros_dcql::QueryId;
-use siros_display::{DisplayCache, IssuerMetadata, Locale};
-use siros_oid4vp::HttpsUrl;
+use siros_display::{DisplayCache, Locale};
 use siros_oid4vp::{FetchResponse, HttpStatus, VerifiedRequest};
 use siros_presentation::{
     plan, AdditionIndex, Fetches, Fulfilment, OfferIndex, PlanInput, PlanStep, Planned,
     PresentationError, Response, Selection, SignId, Subset,
 };
-use siros_transaction_data::{
-    Amr, Configuration, Factor, HeldDocument, HeldMetadata, Inherence, Possession, Segment,
-    ShownLabel,
-};
+use siros_transaction_data::{Amr, Configuration, Factor, HeldMetadata, Inherence, Possession};
 use siros_trust::TrustStore;
 use siros_wallet_state::{CredentialId, WalletState};
 use siros_zkp_req_nym_auth::system::NymAuthSystem;
 use siros_zkp_req_nym_auth::testing::{self, Issuer, Spec, TestProver, SEED};
 use siros_zkp_req_nym_auth::verifier_id::VerifierIdForm;
 
+use crate::host::{holding_absent, issuer_display, label_text};
 use crate::verifier::{b64, Rng, NOW};
 
 /// The holder's key, nym_auth's test device key, which every credential is bound to.
@@ -412,47 +409,6 @@ impl Wallet {
             fetches.answer(&fetch, response).unwrap();
         }
     }
-}
-
-/// The display metadata of the wallet's credentials: the issuer metadata of the configuration
-/// `example` of `https://issuer.example`, without a `credential_metadata_uri`.
-pub fn issuer_display() -> DisplayCache {
-    let issuer = json!({
-        "credential_issuer": "https://issuer.example",
-        "credential_configurations_supported": {"example": {"format": "dc+sd-jwt", "vct": VCT}}
-    });
-    let metadata = IssuerMetadata::merge(&issuer, "example", None).unwrap();
-    DisplayCache::new(vec![metadata], Vec::new()).unwrap()
-}
-
-/// The metadata of the host's records that the documents of `urls` are absent.
-pub fn holding_absent(urls: &[&str]) -> HeldMetadata {
-    let documents = urls
-        .iter()
-        .map(|url| HeldDocument::absent(HttpsUrl::parse(url).unwrap()))
-        .collect();
-    HeldMetadata::new(Vec::new(), documents).unwrap()
-}
-
-/// The metadata of the documents `documents`, each the body the host fetched from its URL.
-pub fn holding(documents: Vec<(&str, Vec<u8>)>) -> HeldMetadata {
-    let documents = documents
-        .into_iter()
-        .map(|(url, body)| HeldDocument::new(HttpsUrl::parse(url).unwrap(), body))
-        .collect();
-    HeldMetadata::new(Vec::new(), documents).unwrap()
-}
-
-/// The text of `label`, each value as the payload writes it.
-pub fn label_text(label: &ShownLabel) -> String {
-    label
-        .segments()
-        .iter()
-        .map(|segment| match segment {
-            Segment::Text(text) => text.clone(),
-            Segment::Value(value) => value.text(),
-        })
-        .collect()
 }
 
 /// The plan of `input`, which needs no further fetch. Its view shows neither the seed nym_auth's

@@ -10,6 +10,7 @@
 
 mod digest;
 mod display;
+mod host;
 mod mdoc;
 mod nym_request;
 mod offers;
