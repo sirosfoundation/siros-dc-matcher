@@ -219,10 +219,10 @@ jobs:
       #
       # siros-oid4vp holds it without `crypto`, the part the matcher links;
       # `crypto` builds with the pinned toolchain. siros-presentation holds it
-      # without `wallet`: the matching the picker runs. siros-transaction-data
+      # without `wallet`: the matching for the picker. siros-transaction-data
       # holds it without `wallet`, the selection over a registration, and with
-      # it. siros-trust holds it without `chain`, the admission rule the picker
-      # runs, and with it.
+      # it. siros-trust holds it without `chain`, the admission rule for the
+      # picker, and with it.
       #
       # -ffi and siros-picker-testhost are deliberately excluded: they declare 1.88 in
       # their own manifests. Checking them here would only re-discover that.

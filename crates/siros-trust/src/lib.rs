@@ -12,8 +12,8 @@
 //! One rule serves both sides: [`QueryAuthorities::admit`] over an [`Issuer`]. The wallet's
 //! issuer is the chain and the store at a time, the picker's the recorded [`IssuerFacts`].
 //!
-//! Without the feature `chain` the crate holds the rule, the authorities and the facts: what the
-//! credential picker links. It builds with Rust 1.82 and holds no X.509 or ECDSA code.
+//! Without the feature `chain` the crate holds the rule, the authorities and the facts, for the
+//! credential picker (K2, TR5). It builds with Rust 1.82 and holds no X.509 or ECDSA code.
 
 #![deny(missing_docs)]
 #![deny(unsafe_code)]

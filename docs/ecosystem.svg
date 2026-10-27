@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1360 858" width="1360" height="858" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 858" width="1440" height="858" role="img" aria-labelledby="title desc">
 <title id="title">SIROS wallet core: layers, artifacts and host</title>
 <desc id="desc">The crates of the workspace in five layers, the artifacts built from them, and the host each platform provides.</desc>
 <style>
@@ -36,127 +36,127 @@
     .host { fill: #161b22; stroke: #6e7681; }
   }
 </style>
-<rect class="bg" width="1360" height="858" rx="18"/>
+<rect class="bg" width="1440" height="858" rx="18"/>
 <text class="title" x="32" y="48">SIROS wallet core</text>
 <text class="subtitle" x="32" y="72">The Rust workspace in layers, what it ships, and what each platform provides</text>
-<rect class="band-art" x="16" y="92" width="1084" height="78" rx="14"/>
+<rect class="band-art" x="16" y="92" width="1164" height="78" rx="14"/>
 <text class="layer" x="32" y="129.0">Artifacts</text>
 <text class="caption" x="32" y="149.0">what consumers install</text>
-<rect class="chip chip-art" x="210.0" y="106" width="210.0" height="50" rx="9"/>
-<text class="name" x="315.0" y="127" text-anchor="middle">matcher.wasm</text>
-<text class="desc" x="315.0" y="144" text-anchor="middle">Credential Manager picker</text>
-<rect class="chip chip-art" x="432.0" y="106" width="210.0" height="50" rx="9"/>
-<text class="name" x="537.0" y="127" text-anchor="middle">Android AAR</text>
-<text class="desc" x="537.0" y="144" text-anchor="middle">UniFFI bindings + matcher.wasm</text>
-<rect class="chip chip-art" x="654.0" y="106" width="210.0" height="50" rx="9"/>
-<text class="name" x="759.0" y="127" text-anchor="middle">XCFramework</text>
-<text class="desc" x="759.0" y="144" text-anchor="middle">UniFFI bindings for iOS</text>
-<rect class="chip chip-art" x="876.0" y="106" width="210.0" height="50" rx="9"/>
-<text class="name" x="981.0" y="127" text-anchor="middle">browser presenter</text>
-<text class="desc" x="981.0" y="144" text-anchor="middle">zkp_req proofs in the browser</text>
-<rect class="band-l4" x="16" y="184" width="1084" height="198" rx="14"/>
+<rect class="chip chip-art" x="210.0" y="106" width="230.0" height="50" rx="9"/>
+<text class="name" x="325.0" y="127" text-anchor="middle">matcher.wasm</text>
+<text class="desc" x="325.0" y="144" text-anchor="middle">Credential Manager picker</text>
+<rect class="chip chip-art" x="452.0" y="106" width="230.0" height="50" rx="9"/>
+<text class="name" x="567.0" y="127" text-anchor="middle">Android AAR</text>
+<text class="desc" x="567.0" y="144" text-anchor="middle">UniFFI bindings + matcher.wasm</text>
+<rect class="chip chip-art" x="694.0" y="106" width="230.0" height="50" rx="9"/>
+<text class="name" x="809.0" y="127" text-anchor="middle">XCFramework</text>
+<text class="desc" x="809.0" y="144" text-anchor="middle">UniFFI bindings for iOS</text>
+<rect class="chip chip-art" x="936.0" y="106" width="230.0" height="50" rx="9"/>
+<text class="name" x="1051.0" y="127" text-anchor="middle">browser presenter</text>
+<text class="desc" x="1051.0" y="144" text-anchor="middle">zkp_req proofs in the browser</text>
+<rect class="band-l4" x="16" y="184" width="1164" height="198" rx="14"/>
 <text class="layer" x="32" y="281.0">L4</text>
 <text class="caption" x="32" y="301.0">facades · picker · provers</text>
-<rect class="chip chip-l4" x="210.0" y="198" width="210.0" height="50" rx="9"/>
-<text class="name" x="315.0" y="219" text-anchor="middle">siros-picker</text>
-<text class="desc" x="315.0" y="236" text-anchor="middle">the picker binary</text>
-<rect class="chip chip-l4" x="432.0" y="198" width="210.0" height="50" rx="9"/>
-<text class="name" x="537.0" y="219" text-anchor="middle">siros-registration</text>
-<text class="desc" x="537.0" y="236" text-anchor="middle">the picker&#x27;s registration</text>
-<rect class="chip chip-l4" x="654.0" y="198" width="210.0" height="50" rx="9"/>
-<text class="name" x="759.0" y="219" text-anchor="middle">android-credman</text>
-<text class="desc" x="759.0" y="236" text-anchor="middle">host ABI as types</text>
-<rect class="chip chip-l4" x="876.0" y="198" width="210.0" height="50" rx="9"/>
-<text class="name" x="981.0" y="219" text-anchor="middle">android-credman-sys</text>
-<text class="desc" x="981.0" y="236" text-anchor="middle">Credential Manager imports</text>
-<rect class="chip chip-l4" x="210.0" y="258" width="210.0" height="50" rx="9"/>
-<text class="name" x="315.0" y="279" text-anchor="middle">siros-dc-matcher-ffi</text>
-<text class="desc" x="315.0" y="296" text-anchor="middle">UniFFI surface</text>
-<rect class="chip chip-l4" x="432.0" y="258" width="210.0" height="50" rx="9"/>
-<text class="name" x="537.0" y="279" text-anchor="middle">siros-dc-matcher-core</text>
-<text class="desc" x="537.0" y="296" text-anchor="middle">v1 blob and profile, for the FFI</text>
-<rect class="chip chip-l4" x="654.0" y="258" width="210.0" height="50" rx="9"/>
-<text class="name" x="759.0" y="279" text-anchor="middle">siros-picker-testhost</text>
-<text class="desc" x="759.0" y="296" text-anchor="middle">the picker off-device</text>
-<rect class="chip chip-l4" x="876.0" y="258" width="210.0" height="50" rx="9"/>
-<text class="name" x="981.0" y="279" text-anchor="middle">siros-zkp-req-wasm</text>
-<text class="desc" x="981.0" y="296" text-anchor="middle">browser presenter</text>
-<rect class="chip chip-l4" x="210.0" y="318" width="210.0" height="50" rx="9"/>
-<text class="name" x="315.0" y="339" text-anchor="middle">siros-zkp-backend-longfellow</text>
-<text class="desc" x="315.0" y="356" text-anchor="middle">Longfellow prover</text>
-<rect class="chip chip-l4" x="432.0" y="318" width="210.0" height="50" rx="9"/>
-<text class="name" x="537.0" y="339" text-anchor="middle">siros-zkp-backend-vega</text>
-<text class="desc" x="537.0" y="356" text-anchor="middle">Vega prover</text>
-<rect class="chip chip-l4" x="654.0" y="318" width="210.0" height="50" rx="9"/>
-<text class="name" x="759.0" y="339" text-anchor="middle">siros-zkp-proving-e2e</text>
-<text class="desc" x="759.0" y="356" text-anchor="middle">real proofs end to end</text>
-<rect class="band-l3" x="16" y="396" width="1084" height="78" rx="14"/>
+<rect class="chip chip-l4" x="210.0" y="198" width="230.0" height="50" rx="9"/>
+<text class="name" x="325.0" y="219" text-anchor="middle">siros-picker</text>
+<text class="desc" x="325.0" y="236" text-anchor="middle">the picker binary</text>
+<rect class="chip chip-l4" x="452.0" y="198" width="230.0" height="50" rx="9"/>
+<text class="name" x="567.0" y="219" text-anchor="middle">siros-registration</text>
+<text class="desc" x="567.0" y="236" text-anchor="middle">the picker&#x27;s registration</text>
+<rect class="chip chip-l4" x="694.0" y="198" width="230.0" height="50" rx="9"/>
+<text class="name" x="809.0" y="219" text-anchor="middle">android-credman</text>
+<text class="desc" x="809.0" y="236" text-anchor="middle">host ABI as types</text>
+<rect class="chip chip-l4" x="936.0" y="198" width="230.0" height="50" rx="9"/>
+<text class="name" x="1051.0" y="219" text-anchor="middle">android-credman-sys</text>
+<text class="desc" x="1051.0" y="236" text-anchor="middle">Credential Manager imports</text>
+<rect class="chip chip-l4" x="210.0" y="258" width="230.0" height="50" rx="9"/>
+<text class="name" x="325.0" y="279" text-anchor="middle">siros-dc-matcher-ffi</text>
+<text class="desc" x="325.0" y="296" text-anchor="middle">UniFFI surface</text>
+<rect class="chip chip-l4" x="452.0" y="258" width="230.0" height="50" rx="9"/>
+<text class="name" x="567.0" y="279" text-anchor="middle">siros-dc-matcher-core</text>
+<text class="desc" x="567.0" y="296" text-anchor="middle">v1 blob and profile, for the FFI</text>
+<rect class="chip chip-l4" x="694.0" y="258" width="230.0" height="50" rx="9"/>
+<text class="name" x="809.0" y="279" text-anchor="middle">siros-picker-testhost</text>
+<text class="desc" x="809.0" y="296" text-anchor="middle">the picker off-device</text>
+<rect class="chip chip-l4" x="936.0" y="258" width="230.0" height="50" rx="9"/>
+<text class="name" x="1051.0" y="279" text-anchor="middle">siros-zkp-req-wasm</text>
+<text class="desc" x="1051.0" y="296" text-anchor="middle">browser presenter</text>
+<rect class="chip chip-l4" x="210.0" y="318" width="230.0" height="50" rx="9"/>
+<text class="name" x="325.0" y="339" text-anchor="middle">siros-zkp-backend-longfellow</text>
+<text class="desc" x="325.0" y="356" text-anchor="middle">Longfellow prover</text>
+<rect class="chip chip-l4" x="452.0" y="318" width="230.0" height="50" rx="9"/>
+<text class="name" x="567.0" y="339" text-anchor="middle">siros-zkp-backend-vega</text>
+<text class="desc" x="567.0" y="356" text-anchor="middle">Vega prover</text>
+<rect class="chip chip-l4" x="694.0" y="318" width="230.0" height="50" rx="9"/>
+<text class="name" x="809.0" y="339" text-anchor="middle">siros-zkp-proving-e2e</text>
+<text class="desc" x="809.0" y="356" text-anchor="middle">real proofs end to end</text>
+<rect class="band-l3" x="16" y="396" width="1164" height="78" rx="14"/>
 <text class="layer" x="32" y="433.0">L3</text>
 <text class="caption" x="32" y="453.0">presentation</text>
-<rect class="chip chip-l3" x="210.0" y="410" width="876.0" height="50" rx="9"/>
-<text class="name" x="648.0" y="431" text-anchor="middle">siros-presentation</text>
-<text class="desc" x="648.0" y="448" text-anchor="middle">plan · offers · consent view · selection · signing inputs · vp_token · record</text>
-<rect class="band-l2" x="16" y="488" width="1084" height="78" rx="14"/>
+<rect class="chip chip-l3" x="210.0" y="410" width="956.0" height="50" rx="9"/>
+<text class="name" x="688.0" y="431" text-anchor="middle">siros-presentation</text>
+<text class="desc" x="688.0" y="448" text-anchor="middle">plan · offers · consent view · selection · signing inputs · vp_token · record</text>
+<rect class="band-l2" x="16" y="488" width="1164" height="78" rx="14"/>
 <text class="layer" x="32" y="525.0">L2</text>
 <text class="caption" x="32" y="545.0">wallet model</text>
-<rect class="chip chip-l2" x="210.0" y="502" width="210.0" height="50" rx="9"/>
-<text class="name" x="315.0" y="523" text-anchor="middle">siros-wallet-state</text>
-<text class="desc" x="315.0" y="540" text-anchor="middle">decrypted private data</text>
-<rect class="chip chip-l2" x="432.0" y="502" width="210.0" height="50" rx="9"/>
-<text class="name" x="537.0" y="523" text-anchor="middle">siros-credential</text>
-<text class="desc" x="537.0" y="540" text-anchor="middle">typed credentials, issuer chain</text>
-<rect class="chip chip-l2" x="654.0" y="502" width="210.0" height="50" rx="9"/>
-<text class="name" x="759.0" y="523" text-anchor="middle">siros-display</text>
-<text class="desc" x="759.0" y="540" text-anchor="middle">cards and rows, one language</text>
-<rect class="chip chip-l2" x="876.0" y="502" width="210.0" height="50" rx="9"/>
-<text class="name" x="981.0" y="523" text-anchor="middle">siros-transaction-data</text>
-<text class="desc" x="981.0" y="540" text-anchor="middle">PaSO and TS12 transactions</text>
-<rect class="band-l1" x="16" y="580" width="1084" height="138" rx="14"/>
+<rect class="chip chip-l2" x="210.0" y="502" width="230.0" height="50" rx="9"/>
+<text class="name" x="325.0" y="523" text-anchor="middle">siros-wallet-state</text>
+<text class="desc" x="325.0" y="540" text-anchor="middle">decrypted private data</text>
+<rect class="chip chip-l2" x="452.0" y="502" width="230.0" height="50" rx="9"/>
+<text class="name" x="567.0" y="523" text-anchor="middle">siros-credential</text>
+<text class="desc" x="567.0" y="540" text-anchor="middle">typed credentials, issuer chain</text>
+<rect class="chip chip-l2" x="694.0" y="502" width="230.0" height="50" rx="9"/>
+<text class="name" x="809.0" y="523" text-anchor="middle">siros-display</text>
+<text class="desc" x="809.0" y="540" text-anchor="middle">cards and rows, one language</text>
+<rect class="chip chip-l2" x="936.0" y="502" width="230.0" height="50" rx="9"/>
+<text class="name" x="1051.0" y="523" text-anchor="middle">siros-transaction-data</text>
+<text class="desc" x="1051.0" y="540" text-anchor="middle">PaSO and TS12 transactions</text>
+<rect class="band-l1" x="16" y="580" width="1164" height="138" rx="14"/>
 <text class="layer" x="32" y="647.0">L1</text>
 <text class="caption" x="32" y="667.0">protocols · formats · trust</text>
-<rect class="chip chip-l1" x="210.0" y="594" width="210.0" height="50" rx="9"/>
-<text class="name" x="315.0" y="615" text-anchor="middle">siros-dcql</text>
-<text class="desc" x="315.0" y="632" text-anchor="middle">DCQL · on crates.io</text>
-<rect class="chip chip-l1" x="432.0" y="594" width="210.0" height="50" rx="9"/>
-<text class="name" x="537.0" y="615" text-anchor="middle">siros-oid4vp</text>
-<text class="desc" x="537.0" y="632" text-anchor="middle">OpenID4VP intake, response</text>
-<rect class="chip chip-l1" x="654.0" y="594" width="210.0" height="50" rx="9"/>
-<text class="name" x="759.0" y="615" text-anchor="middle">siros-sdjwt</text>
-<text class="desc" x="759.0" y="632" text-anchor="middle">SD-JWT VC</text>
-<rect class="chip chip-l1" x="876.0" y="594" width="210.0" height="50" rx="9"/>
-<text class="name" x="981.0" y="615" text-anchor="middle">siros-mdoc</text>
-<text class="desc" x="981.0" y="632" text-anchor="middle">ISO mdoc</text>
-<rect class="chip chip-l1" x="210.0" y="654" width="210.0" height="50" rx="9"/>
-<text class="name" x="315.0" y="675" text-anchor="middle">siros-zkp-req</text>
-<text class="desc" x="315.0" y="692" text-anchor="middle">zkp_req protocol</text>
-<rect class="chip chip-l1" x="432.0" y="654" width="210.0" height="50" rx="9"/>
-<text class="name" x="537.0" y="675" text-anchor="middle">siros-zkp-req-nym-auth</text>
-<text class="desc" x="537.0" y="692" text-anchor="middle">nym_auth catalogue</text>
-<rect class="chip chip-l1" x="654.0" y="654" width="210.0" height="50" rx="9"/>
-<text class="name" x="759.0" y="675" text-anchor="middle">siros-trust</text>
-<text class="desc" x="759.0" y="692" text-anchor="middle">trust store, issuer chains</text>
-<rect class="band-l0" x="16" y="732" width="1084" height="78" rx="14"/>
+<rect class="chip chip-l1" x="210.0" y="594" width="230.0" height="50" rx="9"/>
+<text class="name" x="325.0" y="615" text-anchor="middle">siros-dcql</text>
+<text class="desc" x="325.0" y="632" text-anchor="middle">DCQL · on crates.io</text>
+<rect class="chip chip-l1" x="452.0" y="594" width="230.0" height="50" rx="9"/>
+<text class="name" x="567.0" y="615" text-anchor="middle">siros-oid4vp</text>
+<text class="desc" x="567.0" y="632" text-anchor="middle">OpenID4VP intake, response</text>
+<rect class="chip chip-l1" x="694.0" y="594" width="230.0" height="50" rx="9"/>
+<text class="name" x="809.0" y="615" text-anchor="middle">siros-sdjwt</text>
+<text class="desc" x="809.0" y="632" text-anchor="middle">SD-JWT VC</text>
+<rect class="chip chip-l1" x="936.0" y="594" width="230.0" height="50" rx="9"/>
+<text class="name" x="1051.0" y="615" text-anchor="middle">siros-mdoc</text>
+<text class="desc" x="1051.0" y="632" text-anchor="middle">ISO mdoc</text>
+<rect class="chip chip-l1" x="210.0" y="654" width="230.0" height="50" rx="9"/>
+<text class="name" x="325.0" y="675" text-anchor="middle">siros-zkp-req</text>
+<text class="desc" x="325.0" y="692" text-anchor="middle">zkp_req protocol</text>
+<rect class="chip chip-l1" x="452.0" y="654" width="230.0" height="50" rx="9"/>
+<text class="name" x="567.0" y="675" text-anchor="middle">siros-zkp-req-nym-auth</text>
+<text class="desc" x="567.0" y="692" text-anchor="middle">nym_auth catalogue</text>
+<rect class="chip chip-l1" x="694.0" y="654" width="230.0" height="50" rx="9"/>
+<text class="name" x="809.0" y="675" text-anchor="middle">siros-trust</text>
+<text class="desc" x="809.0" y="692" text-anchor="middle">trust store, issuer chains</text>
+<rect class="band-l0" x="16" y="732" width="1164" height="78" rx="14"/>
 <text class="layer" x="32" y="769.0">L0</text>
 <text class="caption" x="32" y="789.0">encodings</text>
-<rect class="chip chip-l0" x="210.0" y="746" width="876.0" height="50" rx="9"/>
-<text class="name" x="648.0" y="767" text-anchor="middle">siros-codec</text>
-<text class="desc" x="648.0" y="784" text-anchor="middle">strict CBOR and JSON · base64url · shared types</text>
-<rect class="host" x="1148" y="184" width="196" height="626" rx="14"/>
-<text class="layer" x="1166" y="218">Host</text>
-<text class="caption" x="1166" y="238">each platform</text>
-<text class="name" x="1166" y="276.0">Storage</text>
-<text class="desc" x="1166" y="293.0">wallet state, held metadata</text>
-<text class="name" x="1166" y="402.5">Keys</text>
-<text class="desc" x="1166" y="419.5">signing through wscd</text>
-<text class="name" x="1166" y="529.0">Network</text>
-<text class="desc" x="1166" y="546.0">Fetch effects</text>
-<text class="name" x="1166" y="655.5">Trust</text>
-<text class="desc" x="1166" y="672.5">store provisioning, verdicts</text>
-<text class="name" x="1166" y="782.0">Platform</text>
-<text class="desc" x="1166" y="799.0">clock, language, UI</text>
-<path class="arrow" d="M 1108 491.0 H 1140"/>
-<path class="head" d="M 1144 491.0 l -8 -4 v 8 z"/>
-<path class="arrow" d="M 1140 503.0 H 1108"/>
-<path class="head" d="M 1104 503.0 l 8 -4 v 8 z"/>
+<rect class="chip chip-l0" x="210.0" y="746" width="956.0" height="50" rx="9"/>
+<text class="name" x="688.0" y="767" text-anchor="middle">siros-codec</text>
+<text class="desc" x="688.0" y="784" text-anchor="middle">strict CBOR and JSON · base64url · shared types</text>
+<rect class="host" x="1228" y="184" width="196" height="626" rx="14"/>
+<text class="layer" x="1246" y="218">Host</text>
+<text class="caption" x="1246" y="238">each platform</text>
+<text class="name" x="1246" y="276.0">Storage</text>
+<text class="desc" x="1246" y="293.0">wallet state, held metadata</text>
+<text class="name" x="1246" y="402.5">Keys</text>
+<text class="desc" x="1246" y="419.5">signing through wscd</text>
+<text class="name" x="1246" y="529.0">Network</text>
+<text class="desc" x="1246" y="546.0">Fetch effects</text>
+<text class="name" x="1246" y="655.5">Trust</text>
+<text class="desc" x="1246" y="672.5">store provisioning, verdicts</text>
+<text class="name" x="1246" y="782.0">Platform</text>
+<text class="desc" x="1246" y="799.0">clock, language, UI</text>
+<path class="arrow" d="M 1188 491.0 H 1220"/>
+<path class="head" d="M 1224 491.0 l -8 -4 v 8 z"/>
+<path class="arrow" d="M 1220 503.0 H 1188"/>
+<path class="head" d="M 1184 503.0 l 8 -4 v 8 z"/>
 <text class="note" x="32" y="842">Dependencies point down the layers. The core is sans-IO: the host supplies its inputs and answers its Fetch, Sign and Trust effects.</text>
 </svg>

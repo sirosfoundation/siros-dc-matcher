@@ -19,8 +19,8 @@
 //! | N2: the nym_auth request of a verified request, its `verifier_id` from the request's certificate | [`siros_zkp_req_nym_auth::request::NymAuthRequest`], built by [`plan`] from [`PlanInput::verifier_id`] |
 //!
 //! Without the default feature `wallet` the crate holds the matching ([`Matching`], [`Offers`],
-//! [`WalletDisplay`]): what the credential picker runs over its registration projection. It
-//! builds with Rust 1.82 and links no crypto, prover or display resolution.
+//! [`WalletDisplay`]), for the credential picker to run over its registration projection (K2).
+//! It builds with Rust 1.82 and links no crypto, prover or display resolution.
 //!
 //! The crate performs no I/O. The plan takes the transaction metadata the host holds as input
 //! and asks the host for each image fetch, phase 2 asks it for each signature, randomness comes

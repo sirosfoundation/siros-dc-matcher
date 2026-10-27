@@ -1,7 +1,7 @@
 # Changelog
 
-Notable changes to the matcher, its AAR/XCFramework, and the `siros-dcql`
-crate. The crate keeps [its own changelog](crates/siros-dcql/CHANGELOG.md),
+Notable changes to the matcher, its AAR/XCFramework, the wallet core crates, and
+the `siros-dcql` crate. The crate keeps [its own changelog](crates/siros-dcql/CHANGELOG.md),
 because it is published to crates.io and versioned independently of this
 repository.
 
@@ -320,8 +320,8 @@ the 307,200-byte budget (303,418 at v0.11.0), sha256
     the entry carried it, and under a TS12 rulebook `jti`, `response_mode` and `amr`.
   - Every refusal of a request is a `TransactionDataError`: `invalid_request` for an unsigned
     request, `invalid_transaction_data` otherwise.
-  - Without the default feature `wallet` the crate holds what the credential picker runs over
-    a registration: definitions, the projection reader, payload conformance, selection and
+  - Without the default feature `wallet` the crate holds the selection over a registration for
+    the credential picker: definitions, the projection reader, payload conformance, selection and
     rendering, and links no X.509, ECDSA or trust code. The picker cannot verify an image at a
     remote URL or an ad-hoc metadata JWT.
 - `siros-trust`, issuer trust for the wallet core (§4.18).
@@ -486,7 +486,8 @@ the 307,200-byte budget (303,418 at v0.11.0), sha256
   pseudonym vectors of zk-cred-vega, and `readdit.json`, the values of readdit `1cf3f26` for a
   differential test. Each changed expectation carries a `v0_4` note.
 - Docs: `docs/zkp_req_core.md` (crates, flow, prover interface, API); `docs/zkp_req_request.md`
-  and `docs/zkp_req_response.md` follow the draft.
+  and `docs/zkp_req_response.md` follow the draft; `docs/ecosystem.svg`, the README's overview
+  of the layers, written by `scripts/gen_ecosystem_svg.py`.
 - `scripts/vectors_digest.sh --digest` gives the vector set digest stated under Changed. The
   capability vectors (`circuit_capabilities/match.json`) are unchanged.
 - `siros-registration`, the registration the wallet writes for the picker (K1, TR5), format
@@ -517,6 +518,7 @@ the 307,200-byte budget (303,418 at v0.11.0), sha256
 - From `siros-dc-matcher-core`: the v0.4 planner (`zkp_req`), the response validator
   (`zkp_req_response`), `proof_time`, their vectors (`zkp_req`, `zkp_req_response`,
   `zkp_req_unsat`, `proof_time`) and `scripts/gen_zkp_req_response_vectors.py`.
+- `docs/plan.md`, the plan of the first release.
 
 ## v0.11.0 — 2026-10-20
 

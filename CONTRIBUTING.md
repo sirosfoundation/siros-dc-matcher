@@ -71,8 +71,10 @@ Cargo 1.82 cannot read, and the browser presenter that links them. Run its comma
 crate in this workspace. CI enforces this with `cargo publish --dry-run`; please
 do not work around it.
 
-Two floors are checked separately, because they differ on purpose. Everything that ships inside
-the credential picker holds Rust 1.82, and CI's `msrv` job checks those crates on it.
+Rust 1.82 is the floor of every crate in the root workspace except `siros-dc-matcher-ffi` and
+`siros-picker-testhost`. The MSRV job checks them on 1.82: `siros-presentation` without its
+`wallet` feature, `siros-transaction-data` and `siros-trust` with and without their `wallet` and
+`chain` features, and the picker and the host ABI crates for `wasm32-wasip1` as well.
 
 `siros-dc-matcher-ffi` and `siros-picker-testhost` declare 1.88 in their own manifests —
 uniffi's bindgen chain and wasmtime need it — and neither ships in the picker.

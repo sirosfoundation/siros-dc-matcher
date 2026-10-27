@@ -31,7 +31,7 @@ jobs:
       # That is worse than untidy. The digest below exists so someone can check
       # what they are running, and it was attesting a file nobody runs — one
       # carrying exactly the two imports the host's WASI subset may not
-      # provide, where a missing import fails instantiation with no error
+      # provide, where a missing import traps when called, with no error
       # surface at all.
       - run: make matcher
 

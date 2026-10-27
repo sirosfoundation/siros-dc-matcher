@@ -1,5 +1,5 @@
 //! Kotlin and Swift access to the v1 credential blob of `siros-dc-matcher-core`, its matching
-//! engine, and `zkp_req` presentation.
+//! engine, and the `zkp_req` session, `vp_token` and verifier ([`zkp_req`]).
 //!
 //! The Kotlin SDK builds the blob it registers, and matches again after the user has selected
 //! an entry. The credential picker, `matcher.wasm`, reads the registration of

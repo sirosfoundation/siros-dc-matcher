@@ -179,7 +179,7 @@ publish-local: aar pom
 	cp $(BUILD_DIR)/$(MAVEN_ARTIFACT)-$(VERSION).pom $(MAVEN_LOCAL_DIR)/$(MAVEN_ARTIFACT)-$(VERSION).pom
 	@echo "Installed org.siros:$(MAVEN_ARTIFACT):$(VERSION) to $(MAVEN_LOCAL_DIR)"
 
-# ── iOS (Phase 7) ────────────────────────────────────────────────────
+# ── iOS ──────────────────────────────────────────────────────────────
 
 ios: $(foreach t,$(IOS_TARGETS) $(IOS_SIM_TARGETS),ios-$(t))
 

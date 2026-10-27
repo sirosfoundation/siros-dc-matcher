@@ -15,16 +15,16 @@ behind the nym_auth prover interface and the rulebooks' artifact pins.
 | Crate | Holds | Rust |
 | :-- | :-- | :-- |
 | `siros-zkp-req` | The protocol: the Credential Query with `_req` and `_req_sets`, `vp_formats_supported.zkp_req`, the usable pair of Section 1.3, `ZkpPresentation`, the backends' `Proof`, the `vp_token`, the Verifier's steps 1 to 5 of Section 4.1. Depends on `serde_json`, `siros-codec` and `siros-dcql`, which parses the Credential Query: `ZkpReqQuery::parse` reads the `CredentialQuery` it gives. | 1.82 |
-| `siros-zkp-req-nym-auth` | The catalogue (`pseudonym`, `age_check` with E and C), `verifier_id`, the Longfellow and Vega systems, the `Handover`, the request policy. With the default feature `credential`: the nym_auth form of an mdoc, the Wallet's credential tests, the prover interface and the verifier (`siros-mdoc` with `crypto`, `siros-trust` with `chain`, `zeroize`). With `request`: the nym_auth request of `siros-oid4vp`'s verified request, the answer of an option and its presentation. With `test-fixtures`: a test issuer, signed requests and a test host. | 1.82 |
+| `siros-zkp-req-nym-auth` | The catalogue (`pseudonym`, `age_check` with E and C), `verifier_id`, the Longfellow and Vega systems, the session binding, the request policy. With the default feature `credential`: the nym_auth form of an mdoc, the Wallet's credential tests, the prover interface and the verifier (`siros-mdoc` with `crypto`, `siros-trust` with `chain`, `zeroize`). With `request`: the nym_auth request of `siros-oid4vp`'s verified request, the answer of an option and its presentation. With `test-fixtures`: a test issuer, signed requests and a test host. | 1.82 |
 | `siros-dc-matcher-core` | The matcher. It plans `zkp_req` with the two crates above, without `credential`. | 1.82 |
 | `siros-dc-matcher-ffi` | Module `zkp_req`: the session, the `vp_token` and the verifier for Kotlin and Swift (UniFFI), around a host's proof verifier. | 1.88 |
 | `siros-zkp-backend-longfellow` | `urn:circuits:longfellow:nym_auth:v1` on `longfellow-libzk-v1`: `LongfellowProver` and `LongfellowVerifier` over zk-cred-longfellow. | 1.95 |
 | `siros-zkp-backend-vega` | `urn:circuits:vega:nym_auth:v1` on `vega-v1`: `VegaNymAuth` over zk-cred-vega. | 1.95 |
 | `siros-zkp-req-wasm` | The browser's provers over both backends and the `vp_token` (`wasm-bindgen`). | 1.95 |
 
-The last three form the `proving/` workspace. zk-cred-longfellow and zk-cred-vega are edition
-2024, which Cargo 1.82 cannot read; in the root workspace they would stop every 1.82 build,
-the matcher's included. The matcher plans with the nym_auth catalogue and compiles no prover.
+The last three and the real-proof tests in `proving/e2e` form the `proving/` workspace.
+zk-cred-longfellow and zk-cred-vega are edition 2024, which Cargo 1.82 cannot read; in the root
+workspace they would stop every 1.82 build, the matcher's included. The matcher plans with the nym_auth catalogue and compiles no prover.
 
 The matcher decides which credentials can serve a query. Signing and proving follow the user's
 consent. Every `zkp_req` rule has one owner: the matcher, the wallet's plan, the FFI and the
@@ -174,19 +174,21 @@ artifacts from their reference copies.
 `zkp_req_session` (→ `FfiSession`), `zkp_req_jwk_thumbprint`, `zkp_req_vp_token_json`,
 `zkp_req_vp_token_cbor`, and `zkp_req_verify` with a host-implemented `FfiProofVerifier` and the
 verifier's DER `trust_anchors`. `ZkpReqError` carries the request's `error_code`
-(`invalid_request`, `access_denied`) and a stable `code`. Indexes are `u64`. No FFI function
-produces a nym_auth proof: the facades wave exposes the wallet's plan, which proves.
+(`invalid_request`, `access_denied`) and a stable `code`. Indexes are `u64`. Proofs come from
+the wallet's plan (`siros-presentation`), which proves in-process through a `NymAuthProver`.
 
 ### Browser
 
 `wasm-pack build proving/siros-zkp-req-wasm --target web`, for a desktop browser. JavaScript
-receives `ZkpProvers` (its constructor, `loadLongfellow(circuitsZst)`, `loadVega(shapesZst)` and
+receives `ZkpProvers` (its constructor, `loadLongfellow(circuits_zst)`, `loadVega(shapes_zst)` and
 `systems()`) and `vpTokenJson`. Bytes are `Uint8Array`. A refusal throws `{error_code, kind,
-code}`. No export proves: the facades wave exposes the wallet's plan, which proves through the
-loaded systems on one thread, with no Web Worker pool and no cross-origin isolation.
+code}`. Rust code proves through `ZkpProvers` as a `NymAuthProver`, on one thread, with no Web
+Worker pool and no cross-origin isolation.
 
-It links zk-cred-longfellow under MPL-2.0, part of it derived from Google's longfellow-zk under
-Apache-2.0; a page that serves it carries their notices.
+Built with wasm-pack 0.15.0 and wasm-opt 116, the module is 2,581,497 bytes (684,141 with brotli
+at quality 11) and its JavaScript glue 22,697 (4,779). It links zk-cred-longfellow under MPL-2.0,
+part of it derived from Google's longfellow-zk under Apache-2.0; a page that serves it carries
+their notices.
 
 ## The frontend package
 
@@ -194,8 +196,8 @@ Apache-2.0; a page that serves it carries their notices.
 `ZkpReq` runs `match`, the consent screen and `prove` across queries, and a host runs a
 `ZkpPresenter`. Its host contract hands the presenter DER anchors per query
 (`anchors(authorities)`). The core resolves `trusted_authorities` itself, against the trust
-store the host provisions (§4.18 of the architecture). The browser facade has no `matchQuery`
-or `prepare`; the facades wave gives it the plan in their place.
+store the host provisions (§4.18 of the architecture). The browser facade exports the provers
+and `vpTokenJson`.
 
 ## Acceptance gates
 

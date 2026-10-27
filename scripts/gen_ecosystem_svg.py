@@ -5,10 +5,10 @@ Run from the repository root: python3 scripts/gen_ecosystem_svg.py docs/ecosyste
 import sys
 from html import escape
 
-W = 1360
-LABEL_X, CONTENT_X, CONTENT_W = 32, 210, 876
-BAND_RIGHT = 1100
-HOST_X, HOST_W = 1148, 196
+W = 1440
+LABEL_X, CONTENT_X, CONTENT_W = 32, 210, 956
+BAND_RIGHT = 1180
+HOST_X, HOST_W = 1228, 196
 GAP = 12
 CHIP_H = 50
 
