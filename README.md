@@ -20,6 +20,12 @@ Released artifacts are on the
 `matcher.wasm` and its digest, an Android AAR, and an XCFramework.
 `siros-dcql` is on [crates.io](https://crates.io/crates/siros-dcql).
 
+## Overview
+
+![The crates of the workspace in five layers, the artifacts built from them, and the host each platform provides](docs/ecosystem.svg)
+
+`scripts/gen_ecosystem_svg.py` writes the diagram; change it there when a crate is added, renamed or removed.
+
 ## Build and test
 
 Rust, pinned exactly in `rust-toolchain.toml` (rustup installs it on first use), plus the wasm target:
