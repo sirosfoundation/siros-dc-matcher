@@ -12,7 +12,7 @@ use siros_trust::{IssuerChain, QueryAuthorities, TrustStore};
 use x509_cert::builder::{Builder, CertificateBuilder, Profile};
 use x509_cert::der::asn1::{AnyRef, GeneralizedTime, ObjectIdentifier, OctetString};
 use x509_cert::der::Encode;
-use x509_cert::ext::pkix::{AuthorityKeyIdentifier, BasicConstraints};
+use x509_cert::ext::pkix::{AuthorityKeyIdentifier, BasicConstraints, InhibitAnyPolicy, KeyUsage};
 use x509_cert::name::Name;
 use x509_cert::serial_number::SerialNumber;
 use x509_cert::spki::{
@@ -88,6 +88,9 @@ pub struct Cert {
     signer: Key,
     validity: (&'static str, &'static str),
     ca: Option<bool>,
+    path_len: Option<u8>,
+    key_usage: Option<KeyUsage>,
+    inhibit_any_policy: bool,
     aki: Option<Vec<u8>>,
     sha512_declared: bool,
     explicit_false_critical: bool,
@@ -104,6 +107,9 @@ impl Cert {
             key,
             validity: ("2026-01-01T00:00:00Z", "2027-12-31T23:59:59Z"),
             ca: Some(true),
+            path_len: None,
+            key_usage: None,
+            inhibit_any_policy: false,
             aki: None,
             sha512_declared: false,
             explicit_false_critical: false,
@@ -119,6 +125,9 @@ impl Cert {
             signer: issuer.key.clone(),
             validity: ("2026-01-01T00:00:00Z", "2027-12-31T23:59:59Z"),
             ca: None,
+            path_len: None,
+            key_usage: None,
+            inhibit_any_policy: false,
             aki: None,
             sha512_declared: false,
             explicit_false_critical: false,
@@ -127,6 +136,24 @@ impl Cert {
 
     pub fn ca(mut self, ca: Option<bool>) -> Self {
         self.ca = ca;
+        self
+    }
+
+    /// basicConstraints states the pathLenConstraint `length`.
+    pub fn path_len(mut self, length: u8) -> Self {
+        self.path_len = Some(length);
+        self
+    }
+
+    /// The certificate has the keyUsage `usage`, critical.
+    pub fn key_usage(mut self, usage: KeyUsage) -> Self {
+        self.key_usage = Some(usage);
+        self
+    }
+
+    /// The certificate has inhibitAnyPolicy, critical: an extension TR3 does not process.
+    pub fn inhibit_any_policy(mut self) -> Self {
+        self.inhibit_any_policy = true;
         self
     }
 
@@ -213,9 +240,15 @@ impl Cert {
             builder
                 .add_extension(&BasicConstraints {
                     ca,
-                    path_len_constraint: None,
+                    path_len_constraint: self.path_len,
                 })
                 .unwrap();
+        }
+        if let Some(usage) = &self.key_usage {
+            builder.add_extension(usage).unwrap();
+        }
+        if self.inhibit_any_policy {
+            builder.add_extension(&InhibitAnyPolicy(0)).unwrap();
         }
         if let Some(aki) = &self.aki {
             builder
@@ -313,6 +346,12 @@ fn explicit_false_critical(der: &[u8], signer: &Key) -> Vec<u8> {
     certificate.extend_from_slice(parts[1]);
     certificate.extend_from_slice(&tlv(0x03, &bits));
     tlv(0x30, &certificate)
+}
+
+/// The chain of the DER certificates `first` and `rest`.
+pub fn chain_of(first: &[u8], rest: &[&[u8]]) -> IssuerChain {
+    let rest = rest.iter().map(|der| der.to_vec()).collect();
+    IssuerChain::parse(&CertificateChain::new(first.to_vec(), rest)).unwrap()
 }
 
 /// The chain of `certificates`, the signer's first.

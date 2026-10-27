@@ -47,6 +47,11 @@ this file.
   `QueryMatch::refusals`, a `ClaimPathRefusal` each.
 - **BREAKING:** `CredentialQuery::claim_sets` gives the `ClaimOption`s, each with the `ids()`
   and the `claims()` it names.
+- **BREAKING:** `DcqlQuery::parse` refuses with a `QueryError`, which is `Clone`, `Eq` and
+  `Hash`; `DcqlQuery::from_json` refuses with a `QueryTextError`: the serde_json error of text
+  that is no JSON, or the `QueryError` of its value. `QueryError::Json` is gone.
+- The text values (`CredentialFormat`, `CredentialRef`, `DocType`, `Vct`, `AuthorityType`,
+  `AuthorityValue`) implement `Borrow<str>`, for map lookups by text.
 - **BREAKING:** `trusted_authorities` parses into `TrustedAuthorities`: a non-empty array of
   `TrustedAuthority`, each an `AuthorityType` and a non-empty list of `AuthorityValue`s
   (§6.1.1). A malformed one is `QueryError::TrustedAuthorities` with its
@@ -85,10 +90,10 @@ this file.
   `HolderBinding`, `SetRequirement`, `CryptographicBinding`, `Satisfaction`, `ComponentIndex`,
   `QueryError::code` and `select_claims` at the crate root.
 - `CredentialRef`, `DocType` and `Vct`, the text values a held credential and `meta` carry.
-- `ClaimPath`, `ClaimPathError`, `ClaimOption`, `ClaimPathRefusal`, `Position`, `Member`,
-  `CredentialMember`, `ClaimMember`, `SetMember`, `FormFault`, and `QueryError::Form`,
-  `ClaimPath`, `UnknownClaimId`, `UnknownCredentialId`, `ClaimSetsWithoutClaims` and
-  `MdocPath`.
+- `QueryTextError`, `ClaimPath`, `ClaimPathError`, `ClaimOption`, `ClaimPathRefusal`,
+  `Position`, `Member`, `CredentialMember`, `ClaimMember`, `SetMember`, `FormFault`, and
+  `QueryError::Form`, `ClaimPath`, `UnknownClaimId`, `UnknownCredentialId`,
+  `ClaimSetsWithoutClaims` and `MdocPath`.
 
 - `resolve`, the §7.1.1 processing over any claim tree that implements `ClaimNode` (with `Lookup`), which `resolve_json` now runs on, and `PathError::code`.
 

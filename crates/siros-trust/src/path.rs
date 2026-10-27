@@ -2,17 +2,23 @@
 //! has a path to an anchor certificate at a given time.
 //!
 //! A path is a prefix of the chain, each certificate signed by the next, whose last certificate
-//! an anchor signs. Each signer names its subject as the certificate's issuer and is a CA, and
-//! every certificate on the path, the anchor included, is valid at the time. Signatures are
-//! ECDSA P-256 with SHA-256 or P-384 with SHA-384, over the `tbsCertificate` as written. Name
-//! constraints, policies, key usage, path length and revocation are outside TR3.
+//! an anchor signs; or the chain's first certificate alone, when an anchor is byte-identical to
+//! it. Each signer names its subject as the certificate's issuer, is a CA whose keyUsage, when
+//! present, includes keyCertSign, and has at most its pathLenConstraint of non-self-issued
+//! intermediate certificates below it. Every certificate on the path, the anchor included, is
+//! valid at the time and has no critical extension outside the set
+//! [`extensions`](crate::extensions) processes. Signatures are ECDSA P-256 with SHA-256 or
+//! P-384 with SHA-384, over the `tbsCertificate` as written. Name constraints, policies and
+//! revocation are outside TR3.
 
 use std::fmt;
 
+use der::asn1::ObjectIdentifier;
 use siros_codec::date::DateTime;
 
-use crate::certificate::{Certificate, CertificateRole, IssuanceRefusal};
+use crate::certificate::{Certificate, IssuanceRefusal};
 use crate::chain::IssuerChain;
+use crate::extensions::{CertSigning, CertificateRole, PathLength};
 use crate::position::{CertificateIndex, ChainIndex};
 
 /// A certificate on a validation path.
@@ -31,11 +37,24 @@ pub enum OnPath {
 pub enum PathRefusal {
     /// The certificate is not valid at the time.
     NotValid(OnPath),
+    /// The certificate has this critical extension, outside the set TR3 processes (RFC 5280,
+    /// Section 6.1.4 (o)).
+    CriticalExtension {
+        /// The certificate.
+        certificate: OnPath,
+        /// The extension's identifier.
+        extension: ObjectIdentifier,
+    },
     /// No anchor, nor the chain's next certificate, has the subject the chain's certificate
     /// names as its issuer.
     IssuerName(ChainIndex),
     /// The signer is not a CA: its basicConstraints is absent or its `cA` is FALSE.
     NotCa(OnPath),
+    /// The signer's keyUsage leaves keyCertSign out (RFC 5280, Section 6.1.4 (n)).
+    KeyCertSign(OnPath),
+    /// More non-self-issued intermediate certificates lie below the signer than its
+    /// pathLenConstraint allows (RFC 5280, Section 6.1.4 (l) and (m)).
+    PathLength(OnPath),
     /// The chain's certificate is signed with an algorithm other than `ecdsa-with-SHA256` and
     /// `ecdsa-with-SHA384`.
     Algorithm(ChainIndex),
@@ -69,8 +88,11 @@ impl PathRefusal {
     pub fn code(self) -> &'static str {
         match self {
             Self::NotValid(_) => "path_not_valid",
+            Self::CriticalExtension { .. } => "path_critical_extension",
             Self::IssuerName(_) => "path_issuer_name",
             Self::NotCa(_) => "path_signer_not_ca",
+            Self::KeyCertSign(_) => "path_signer_key_cert_sign",
+            Self::PathLength(_) => "path_length",
             Self::Algorithm(_) => "path_signature_algorithm",
             Self::IssuerKey { .. } => "path_issuer_key",
             Self::SignatureEncoding { .. } => "path_signature_encoding",
@@ -87,26 +109,37 @@ impl fmt::Display for PathRefusal {
 
 impl std::error::Error for PathRefusal {}
 
-/// A validated path (TR3): the chain's certificates up to `anchored_at`, each signed by the
-/// next, the last signed by the anchor at `anchor`, all valid at the time.
+/// A validated path (TR3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TrustPath {
-    anchored_at: ChainIndex,
-    anchor: CertificateIndex,
+pub enum TrustPath {
+    /// The chain's certificates up to `anchored_at`, each signed by the next, the last signed by
+    /// the anchor at `anchor`, all valid at the time.
+    Signed {
+        /// The position of the path's last chain certificate.
+        anchored_at: ChainIndex,
+        /// The position of the anchor among the anchors.
+        anchor: CertificateIndex,
+    },
+    /// The anchor at this position is byte-identical to the chain's first certificate, which
+    /// is valid at the time.
+    Listed(CertificateIndex),
 }
 
-/// A signer on a path, with its position.
+/// A signer on a path, with its position and the number of non-self-issued intermediate
+/// certificates below it.
 #[derive(Clone, Copy)]
 struct Signer<'c> {
     certificate: &'c Certificate,
     position: OnPath,
+    below: usize,
 }
 
 impl TrustPath {
     /// The path from `chain`'s first certificate up to one of `anchors` at `time`.
     ///
-    /// Each prefix of the chain is tried, shortest first, and at each the anchors whose subject
-    /// its last certificate names as its issuer, the one whose SubjectKeyIdentifier equals the
+    /// An anchor byte-identical to the chain's first certificate admits it. Otherwise each
+    /// prefix of the chain is tried, shortest first, and at each the anchors whose subject its
+    /// last certificate names as its issuer, the one whose SubjectKeyIdentifier equals the
     /// certificate's AuthorityKeyIdentifier first.
     ///
     /// # Errors
@@ -120,14 +153,20 @@ impl TrustPath {
         let certificates: Vec<&Certificate> = chain.certificates().collect();
         let mut position = 0;
         let mut certificate = chain.leaf();
+        // The non-self-issued intermediate certificates of the prefix: every certificate after
+        // the first.
+        let mut below = 0;
         loop {
             let at = ChainIndex::new(position);
-            if !certificate.valid_at(time) {
-                return Err(PathRefusal::NotValid(OnPath::Chain(at)));
+            on_path(certificate, OnPath::Chain(at), time)?;
+            if position == 0 {
+                if let Some(listed) = anchors.iter().position(|anchor| anchor == certificate) {
+                    return Ok(Self::Listed(CertificateIndex::new(listed)));
+                }
             }
-            let refusal = match anchored(certificate, at, anchors, time) {
+            let refusal = match anchored(certificate, at, below, anchors, time) {
                 Ok(anchor) => {
-                    return Ok(Self {
+                    return Ok(Self::Signed {
                         anchored_at: at,
                         anchor,
                     })
@@ -135,32 +174,48 @@ impl TrustPath {
                 Err(refusal) => refusal,
             };
             let next = certificates.get(position + 1).copied();
-            certificate = match next_link(certificate, at, next, time) {
+            certificate = match next_link(certificate, at, below, next) {
                 Ok(next) => next,
                 Err(extension) => return Err(refusal.unwrap_or(extension)),
             };
             position += 1;
+            if !certificate.self_issued() {
+                below += 1;
+            }
         }
-    }
-
-    /// The position of the path's last chain certificate, the one the anchor signs.
-    #[must_use]
-    pub fn anchored_at(self) -> ChainIndex {
-        self.anchored_at
     }
 
     /// The position of the anchor among the anchors.
     #[must_use]
     pub fn anchor(self) -> CertificateIndex {
-        self.anchor
+        match self {
+            Self::Signed { anchor, .. } | Self::Listed(anchor) => anchor,
+        }
     }
 }
 
-/// The anchor that signs `certificate`, at `at` on the chain; else the refusal of the first
-/// anchor tried, or `None` when no anchor has the subject `certificate` names as its issuer.
+/// `certificate`, at `position` on the path, valid at `time` and with no critical extension
+/// outside the processed set.
+fn on_path(certificate: &Certificate, position: OnPath, time: DateTime) -> Result<(), PathRefusal> {
+    if !certificate.valid_at(time) {
+        return Err(PathRefusal::NotValid(position));
+    }
+    match certificate.unprocessed_critical() {
+        Some(extension) => Err(PathRefusal::CriticalExtension {
+            certificate: position,
+            extension,
+        }),
+        None => Ok(()),
+    }
+}
+
+/// The anchor that signs `certificate`, at `at` on the chain above `below` non-self-issued
+/// intermediate certificates; else the refusal of the first anchor tried, or `None` when no
+/// anchor has the subject `certificate` names as its issuer.
 fn anchored(
     certificate: &Certificate,
     at: ChainIndex,
+    below: usize,
     anchors: &[Certificate],
     time: DateTime,
 ) -> Result<CertificateIndex, Option<PathRefusal>> {
@@ -180,8 +235,11 @@ fn anchored(
         let signer = Signer {
             certificate: anchor,
             position: OnPath::Store(index),
+            below,
         };
-        match link(certificate, at, signer, time) {
+        let signs =
+            on_path(anchor, signer.position, time).and_then(|()| link(certificate, at, signer));
+        match signs {
             Ok(()) => return Ok(index),
             Err(refusal) => {
                 if first.is_none() {
@@ -193,12 +251,14 @@ fn anchored(
     Err(first)
 }
 
-/// `next`, the chain's next certificate, when it signs `certificate` at `at`.
+/// `next`, the chain's next certificate, when it signs `certificate` at `at` above `below`
+/// non-self-issued intermediate certificates. Its validity and extensions are checked at its
+/// own step.
 fn next_link<'c>(
     certificate: &Certificate,
     at: ChainIndex,
+    below: usize,
     next: Option<&'c Certificate>,
-    time: DateTime,
 ) -> Result<&'c Certificate, PathRefusal> {
     let next = next
         .filter(|next| certificate.names_as_issuer(next))
@@ -206,23 +266,26 @@ fn next_link<'c>(
     let signer = Signer {
         certificate: next,
         position: OnPath::Chain(ChainIndex::new(at.value() + 1)),
+        below,
     };
-    link(certificate, at, signer, time).map(|()| next)
+    link(certificate, at, signer).map(|()| next)
 }
 
-/// Whether `signer` signs `certificate`, at `at` on the chain: an anchor valid at `time`, a CA,
-/// that issued `certificate`. A chain certificate's validity is checked at its own step.
-fn link(
-    certificate: &Certificate,
-    at: ChainIndex,
-    signer: Signer<'_>,
-    time: DateTime,
-) -> Result<(), PathRefusal> {
-    if matches!(signer.position, OnPath::Store(_)) && !signer.certificate.valid_at(time) {
-        return Err(PathRefusal::NotValid(signer.position));
+/// Whether `signer` signs `certificate`, at `at` on the chain: a CA whose keyUsage lets it sign
+/// certificates and whose pathLenConstraint admits the intermediates below it, that issued
+/// `certificate`.
+fn link(certificate: &Certificate, at: ChainIndex, signer: Signer<'_>) -> Result<(), PathRefusal> {
+    let path_length = match signer.certificate.role() {
+        CertificateRole::Ca(path_length) => path_length,
+        CertificateRole::EndEntity => return Err(PathRefusal::NotCa(signer.position)),
+    };
+    if signer.certificate.cert_signing() == CertSigning::Withheld {
+        return Err(PathRefusal::KeyCertSign(signer.position));
     }
-    if signer.certificate.role() != CertificateRole::Ca {
-        return Err(PathRefusal::NotCa(signer.position));
+    if let PathLength::AtMost(length) = path_length {
+        if signer.below > usize::from(length) {
+            return Err(PathRefusal::PathLength(signer.position));
+        }
     }
     certificate
         .issued_by(signer.certificate)

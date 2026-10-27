@@ -166,7 +166,7 @@ against the 307,200-byte budget (303,914 before).
   (`Candidate`, `Judged`, `Match`, `OptionRefusal`, `UserInput`, `failure_code`) is removed.
 - **BREAKING (Rust API):** `siros-mdoc` types its names and values: `DocType` (from
   `siros-dcql`), `NameSpace`, `ElementIdentifier`, `DigestId`, `ItemDigest`, `CoseAlgorithm`,
-  `SigStructure`, `MessageDigest`, `Es256Signature` and `SessionTranscript`.
+  `SigStructure`, `MessageDigest` and `SessionTranscript`; `Es256Signature` is `siros-codec`'s.
   `device_signing_input` takes a `SessionTranscript` and a `DocType` and gives a
   `SigStructure`, whose `digest` replaces `device_signing_digest`. Every `MdocError` carries
   its fault; its codes are unchanged.
@@ -180,7 +180,8 @@ against the 307,200-byte budget (303,914 before).
   `PrfUndefined`); its codes are unchanged. `Statement` holds the `DocumentSigner`, a
   `ProofBackend`, `VerifierInput`, `SessionTranscript` and `MessageDigest`, and loses
   `doc_type`; `ProofOutput` and the verifier take `ZkProof` and `PseudonymValue`. `Prepared`
-  signs a `SigStructure` for a `KeyId` and proves with an `Es256Signature`;
+  gives the `SigStructure` the device key signs and proves with an `Es256Signature`;
+  `Prepared::new` takes the answer and the request, and the `Sign` effect names the key;
   `HostError::SignatureLength` is gone. `check_request` and the session values move to
   `request_object` (feature `credential`) and take `Signing`; `Channel::DcApi` holds an
   `Origin`. `Rejection` names its fault (`OwnQueryFault`, `ProofEncodingFault`,
@@ -213,6 +214,40 @@ against the 307,200-byte budget (303,914 before).
   `AuthorityKind::of` classifies a `type` (`aki`, or a `StoreType`); `StoreType::of` is gone.
   A store entry that repeats a member is `EntryError::RepeatedMember`
   (`trust_store_entry_member_repeated`), and `StoreError::Json` holds the `JsonTextError`.
+- **BREAKING (trust):** TR3 applies RFC 5280's path rules: a signer whose keyUsage leaves
+  keyCertSign out is `PathRefusal::KeyCertSign`; a signer with more non-self-issued
+  intermediate certificates below it than its pathLenConstraint is `PathRefusal::PathLength`
+  (a self-issued link certificate counts none); a certificate on the path with a critical
+  extension outside the processed set (`extensions`: basicConstraints, keyUsage, extKeyUsage,
+  authorityKeyIdentifier, subjectKeyIdentifier) is `PathRefusal::CriticalExtension`. A store
+  certificate byte-identical to the chain's first certificate admits it when it is valid
+  (`TrustPath::Listed`; a path through a signer is `TrustPath::Signed`). `CertificateRole::Ca`
+  holds the `PathLength`, `Certificate::cert_signing` gives the `CertSigning`, a keyUsage or
+  extKeyUsage that does not decode is `CertificateError::KeyUsage` or `ExtendedKeyUsage`, and
+  `IssuerChain::parse` reads a `siros-codec` `CertificateChain`, so `ChainError` names the
+  certificate that does not parse and `issuer_chain_empty` is gone.
+- **BREAKING (Rust API):** `siros-codec` holds the internals the components share:
+  `signature::Es256Signature` (from `siros-mdoc`), `member::MemberFault` with its
+  `ArrayIndex` (replacing the enums of `siros-mdoc`, `siros-zkp-req`, `siros-trust` and
+  `siros-wallet-state`), the `position!` and `text_value!` macros, and
+  `chain::CertificateChain`, which replaces `siros-mdoc`'s `X5Chain`, `siros-sdjwt`'s `X5c` and
+  `siros-oid4vp`'s `X509Chain`. `siros-sdjwt` drops its `siros-mdoc` dependency and
+  `siros-zkp-req-nym-auth` its `siros-wallet-state` one. `siros-display` keys Type Metadata by
+  `siros-dcql`'s `Vct`, and its `IssuerIdentifier` and `ConfigurationId` construct publicly.
+- **BREAKING (Rust API):** refusals keep their causes. `IntakeError::DcqlQueryInvalid` holds
+  the `QueryError`, a form parameter that is no JSON is `IntakeError::ParameterNotJson`, a DC
+  API request that is no JSON `EnvelopeNotJson`, and `IntakeError` loses `Copy`.
+  `DcqlQuery::from_json` refuses with `QueryTextError`. `CborError::InvalidUtf8`,
+  `FormFault::NotUtf8` and `JwsFault::NotUtf8` hold the `Utf8Error`; `ChainFault`'s
+  `LeafNotCertificate` and `SubjectAltName` and `SemanticIdError`'s `Policies` and `Encoding`
+  (feature `crypto`) the `der::Error`; `NoQuery::PayloadNotJson`,
+  `WalletStateError::Malformed` and `PresentationsFault::Record` the `JsonTextError`;
+  `DigestError::Encoding` the `Base64Error`. `TransactionDataError` gains `NotUtf8` and
+  `NotJson`, which replaces `DuplicateKey` and `TooDeep`, and `MetadataNotUtf8` and
+  `MetadataNotJson`, with the codes unchanged. `RequestRule::TypeValueInvalid` holds a
+  `TypeValueFault`. `siros-dc-matcher-core`'s `DecodeError::Malformed` is `Truncated`,
+  `Syntax`, `Shape` or `TooDeep`. The proof backends' `ArtifactError::Decompress` holds zstd's
+  message. Enums that hold a `Utf8Error` or a `der::Error` lose `Hash`.
 - **BREAKING (FFI):** `zkp_req_verify` refuses a clock outside the years 0000 to 9999 and a
   negative tolerance as host errors (`now_out_of_range`, `tolerance_out_of_range`), and
   `zkp_req_vp_token_json` and `zkp_req_vp_token_cbor` refuse a query id outside §6.1.

@@ -3,23 +3,34 @@
 
 use serde_json::{json, Value};
 use siros_codec::base64url;
+use siros_codec::date::DateTime;
 use siros_dcql::AuthorityType;
 use siros_trust::{
     Admission, AdmittedIssuer, CertificateIndex, ChainIndex, ChainRefusal, Ground, IssuerChain,
     IssuerFacts, KeyIdentifier, OnPath, PathRefusal, Refusal, StoreAuthority, StoreType,
     TrustStore,
 };
+use x509_cert::der::asn1::ObjectIdentifier;
+use x509_cert::ext::pkix::{KeyUsage, KeyUsages};
 
-use crate::support::{at, authorities, chain, store, Cert, Key, NOW};
+use crate::support::{at, authorities, base64, chain, chain_of, store, Cert, Key, NOW};
+
+/// The Document Signer of ISO/IEC 18013-5, Annex D: keyUsage and extKeyUsage critical.
+const ANNEX_D_DOCUMENT_SIGNER: &[u8] = include_bytes!("vectors/annex_d_document_signer.der");
 
 const LIST: &str = "https://tl.example/eu";
 
-/// One rule's case: the chain, the store, the query's `trusted_authorities`, and the outcome.
+/// `id-ce-inhibitAnyPolicy` (RFC 5280, Section 4.2.1.14).
+const INHIBIT_ANY_POLICY: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.54");
+
+/// One rule's case: the chain, the store, the query's `trusted_authorities`, the time, and
+/// the outcome.
 struct Case {
     name: &'static str,
     chain: IssuerChain,
     store: TrustStore,
     authorities: Value,
+    time: DateTime,
     expected: Result<Ground, Vec<Refusal<ChainRefusal>>>,
 }
 
@@ -62,6 +73,7 @@ fn case(
         chain,
         store,
         authorities,
+        time: at(NOW),
         expected,
     }
 }
@@ -178,6 +190,75 @@ fn cases() -> Vec<Case> {
             Err(vec![Refusal::Issuer(ChainRefusal::NoStoreEntry)]),
         ),
         case(
+            "a signer whose keyUsage leaves keyCertSign out",
+            signed_by(
+                &iaca.clone().key_usage(KeyUsage(KeyUsages::CRLSign.into())),
+                |ds| ds,
+            ),
+            etsi_tl(LIST),
+            path(PathRefusal::KeyCertSign(anchor)),
+        ),
+        case(
+            "an anchor of pathLenConstraint 0 above an intermediate CA",
+            {
+                let root = p384_root.clone().path_len(0);
+                let intermediate =
+                    Cert::issued_by("Test intermediate", Key::p384(0x42), &root).ca(Some(true));
+                let leaf = Cert::issued_by("Test Document Signer", Key::p256(0x43), &intermediate);
+                (
+                    chain(&[&leaf, &intermediate]),
+                    store(&[("etsi_tl", LIST, &[&root])]),
+                )
+            },
+            etsi_tl(LIST),
+            path(PathRefusal::PathLength(OnPath::Store(
+                CertificateIndex::new(0),
+            ))),
+        ),
+        case(
+            "a self-issued link certificate below an anchor of pathLenConstraint 0",
+            {
+                let iaca = iaca.clone().path_len(0);
+                let link = Cert::issued_by("Test IACA", Key::p256(0x35), &iaca)
+                    .ca(Some(true))
+                    .path_len(0);
+                let document_signer =
+                    Cert::issued_by("Test Document Signer", Key::p256(0x32), &link);
+                (
+                    chain(&[&document_signer, &link]),
+                    store(&[("etsi_tl", LIST, &[&iaca])]),
+                )
+            },
+            etsi_tl(LIST),
+            Ok(listed()),
+        ),
+        case(
+            "a critical extension TR3 does not process",
+            signed_by(&iaca, Cert::inhibit_any_policy),
+            etsi_tl(LIST),
+            path(PathRefusal::CriticalExtension {
+                certificate: OnPath::Chain(first),
+                extension: INHIBIT_ANY_POLICY,
+            }),
+        ),
+        Case {
+            time: at("2021-01-01T00:00:00Z"),
+            ..case(
+                "the Annex D Document Signer, listed in the store itself",
+                (
+                    chain_of(ANNEX_D_DOCUMENT_SIGNER, &[]),
+                    TrustStore::parse(
+                        &json!([{"type": "etsi_tl", "value": LIST,
+                            "certificates": [base64(ANNEX_D_DOCUMENT_SIGNER)]}])
+                        .to_string(),
+                    )
+                    .unwrap(),
+                ),
+                etsi_tl(LIST),
+                Ok(listed()),
+            )
+        },
+        case(
             "an unknown type",
             signed_by(&iaca, |ds| ds),
             json!([{"type": "x_unknown", "values": [LIST]}]),
@@ -192,7 +273,7 @@ fn each_rule_of_tr3() {
         .into_iter()
         .filter_map(|case| {
             let query = authorities(case.authorities);
-            let got = AdmittedIssuer::resolve(&query, Some(&case.chain), &case.store, at(NOW))
+            let got = AdmittedIssuer::resolve(&query, Some(&case.chain), &case.store, case.time)
                 .map(|admitted| admitted.ground())
                 .map_err(|unadmitted| unadmitted.refusals().to_vec());
             (got != case.expected)
@@ -210,10 +291,10 @@ fn the_picker_admits_from_the_facts_as_the_wallet_does() {
         .into_iter()
         .filter_map(|case| {
             let query = authorities(case.authorities);
-            let wallet = AdmittedIssuer::resolve(&query, Some(&case.chain), &case.store, at(NOW))
+            let wallet = AdmittedIssuer::resolve(&query, Some(&case.chain), &case.store, case.time)
                 .map(|admitted| admitted.ground())
                 .ok();
-            let facts = IssuerFacts::at(Some(&case.chain), &case.store, at(NOW));
+            let facts = IssuerFacts::at(Some(&case.chain), &case.store, case.time);
             let picker = Admission::of(&query, &facts)
                 .map(|admission| admission.ground().clone())
                 .ok();

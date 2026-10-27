@@ -1,17 +1,17 @@
 //! An X.509 certificate (RFC 5280), as issuer trust reads it: its names, validity, key,
-//! basicConstraints, AuthorityKeyIdentifier and signature.
+//! signature, and the extensions [`extensions`](crate::extensions) processes.
 
 use std::fmt;
 
-use der::asn1::{ObjectIdentifier, OctetString};
+use der::asn1::ObjectIdentifier;
 use der::{Decode, Encode, Header, Reader, SliceReader, Tag};
 use p256::ecdsa::signature::Verifier;
 use siros_codec::date::DateTime;
-use x509_cert::ext::pkix::{AuthorityKeyIdentifier, BasicConstraints};
 use x509_cert::spki::AlgorithmIdentifierOwned;
 use x509_cert::time::Time;
 
 use crate::authority::{KeyIdentifier, KeyIdentifierError};
+use crate::extensions::{CertSigning, CertificateRole, Extensions};
 
 /// `id-ecPublicKey` (RFC 5480).
 const EC_PUBLIC_KEY: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.2.1");
@@ -23,12 +23,6 @@ const SECP384R1: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.132.0.34")
 const ECDSA_SHA256: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.2");
 /// `ecdsa-with-SHA384` (RFC 5758).
 const ECDSA_SHA384: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.3");
-/// `id-ce-basicConstraints` (RFC 5280, Section 4.2.1.9).
-const BASIC_CONSTRAINTS: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.19");
-/// `id-ce-authorityKeyIdentifier` (RFC 5280, Section 4.2.1.1).
-const AUTHORITY_KEY_IDENTIFIER: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.35");
-/// `id-ce-subjectKeyIdentifier` (RFC 5280, Section 4.2.1.2).
-const SUBJECT_KEY_IDENTIFIER: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.14");
 
 /// A certificate's issuer or subject name: its DER encoding. Two names are one when their
 /// encodings are.
@@ -58,6 +52,8 @@ pub struct Certificate {
     authority_key_identifier: Option<KeyIdentifier>,
     subject_key_identifier: Option<KeyIdentifier>,
     role: CertificateRole,
+    cert_signing: CertSigning,
+    unprocessed_critical: Option<ObjectIdentifier>,
 }
 
 /// The algorithm a certificate is signed with, of those TR3 accepts.
@@ -80,16 +76,6 @@ enum SubjectKey {
     P384(p384::ecdsa::VerifyingKey),
     /// A key of another type.
     Other,
-}
-
-/// Whether a certificate's subject is a certificate authority (basicConstraints, RFC 5280,
-/// Section 4.2.1.9).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum CertificateRole {
-    /// `cA` is TRUE: the subject may sign certificates.
-    Ca,
-    /// basicConstraints is absent, or `cA` is FALSE.
-    EndEntity,
 }
 
 /// A time of a certificate's validity period (RFC 5280, Section 4.1.2.5).
@@ -150,6 +136,10 @@ pub enum CertificateError {
     ExtensionRepeated(ObjectIdentifier),
     /// basicConstraints does not decode.
     BasicConstraints(der::Error),
+    /// keyUsage does not decode.
+    KeyUsage(der::Error),
+    /// extKeyUsage does not decode.
+    ExtendedKeyUsage(der::Error),
     /// The AuthorityKeyIdentifier extension gives no keyIdentifier.
     AuthorityKeyIdentifier(KeyIdentifierFault),
     /// The SubjectKeyIdentifier extension gives no keyIdentifier.
@@ -169,6 +159,8 @@ impl CertificateError {
             Self::PublicKey(_) => "certificate_public_key",
             Self::ExtensionRepeated(_) => "certificate_extension_repeated",
             Self::BasicConstraints(_) => "certificate_basic_constraints",
+            Self::KeyUsage(_) => "certificate_key_usage",
+            Self::ExtendedKeyUsage(_) => "certificate_extended_key_usage",
             Self::AuthorityKeyIdentifier(_) => "certificate_authority_key_identifier",
             Self::SubjectKeyIdentifier(_) => "certificate_subject_key_identifier",
         }
@@ -187,6 +179,8 @@ impl std::error::Error for CertificateError {
             Self::Der(e)
             | Self::Name(_, e)
             | Self::BasicConstraints(e)
+            | Self::KeyUsage(e)
+            | Self::ExtendedKeyUsage(e)
             | Self::AuthorityKeyIdentifier(KeyIdentifierFault::Der(e))
             | Self::SubjectKeyIdentifier(KeyIdentifierFault::Der(e)) => Some(e),
             Self::AuthorityKeyIdentifier(KeyIdentifierFault::KeyIdentifier(e))
@@ -279,6 +273,8 @@ impl Certificate {
             authority_key_identifier: extensions.authority_key_identifier,
             subject_key_identifier: extensions.subject_key_identifier,
             role: extensions.role,
+            cert_signing: extensions.cert_signing,
+            unprocessed_critical: extensions.unprocessed_critical,
         })
     }
 
@@ -313,10 +309,27 @@ impl Certificate {
         &self.subject
     }
 
-    /// Whether the subject is a certificate authority.
+    /// Whether the subject is a certificate authority, and its pathLenConstraint.
     #[must_use]
     pub fn role(&self) -> CertificateRole {
         self.role
+    }
+
+    /// Whether the keyUsage lets the key sign certificates.
+    #[must_use]
+    pub fn cert_signing(&self) -> CertSigning {
+        self.cert_signing
+    }
+
+    /// The first critical extension outside the set TR3 processes.
+    #[must_use]
+    pub fn unprocessed_critical(&self) -> Option<ObjectIdentifier> {
+        self.unprocessed_critical
+    }
+
+    /// Whether the certificate names its subject as its issuer (RFC 5280, Section 6.1).
+    pub(crate) fn self_issued(&self) -> bool {
+        self.issuer == self.subject
     }
 
     /// The SEC 1 encoding of the subject's key, when it is a P-256 key.
@@ -422,78 +435,6 @@ impl SubjectKey {
             Some(Ok(_) | Err(_)) | None => Ok(Self::Other),
         }
     }
-}
-
-/// The extensions issuer trust reads.
-struct Extensions {
-    role: CertificateRole,
-    authority_key_identifier: Option<KeyIdentifier>,
-    subject_key_identifier: Option<KeyIdentifier>,
-}
-
-impl Extensions {
-    /// The extensions of a certificate that has none.
-    const NONE: Self = Self {
-        role: CertificateRole::EndEntity,
-        authority_key_identifier: None,
-        subject_key_identifier: None,
-    };
-
-    fn read(extensions: &[x509_cert::ext::Extension]) -> Result<Self, CertificateError> {
-        let repeated = extensions.iter().enumerate().find(|(position, extension)| {
-            extensions
-                .iter()
-                .take(*position)
-                .any(|earlier| earlier.extn_id == extension.extn_id)
-        });
-        if let Some((_, extension)) = repeated {
-            return Err(CertificateError::ExtensionRepeated(extension.extn_id));
-        }
-        let value = |oid: ObjectIdentifier| {
-            extensions
-                .iter()
-                .find(|extension| extension.extn_id == oid)
-                .map(|extension| extension.extn_value.as_bytes())
-        };
-        let role = match value(BASIC_CONSTRAINTS) {
-            None => CertificateRole::EndEntity,
-            Some(bytes) => match BasicConstraints::from_der(bytes) {
-                Ok(constraints) if constraints.ca => CertificateRole::Ca,
-                Ok(_) => CertificateRole::EndEntity,
-                Err(error) => return Err(CertificateError::BasicConstraints(error)),
-            },
-        };
-        let authority_key_identifier = value(AUTHORITY_KEY_IDENTIFIER)
-            .map(authority_key_identifier)
-            .transpose()
-            .map_err(CertificateError::AuthorityKeyIdentifier)?
-            .flatten();
-        let subject_key_identifier = value(SUBJECT_KEY_IDENTIFIER)
-            .map(subject_key_identifier)
-            .transpose()
-            .map_err(CertificateError::SubjectKeyIdentifier)?;
-        Ok(Self {
-            role,
-            authority_key_identifier,
-            subject_key_identifier,
-        })
-    }
-}
-
-/// The keyIdentifier of the AuthorityKeyIdentifier extension `bytes`; `None` without one.
-fn authority_key_identifier(bytes: &[u8]) -> Result<Option<KeyIdentifier>, KeyIdentifierFault> {
-    let extension = AuthorityKeyIdentifier::from_der(bytes).map_err(KeyIdentifierFault::Der)?;
-    extension
-        .key_identifier
-        .map(|key_identifier| KeyIdentifier::new(key_identifier.as_bytes()))
-        .transpose()
-        .map_err(KeyIdentifierFault::KeyIdentifier)
-}
-
-/// The keyIdentifier of the SubjectKeyIdentifier extension `bytes`: an OCTET STRING.
-fn subject_key_identifier(bytes: &[u8]) -> Result<KeyIdentifier, KeyIdentifierFault> {
-    let key_identifier = OctetString::from_der(bytes).map_err(KeyIdentifierFault::Der)?;
-    KeyIdentifier::new(key_identifier.as_bytes()).map_err(KeyIdentifierFault::KeyIdentifier)
 }
 
 /// The `tbsCertificate` of the certificate `der`, as written: the bytes its signature covers.
