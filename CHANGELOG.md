@@ -113,8 +113,8 @@ against the 307,200-byte budget (303,418 at v0.11.0).
   lengths, no duplicate keys, no trailing bytes, at most `cbor::MAX_DEPTH` (32) levels) and a
   deterministic writer; unpadded base64url and the padded base64 of `x5c` certificates (RFC
   4648, Sections 4 and 5); the calendar dates and UTC times of CBOR's `full-date` and `tdate`;
-  the ES256 signature value (`signature::Es256Signature`); an `https` URL (`url::HttpsUrl`); and
-  `json::JsonTextError`, what
+  the ES256 signature value (`signature::Es256Signature`); an `https` URL (`url::HttpsUrl`);
+  BCP 47 language tags (`locale::Locale`); and `json::JsonTextError`, what
   serde_json reports of text that is no JSON. With the feature `json` it holds the strict JSON
   reader, `Json::parse_unique`: one value, members in document order, each member name once per
   object, every number with the text its writer chose (`JsonNumber`), at most `json::MAX_DEPTH`
@@ -179,28 +179,29 @@ against the 307,200-byte budget (303,418 at v0.11.0).
   `QueryError`) and `ClientId`, whose parse refuses with a `ClientIdError`, and builds with Rust
   1.82. With `crypto`: sans-IO intake of redirect requests (by value, `request`, `request_uri`
   with `get` or `post`) and DC API requests (unsigned, signed, multisigned) into a
-  `VerifiedRequest`, with `Fetch` and `Trust` effects for the host; the Client Identifier
-  Prefixes `x509_san_dns`, `x509_hash`, `decentralized_identifier`, `verifier_attestation`,
-  `openid_federation` and `redirect_uri`; ES256 Request Objects; the `vp_token` (`VpToken::json`),
-  its submission per Response Mode, `ECDH-ES` response encryption with `A128GCM` or `A256GCM`,
-  error submissions, and the reply to a direct post. `direct_post.cwt` (`zkp_req.md`, Section
-  6.2) posts the CBOR Authorization Response in a `COSE_Encrypt` by ECDH-ES + HKDF-256 with
-  `A128GCM`, `A192GCM` or `A256GCM`. `Handover` and `ec_jwk_thumbprint` give the session
-  transcript's handover, with `None` for the CBOR `null` of an unencrypted response (B.2.6).
+  `VerifiedRequest`, with `Fetch` and `Trust` effects for the host (a `Fetch` may carry an
+  `Accept-Language`, `Fetch::accept_language`); the Client Identifier Prefixes `x509_san_dns`,
+  `x509_hash`, `decentralized_identifier`, `verifier_attestation`, `openid_federation` and
+  `redirect_uri`; ES256 Request Objects; the `vp_token` (`VpToken::json`), its submission per
+  Response Mode, `ECDH-ES` response encryption with `A128GCM` or `A256GCM`, error submissions, and
+  the reply to a direct post. `direct_post.cwt` (`zkp_req.md`, Section 6.2) posts the CBOR
+  Authorization Response in a `COSE_Encrypt` by ECDH-ES + HKDF-256 with `A128GCM`, `A192GCM` or
+  `A256GCM`. `Handover` and `ec_jwk_thumbprint` give the session transcript's handover, with
+  `None` for the CBOR `null` of an unencrypted response (B.2.6).
   `VerifiedRequest::access_certificate` gives the `CertificateDer` and the `SemanticIdentifier`,
   or the `SemanticIdError`, of an `x509_san_dns` or `x509_hash` signer's certificate: the WRPAC
   policy (ETSI TS 119 411-8) says whether its subject is a natural person, identified by its
-  `serialNumber`, or a legal person, identified by its `organizationIdentifier` (ETSI TS 119
-  475, Clauses 5.1.3 and 5.1.5). `dc_api_protocol` gives the DC API protocol, `signature`
-  whether the request arrived signed (`RequestSignature`), and `verifier_info_formats` the `AttestationFormat` of each `verifier_info` attestation (Section
-  5.1). Each refusal is an `IntakeError` with its cause: the `QueryError` of a `dcql_query`, the
-  `JsonTextError` of a parameter or a DC API request that is no JSON, the `Utf8Error` and
-  `der::Error` of what does not decode, the `VerifierInfoRule` a `verifier_info` breaks, the
-  `LeafKeyFault` of an `x5c` leaf key, the `ClaimsFault` of a Verifier Attestation's claims, and
-  the `JwkFault` of a JWK that is no P-256 key: the host's resolved key (`ResolvedKeyInvalid`),
-  or, when no `ECDH-ES` encryption key of `jwks` is usable, the first that names P-256
-  (`EncryptionKeyInvalid`). A key that does not read is passed over, as a key of another type or
-  curve is (RFC 7517, Section 5).
+  `serialNumber`, or a legal person, identified by its `organizationIdentifier` (ETSI TS 119 475,
+  Clauses 5.1.3 and 5.1.5). `dc_api_protocol` gives the DC API protocol, `signature` whether the
+  request arrived signed (`RequestSignature`), and `verifier_info_formats` the `AttestationFormat`
+  of each `verifier_info` attestation (Section 5.1). Each refusal is an `IntakeError` with its
+  cause: the `QueryError` of a `dcql_query`, the `JsonTextError` of a parameter or a DC API
+  request that is no JSON, the `Utf8Error` and `der::Error` of what does not decode, the
+  `VerifierInfoRule` a `verifier_info` breaks, the `LeafKeyFault` of an `x5c` leaf key, the
+  `ClaimsFault` of a Verifier Attestation's claims, and the `JwkFault` of a JWK that is no P-256
+  key: the host's resolved key (`ResolvedKeyInvalid`), or, when no `ECDH-ES` encryption key of
+  `jwks` is usable, the first that names P-256 (`EncryptionKeyInvalid`). A key that does not read
+  is passed over, as a key of another type or curve is (RFC 7517, Section 5).
 - `siros-transaction-data`, the `transaction_data` request parameter (OpenID4VP 1.0, Section
   5.1) for the wallet core, on the PaSO model (draft 2), with the four EC TS12 v1.0.1 types as
   built-in rulebooks. It builds with Rust 1.82.
@@ -211,11 +212,11 @@ against the 307,200-byte budget (303,418 at v0.11.0).
     `DefinitionError`.
   - Sources, each a parser into that form, for one type and credential in this order: the
     entry's ad-hoc metadata JWT (Section 5.3), the credential's signed credential metadata JWT
-    from its issuer metadata's `credential_metadata_uri` (Sections 4 and 7: ES256 or ES384, an
-    `x5c` chain to the credential's root with its leaf's Subject, or a `kid` of the issuer's JWT
-    VC issuer metadata; its `credential_metadata_uri` claim the URL fetched), TS12 v1.0.1 type
-    metadata, and the host's `Configuration`. A failed
-    ad-hoc JWT or signed metadata excludes the credential.
+    fetched in the wallet's language from its issuer metadata's `credential_metadata_uri`
+    (Sections 2, 4, 7 and 8: ES256 or ES384, an `x5c` chain to the credential's root with its
+    leaf's Subject, or a `kid` of the issuer's JWT VC issuer metadata; its
+    `credential_metadata_uri` claim the URL fetched), TS12 v1.0.1 type metadata, and the host's
+    `Configuration`. A failed ad-hoc JWT or signed metadata excludes the credential.
   - `Definition::project` keeps the entry of each array the locale function takes; a type
     with an array it leaves empty is unsupported in that language. `Projected::to_json` writes
     it deterministically.
@@ -255,14 +256,14 @@ against the 307,200-byte budget (303,418 at v0.11.0).
     `QueryAuthorities`, which `QueryAuthorities::are_those_of` compares with a Credential Query.
     Path validation, `IssuerChain::validate_path`, gives the anchor a chain's path ends at at a
     time, or its `PathRefusal`; `TrustStore::anchor` gives the anchor of the first store entry
-    with a path, or `Unanchored` with each entry's refusal. A path is a prefix of the chain, each certificate signed by the
-    next, whose last certificate an anchor signs: every certificate on it, the anchor included,
-    is valid at the time; each signer's subject is the certificate's issuer, the signer is a
-    CA, its keyUsage, when present, includes keyCertSign, and at most its pathLenConstraint of
-    non-self-issued intermediate certificates lie below it, a self-issued link certificate
-    counting none; each signature is ECDSA P-256 with SHA-256 or P-384 with SHA-384 over the
-    `tbsCertificate` as written; and every critical extension on the path is one TR3 processes
-    (`extensions`: basicConstraints, keyUsage, extKeyUsage, authorityKeyIdentifier,
+    with a path, or `Unanchored` with each entry's refusal. A path is a prefix of the chain, each
+    certificate signed by the next, whose last certificate an anchor signs: every certificate on
+    it, the anchor included, is valid at the time; each signer's subject is the certificate's
+    issuer, the signer is a CA, its keyUsage, when present, includes keyCertSign, and at most its
+    pathLenConstraint of non-self-issued intermediate certificates lie below it, a self-issued
+    link certificate counting none; each signature is ECDSA P-256 with SHA-256 or P-384 with
+    SHA-384 over the `tbsCertificate` as written; and every critical extension on the path is one
+    TR3 processes (`extensions`: basicConstraints, keyUsage, extKeyUsage, authorityKeyIdentifier,
     subjectKeyIdentifier). Direct trust: a store certificate byte-identical to the chain's first
     certificate admits it while it is valid. The anchor whose SubjectKeyIdentifier equals the
     certificate's AuthorityKeyIdentifier is tried first.

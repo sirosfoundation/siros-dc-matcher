@@ -3,6 +3,7 @@
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use siros_codec::locale::Locale;
 pub use siros_codec::url::HttpsUrl;
 
 /// A media type a fetch accepts or a body has, `type/subtype`; or, as the `Accept` value of an
@@ -76,6 +77,7 @@ pub struct Fetch {
     url: HttpsUrl,
     method: Method,
     accept: MediaType,
+    language: Option<Locale>,
     limit: BodyLimit,
 }
 
@@ -85,6 +87,7 @@ impl Fetch {
             url,
             method,
             accept,
+            language: None,
             limit,
         }
     }
@@ -107,10 +110,25 @@ impl Fetch {
         &self.method
     }
 
+    /// The fetch with the `Accept-Language` header `language`.
+    #[must_use]
+    pub fn in_language(self, language: Locale) -> Self {
+        Self {
+            language: Some(language),
+            ..self
+        }
+    }
+
     /// The `Accept` header value.
     #[must_use]
     pub fn accept(&self) -> MediaType {
         self.accept
+    }
+
+    /// The `Accept-Language` header value, when the fetch carries one.
+    #[must_use]
+    pub fn accept_language(&self) -> Option<&Locale> {
+        self.language.as_ref()
     }
 
     /// The largest response body the host may read.

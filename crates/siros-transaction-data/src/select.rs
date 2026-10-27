@@ -158,6 +158,7 @@ impl Context<'_> {
             },
             display: self.display,
             configuration: self.configuration,
+            language: self.language,
         }
     }
 

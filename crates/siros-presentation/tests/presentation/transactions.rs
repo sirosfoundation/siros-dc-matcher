@@ -9,8 +9,8 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use siros_codec::base64url;
 use siros_display::{DisplayCache, IssuerMetadata};
-use siros_oid4vp::{ErrorCode, FetchResponse, HttpStatus};
-use siros_presentation::PresentationError;
+use siros_oid4vp::{ErrorCode, FetchResponse, HttpStatus, MediaType};
+use siros_presentation::{plan, Fetches, PlanStep, PresentationError};
 use siros_transaction_data::{
     EntryPosition, Exclusion, Incompatibility, Location, LocationStep, PayloadFault, RowValue,
     SourceKind, TransactionDataError, UnsignedWarning,
@@ -125,6 +125,15 @@ fn signed_credential_metadata_binds_the_entry_into_the_kb_jwt() {
     let wallet = paso_wallet();
     let approval = entry(APPROVAL, "pid", json!({"what": "Pay 10.00 EUR"}));
     let request = dc_api_signed(&params(&[("pid", VCT)], std::slice::from_ref(&approval)));
+    // Proof Metadata, Section 2: the fetch accepts the JWT, in the wallet's language.
+    let none = Fetches::new();
+    let first = plan(&wallet.input(&request, &none)).unwrap();
+    let PlanStep::Fetch(fetch) = first else {
+        panic!("the plan fetches the credential metadata first")
+    };
+    assert_eq!(fetch.url().as_str(), METADATA_URI);
+    assert_eq!(fetch.accept(), MediaType::JWT);
+    assert_eq!(fetch.accept_language(), Some(&wallet.language));
     let fetches = wallet.fetches(&request);
     let input = wallet.input(&request, &fetches);
     let planned = ready(&input).unwrap();

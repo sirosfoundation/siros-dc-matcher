@@ -6,7 +6,8 @@
 use std::str::Utf8Error;
 
 use siros_credential::Credential;
-use siros_oid4vp::{BodyLimit, HttpsUrl, MediaType};
+use siros_display::Locale;
+use siros_oid4vp::{BodyLimit, Fetch, HttpsUrl, MediaType};
 
 use super::signed::{self, MetadataClaim, SignedFault, Verifier};
 use crate::definition::{Definition, DefinitionError};
@@ -58,16 +59,19 @@ impl std::error::Error for CredentialMetadataFault {}
 pub(crate) struct CredentialMetadata(Vec<(String, Result<Definition, DefinitionError>)>);
 
 impl CredentialMetadata {
-    /// The signed credential metadata of `credential` at `uri`, verified (Section 7); the
-    /// fetch of the JWT or of the issuer's key set while the host has not given it.
+    /// The signed credential metadata of `credential` at `uri` in `language`, verified (Section
+    /// 7); the fetch of the JWT, with `Accept: application/jwt` and `Accept-Language` (Section
+    /// 2), or of the issuer's key set while the host has not given it.
     pub(crate) fn load(
         uri: &HttpsUrl,
+        language: &Locale,
         credential: &Credential,
         verifier: Verifier<'_>,
     ) -> Result<Step<Self>, CredentialMetadataFault> {
+        let fetch = Fetch::get(uri.clone(), MediaType::JWT, MAX_JWT).in_language(language.clone());
         let body = match verifier
             .fetched
-            .body(uri, MediaType::JWT, MAX_JWT)
+            .body_of(fetch)
             .map_err(CredentialMetadataFault::Fetch)?
         {
             Step::Fetch(fetch) => return Ok(Step::Fetch(fetch)),

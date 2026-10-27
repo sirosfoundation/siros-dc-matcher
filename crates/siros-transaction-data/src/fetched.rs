@@ -61,7 +61,16 @@ impl Fetched {
         accept: MediaType,
         limit: BodyLimit,
     ) -> Result<Step<&[u8]>, FetchFault> {
-        let fetch = Fetch::get(url.clone(), accept, limit);
+        self.body_of(Fetch::get(url.clone(), accept, limit))
+    }
+
+    /// The body of the response to `fetch`, at most its limit; the fetch while the host has not
+    /// answered it.
+    ///
+    /// # Errors
+    ///
+    /// [`FetchFault`]: a status other than 200, or a body over the fetch's limit.
+    pub(crate) fn body_of(&self, fetch: Fetch) -> Result<Step<&[u8]>, FetchFault> {
         let Some(response) = self.response(&fetch) else {
             return Ok(Step::Fetch(fetch));
         };
@@ -69,7 +78,7 @@ impl Fetched {
             return Err(FetchFault::Status(response.status()));
         }
         let body = response.body();
-        if !limit.admits(body) {
+        if !fetch.limit().admits(body) {
             return Err(FetchFault::TooLarge(body.len()));
         }
         Ok(Step::Done(body))

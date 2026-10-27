@@ -12,7 +12,7 @@ mod ts12;
 mod ts12_map;
 
 use siros_credential::Credential;
-use siros_display::DisplayCache;
+use siros_display::{DisplayCache, Locale};
 
 use crate::definition::{Definition, DefinitionError};
 use crate::entry::Entry;
@@ -76,13 +76,15 @@ pub(crate) struct Served {
     pub(crate) rulebook: Rulebook,
 }
 
-/// What the sources read: the verification inputs, the host's display metadata and its
-/// configuration.
+/// What the sources read: the verification inputs, the host's display metadata, its
+/// configuration, and the wallet's language.
 #[derive(Clone, Copy)]
 pub(crate) struct Sources<'s> {
     pub(crate) verifier: Verifier<'s>,
     pub(crate) display: &'s DisplayCache,
     pub(crate) configuration: &'s Configuration,
+    /// The `Accept-Language` of the signed credential metadata fetch.
+    pub(crate) language: &'s Locale,
 }
 
 impl Sources<'_> {
@@ -114,12 +116,13 @@ impl Sources<'_> {
             return served(definition, SourceKind::AdHoc, rulebook);
         }
         if let Some(uri) = self.display.credential_metadata_uri(credential) {
-            let metadata = match CredentialMetadata::load(uri, credential, self.verifier)
-                .map_err(Incompatibility::CredentialMetadata)?
-            {
-                Step::Fetch(fetch) => return Ok(Step::Fetch(fetch)),
-                Step::Done(metadata) => metadata,
-            };
+            let metadata =
+                match CredentialMetadata::load(uri, self.language, credential, self.verifier)
+                    .map_err(Incompatibility::CredentialMetadata)?
+                {
+                    Step::Fetch(fetch) => return Ok(Step::Fetch(fetch)),
+                    Step::Done(metadata) => metadata,
+                };
             if let Some(definition) = metadata.definition(type_id) {
                 return served(definition.clone(), SourceKind::CredentialMetadata, rulebook);
             }
