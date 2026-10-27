@@ -14,15 +14,15 @@ behind the nym_auth prover interface and the rulebooks' artifact pins.
 
 | Crate | Holds | Rust |
 | :-- | :-- | :-- |
-| `siros-zkp-req` | The protocol: the Credential Query with `_req` and `_req_sets`, `vp_formats_supported.zkp_req`, the usable pair of Section 1.3, the consent model, `ZkpPresentation`, the backends' `Proof`, the `vp_token`, the Verifier's steps 1 to 5 of Section 4.1. Depends on `serde` and `serde_json` only. | 1.82 |
-| `siros-zkp-req-nym-auth` | The catalogue (`pseudonym`, `age_check` with E and C), `verifier_id`, the Longfellow and Vega systems, the `Handover`, the request policy. With the default feature `credential`: the nym_auth form of an mdoc, the Wallet's credential tests, the presenter, the prover interface and the verifier (`siros-mdoc` with `crypto`, `zeroize`). With `request`: the nym_auth request of `siros-oid4vp`'s verified request. With `test-fixtures`: a test issuer, requests and a test host. | 1.82 |
+| `siros-zkp-req` | The protocol: the Credential Query with `_req` and `_req_sets`, `vp_formats_supported.zkp_req`, the usable pair of Section 1.3, the consent model, `ZkpPresentation`, the backends' `Proof`, the `vp_token`, the Verifier's steps 1 to 5 of Section 4.1. Depends on `siros-codec`, `serde` and `serde_json`. | 1.82 |
+| `siros-zkp-req-nym-auth` | The catalogue (`pseudonym`, `age_check` with E and C), `verifier_id`, the Longfellow and Vega systems, the session binding, the request policy. With the default feature `credential`: the nym_auth form of an mdoc, the Wallet's credential tests, the presenter, the prover interface and the verifier (`siros-mdoc` with `crypto`, `zeroize`). With `request`: the nym_auth request of `siros-oid4vp`'s verified request. With `test-fixtures`: a test issuer, requests and a test host. | 1.82 |
 | `siros-dc-matcher-core` | The matcher. It plans `zkp_req` with the two crates above, without `credential`. | 1.82 |
 | `siros-dc-matcher-ffi` | Module `zkp_req`: the presenter and the verifier for Kotlin and Swift (UniFFI), around a host's prover. | 1.88 |
 | `siros-zkp-backend-longfellow` | `urn:circuits:longfellow:nym_auth:v1` on `longfellow-libzk-v1`: `LongfellowProver` and `LongfellowVerifier` over zk-cred-longfellow. | 1.95 |
 | `siros-zkp-backend-vega` | `urn:circuits:vega:nym_auth:v1` on `vega-v1`: `VegaNymAuth` over zk-cred-vega. | 1.95 |
 | `siros-zkp-req-wasm` | The presenter for the browser, with both backends (`wasm-bindgen`). | 1.95 |
 
-The last three form the `proving/` workspace. zk-cred-longfellow and zk-cred-vega are edition
+The last three and the real-proof tests in `proving/e2e` form the `proving/` workspace. zk-cred-longfellow and zk-cred-vega are edition
 2024, which Cargo 1.82 cannot read; in the root workspace they would stop every 1.82 build,
 the matcher's included. The matcher plans with the nym_auth catalogue and compiles no prover.
 
@@ -187,7 +187,7 @@ longfellow-zk under Apache-2.0; a page that serves it carries their notices.
 `@sirosfoundation/zkp-req` (wallet-frontend, `packages/zkp-req`) defines the wallet's side:
 `ZkpReq` runs `match`, the consent screen and `prove` across queries, and a host
 (`ZkpPresenterInPageHost`, `ZkpPresenterNativeWrapperHost`) runs a `ZkpPresenter`. Its in-page
-host creates a mock presenter today. `create_zkp_presenter(wallet)` over `siros-zkp-req-wasm`
+host creates a mock presenter; `create_zkp_presenter(wallet)` over `siros-zkp-req-wasm`
 replaces it:
 
 * `match(req)`: `wallet.credentials`, `wallet.anchors` and `wallet.now`, then `matchQuery`;
