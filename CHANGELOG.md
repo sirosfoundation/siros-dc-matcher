@@ -43,8 +43,12 @@ against the 307,200-byte budget (303,914 before).
   APTITUDE-Consortium/dcapi-matcher). `crates/android-credman-sys/ABI.md`
   documents the host ABI.
 - Below host level 2 the matcher emits nothing; it used to call the
-  `credman_v2` functions regardless. Output on level 2 and above is
-  unchanged.
+  `credman_v2` functions regardless.
+- On level 2 and above, the matcher emits nothing when the host's inputs are
+  malformed: a calling-app origin without a terminating NUL or with invalid
+  UTF-8, a read that reports more bytes than it wrote, or a request or blob
+  size it cannot allocate. It used to emit entries from such inputs, or to
+  trap on the sizes. A debug build emits one entry that names the fault.
 - The registered blob is read until complete; a short
   `ReadCredentialsBuffer` read used to leave its tail zeroed.
 - `siros-dc-matcher-core`'s unused `sink` module is removed.
