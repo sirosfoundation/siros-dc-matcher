@@ -180,7 +180,7 @@ the wallet's plan (`siros-presentation`), which proves in-process through a `Nym
 ### Browser
 
 `wasm-pack build proving/siros-zkp-req-wasm --target web`, for a desktop browser. JavaScript
-receives `ZkpProvers` (its constructor, `loadLongfellow(circuitsZst)`, `loadVega(shapesZst)` and
+receives `ZkpProvers` (its constructor, `loadLongfellow(circuits_zst)`, `loadVega(shapes_zst)` and
 `systems()`) and `vpTokenJson`. Bytes are `Uint8Array`. A refusal throws `{error_code, kind,
 code}`. Rust code proves through `ZkpProvers` as a `NymAuthProver`, on one thread, with no Web
 Worker pool and no cross-origin isolation.
