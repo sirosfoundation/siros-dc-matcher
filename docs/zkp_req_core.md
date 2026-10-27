@@ -150,8 +150,7 @@ artifacts from their reference copies.
 * `attestation::UsableAttestation::of(mdoc, anchors, proof_time)` tests an mdoc `siros-mdoc`
   parsed.
 * `presenter::Answer::new(pair, attestation, secret_seed)` holds when the seed opens `ssc` and the
-  option's assertions hold; `Prepared::new(answer, &NymAuthRequest, key_id)` gives the `Prepared`
-  of the answer in the request's session.
+  option's assertions hold.
 * `presenter::prepare(&ProveInput)` gives `Prepared`: `data_to_sign`, `key_id`, `statement`,
   `job(device_signature)`, `assemble(&ProofOutput)`, and `prove(device_signature, prover)` for
   a linked prover. `presenter::present` runs the phases with a `Signer` and a `NymAuthProver`.
@@ -179,8 +178,9 @@ pool, no cross-origin isolation. Objects use the snake_case names of `@sirosfoun
 bytes are `Uint8Array`. A refusal throws `{error_code, kind, code, errors?}`. Verification is
 available in Rust and through the FFI.
 
-Built with wasm-pack 0.15.0 and wasm-opt 116, the module is 2,896,016 bytes (772,454 with brotli
-at quality 11) and its JavaScript glue 31,300 (6,097). It links zk-cred-longfellow under MPL-2.0, part of it derived from Google's
+Built with wasm-pack 0.15.0 and wasm-opt 116, the module is about 2.9 MB (0.77 MB with brotli at
+quality 11) and its JavaScript glue 31 KB (6 KB); the exact sizes vary with the source paths the
+module embeds. It links zk-cred-longfellow under MPL-2.0, part of it derived from Google's
 longfellow-zk under Apache-2.0; a page that serves it carries their notices.
 
 ## The frontend package
