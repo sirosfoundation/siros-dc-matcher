@@ -77,9 +77,10 @@ fn main() {
     let Some(mut sets) = host.entry_sets() else {
         return;
     };
-    // Without both inputs there is nothing to offer, and no debug flag to
-    // report the failure with.
-    let (Ok(request), Ok(blob)) = (host.request(), host.credentials()) else {
+    let request = host.request();
+    // Without the blob there is nothing to offer, and no debug flag to report
+    // the failure with.
+    let Ok(blob) = host.credentials() else {
         return;
     };
     let caller = host.calling_app();

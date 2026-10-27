@@ -16,7 +16,7 @@ commit `e65861c`), and adds the components of the SIROS wallet core. **Breaking*
 presentations follow the draft, the DCQL parse enforces OpenID4VP 1.0, Section 6, the FFI loses
 `zkp_req_plan`, and the vectors move to the crates that own their rules. Consumers that keep a
 copy of the vectors (siros-sdk-kotlin, siros-sdk-swift) must re-copy them from the new
-directories; the vector set digest below identifies them. `matcher.wasm` is 295,552 bytes
+directories; the vector set digest below identifies them. `matcher.wasm` is 294,391 bytes
 against the 307,200-byte budget (303,418 at v0.11.0).
 
 ### Changed
@@ -47,9 +47,9 @@ against the 307,200-byte budget (303,418 at v0.11.0).
   `credman_v2` functions regardless.
 - On level 2 and above, the matcher emits nothing when the host's inputs are
   malformed: a calling-app origin without a terminating NUL or with invalid
-  UTF-8, a read that reports more bytes than it wrote, or a request or blob
-  size it cannot allocate. It used to emit entries from such inputs, or to
-  trap on the sizes. A debug build emits one entry that names the fault.
+  UTF-8, or a read that reports more bytes than it wrote. It used to emit
+  entries from such inputs. A debug build emits one entry that names the
+  fault.
 - The registered blob is read until complete; a short
   `ReadCredentialsBuffer` read used to leave its tail zeroed.
 - `siros-dc-matcher-core`'s unused `sink` module is removed.
