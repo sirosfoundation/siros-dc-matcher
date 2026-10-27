@@ -126,27 +126,18 @@ pub struct Claim {
 }
 
 /// Why a blob could not be read.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum DecodeError {
     /// The bytes are not valid CBOR, or not shaped like a database.
+    #[error("credential blob is not valid CBOR")]
     Malformed,
     /// The blob's version is one this matcher does not understand.
     ///
     /// Carries the version so a diagnostic can say *which*, which is the
     /// difference between "the wallet is newer than the matcher" and "the blob
     /// is corrupt".
+    #[error("credential blob version {0} is newer than this matcher")]
     UnsupportedVersion(u32),
-}
-
-impl core::fmt::Display for DecodeError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::Malformed => write!(f, "credential blob is not valid CBOR"),
-            Self::UnsupportedVersion(v) => {
-                write!(f, "credential blob version {v} is newer than this matcher")
-            }
-        }
-    }
 }
 
 impl CredentialDatabase {

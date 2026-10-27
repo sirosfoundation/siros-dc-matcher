@@ -56,7 +56,8 @@ pub const CBOR_MAX_DEPTH: usize = 16;
 /// Why a `zkp_req` response was refused.
 ///
 /// `index` is the position of the presentation in the entry's array.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("zkp_req response refused: {}", self.code())]
 pub enum InvalidResponse {
     /// The `vp_token` is not a JSON object.
     ResponseNotParseable,
@@ -274,14 +275,6 @@ impl InvalidResponse {
     }
 }
 
-impl fmt::Display for InvalidResponse {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "zkp_req response refused: {}", self.code())
-    }
-}
-
-impl std::error::Error for InvalidResponse {}
-
 // ---------------------------------------------------------------------------
 // The vp_token: JSON that keeps duplicate members.
 
@@ -355,11 +348,15 @@ enum Cbor {
     Other(Vec<u8>),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 enum CborError {
+    #[error("malformed CBOR")]
     Malformed,
+    #[error("CBOR item of indefinite length")]
     Indefinite,
+    #[error("bytes after the CBOR item")]
     Trailing,
+    #[error("CBOR map with a repeated key")]
     DuplicateKey,
 }
 
