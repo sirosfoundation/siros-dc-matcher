@@ -2,8 +2,6 @@
 
 use serde_json::{Map, Value};
 
-use crate::error::TransactionDataError;
-
 /// An authentication factor the wallet applied to authorize a presentation: its category and
 /// method.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -107,6 +105,22 @@ impl Factor {
     }
 }
 
+/// The authentication factors cover fewer than two categories (EC TS12 v1.0.1, Section 3.6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct AmrCategories;
+
+impl AmrCategories {
+    /// A stable identifier.
+    #[must_use]
+    pub fn code(self) -> &'static str {
+        "transaction_data_amr_categories"
+    }
+}
+
+siros_codec::display_code!(AmrCategories);
+
+impl std::error::Error for AmrCategories {}
+
 /// The factors of a signing key, at least two categories among them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Amr(Vec<Factor>);
@@ -116,13 +130,13 @@ impl Amr {
     ///
     /// # Errors
     ///
-    /// [`TransactionDataError::AmrCategories`]: the factors cover fewer than two categories.
-    pub fn new(factors: Vec<Factor>) -> Result<Self, TransactionDataError> {
+    /// [`AmrCategories`]: the factors cover fewer than two categories.
+    pub fn new(factors: Vec<Factor>) -> Result<Self, AmrCategories> {
         let first = factors.first().map(|f| f.category());
         if factors.iter().any(|f| Some(f.category()) != first) {
             Ok(Self(factors))
         } else {
-            Err(TransactionDataError::AmrCategories)
+            Err(AmrCategories)
         }
     }
 

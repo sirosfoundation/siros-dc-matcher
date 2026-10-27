@@ -4,7 +4,7 @@ use p256::PublicKey;
 use serde_json::Value;
 use siros_dcql::DcqlQuery;
 
-use crate::client_id::ClientId;
+use crate::client_id::{ClientId, ClientIdPrefix};
 use crate::fetch::HttpsUrl;
 use crate::handover::{Handover, JwkThumbprint};
 use crate::intake::Verdict;
@@ -235,6 +235,15 @@ impl AttestationFormat {
     }
 }
 
+/// Whether a request arrived as a signed Request Object (RFC 9101).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RequestSignature {
+    /// A Request Object whose signature intake verified.
+    Signed,
+    /// A request of a `redirect_uri` client, or an unsigned DC API request.
+    Unsigned,
+}
+
 /// Who asks, as the consent screen shows it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VerifierView<'a> {
@@ -285,6 +294,18 @@ impl VerifiedRequest {
             client_id,
             verdict: self.trusted,
             display,
+        }
+    }
+
+    /// Whether the request arrived signed: every Client Identifier Prefix but `redirect_uri`
+    /// signs (Section 5.9.3).
+    #[must_use]
+    pub fn signature(&self) -> RequestSignature {
+        match self.verifier().client_id {
+            Some(client_id) if client_id.prefix() != ClientIdPrefix::RedirectUri => {
+                RequestSignature::Signed
+            }
+            Some(_) | None => RequestSignature::Unsigned,
         }
     }
 

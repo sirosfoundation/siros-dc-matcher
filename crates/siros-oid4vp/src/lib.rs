@@ -74,5 +74,5 @@ pub use values::{AttestationIssuer, Kid, Nonce, Origin, State, TransactionDataIt
 #[cfg(feature = "crypto")]
 pub use verified::{
     AccessCertificate, AttestationFormat, CertificateDer, ContentEncryption, Encryption,
-    ResponseMode, VerifiedRequest, VerifierView,
+    RequestSignature, ResponseMode, VerifiedRequest, VerifierView,
 };

@@ -5,7 +5,7 @@
 //! published 2026-09-17, SHA-256 `33139b438657d1cee116ba737807ea71d19d6de4b90f799a09c56f0cc6a1b0ff`.
 
 /// The minor unit of a currency.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum Minor {
     /// The digits after the decimal point.
     Digits(u8),
@@ -196,8 +196,8 @@ const MINOR_UNITS: [(&str, Minor); 178] = [
 ];
 
 /// An ISO 4217 alphabetic code of the list, with its minor unit.
-#[derive(Clone, Copy)]
-pub(crate) struct CurrencyCode {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CurrencyCode {
     code: &'static str,
     minor: Minor,
 }
@@ -212,12 +212,27 @@ impl CurrencyCode {
     }
 
     /// The code.
-    pub(crate) fn as_str(self) -> &'static str {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
         self.code
     }
 
-    /// The minor unit.
-    pub(crate) fn minor(self) -> Minor {
-        self.minor
+    /// Whether the unsigned decimal `amount` is an amount of this currency: the major units,
+    /// and an optional decimal point with exactly the digits of the minor unit. A currency
+    /// without a minor unit takes no fraction.
+    pub(crate) fn admits(self, amount: &str) -> bool {
+        let (major, fraction) = match amount.split_once('.') {
+            Some((major, fraction)) => (major, Some(fraction)),
+            None => (amount, None),
+        };
+        let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+        let fraction_fits = match (fraction, self.minor) {
+            (None, _) => true,
+            (Some(fraction), Minor::Digits(n)) => {
+                n > 0 && digits(fraction) && fraction.len() == usize::from(n)
+            }
+            (Some(_), Minor::Undefined) => false,
+        };
+        digits(major) && fraction_fits
     }
 }

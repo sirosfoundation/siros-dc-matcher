@@ -3,56 +3,10 @@
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+pub use siros_codec::url::HttpsUrl;
 
-/// An absolute `https` URL with a non-empty authority.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct HttpsUrl(String);
-
-impl HttpsUrl {
-    /// The URL `text`, when its scheme is `https` (any case), an authority follows `//`, and it
-    /// holds no ASCII whitespace or control character.
-    #[must_use]
-    pub fn parse(text: &str) -> Option<Self> {
-        let scheme = text.get(..8)?;
-        if !scheme.eq_ignore_ascii_case("https://") {
-            return None;
-        }
-        if text
-            .bytes()
-            .any(|b| b.is_ascii_whitespace() || b.is_ascii_control())
-        {
-            return None;
-        }
-        let authority = text.get(8..)?.split(['/', '?', '#']).next()?;
-        if authority.is_empty() {
-            return None;
-        }
-        Some(Self(text.to_owned()))
-    }
-
-    /// The host of the authority: without user information, port or IPv6 brackets.
-    #[must_use]
-    pub fn host(&self) -> &str {
-        let authority = self
-            .0
-            .get(8..)
-            .and_then(|rest| rest.split(['/', '?', '#']).next())
-            .unwrap_or_default();
-        let host_port = authority.rsplit('@').next().unwrap_or(authority);
-        match host_port.strip_prefix('[') {
-            Some(bracketed) => bracketed.split(']').next().unwrap_or_default(),
-            None => host_port.split(':').next().unwrap_or_default(),
-        }
-    }
-
-    /// The URL.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-/// A media type a fetch accepts or a body has, `type/subtype`.
+/// A media type a fetch accepts or a body has, `type/subtype`; or, as the `Accept` value of an
+/// image fetch, the list of the image types the wallet shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MediaType(&'static str);
 
@@ -65,6 +19,10 @@ impl MediaType {
     pub const FORM: Self = Self("application/x-www-form-urlencoded");
     /// `application/cwt`, the body of `direct_post.cwt` (`zkp_req.md`, Section 6.2).
     pub const CWT: Self = Self("application/cwt");
+    /// `application/jwt`: a signed credential metadata JWT (PaSO Proof Metadata, Section 2).
+    pub const JWT: Self = Self("application/jwt");
+    /// The image types the wallet shows: PNG, JPEG and SVG (PaSO View, Section 3, `image`).
+    pub const IMAGES: Self = Self("image/png, image/jpeg, image/svg+xml");
 
     /// `type/subtype`.
     #[must_use]

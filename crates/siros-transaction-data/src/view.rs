@@ -1,95 +1,153 @@
-//! What the consent screen shows for one transaction (EC TS12 v1.0.1, Section 3.3).
+//! What the consent screen shows for one transaction: the generic rendering of PaSO View, Section
+//! 2, for every type and every source.
 
-use siros_codec::date::Date;
-use siros_display::DisplayText;
+use siros_oid4vp::RequestSignature;
 
-use crate::kind::SupportedType;
-use crate::ts12::ImageUrl;
+use crate::definition::{LabelFormat, LabelText, Prominence, SecurityHint};
+use crate::image::VerifiedImage;
+use crate::payload::{Location, Scalar};
+use crate::sources::{Rulebook, SourceKind};
+use crate::type_id::TypeId;
 
-/// The display of one transaction data entry: the UI elements of its type (Section 3.3.3) and
-/// a row per leaf parameter of its payload (Sections 3.3.1 and 3.3.2).
+/// The display of one transaction data entry: its UI elements and a row per displayed claim
+/// instance, in the order of the definition's claims.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TransactionView {
-    transaction_type: SupportedType,
-    labels: Labels,
-    rows: Vec<Row>,
+    pub(crate) type_id: TypeId,
+    pub(crate) source: SourceKind,
+    pub(crate) rulebook: Rulebook,
+    pub(crate) title: Option<ShownLabel>,
+    pub(crate) affirmative: Option<ShownLabel>,
+    pub(crate) denial: Option<ShownLabel>,
+    pub(crate) security_hint: Option<LabelText<SecurityHint>>,
+    pub(crate) rows: Vec<Row>,
+    pub(crate) signature: RequestSignature,
 }
 
-/// The UI elements of a transaction (Section 3.3.3).
+/// A label as shown: its text, interpolated when it was a template, and how it is formatted.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Labels {
-    pub(crate) affirmative: DisplayText,
-    pub(crate) denial: Option<DisplayText>,
-    pub(crate) title: Option<DisplayText>,
-    pub(crate) security_hint: Option<DisplayText>,
+pub struct ShownLabel {
+    pub(crate) text: String,
+    pub(crate) format: LabelFormat,
+}
+
+/// A displayed claim instance: its location in the payload, its label, its value, and the
+/// prominence TS12 type metadata gives it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Row {
+    pub(crate) location: Location,
+    pub(crate) label: ShownLabel,
+    pub(crate) value: RowValue,
+    pub(crate) prominence: Option<Prominence>,
+}
+
+/// The value of a row, typed for the UI to format.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RowValue {
+    /// `label_only`: the label is shown alone.
+    LabelOnly,
+    /// A value formatted by its type.
+    Value(Scalar),
+    /// An image, verified.
+    Image(VerifiedImage),
+}
+
+/// Whether the UI warns that the request arrived unsigned, and requires explicit confirmation
+/// before it continues (EC TS12 v1.0.1, Section 3.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum UnsignedWarning {
+    /// The request is unsigned and the type's rulebook is TS12's: warn and confirm.
+    Required,
+    /// The request arrived signed, or the rulebook is no TS12 one.
+    NotNeeded,
 }
 
 impl TransactionView {
-    pub(crate) fn new(transaction_type: SupportedType, labels: Labels, rows: Vec<Row>) -> Self {
-        Self {
-            transaction_type,
-            labels,
-            rows,
-        }
-    }
-
     /// The `type` value.
     #[must_use]
-    pub fn transaction_type(&self) -> SupportedType {
-        self.transaction_type
+    pub fn type_id(&self) -> &TypeId {
+        &self.type_id
     }
 
-    /// `affirmative_action_label`: the label of the control that confirms.
+    /// The source of the definition the view renders.
     #[must_use]
-    pub fn affirmative_action_label(&self) -> &DisplayText {
-        &self.labels.affirmative
+    pub fn source(&self) -> SourceKind {
+        self.source
     }
 
-    /// `denial_action_label`. `None`: the wallet labels the control that cancels.
+    /// The rulebook of the payload.
     #[must_use]
-    pub fn denial_action_label(&self) -> Option<&DisplayText> {
-        self.labels.denial.as_ref()
+    pub fn rulebook(&self) -> Rulebook {
+        self.rulebook
     }
 
     /// `transaction_title`. `None`: the wallet may title the screen itself.
     #[must_use]
-    pub fn transaction_title(&self) -> Option<&DisplayText> {
-        self.labels.title.as_ref()
+    pub fn transaction_title(&self) -> Option<&ShownLabel> {
+        self.title.as_ref()
     }
 
-    /// `security_hint`. `None`: no hint is shown.
+    /// `affirmative_action_label`. `None`: the wallet labels the control that confirms.
     #[must_use]
-    pub fn security_hint(&self) -> Option<&DisplayText> {
-        self.labels.security_hint.as_ref()
+    pub fn affirmative_action_label(&self) -> Option<&ShownLabel> {
+        self.affirmative.as_ref()
     }
 
-    /// The rows, by level, in the order of the type's schema within a level.
+    /// `denial_action_label`. `None`: the wallet labels the control that cancels.
+    #[must_use]
+    pub fn denial_action_label(&self) -> Option<&ShownLabel> {
+        self.denial.as_ref()
+    }
+
+    /// `security_hint`, shown exactly as given (PaSO View, Section 2).
+    #[must_use]
+    pub fn security_hint(&self) -> Option<&LabelText<SecurityHint>> {
+        self.security_hint.as_ref()
+    }
+
+    /// The rows, in the order of the definition's claims, wildcards expanded (PaSO View,
+    /// Section 2).
     #[must_use]
     pub fn rows(&self) -> &[Row] {
         &self.rows
     }
+
+    /// Whether the UI warns that the request arrived unsigned (EC TS12 v1.0.1, Section 3.1).
+    #[must_use]
+    pub fn unsigned_warning(&self) -> UnsignedWarning {
+        match (self.signature, self.rulebook) {
+            (RequestSignature::Unsigned, Rulebook::Ts12(_)) => UnsignedWarning::Required,
+            (RequestSignature::Signed, _) | (RequestSignature::Unsigned, Rulebook::Generic) => {
+                UnsignedWarning::NotNeeded
+            }
+        }
+    }
 }
 
-/// A leaf parameter of the payload with its localised name.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Row {
-    label: DisplayText,
-    value: RowValue,
-    level: Level,
+impl ShownLabel {
+    /// The text.
+    #[must_use]
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// How the text is formatted: plain or `mini_markdown`.
+    #[must_use]
+    pub fn format(&self) -> LabelFormat {
+        self.format
+    }
 }
 
 impl Row {
-    pub(crate) fn new(label: DisplayText, value: RowValue, level: Level) -> Self {
-        Self {
-            label,
-            value,
-            level,
-        }
+    /// The claim instance's location in the payload.
+    #[must_use]
+    pub fn location(&self) -> &Location {
+        &self.location
     }
 
-    /// The localised name of the parameter.
+    /// The label.
     #[must_use]
-    pub fn label(&self) -> &DisplayText {
+    pub fn label(&self) -> &ShownLabel {
         &self.label
     }
 
@@ -99,123 +157,9 @@ impl Row {
         &self.value
     }
 
-    /// How prominently the row is shown.
+    /// The prominence TS12 type metadata gives the row (EC TS12 v1.0.1, Section 3.3.1).
     #[must_use]
-    pub fn level(&self) -> Level {
-        self.level
-    }
-}
-
-/// The value of a row, typed for the UI to format for its locale.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RowValue {
-    /// A string. An array or `null` in a member the schema leaves open shows as its compact
-    /// JSON text.
-    Text(DisplayText),
-    /// A number, as the verifier wrote it in JSON.
-    Number(DisplayText),
-    /// A boolean.
-    Boolean(bool),
-    /// A calendar date.
-    Date(Date),
-    /// The URL of an image, for the UI to show.
-    Image(ImageUrl),
-    /// A recurrence frequency, which the wallet names in the user's language (Section 4.3.1).
-    Frequency(Frequency),
-}
-
-/// A visualisation level of Section 3.3.1, most prominent first.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Level {
-    /// `1`: shown prominently on the main confirmation screen.
-    Prominent,
-    /// `2`: shown on the main confirmation screen.
-    Main,
-    /// `3`, the default: shown, possibly on a supplementary screen.
-    Supplementary,
-    /// `4`: may be omitted.
-    Omittable,
-}
-
-impl Level {
-    /// The level of the `visualisation` value `value`.
-    pub(crate) fn of(value: u64) -> Option<Self> {
-        match value {
-            1 => Some(Self::Prominent),
-            2 => Some(Self::Main),
-            3 => Some(Self::Supplementary),
-            4 => Some(Self::Omittable),
-            _ => None,
-        }
-    }
-}
-
-/// A recurrence frequency: an ISO 20022 code of EC TS12 v1.0.1, Section 4.3.1.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Frequency {
-    /// `INDA`: several times a day.
-    Intraday,
-    /// `DAIL`: daily.
-    Daily,
-    /// `WEEK`: weekly.
-    Weekly,
-    /// `TOWK`: every two weeks.
-    EveryTwoWeeks,
-    /// `TWMN`: twice a month.
-    TwiceAMonth,
-    /// `MNTH`: monthly.
-    Monthly,
-    /// `TOMN`: every two months.
-    EveryTwoMonths,
-    /// `QUTR`: quarterly.
-    Quarterly,
-    /// `FOMN`: every four months.
-    EveryFourMonths,
-    /// `SEMI`: twice a year.
-    TwiceAYear,
-    /// `YEAR`: yearly.
-    Yearly,
-    /// `TYEA`: every two years.
-    EveryTwoYears,
-}
-
-impl Frequency {
-    const ALL: [Self; 12] = [
-        Self::Intraday,
-        Self::Daily,
-        Self::Weekly,
-        Self::EveryTwoWeeks,
-        Self::TwiceAMonth,
-        Self::Monthly,
-        Self::EveryTwoMonths,
-        Self::Quarterly,
-        Self::EveryFourMonths,
-        Self::TwiceAYear,
-        Self::Yearly,
-        Self::EveryTwoYears,
-    ];
-
-    /// The ISO 20022 code.
-    #[must_use]
-    pub fn code(self) -> &'static str {
-        match self {
-            Self::Intraday => "INDA",
-            Self::Daily => "DAIL",
-            Self::Weekly => "WEEK",
-            Self::EveryTwoWeeks => "TOWK",
-            Self::TwiceAMonth => "TWMN",
-            Self::Monthly => "MNTH",
-            Self::EveryTwoMonths => "TOMN",
-            Self::Quarterly => "QUTR",
-            Self::EveryFourMonths => "FOMN",
-            Self::TwiceAYear => "SEMI",
-            Self::Yearly => "YEAR",
-            Self::EveryTwoYears => "TYEA",
-        }
-    }
-
-    /// The frequency of the code `code`.
-    pub(crate) fn named(code: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|f| f.code() == code)
+    pub fn prominence(&self) -> Option<Prominence> {
+        self.prominence
     }
 }

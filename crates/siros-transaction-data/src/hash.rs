@@ -7,9 +7,6 @@ use siros_codec::base64url::{self, Base64Url};
 use siros_codec::json::Json;
 use siros_oid4vp::TransactionDataItem;
 
-use crate::error::{MemberPath, TransactionDataError};
-use crate::json;
-
 /// A hash algorithm of the IANA Named Information Hash Algorithm Registry that this wallet
 /// computes, weakest first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -84,109 +81,95 @@ impl HashAlg {
     }
 }
 
-/// The algorithms an entry accepts for its hash.
+/// The algorithms an entry accepts for its hash (B.3.3.1).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Accepted {
-    /// The entry carries no `transaction_data_hashes_alg`: `sha-256` only.
+    /// The entry carries no `transaction_data_hashes_alg`: `sha-256`.
     Default,
-    /// The algorithms of `transaction_data_hashes_alg` this wallet computes, in the verifier's
-    /// order; at least one.
-    Listed(Vec<HashAlg>),
+    /// The entry carries `transaction_data_hashes_alg`: its first algorithm this wallet
+    /// computes.
+    Listed(HashAlg),
 }
 
-/// The name of the request member.
-pub(crate) const HASHES_ALG: MemberPath = MemberPath::new("transaction_data_hashes_alg");
+/// Why an entry's `transaction_data_hashes_alg` is refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum HashesAlgFault {
+    /// The member is neither an array nor a string.
+    WrongType,
+    /// The array is empty.
+    Empty,
+    /// The element at this position is no string.
+    Element(usize),
+    /// No name is of an algorithm this wallet computes.
+    Unsupported,
+}
+
+impl HashesAlgFault {
+    /// A stable identifier.
+    #[must_use]
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::WrongType | Self::Empty | Self::Element(_) => {
+                "transaction_data_hash_alg_malformed"
+            }
+            Self::Unsupported => "transaction_data_hash_alg_unsupported",
+        }
+    }
+}
+
+siros_codec::display_code!(HashesAlgFault);
+
+impl std::error::Error for HashesAlgFault {}
+
+/// Whether a KB-JWT carries `transaction_data_hashes_alg` (B.3.3.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AlgClaim {
+    /// The entry carried `transaction_data_hashes_alg`: the KB-JWT names the algorithm.
+    Repeated,
+    /// It did not.
+    Omitted,
+}
 
 impl Accepted {
-    /// The algorithms `value`, the entry's `transaction_data_hashes_alg`, accepts: a
-    /// non-empty array of Hash Name Strings. A name this wallet does not compute is passed
-    /// over.
-    pub(crate) fn parse(value: Option<Json>) -> Result<Self, TransactionDataError> {
-        let Some(value) = value else {
-            return Ok(Self::Default);
+    /// The algorithms `value`, the entry's `transaction_data_hashes_alg`, accepts: a non-empty
+    /// array of Hash Name Strings (B.3.3.1), or one string as CS-12, Section 8.1 sends it,
+    /// which reads as a list of one. A name this wallet does not compute is passed over.
+    pub(crate) fn parse(value: Option<Json>) -> Result<Self, HashesAlgFault> {
+        let names = match value {
+            None => return Ok(Self::Default),
+            Some(Json::String(name)) => vec![name],
+            Some(Json::Array(items)) if items.is_empty() => return Err(HashesAlgFault::Empty),
+            Some(Json::Array(items)) => items
+                .into_iter()
+                .enumerate()
+                .map(|(at, item)| match item {
+                    Json::String(name) => Ok(name),
+                    _ => Err(HashesAlgFault::Element(at)),
+                })
+                .collect::<Result<_, _>>()?,
+            Some(_) => return Err(HashesAlgFault::WrongType),
         };
-        let names = json::array(value, HASHES_ALG)?;
-        if names.is_empty() {
-            return Err(TransactionDataError::InvalidValue(HASHES_ALG));
-        }
-        let names = names
-            .into_iter()
-            .map(|name| json::text(name, HASHES_ALG))
-            .collect::<Result<Vec<_>, _>>()?;
-        let algs: Vec<HashAlg> = names
+        names
             .iter()
-            .filter_map(|name| HashAlg::named(name))
-            .collect();
-        if algs.is_empty() {
-            return Err(TransactionDataError::HashAlgUnsupported);
-        }
-        Ok(Self::Listed(algs))
+            .find_map(|name| HashAlg::named(name))
+            .map(Self::Listed)
+            .ok_or(HashesAlgFault::Unsupported)
     }
 
-    /// The algorithms, in the verifier's order.
-    fn algs(&self) -> &[HashAlg] {
+    /// The algorithm of the hash: the first the verifier lists that this wallet computes, else
+    /// `sha-256` (B.3.3.1).
+    pub(crate) fn alg(&self) -> HashAlg {
         match self {
-            Self::Default => &[HashAlg::Sha256],
-            Self::Listed(algs) => algs,
+            Self::Default => HashAlg::Sha256,
+            Self::Listed(alg) => *alg,
         }
     }
 
-    /// The claim the KB-JWT carries for the request's `transaction_data_hashes_alg`.
-    fn claim(&self) -> AlgClaim {
+    /// Whether the KB-JWT names the algorithm.
+    pub(crate) fn claim(&self) -> AlgClaim {
         match self {
             Self::Default => AlgClaim::Omitted,
             Self::Listed(_) => AlgClaim::Repeated,
         }
-    }
-}
-
-/// Whether a KB-JWT carries `transaction_data_hashes_alg` (B.3.3.1).
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AlgClaim {
-    /// An entry bound to the credential carried the member: the KB-JWT repeats the algorithm.
-    Repeated,
-    /// No entry carried it.
-    Omitted,
-}
-
-/// The algorithm of one KB-JWT, shared by the entries bound to its credential (B.3.3.1).
-#[derive(Clone, Copy)]
-pub(crate) struct Choice {
-    alg: HashAlg,
-    claim: AlgClaim,
-}
-
-impl Choice {
-    /// The first algorithm of the first entry that every entry accepts.
-    ///
-    /// # Errors
-    ///
-    /// [`TransactionDataError::HashAlgConflict`]: no algorithm is common to all.
-    pub(crate) fn of(accepted: &[&Accepted]) -> Result<Self, TransactionDataError> {
-        let first = accepted.first().map_or(&[][..], |a| a.algs());
-        let alg = first
-            .iter()
-            .copied()
-            .find(|alg| accepted.iter().all(|a| a.algs().contains(alg)))
-            .ok_or(TransactionDataError::HashAlgConflict)?;
-        let repeated = accepted.iter().any(|a| a.claim() == AlgClaim::Repeated);
-        Ok(Self {
-            alg,
-            claim: if repeated {
-                AlgClaim::Repeated
-            } else {
-                AlgClaim::Omitted
-            },
-        })
-    }
-
-    /// The algorithm.
-    pub(crate) fn alg(self) -> HashAlg {
-        self.alg
-    }
-
-    /// Whether the KB-JWT carries `transaction_data_hashes_alg`: when any entry bound to the
-    /// credential carried it (B.3.3.1).
-    pub(crate) fn claim(self) -> AlgClaim {
-        self.claim
     }
 }

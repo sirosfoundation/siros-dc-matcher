@@ -30,6 +30,8 @@ pub enum DisplayError {
     ResponseMetadataNotObject,
     /// The display metadata record has an unknown member.
     RecordMemberUnknown,
+    /// `credential_metadata_uri` is no `https` URL (PaSO Proof Metadata, Section 2).
+    CredentialMetadataUri,
     /// A `display` array or one of its entries breaks its rules.
     Display(EntryFault),
     /// Two `display` entries of one array have the same locale.
@@ -134,6 +136,7 @@ impl DisplayError {
             Self::AuxiliaryDataPublished => "auxiliary_data_published",
             Self::ResponseMetadataNotObject => "response_metadata_not_object",
             Self::RecordMemberUnknown => "record_member_unknown",
+            Self::CredentialMetadataUri => "credential_metadata_uri_malformed",
             Self::Display(_) => "display_malformed",
             Self::DisplayLocaleRepeated => "display_locale_repeated",
             Self::Logo(_) => "logo_malformed",

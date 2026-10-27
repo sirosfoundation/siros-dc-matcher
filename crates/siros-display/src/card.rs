@@ -1,12 +1,13 @@
 //! Credential cards (D2, D3).
 
+use siros_codec::url::HttpsUrl;
 use siros_credential::{Credential, Format};
 
 use crate::cache::DisplayCache;
 use crate::colour::Colour;
 use crate::error::DisplayError;
 use crate::issuer::IssuerMetadata;
-use crate::locale::{choose, Locale};
+use crate::locale::{lookup, Locale};
 use crate::logo::Logo;
 use crate::text::DisplayText;
 use crate::type_metadata::TypeMetadata;
@@ -49,25 +50,21 @@ impl Card {
 }
 
 impl DisplayCache {
-    /// The card of `credential` for the user's `preferences`, most preferred first.
+    /// The card of `credential` in the wallet's `language`.
     ///
-    /// [`choose`] takes the entry from the `display` of the credential's Type Metadata, the
+    /// [`lookup`] takes the entry from the `display` of the credential's Type Metadata, the
     /// nearest type that has one (SD-JWT VC, Section 5.5.2). Without a type entry it takes it from
     /// the `credential_metadata.display` of the credential's configuration, the fallback (D3,
     /// OpenID4VCI 1.0, Section 12.2.4). The entry gives the title, logo and colours; without any
     /// entry the title is the credential type. The issuer line is the
-    /// chosen named entry of the Credential Issuer's `display`, else the credential's Credential
-    /// Issuer Identifier.
+    /// named entry of the Credential Issuer's `display` [`lookup`] takes, else the credential's
+    /// Credential Issuer Identifier.
     ///
     /// # Errors
     ///
     /// [`DisplayError::Text`] when the title or the issuer line falls back to an identifier
     /// that is no safe label.
-    pub fn card(
-        &self,
-        credential: &Credential,
-        preferences: &[Locale],
-    ) -> Result<Card, DisplayError> {
+    pub fn card(&self, credential: &Credential, language: &Locale) -> Result<Card, DisplayError> {
         let issued = self.issued(credential);
         let type_display = self
             .types_of(credential)
@@ -78,7 +75,7 @@ impl DisplayCache {
             [] => issued.map(IssuerMetadata::display).unwrap_or_default(),
             typed => typed,
         };
-        let issuer = match issued.and_then(|m| choose(preferences, m.issuer_display())) {
+        let issuer = match issued.and_then(|m| lookup(language, m.issuer_display())) {
             Some(named) => Some(named.text.clone()),
             None => credential
                 .issuer()
@@ -86,7 +83,7 @@ impl DisplayCache {
                 .transpose()
                 .map_err(DisplayError::Text)?,
         };
-        Ok(match choose(preferences, entries) {
+        Ok(match lookup(language, entries) {
             Some(entry) => Card {
                 title: entry.name.clone(),
                 issuer,
@@ -108,6 +105,12 @@ impl DisplayCache {
     /// The OpenID4VCI display metadata of `credential`'s configuration.
     pub(crate) fn issued(&self, credential: &Credential) -> Option<&IssuerMetadata> {
         self.issuer(credential.issuer()?, credential.configuration_id()?)
+    }
+
+    /// Where the signed credential metadata of `credential`'s configuration is served: its
+    /// `credential_metadata_uri` (PaSO Proof Metadata, Section 2).
+    pub fn credential_metadata_uri(&self, credential: &Credential) -> Option<&HttpsUrl> {
+        self.issued(credential)?.credential_metadata_uri()
     }
 
     /// The Type Metadata of an SD-JWT VC's `vct` and of the types it extends.

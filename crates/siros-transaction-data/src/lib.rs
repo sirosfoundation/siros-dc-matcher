@@ -1,28 +1,21 @@
-//! OpenID4VP 1.0 transaction data for the SIROS wallet core: the `transaction_data` request
-//! parameter, the transaction data types of EC TS12 v1.0.1, what each binds into a
-//! presentation, and its display.
+//! OpenID4VP 1.0 transaction data for the SIROS wallet core, on the PaSO model (PaSO Core, View
+//! and Proof Metadata, draft 2), with the four types of EC TS12 v1.0.1 as built-in rulebooks.
 //!
 //! | Requirement | API |
 //! | --- | --- |
-//! | T1: base64url JSON, no duplicate keys, string `type`, non-empty `credential_ids` of DCQL query ids | [`Entry::parse`] |
-//! | T2: one implementation per type: parsing, authorizing credentials, display, bindings, extra KB-JWT claims | the crate's `TransactionType` trait and its registry, behind [`Entry`] |
-//! | T3: the B.3.3.1 hashes, over each entry as received, one algorithm per credential | [`bind`], [`MemberBinding::kb_jwt_claims`], [`HashAlg`] |
-//! | T4: an entry binds to the first of its `credential_ids` the chosen offer answers with a credential the type authorizes | [`bind`], [`Presented`] |
-//! | T5: no binding under `require_cryptographic_holder_binding: false` | [`Entry::parse`] refuses such a query (B.3.3) |
-//! | T6: the four TS12 types, SD-JWT VC only, payloads typed by their schemas and TS12's prose, hashes plus `jti`, `response_mode`, `amr`, display failing closed in the user's language | [`Entry::parse`], [`KbJwtInputs`], [`Amr`], [`MemberBinding::views`] |
-//! | T7: type metadata and referenced documents as host fetches under H1 | [`ScaMetadata::fetch`], [`Step::Fetch`], [`Fetched`] |
+//! | One definition form: a `transaction_data_types` entry (Proof Metadata, Section 3), its labels typed by role with their limits and character rules, its structural rules (Section 3.3) | [`Definition`], [`ClaimDefinition`], [`UiLabels`], [`LabelText`], [`ValueType`] |
+//! | Sources, each a parser into it: the signed credential metadata JWT (Sections 4 and 7), TS12 v1.0.1 type metadata (`lang` → `locale`, `label` → `name`, `visualisation` as [`Prominence`]), the host's [`Configuration`], and the entry's ad-hoc metadata JWT (Section 5); ad-hoc first, then the credential's own metadata, then the configuration | [`SourceKind`], [`Configuration::parse`] |
+//! | The projection to the wallet's language: one entry per array, made only by the locale function (View, Section 4), serialised deterministically | [`Definition::project`], [`Projected::to_json`] |
+//! | T1: entries: base64url JSON without repeated names, `type`, `credential_ids` of DCQL query ids, `payload`, ad-hoc `metadata`, `transaction_data_hashes_alg` as an array or CS-12's string | [`Entry::parse`] |
+//! | Credential sets: the targeted queries in one set, its alternatives transposable (Core, Section 7.4.1) | [`TransactionDataError::CredentialSets`] |
+//! | Payload conformance: coverage, mandatory claims, value types (Core, Section 7.4.2; View, Section 3) | [`PayloadFault`], [`Scalar`] |
+//! | Images: Data URLs of PNG, JPEG and SVG, `https` URLs with `#integrity`, 512 KiB and 2048 px, SVG references pinned (View, Section 3) | [`VerifiedImage`], [`ImageFault`] |
+//! | Generic rendering: rows in claims order, `null` paths, `template:`, label limits after interpolation, at most 200 items, `security_hint` as given (View, Section 2) | [`TransactionView`], [`RenderFault`] |
+//! | Selection: each candidate credential takes its first compatible entry (Core, Section 7.4.2) | [`Context::first_match`], [`Selection`] |
+//! | T3, T6: the B.3.3.1 hash over the entry as received, one algorithm per credential, `transaction_data_hashes_alg` repeated when the request carried it; `jti`, `response_mode` and `amr` under a TS12 rulebook; SD-JWT VC only | [`Binding::kb_jwt_claims`], [`Amr`] |
 //!
-//! Every refusal is a [`TransactionDataError`], which reaches the verifier as
-//! `invalid_transaction_data` (Section 8.5).
-//!
-//! A presentation with transaction data goes through these steps:
-//! 1. [`Entry::parse`] each string of the request's `transaction_data` against its DCQL query,
-//!    at the time of the request.
-//! 2. For each SD-JWT VC that answers a query some entry names, have the host perform
-//!    [`ScaMetadata::fetch`] and read the response with [`ScaMetadata::parse`].
-//! 3. For each offer, [`bind`] the entries to the credentials it presents.
-//! 4. Show [`MemberBinding::views`], fetching each document it asks for into [`Fetched`].
-//! 5. Add [`MemberBinding::kb_jwt_claims`] to the KB-JWT of each bound credential.
+//! Every refusal of a request is a [`TransactionDataError`]; every reason an entry does not
+//! serve a credential is an [`Incompatibility`].
 
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
@@ -37,24 +30,71 @@
 )]
 
 mod amr;
-mod binding;
+mod currency;
+mod definition;
 mod entry;
 mod error;
+mod fetched;
 mod hash;
+mod image;
 mod integrity;
 mod json;
-mod kind;
-mod labels;
-mod metadata;
+mod output;
+mod payload;
+mod projection;
+mod render;
+mod select;
+mod sets;
+mod sources;
 mod ts12;
+mod type_id;
 mod view;
 
-pub use amr::{Amr, Factor, Inherence, Knowledge, Possession};
-pub use binding::{bind, Jti, KbJwtInputs, MemberBinding, Presented};
+pub use amr::{Amr, AmrCategories, Factor, Inherence, Knowledge, Possession};
+pub use currency::CurrencyCode;
+pub use definition::{
+    ActionLabel, BaseType, ClaimDefinition, ClaimDisplay, ClaimFault, ClaimIndex, ClaimName,
+    Definition, DefinitionError, DefinitionMember, Description, EntryFault, HintEntry, LabelFormat,
+    LabelLength, LabelRole, LabelText, LabelsFault, Localizations, Mandatory, OtherUiElement,
+    PayloadPath, Prominence, SecurityHint, TextFault, TransactionTitle, UiLabel, UiLabels,
+    ValueType, MAX_CLAIMS,
+};
 pub use entry::Entry;
-pub use error::{MemberPath, MetadataPart, TransactionDataError};
-pub use hash::HashAlg;
-pub use kind::SupportedType;
-pub use metadata::{Fetched, ScaMetadata, Step};
-pub use ts12::ImageUrl;
-pub use view::{Frequency, Level, Row, RowValue, TransactionView};
+pub use error::{EntryMember, EntryPosition, EntryRefusal, TransactionDataError};
+pub use fetched::{FetchFault, Fetched, Step};
+pub use hash::{AlgClaim, HashAlg, HashesAlgFault};
+pub use image::{
+    ImageFault, ImageFormat, ImageRef, RasterFault, Resource, SvgFault, VerifiedImage,
+    MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS,
+};
+pub use integrity::{Integrity, IntegrityFault};
+pub use output::{Binding, Jti, KbJwtInputs};
+pub use payload::{
+    CurrencyAmount, Frequency, IsoDateTime, IsoTime, Location, NumberText, PayloadFault,
+    PayloadText, Scalar, Step as LocationStep, Typed, ValueFault,
+};
+pub use projection::{Projected, ProjectedClaim, Unmatched};
+pub use render::{RenderFault, TemplateFault, MAX_ITEMS};
+pub use select::{Context, Exclusion, Incompatibility, Selection, Taken};
+pub use sets::{SetPosition, SetsFault};
+pub use sources::{
+    AdHocMetadata, Configuration, ConfigurationError, ConfigurationMember, Configured,
+    ConfiguredFault, ConfiguredType, CredentialMetadataFault, JwkFault, JwsFault, KeySetFault,
+    MetadataClaim, Rulebook, SignedFault, SourceKind, Ts12Fault, Ts12Member,
+};
+pub use ts12::read::{MemberPath, Ts12PayloadFault};
+pub use type_id::{EmptyTypeId, Ts12Type, TypeFamily, TypeId};
+pub use view::{Row, RowValue, ShownLabel, TransactionView, UnsignedWarning};
+
+/// Checks the credential sets of `query` against the queries `entries` target (PaSO Core,
+/// Section 7.4.1).
+///
+/// # Errors
+///
+/// [`TransactionDataError::CredentialSets`].
+pub fn check_sets(
+    entries: &[Entry],
+    query: &siros_dcql::DcqlQuery,
+) -> Result<(), TransactionDataError> {
+    sets::check(entries, query).map_err(TransactionDataError::CredentialSets)
+}

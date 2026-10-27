@@ -164,51 +164,55 @@ fn the_card_and_the_labels_of_the_example() {
         pointer(&["address"]),
     ];
 
-    // (preference, given_name, family_name, address)
+    // (language, given_name, family_name, address). RFC 4647 Lookup finds no `de` tag for
+    // "de", whose labels fall back to the claim names.
     let table = [
         ("en-US", "Given Name", "Surname", "Place of residence"),
         ("de-DE", "Vorname", "Nachname", "Wohnsitz"),
-        ("de", "Vorname", "Nachname", "Wohnsitz"),
-        ("fr-FR", "Given Name", "Surname", "Place of residence"),
+        ("de", "given_name", "family_name", "address"),
+        ("fr-FR", "given_name", "family_name", "address"),
     ];
-    for (preference, given_name, family_name, address) in table {
-        let preferences = [Locale::parse(preference).unwrap()];
-
-        // The display has one entry, en-US: every preference shows it.
-        let card = cache.card(&credential, &preferences).unwrap();
-        assert_eq!(card.title().as_str(), "IdentityCredential", "{preference}");
+    for (language, given_name, family_name, address) in table {
+        let language = Locale::parse(language).unwrap();
+        let card = cache.card(&credential, &language).unwrap();
         assert_eq!(
             card.issuer().map(|i| i.as_str()),
             Some(ISSUER),
-            "{preference}"
+            "{language}"
         );
-        let logo = card.logo().unwrap();
-        assert_eq!(
-            logo.uri().as_str(),
-            "https://university.example.edu/public/logo.png"
-        );
-        assert_eq!(
-            logo.alt_text().map(|a| a.as_str()),
-            Some("a square logo of a university")
-        );
-        let rgba = |c: siros_display::Colour| (c.red(), c.green(), c.blue(), c.alpha());
-        assert_eq!(card.background().map(rgba), Some((0x12, 0x10, 0x7c, 0xff)));
-        assert_eq!(card.text().map(rgba), Some((0xff, 0xff, 0xff, 0xff)));
+        // The display has one entry, en-US: another language has no entry, and the title is
+        // the credential type.
+        if language.as_str() == "en-US" {
+            assert_eq!(card.title().as_str(), "IdentityCredential");
+            let logo = card.logo().unwrap();
+            assert_eq!(
+                logo.uri().as_str(),
+                "https://university.example.edu/public/logo.png"
+            );
+            assert_eq!(
+                logo.alt_text().map(|a| a.as_str()),
+                Some("a square logo of a university")
+            );
+            let rgba = |c: siros_display::Colour| (c.red(), c.green(), c.blue(), c.alpha());
+            assert_eq!(card.background().map(rgba), Some((0x12, 0x10, 0x7c, 0xff)));
+            assert_eq!(card.text().map(rgba), Some((0xff, 0xff, 0xff, 0xff)));
+        } else {
+            assert_eq!(card.title().as_str(), CONFIGURATION, "{language}");
+            assert!(card.logo().is_none(), "{language}");
+        }
 
-        let rows = cache
-            .claim_rows(&credential, &pointers, &preferences)
-            .unwrap();
+        let rows = cache.claim_rows(&credential, &pointers, &language).unwrap();
         let labels: Vec<&str> = rows.iter().map(|row| row.label().as_str()).collect();
         // `email` has no display: its label is its name.
         assert_eq!(
             labels,
             [given_name, family_name, "email", address],
-            "{preference}"
+            "{language}"
         );
         let DisplayValue::Group(members) = rows[3].value() else {
-            panic!("{preference}: address is no group");
+            panic!("{language}: address is no group");
         };
         let members: Vec<&str> = members.iter().map(|row| row.label().as_str()).collect();
-        assert_eq!(members, ["locality", "street_address"], "{preference}");
+        assert_eq!(members, ["locality", "street_address"], "{language}");
     }
 }
