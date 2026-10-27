@@ -1,8 +1,6 @@
 //! `zkp_req` matching (A2): the options in the Verifier's order, each with the first available
 //! system that forms a usable pair for it.
 
-use std::fmt;
-
 use itertools::Itertools;
 use serde_json::Value;
 use siros_codec::date::Date;
@@ -37,20 +35,21 @@ pub struct ProofChoice {
 }
 
 /// Why a `zkp_req` query has no candidate whatever the wallet holds (`zkp_req.md`, Section 5).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum ZkpRefusal {
     /// The query breaks a rule of `zkp_req`.
-    Query(RequestRule),
+    Query(#[source] RequestRule),
     /// The request has no `client_metadata` to list the Verifier's systems.
     ClientMetadataMissing,
     /// `client_metadata` breaks a rule of `zkp_req`, Section 1.2.
-    ClientMetadata(RequestRule),
+    ClientMetadata(#[source] RequestRule),
     /// The query breaks a rule of the nym_auth catalogue.
-    Catalogue(CatalogueRule),
+    Catalogue(#[source] CatalogueRule),
     /// The query asks for another credential type than nym_auth's.
     OtherType,
     /// The request breaks the nym_auth policy.
-    Policy(RequestRefusal),
+    Policy(#[source] RequestRefusal),
     /// No option has a usable pair: the refusal of each system for each option.
     NoUsablePair(Vec<PairRefusal<Unsupported>>),
 }
@@ -82,21 +81,14 @@ impl ZkpRefusal {
     }
 }
 
-impl fmt::Display for ZkpRefusal {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
-
-impl std::error::Error for ZkpRefusal {}
-
 /// Why a [`ProofChoice`] gives no option or usable pair of a query.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum ChoiceError {
     /// The query has no option at the choice's position: the choice is another query's.
     OptionUnknown(OptionIndex),
     /// The choice's system no longer forms a usable pair for the option.
-    Pair(PairRefusal<Unsupported>),
+    Pair(#[source] PairRefusal<Unsupported>),
 }
 
 impl ChoiceError {
@@ -108,14 +100,6 @@ impl ChoiceError {
         }
     }
 }
-
-impl fmt::Display for ChoiceError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
-
-impl std::error::Error for ChoiceError {}
 
 impl ProofChoice {
     /// The option's position among the query's options.

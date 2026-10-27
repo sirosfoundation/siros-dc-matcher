@@ -16,7 +16,7 @@ commit `e65861c`), and adds the components of the SIROS wallet core.
 **Breaking**: requests and presentations follow the draft, the FFI loses `zkp_req_plan`, and the
 vectors move to the crates that own their rules. Consumers that keep a copy of the vectors
 (siros-sdk-kotlin, siros-sdk-swift) must re-copy them from the new directories; the vector set
-digest below identifies them. `matcher.wasm` is 300,441 bytes
+digest below identifies them. `matcher.wasm` is 299,413 bytes
 against the 307,200-byte budget (303,418 at v0.11.0).
 
 ### Changed
@@ -45,11 +45,11 @@ against the 307,200-byte budget (303,418 at v0.11.0).
   documents the host ABI.
 - Below host level 2 the matcher emits nothing; it used to call the
   `credman_v2` functions regardless.
-- On level 2 and above, the matcher emits nothing when the host's inputs are
-  malformed: a calling-app origin without a terminating NUL or with invalid
-  UTF-8, or a read that reports more bytes than it wrote. It used to emit
-  entries from such inputs. A debug build emits one entry that names the
-  fault.
+- On level 2 and above, the matcher traps when the host breaks its ABI: a
+  calling-app field without a terminating NUL or with invalid UTF-8, a
+  credential read that reports more bytes than it was asked for, or one that
+  copies nothing before the reported size. It used to emit entries from the
+  first two. Release and debug builds trap alike.
 - The registered blob is read until complete; a short
   `ReadCredentialsBuffer` read used to leave its tail zeroed.
 - `siros-dc-matcher-core`'s unused `sink` module is removed.
@@ -67,6 +67,15 @@ against the 307,200-byte budget (303,418 at v0.11.0).
 - **BREAKING (Rust API):** `siros-dcql` 0.12.0: the Credential Query `id` is a `QueryId` (§6.1),
   which the query parse refuses outside its characters, and `resolve` runs §7.1.1 over any claim
   tree that implements `ClaimNode`. See [its changelog](crates/siros-dcql/CHANGELOG.md).
+- Every error type derives `Display` and `Error` with `thiserror`; the text is unchanged.
+  `PathError`, `DecodeError`, `NoQuery` and `ZkpError` implement `std::error::Error`, and so do
+  the fault, failure and refusal enums the errors hold, each variant with a text of its own.
+  `NoQuery::reason` is removed: `NoQuery`'s `Display` gives the same text.
+- `source()` returns the cause a variant holds. It returned `None` in `ChoiceError`,
+  `CredentialError`, `DisplayError`, `EncodingError`, `FormError`, `HandoverInvalid`,
+  `IntakeError`, `InvalidRequest`, `MdocError`, `PresentationError`, `ProveError`,
+  `QueryRefusal`, `Rejection`, `RequestRefusal`, `TransactionDataError`, `Unproven`, `Unusable`,
+  `WalletStateError` and `ZkpRefusal`.
 
 ### Fixed
 

@@ -1,8 +1,6 @@
 //! The mdoc `Handover` and `SessionTranscript` of OpenID4VP 1.0, B.2.6, and the JWK SHA-256
 //! Thumbprint (RFC 7638) they bind.
 
-use std::fmt;
-
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use siros_codec::cbor::{self, CborError, Value as Cbor};
@@ -14,10 +12,11 @@ pub struct Handover {
 }
 
 /// Why bytes are not a `Handover` of OpenID4VP 1.0, B.2.6.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("not an OpenID4VP Handover")]
 pub enum HandoverInvalid {
     /// The bytes are not one CBOR item.
-    Cbor(CborError),
+    Cbor(#[source] CborError),
     /// The item is not one of the two arrays of B.2.6 with a 32-byte digest.
     Shape,
 }
@@ -29,14 +28,6 @@ impl HandoverInvalid {
         "handover_invalid"
     }
 }
-
-impl fmt::Display for HandoverInvalid {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("not an OpenID4VP Handover")
-    }
-}
-
-impl std::error::Error for HandoverInvalid {}
 
 impl Handover {
     /// `OpenID4VPDCAPIHandover = ["OpenID4VPDCAPIHandover", SHA-256(cbor([origin, nonce,

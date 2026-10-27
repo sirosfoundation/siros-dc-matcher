@@ -13,6 +13,7 @@ rust-version.workspace = true
 siros-codec = { workspace = true }
 serde = "1"
 serde_json = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }

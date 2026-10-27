@@ -62,7 +62,7 @@ mod plan;
 mod respond;
 
 #[cfg(feature = "wallet")]
-pub use error::{Inconsistency, PresentationError};
+pub use error::PresentationError;
 #[cfg(feature = "wallet")]
 pub use plan::{
     plan, refusal, AdditionView, ConsentView, CredentialView, DigestError, EntryPosition, Fetches,

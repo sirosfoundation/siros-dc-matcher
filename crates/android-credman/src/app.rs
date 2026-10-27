@@ -1,5 +1,5 @@
 use android_credman_sys::CallingAppInfo;
-use c8str::{C8Str, C8StrError, C8String};
+use c8str::{C8Str, C8String};
 
 /// The app that called the Digital Credentials API, as the platform verified
 /// it: its package name and, for a browser, the page's origin. Trust it over
@@ -17,15 +17,18 @@ pub struct CallingApp {
 impl CallingApp {
     /// Reads each field up to its first NUL inside the field. An empty
     /// origin is `None`.
+    ///
+    /// # Panics
+    ///
+    /// When a field holds no NUL, or bytes before it that are not UTF-8.
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-    pub(crate) fn from_host(info: &CallingAppInfo) -> Result<Self, CallingAppError> {
-        let package_name = C8Str::from_bytes_until_nul(&info.package_name)
-            .map_err(CallingAppError::PackageName)?;
-        let origin = C8Str::from_bytes_until_nul(&info.origin).map_err(CallingAppError::Origin)?;
-        Ok(Self {
+    pub(crate) fn from_host(info: &CallingAppInfo) -> Self {
+        let package_name = host_field(&info.package_name, "package name");
+        let origin = host_field(&info.origin, "origin");
+        Self {
             package_name: package_name.into(),
             origin: (!origin.is_empty()).then(|| origin.into()),
-        })
+        }
     }
 
     /// The Android package name of the calling app, such as a browser's.
@@ -39,16 +42,23 @@ impl CallingApp {
     }
 }
 
-/// Why [`Host::calling_app`] could not read the host's report: a field with
-/// no NUL inside its array, or with bytes before the NUL that are not UTF-8.
+/// One field of the host's report, up to its NUL.
 ///
-/// [`Host::calling_app`]: crate::Host::calling_app
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub enum CallingAppError {
-    /// The package name field.
-    #[error("calling app package name: {0}")]
-    PackageName(#[source] C8StrError),
-    /// The origin field.
-    #[error("calling app origin: {0}")]
-    Origin(#[source] C8StrError),
+/// # Panics
+///
+/// When `field` holds no NUL, or bytes before it that are not UTF-8.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+#[expect(
+    clippy::panic,
+    reason = "GetCallingAppInfo fills each fixed-size field with NUL-terminated text; \
+              a field without it names no caller the matcher can trust"
+)]
+fn host_field<'a>(field: &'a [u8], name: &str) -> &'a C8Str {
+    match C8Str::from_bytes_until_nul(field) {
+        Ok(text) => text,
+        // The host broke the GetCallingAppInfo contract. The caller is
+        // the one value every entry must carry verified, so the matcher
+        // has nothing it may offer.
+        Err(error) => panic!("calling app {name}: {error}"),
+    }
 }

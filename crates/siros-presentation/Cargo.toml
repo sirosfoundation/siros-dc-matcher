@@ -47,6 +47,7 @@ siros-mdoc = { workspace = true, optional = true }
 siros-oid4vp = { workspace = true, optional = true }
 siros-sdjwt = { workspace = true, optional = true }
 siros-transaction-data = { workspace = true, optional = true }
+thiserror = { workspace = true }
 zeroize = { version = "1.8.1", optional = true }
 
 # The tests act as the verifier: they sign requests, issue credentials, and decrypt and check

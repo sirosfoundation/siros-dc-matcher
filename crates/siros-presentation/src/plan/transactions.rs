@@ -13,8 +13,8 @@ use siros_wallet_state::CredentialId;
 
 use super::fetches::Fetches;
 use super::Unproven;
-use crate::error::{Inconsistency, PresentationError};
-use crate::ids::{position, CandidateIndex, QueryIndex};
+use crate::error::PresentationError;
+use crate::ids::{position, CandidateIndex};
 use crate::matching::{Answered, Answers, Candidate};
 use crate::offers::{EntryCarriers, EntryQueries, Member};
 
@@ -113,10 +113,16 @@ impl<'a> Transactions<'a> {
     }
 
     /// The positions in the request's `transaction_data` of the entries `binding` binds.
-    pub(crate) fn positions(
-        &self,
-        binding: &MemberBinding<'_, '_>,
-    ) -> Result<Vec<EntryPosition>, Inconsistency> {
+    ///
+    /// # Panics
+    ///
+    /// When `binding` binds an entry of other transactions than these.
+    #[expect(
+        clippy::expect_used,
+        reason = "a binding of these transactions binds their own entries; another entry is a \
+                  bug of the core, and no plan built on it is sound"
+    )]
+    pub(crate) fn positions(&self, binding: &MemberBinding<'_, '_>) -> Vec<EntryPosition> {
         binding
             .entries()
             .iter()
@@ -125,7 +131,8 @@ impl<'a> Transactions<'a> {
                     .iter()
                     .position(|entry| std::ptr::eq(entry, *bound))
                     .map(EntryPosition::at)
-                    .ok_or(Inconsistency::Entry)
+                    // `bind` made the binding from `self.entries`.
+                    .expect("a binding binds an entry of its own transactions")
             })
             .collect()
     }
@@ -162,8 +169,17 @@ impl<'a> Transactions<'a> {
     /// # Errors
     ///
     /// [`PresentationError::TransactionData`] when no credential of the offer authorizes an
-    /// entry, or the entries bound to one credential share no hash algorithm, and
-    /// [`PresentationError::Inconsistent`] for a member the matching lacks.
+    /// entry, or the entries bound to one credential share no hash algorithm.
+    ///
+    /// # Panics
+    ///
+    /// When a member names a query or a candidate `answered` lacks, or a binding binds a
+    /// credential outside the offer.
+    #[expect(
+        clippy::expect_used,
+        reason = "the bindings come from the offer's own credentials; another credential is a \
+                  bug of the core, and no plan built on it is sound"
+    )]
     pub(crate) fn bind<'t>(
         &'t self,
         answered: &Wallet<'a>,
@@ -173,7 +189,7 @@ impl<'a> Transactions<'a> {
             return Ok(Vec::new());
         }
         // A credential without type metadata authorizes no entry.
-        let offered = offered(answered, members)?;
+        let offered = offered(answered, members);
         let presented: Vec<(Bound, Presented<'t>)> = offered
             .iter()
             .flat_map(|member| {
@@ -185,7 +201,7 @@ impl<'a> Transactions<'a> {
             })
             .collect();
         let offer: Vec<Presented<'t>> = presented.iter().map(|(_, p)| *p).collect();
-        bind(&self.entries, &offer)?
+        Ok(bind(&self.entries, &offer)?
             .into_iter()
             .map(|binding| {
                 let credential = binding.presented();
@@ -196,10 +212,11 @@ impl<'a> Transactions<'a> {
                             && p.credential().entry() == credential.credential().entry()
                     })
                     .map(|(bound, _)| bound.clone())
-                    .ok_or(Inconsistency::BoundCredential)?;
-                Ok((bound, binding))
+                    // `bind` binds the credentials of `offer`, which `presented` lists.
+                    .expect("a binding binds a credential of the offer");
+                (bound, binding)
             })
-            .collect()
+            .collect())
     }
 }
 
@@ -231,9 +248,9 @@ fn authorizing<'w, 'a: 'w>(
         })
 }
 
-/// A member of an offer as the matching answers it: its query, and each of its candidates.
+/// A member of an offer as the matching answers it: its query's answers, and each of its
+/// candidates.
 pub(crate) struct Offered<'w, 'a> {
-    pub(crate) query: QueryIndex,
     pub(crate) answers: &'w Answers<'a, UsableCredential<'a>, Unproven>,
     pub(crate) candidates: Vec<(CandidateIndex, &'w Candidate<UsableCredential<'a>>)>,
 }
@@ -251,33 +268,38 @@ impl Offered<'_, '_> {
 
 /// Each member of `members` as the matching answers it, in order.
 ///
-/// # Errors
+/// # Panics
 ///
-/// [`Inconsistency`] for a member or a candidate the matching lacks.
+/// When a member names a query or a candidate `answered` lacks.
+#[expect(
+    clippy::expect_used,
+    reason = "the offers come from `answered`, so their members name its queries and \
+              candidates; another one is a bug of the core, and no plan built on it is sound"
+)]
 pub(crate) fn offered<'w, 'a>(
     answered: &'w Wallet<'a>,
     members: &[Member],
-) -> Result<Vec<Offered<'w, 'a>>, Inconsistency> {
+) -> Vec<Offered<'w, 'a>> {
     members
         .iter()
         .map(|member| {
-            let query = member.query();
-            let answers = answered.answers(query).ok_or(Inconsistency::Query(query))?;
+            let answers = answered
+                .answers(member.query())
+                .expect("an offer's member names a query of its matching");
             let candidates = member
                 .candidates()
                 .iter()
                 .map(|&index| {
                     let candidate = answers
                         .candidate(index)
-                        .ok_or(Inconsistency::Candidate(query, index))?;
-                    Ok((index, candidate))
+                        .expect("an offer's member names candidates of its query");
+                    (index, candidate)
                 })
-                .try_collect()?;
-            Ok(Offered {
-                query,
+                .collect();
+            Offered {
                 answers,
                 candidates,
-            })
+            }
         })
         .collect()
 }

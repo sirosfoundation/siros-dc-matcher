@@ -1,8 +1,6 @@
 //! Why transaction data is refused. Each refusal has a stable code and reaches the verifier as
 //! `invalid_transaction_data` (OpenID4VP 1.0, Section 8.5).
 
-use std::fmt;
-
 use siros_codec::Base64Error;
 use siros_display::TextError;
 use siros_oid4vp::ErrorCode;
@@ -41,10 +39,11 @@ impl MetadataPart {
 
 /// A rule a `transaction_data` entry, the type metadata of a credential, or a caller input
 /// breaks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum TransactionDataError {
     /// The entry is not base64url without padding (OpenID4VP 1.0, Sections 1.2 and 5.1).
-    NotBase64url(Base64Error),
+    NotBase64url(#[source] Base64Error),
     /// The entry does not decode to the UTF-8 JSON text of one object (Section 5.1).
     NotJsonObject,
     /// An object repeats a member name.
@@ -52,14 +51,18 @@ pub enum TransactionDataError {
     /// Objects and arrays nest deeper than [`MAX_DEPTH`](crate::MAX_DEPTH).
     TooDeep,
     /// A required member is absent (Section 8.5).
+    #[error("{}: {}", self.code(), .0.as_str())]
     MissingMember(MemberPath),
     /// A member has the wrong JSON type (Section 8.5).
+    #[error("{}: {}", self.code(), .0.as_str())]
     WrongType(MemberPath),
     /// A member has a value its type does not allow (Section 8.5).
+    #[error("{}: {}", self.code(), .0.as_str())]
     InvalidValue(MemberPath),
     /// The entry or its payload holds a member its type does not define (Section 8.5).
     UnknownMember,
     /// A member is present where its type forbids it (Section 8.5).
+    #[error("{}: {}", self.code(), .0.as_str())]
     MemberNotAllowed(MemberPath),
     /// `type` names no supported transaction data type (Sections 5.1 and 8.5).
     UnsupportedType,
@@ -95,6 +98,7 @@ pub enum TransactionDataError {
     /// A metadata fetch answered with more bytes than the fetch allowed.
     FetchTooLarge,
     /// A metadata document is not a JSON document of the shape its specification gives.
+    #[error("{}: {}", self.code(), .0.as_str())]
     MetadataMalformed(MetadataPart),
     /// The type metadata describes another `vct` than the credential's (SD-JWT VC, Section
     /// 6.3).
@@ -112,9 +116,9 @@ pub enum TransactionDataError {
     AffirmativeLabelMissing,
     /// A payload value is not display text: it holds a control, format, separator,
     /// private-use or unassigned character, or is too long ([`siros_display::DisplayText`]).
-    ValueNotDisplayable(TextError),
+    ValueNotDisplayable(#[source] TextError),
     /// A label of the type metadata is not display text.
-    LabelNotDisplayable(TextError),
+    LabelNotDisplayable(#[source] TextError),
 }
 
 impl TransactionDataError {
@@ -161,18 +165,3 @@ impl TransactionDataError {
         ErrorCode::InvalidTransactionData
     }
 }
-
-impl fmt::Display for TransactionDataError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::MissingMember(member)
-            | Self::WrongType(member)
-            | Self::InvalidValue(member)
-            | Self::MemberNotAllowed(member) => write!(f, "{}: {}", self.code(), member.as_str()),
-            Self::MetadataMalformed(part) => write!(f, "{}: {}", self.code(), part.as_str()),
-            _ => f.write_str(self.code()),
-        }
-    }
-}
-
-impl std::error::Error for TransactionDataError {}

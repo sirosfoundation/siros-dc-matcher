@@ -3,8 +3,6 @@
 //!
 //! `urn:mms:bbs-cd:nym_auth:v1` is not listed: no Wallet proves it yet.
 
-use std::fmt;
-
 use siros_codec::date::Date;
 use siros_zkp_req::{CredentialType, PairRefusal};
 
@@ -22,7 +20,8 @@ pub enum NymAuthSystem {
 }
 
 /// Why a system answers `unsupported` for an option (system rulebooks, Section 2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum Unsupported {
     /// The option has no `pseudonym` item.
     NoPseudonym,
@@ -43,12 +42,6 @@ impl Unsupported {
             Self::Prf => "prf",
             Self::AgeBounds => "age_bounds",
         }
-    }
-}
-
-impl fmt::Display for Unsupported {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
     }
 }
 

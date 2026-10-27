@@ -13,12 +13,16 @@ use crate::error::{MemberPath, TransactionDataError};
 pub const MAX_DEPTH: usize = 64;
 
 /// Why a text is no JSON document this crate reads.
+#[derive(Debug, thiserror::Error)]
 pub(crate) enum JsonError {
     /// The text is not one JSON value (RFC 8259), or a number exceeds binary64.
+    #[error("the text is not one JSON value, or a number exceeds binary64")]
     Malformed,
     /// An object repeats a member name.
+    #[error("an object repeats a member name")]
     DuplicateKey,
     /// Objects and arrays nest deeper than [`MAX_DEPTH`].
+    #[error("objects and arrays nest deeper than {}", MAX_DEPTH)]
     TooDeep,
 }
 

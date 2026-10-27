@@ -2,12 +2,11 @@
 
 use std::fmt;
 
-use itertools::Itertools;
 use siros_dcql::QueryId;
 use siros_wallet_state::CredentialId;
 
 use super::selection::{Selection, Subset};
-use crate::error::{Inconsistency, PresentationError};
+use crate::error::PresentationError;
 use crate::ids::{AdditionIndex, OfferIndex, QueryIndex};
 use crate::offers::{Addition, Member};
 use crate::plan::Planned;
@@ -147,10 +146,10 @@ impl Planned<'_> {
         for member in offer.members() {
             let named = match picked.iter().find(|picked| picked.query == member.query()) {
                 Some(named) => named,
-                None => return Err(PickError::Missing(self.query_id(member.query())?).into()),
+                None => return Err(PickError::Missing(self.query_id(member.query())).into()),
             };
-            named.held_in(&self.ids([member])?)?;
-            subsets.extend(self.subset(named)?);
+            named.held_in(&self.ids([member]))?;
+            subsets.extend(self.subset(named));
         }
         let left: Vec<&Picked> = picked
             .iter()
@@ -164,11 +163,11 @@ impl Planned<'_> {
             .collect();
         for named in &left {
             self.held_by_additions(&additions, named)?;
-            subsets.extend(self.subset(named)?);
+            subsets.extend(self.subset(named));
         }
         let mut fitting: Vec<(AdditionIndex, &Addition)> = Vec::new();
         for (index, addition) in additions {
-            if self.fits(addition, &left)? {
+            if self.fits(addition, &left) {
                 fitting.push((index, addition));
             }
         }
@@ -204,16 +203,12 @@ impl Planned<'_> {
     }
 
     /// The `credentialId`s of the candidates of `members`.
-    fn ids<'m>(
-        &self,
-        members: impl IntoIterator<Item = &'m Member>,
-    ) -> Result<Vec<CredentialId>, Inconsistency> {
+    fn ids<'m>(&self, members: impl IntoIterator<Item = &'m Member>) -> Vec<CredentialId> {
         members
             .into_iter()
-            .map(|member| self.held(member))
-            .flatten_ok()
-            .map_ok(|(_, id)| id)
-            .try_collect()
+            .flat_map(|member| self.held(member))
+            .map(|(_, id)| id)
+            .collect()
     }
 
     /// Checks that the members of `additions` that answer the query of `picks` hold each of its
@@ -231,33 +226,38 @@ impl Planned<'_> {
         if members.is_empty() {
             return Err(PickError::Query(picks.id.clone()).into());
         }
-        Ok(picks.held_in(&self.ids(members)?)?)
+        Ok(picks.held_in(&self.ids(members))?)
     }
 
     /// Whether the picks `left` name a credential of each member of `addition`, and only
     /// credentials the member holds for its query.
-    fn fits(&self, addition: &Addition, left: &[&Picked]) -> Result<bool, Inconsistency> {
-        for member in addition.members() {
-            let Some(picks) = left.iter().find(|picked| picked.query == member.query()) else {
-                return Ok(false);
-            };
-            if picks.held_in(&self.ids([member])?).is_err() {
-                return Ok(false);
-            }
-        }
-        Ok(true)
+    fn fits(&self, addition: &Addition, left: &[&Picked]) -> bool {
+        addition.members().iter().all(|member| {
+            left.iter()
+                .find(|picked| picked.query == member.query())
+                .is_some_and(|picks| picks.held_in(&self.ids([member])).is_ok())
+        })
     }
 
     /// The subset of `picks` when they answer a `multiple` Credential Query.
-    fn subset(&self, picks: &Picked) -> Result<Option<Subset>, Inconsistency> {
+    ///
+    /// # Panics
+    ///
+    /// When the matching has no query at the position of `picks`.
+    #[expect(
+        clippy::expect_used,
+        reason = "`by_query` takes the position of picks from the matching; another one is a \
+                  bug of the core, and no selection built on it is sound"
+    )]
+    fn subset(&self, picks: &Picked) -> Option<Subset> {
         let answers = self
             .answered
             .answers(picks.query)
-            .ok_or(Inconsistency::Query(picks.query))?;
-        Ok(answers
+            .expect("the picks of a query name a query of the matching");
+        answers
             .query()
             .multiple
-            .then(|| Subset::new(picks.id.clone(), picks.credentials.clone())))
+            .then(|| Subset::new(picks.id.clone(), picks.credentials.clone()))
     }
 }
 

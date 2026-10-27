@@ -3,8 +3,6 @@
 //! only `req_set`, `results` and the prover-supplied values from the presentation, and hands
 //! the proof to a system's verifier.
 
-use std::fmt;
-
 use serde_json::Value;
 use siros_codec::cbor::Value as Cbor;
 use siros_codec::date::{Date, DateTime};
@@ -70,47 +68,53 @@ pub struct Verified {
 }
 
 /// Why `issuer_key_set` is refused.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum IssuerKeySetError {
     /// It holds zero or several certificates.
+    #[error("`issuer_key_set` holds zero or several certificates")]
     Count,
     /// The certificate is not one of the systems' form.
-    Certificate(CertificateError),
+    #[error("the certificate is not one of the systems' form")]
+    Certificate(#[source] CertificateError),
     /// The certificate chains to no trust anchor, or is not valid at the Verifier's clock.
+    #[error("the certificate chains to no trust anchor, or is not valid at the Verifier's clock")]
     Untrusted,
 }
 
 /// Why `proof_time` is refused.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum ProofTimeError {
     /// It is not exactly `YYYY-MM-DDThh:mm:ssZ`, a real UTC second.
+    #[error("`proof_time` is not exactly `YYYY-MM-DDThh:mm:ssZ`, a real UTC second")]
     Malformed,
     /// It lies beyond the tolerance of the Verifier's clock.
+    #[error("`proof_time` lies beyond the tolerance of the Verifier's clock")]
     Tolerance,
 }
 
 /// Why a presentation is rejected.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}: {:?}", self.code(), self)]
 pub enum Rejection {
     /// The Verifier's own query is invalid, or its clock is out of range.
-    Request(Option<InvalidRequest>),
+    Request(#[source] Option<InvalidRequest>),
     /// The Verifier's own option lies outside the system's Section 2: `request`.
-    Unsupported(Unsupported),
+    Unsupported(#[source] Unsupported),
     /// The presentation is not a `ZkpPresentation`.
-    Presentation(EncodingError),
+    Presentation(#[source] EncodingError),
     /// Steps 1 to 5 of `zkp_req`, Section 4.1.
-    Structure(StructureRejection),
+    Structure(#[source] StructureRejection),
     /// `proof` breaks the proof backend's format, or `inputs` breaks Section 3:
     /// `proof_encoding`.
     ProofEncoding,
     /// `issuer_key_set`.
-    IssuerKeySet(IssuerKeySetError),
+    IssuerKeySet(#[source] IssuerKeySetError),
     /// `proof_time`.
-    ProofTime(ProofTimeError),
+    ProofTime(#[source] ProofTimeError),
     /// The pseudonym is no 32-byte `bstr`: `results`.
     Results,
     /// The system's verifier refused the proof.
-    Proof(ProofFailure),
+    Proof(#[source] ProofFailure),
 }
 
 impl Rejection {
@@ -131,14 +135,6 @@ impl Rejection {
         }
     }
 }
-
-impl fmt::Display for Rejection {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: {self:?}", self.code())
-    }
-}
-
-impl std::error::Error for Rejection {}
 
 /// A presentation that follows the draft's structure for the Verifier's own request: steps 1
 /// to 5 of `zkp_req`, Section 4.1, `Proof` and its `inputs` (system rulebooks, Section 3), the

@@ -446,7 +446,7 @@ fn candidate_products(
     }
 
     let take = total.min(budget);
-    let mut products: Vec<Vec<(String, Candidate)>> = Vec::with_capacity(take);
+    let mut products: Vec<Vec<(String, Candidate)>> = Vec::new();
 
     // How many members each combination will hold: one per query, except a
     // `multiple` query which contributes all of its candidates. Constant
@@ -486,6 +486,7 @@ fn candidate_products(
                 );
                 continue;
             }
+            // Not 0: a query without candidates made `total` 0 and returned above.
             let width = query_match.candidates.len();
             let Some(candidate) = query_match.candidates.get(remainder % width) else {
                 return (Vec::new(), Dropped::Exact(0));

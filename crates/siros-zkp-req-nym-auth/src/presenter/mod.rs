@@ -9,8 +9,6 @@ mod answer;
 mod matching;
 mod proving;
 
-use std::fmt;
-
 use serde_json::Value;
 use siros_codec::date::Date;
 use siros_zkp_req::{PairRefusal, QueryOption, ZkpFormats, ZkpReqQuery};
@@ -32,7 +30,8 @@ use crate::system::{NymAuthSystem, Unsupported};
 pub const MAX_ZK_PROOF: usize = 1 << 20;
 
 /// A host input this presenter cannot use. It is a defect of the host, never of the request.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("host input: {}", self.code())]
 pub enum HostError {
     /// `now` lies outside 0000-01-01T00:00:00Z to 9999-12-31T23:59:59Z.
     Time,
@@ -61,14 +60,6 @@ impl HostError {
         }
     }
 }
-
-impl fmt::Display for HostError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "host input: {}", self.code())
-    }
-}
-
-impl std::error::Error for HostError {}
 
 struct Parsed {
     query: NymAuthQuery,

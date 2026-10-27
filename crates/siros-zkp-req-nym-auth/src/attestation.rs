@@ -32,12 +32,13 @@ impl Credential {
 }
 
 /// Why a credential cannot be read in the nym_auth form: `credential_form`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum Unreadable {
     /// The mdoc.
-    Form(FormError),
+    Form(#[source] FormError),
     /// The Document Signer certificate.
-    Certificate(CertificateError),
+    Certificate(#[source] CertificateError),
 }
 
 impl Unreadable {
@@ -71,12 +72,13 @@ impl Failures {
 }
 
 /// Why a stored credential is no usable attestation at the proof time.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum Unusable {
     /// An mdoc of another `docType`: it does not match the query.
     OtherDocType,
     /// The credential cannot be read in the nym_auth form: `credential_form`.
-    Unreadable(Unreadable),
+    Unreadable(#[source] Unreadable),
     /// The MSO lists another digest of an element, or none: `issuer_signature`.
     Unlisted,
     /// The credential reads and fails the tests of [`Failures::codes`].
@@ -113,14 +115,6 @@ impl Unusable {
         }
     }
 }
-
-impl fmt::Display for Unusable {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
-
-impl std::error::Error for Unusable {}
 
 /// A credential that passes the tests that need neither the seed nor the device signature at a
 /// proof time: the form, the issuer signature and the listed digests, the trust in the issuer
@@ -211,7 +205,8 @@ impl UsableAttestation {
 }
 
 /// `SHA-256(secret_seed)` is not the credential's `ssc`: `seed_mismatch`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub struct SeedMismatch;
 
 impl SeedMismatch {
@@ -220,14 +215,6 @@ impl SeedMismatch {
         "seed_mismatch"
     }
 }
-
-impl fmt::Display for SeedMismatch {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
-
-impl std::error::Error for SeedMismatch {}
 
 /// The 16-byte `secret_seed` an issuer delivered with a credential (privatedata, Section 5A).
 /// It is zeroed on drop.

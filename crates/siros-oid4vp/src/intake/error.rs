@@ -1,7 +1,5 @@
 //! Why intake refused a request.
 
-use std::fmt;
-
 use siros_codec::Base64Error;
 
 use crate::client_id::ClientIdError;
@@ -9,10 +7,11 @@ use crate::error_code::ErrorCode;
 
 /// A rule of OpenID4VP 1.0 (or of RFC 9101, RFC 7515, RFC 5280) that a request breaks, or a
 /// host answer that does not fit the effect it answers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum IntakeError {
     /// The authorization request URI has no query of form-encoded parameters, each once.
-    NotAnAuthorizationRequest(FormFault),
+    NotAnAuthorizationRequest(#[source] FormFault),
     /// `client_id` is missing or not a string (Section 5.2; A.2 for signed DC API requests).
     ClientIdMissing,
     /// Both `request` and `request_uri` are present (RFC 9101, Section 5).
@@ -31,7 +30,7 @@ pub enum IntakeError {
     /// The Request URI answered with more bytes than the fetch allowed.
     FetchTooLarge,
     /// A JWS breaks its serialization.
-    JwsMalformed(JwsFault),
+    JwsMalformed(#[source] JwsFault),
     /// The JWS `alg` is not `ES256`.
     AlgorithmUnsupported,
     /// The JWS header has `crit` (RFC 7515, Section 4.1.11).
@@ -49,13 +48,13 @@ pub enum IntakeError {
     /// The Request Object does not echo the `wallet_nonce` the wallet posted (Section 5.10.1).
     WalletNonceMismatch,
     /// The `client_id` is not one this wallet supports (Section 5.9).
-    ClientId(ClientIdError),
+    ClientId(#[from] ClientIdError),
     /// A signed request uses the `redirect_uri` prefix (Section 5.9.3).
     SignedRedirectUri,
     /// An unsigned request uses a prefix other than `redirect_uri` (Section 5.9.3).
     UnsignedNeedsRedirectUri,
     /// `x5c` breaks its rules.
-    CertificateChainInvalid(ChainFault),
+    CertificateChainInvalid(#[source] ChainFault),
     /// No dNSName SAN of the leaf certificate is the `x509_san_dns` value.
     SanMismatch,
     /// The SHA-256 of the leaf certificate is not the `x509_hash` value.
@@ -65,7 +64,7 @@ pub enum IntakeError {
     /// The host's trust answer carries no P-256 JWK for a key it was asked to resolve.
     KeyNotResolved,
     /// The `jwt` Header Parameter is not a Verifier Attestation JWT (Section 12).
-    AttestationInvalid(AttestationFault),
+    AttestationInvalid(#[source] AttestationFault),
     /// The attestation's `sub` is not the `verifier_attestation` value.
     AttestationSubjectMismatch,
     /// The attestation's `exp` has passed, or its `nbf` has not come.
@@ -119,7 +118,7 @@ pub enum IntakeError {
     /// `transaction_data` is not a non-empty array of strings (Section 5.1).
     TransactionDataInvalid,
     /// `verifier_info` breaks a rule of Section 5.1.
-    VerifierInfo(VerifierInfoRule),
+    VerifierInfo(#[from] VerifierInfoRule),
     /// An encrypted Response Mode, and no key of `jwks` is a P-256 `ECDH-ES` encryption key.
     EncryptionKeyMissing,
     /// `encrypted_response_enc_values_supported` names no `enc` of the Response Mode's
@@ -134,83 +133,108 @@ pub enum IntakeError {
 }
 
 /// Why an authorization request URI has no query of form-encoded parameters (Section 5).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum FormFault {
     /// The URI has no query.
+    #[error("the URI has no query")]
     NoQuery,
     /// A parameter name repeats.
+    #[error("a parameter name repeats")]
     RepeatedName,
     /// A `%` is not followed by two hexadecimal digits.
+    #[error("a `%` is not followed by two hexadecimal digits")]
     Escape,
     /// A decoded name or value is not UTF-8.
+    #[error("a decoded name or value is not UTF-8")]
     NotUtf8,
 }
 
 /// The rule a JWS breaks (RFC 7515, Sections 7.1 and 7.2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum JwsFault {
     /// A Compact Serialization is not three segments.
+    #[error("a Compact Serialization is not three segments")]
     Segments,
     /// A segment is not unpadded base64url.
-    Encoding(Base64Error),
+    #[error("a segment is not unpadded base64url")]
+    Encoding(#[source] Base64Error),
     /// The protected header is not a JSON object.
+    #[error("the protected header is not a JSON object")]
     Header,
     /// The signature is not the 64 bytes of an ES256 `r ‖ s`.
+    #[error("the signature is not the 64 bytes of an ES256 `r ‖ s`")]
     Signature,
     /// A JSON Serialization lacks a string `payload` or an array `signatures`, or a signature
     /// lacks a string `protected` or `signature`.
+    #[error("a JSON Serialization lacks a string `payload` or an array `signatures`, or a signature lacks a string `protected` or `signature`")]
     Serialization,
     /// The `trust_chain` Header Parameter is not an array of strings.
+    #[error("the `trust_chain` Header Parameter is not an array of strings")]
     TrustChain,
     /// The fetched Request Object is not UTF-8 text.
+    #[error("the fetched Request Object is not UTF-8 text")]
     NotUtf8,
 }
 
 /// Why a JWS is refused: its serialization, its algorithm, or a critical extension.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum JwsError {
     /// The serialization breaks a rule.
-    Malformed(JwsFault),
+    #[error("the serialization breaks a rule")]
+    Malformed(#[source] JwsFault),
     /// `alg` is not `ES256`.
+    #[error("`alg` is not `ES256`")]
     AlgorithmUnsupported,
     /// The header has `crit` (RFC 7515, Section 4.1.11).
+    #[error("the header has `crit` (RFC 7515, Section 4.1.11)")]
     CriticalHeader,
 }
 
 /// The rule an `x5c` Header Parameter breaks (RFC 7515, Section 4.1.6).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum ChainFault {
     /// `x5c` is absent, not an array, or empty.
+    #[error("`x5c` is absent, not an array, or empty")]
     Absent,
     /// A certificate is not a string.
+    #[error("a certificate is not a string")]
     NotString,
     /// A certificate is not base64 with padding.
-    Encoding(Base64Error),
+    #[error("a certificate is not base64 with padding")]
+    Encoding(#[source] Base64Error),
     /// The leaf is not a DER X.509 certificate.
+    #[error("the leaf is not a DER X.509 certificate")]
     LeafNotCertificate,
     /// The leaf's key is not a P-256 key.
+    #[error("the leaf's key is not a P-256 key")]
     LeafKey,
     /// The leaf's SubjectAltName extension does not decode.
+    #[error("the leaf's SubjectAltName extension does not decode")]
     SubjectAltName,
 }
 
 /// The rule the `jwt` Header Parameter of a `verifier_attestation` request breaks (Section 12).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum AttestationFault {
     /// The request has no string `jwt` Header Parameter.
+    #[error("the request has no string `jwt` Header Parameter")]
     Absent,
     /// `jwt` is not a JWS this wallet reads.
-    Jws(JwsError),
+    #[error("`jwt` is not a JWS this wallet reads")]
+    Jws(#[source] JwsError),
     /// The attestation's `typ` is not `verifier-attestation+jwt`.
+    #[error("the attestation's `typ` is not `verifier-attestation+jwt`")]
     Typ,
     /// The attestation's claims lack a string `iss` or `sub`, a numeric `exp`, or a P-256
     /// `cnf.jwk`, or have a non-numeric `nbf` or a `redirect_uris` other than an array of
     /// strings.
+    #[error("the attestation's claims lack a string `iss` or `sub`, a numeric `exp`, or a P-256 `cnf.jwk`, or have a non-numeric `nbf` or a `redirect_uris` other than an array of strings")]
     Claims,
 }
 
 /// A rule of `verifier_info` (Section 5.1) that a request breaks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum VerifierInfoRule {
     /// `verifier_info` is not an array.
     NotArray,
@@ -374,12 +398,6 @@ impl IntakeError {
     }
 }
 
-impl From<ClientIdError> for IntakeError {
-    fn from(error: ClientIdError) -> Self {
-        Self::ClientId(error)
-    }
-}
-
 impl From<JwsError> for IntakeError {
     fn from(error: JwsError) -> Self {
         match error {
@@ -389,17 +407,3 @@ impl From<JwsError> for IntakeError {
         }
     }
 }
-
-impl From<VerifierInfoRule> for IntakeError {
-    fn from(rule: VerifierInfoRule) -> Self {
-        Self::VerifierInfo(rule)
-    }
-}
-
-impl fmt::Display for IntakeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
-
-impl std::error::Error for IntakeError {}

@@ -9,7 +9,8 @@ use serde_json::Value;
 use siros_codec::base64url;
 
 /// Why a `vp_token` gives no presentations for a query.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum VpTokenError {
     /// The text is not a JSON object.
     NotObject,
@@ -50,14 +51,6 @@ impl VpTokenError {
         }
     }
 }
-
-impl fmt::Display for VpTokenError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
-
-impl std::error::Error for VpTokenError {}
 
 /// The members of a JSON object in their order, repeated names kept.
 struct Members(Vec<(String, Value)>);

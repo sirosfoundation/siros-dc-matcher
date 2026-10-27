@@ -287,7 +287,7 @@ pub fn match_dcql_with_context(
             strict
                 .as_ref()
                 .err()
-                .map_or_else(|| e.reason(), ToString::to_string),
+                .map_or_else(|| e.to_string(), ToString::to_string),
         )
     })?;
     let query = match strict {

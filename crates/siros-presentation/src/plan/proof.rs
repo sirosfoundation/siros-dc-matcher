@@ -1,8 +1,6 @@
 //! The wallet's tests of a nym_auth candidate (A2; N3, N4): a usable attestation at the proof
 //! time, the `secret_seed` its issuer delivered, and an option it answers.
 
-use std::fmt;
-
 use itertools::Itertools;
 use siros_codec::date::DateTime;
 use siros_credential::{Parsed, UsableCredential};
@@ -15,31 +13,34 @@ use crate::error::PresentationError;
 use crate::matching::{ChoiceError, ProofChoice, ZkpQuery};
 
 /// Why a nym_auth candidate answers no option of its query.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum Unproven {
     /// The credential is no mdoc.
     NotAnMdoc,
     /// The mdoc is of another `docType`.
     OtherDocType,
     /// The credential cannot be read in the nym_auth form: `credential_form`.
-    Unreadable(Unreadable),
+    Unreadable(#[source] Unreadable),
     /// The MSO lists another digest of an element, or none: `issuer_signature`.
     Unlisted,
     /// The credential fails these tests at the proof time.
     Fails(Vec<CredentialCode>),
     /// The issuer delivered no usable `secret_seed`.
-    Seed(NoSeed),
+    Seed(#[from] NoSeed),
     /// Each option with a usable pair refuses the credential, in the Verifier's order.
     Options(Vec<OptionRefusal>),
 }
 
 /// Why a credential answers an option of a nym_auth query.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum OptionRefusal {
     /// The option's pair is not usable again.
-    Choice(ChoiceError),
+    #[error("the option's pair is not usable again")]
+    Choice(#[source] ChoiceError),
     /// An item of the option fails for the credential.
-    Unanswerable(Unanswerable),
+    #[error("an item of the option fails for the credential")]
+    Unanswerable(#[source] Unanswerable),
 }
 
 impl Unproven {
@@ -58,14 +59,6 @@ impl Unproven {
     }
 }
 
-impl fmt::Display for Unproven {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
-
-impl std::error::Error for Unproven {}
-
 impl From<Unusable> for Unproven {
     fn from(unusable: Unusable) -> Self {
         match unusable {
@@ -74,12 +67,6 @@ impl From<Unusable> for Unproven {
             Unusable::Unlisted => Self::Unlisted,
             Unusable::Fails(failures) => Self::Fails(failures.codes().to_vec()),
         }
-    }
-}
-
-impl From<NoSeed> for Unproven {
-    fn from(error: NoSeed) -> Self {
-        Self::Seed(error)
     }
 }
 

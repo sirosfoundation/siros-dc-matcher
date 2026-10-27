@@ -13,11 +13,13 @@ use serde::{Deserialize, Serialize};
 pub struct QueryId(String);
 
 /// Why a text is no Credential Query `id`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum QueryIdError {
     /// The text is empty.
+    #[error("a credential query id is empty (§6.1)")]
     Empty,
     /// The text holds this character, which is not an ASCII letter, a digit, `_` or `-`.
+    #[error("a credential query id holds {0:?} (§6.1)")]
     Character(char),
 }
 
@@ -31,17 +33,6 @@ impl QueryIdError {
         }
     }
 }
-
-impl fmt::Display for QueryIdError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Empty => f.write_str("a credential query id is empty (§6.1)"),
-            Self::Character(c) => write!(f, "a credential query id holds {c:?} (§6.1)"),
-        }
-    }
-}
-
-impl std::error::Error for QueryIdError {}
 
 impl QueryId {
     /// The Credential Query `id` `text`.

@@ -1,8 +1,6 @@
 //! Why a plan, a selection or a response failed. Each error has a stable code and the
 //! OpenID4VP 1.0, Section 8.5 code the verifier receives.
 
-use std::fmt;
-
 use siros_credential::EntryRef;
 use siros_dcql::PathError;
 use siros_display::DisplayError;
@@ -11,31 +9,31 @@ use siros_oid4vp::{ErrorCode, HttpsUrl, ResponseError};
 use siros_sdjwt::KeyBindingError;
 use siros_transaction_data::TransactionDataError;
 use siros_wallet_state::KeyId;
-use siros_zkp_req_nym_auth::policy::RequestRefusal;
 use siros_zkp_req_nym_auth::presenter::{ProveError, Unanswerable};
 
-use crate::ids::{AdditionIndex, CandidateIndex, OfferIndex, QueryIndex, SetIndex};
+use crate::ids::{AdditionIndex, OfferIndex, SetIndex};
 use crate::matching::{AskedError, ChoiceError, Failure};
 use crate::plan::{DigestError, EntryPosition, Unproven};
 use crate::respond::{PickError, SignatureError, SubsetError};
 use siros_dcql::QueryId;
 
 /// Why the core gives no plan, no chosen offer or no response.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum PresentationError {
     /// A Credential Query of the request breaks a rule (`invalid_request`).
-    Asked(AskedError),
+    Asked(#[from] AskedError),
     /// The wallet has no offer for the request, and why.
-    NoOffer(Failure<Unproven>),
+    NoOffer(#[from] Failure<Unproven>),
     /// An entry of `transaction_data`, or its binding to an offer, breaks a rule. The code is
     /// its own.
-    TransactionData(TransactionDataError),
+    TransactionData(#[from] TransactionDataError),
     /// The consent view cannot show a credential. The code is the display's.
-    Display(DisplayError),
+    Display(#[from] DisplayError),
     /// The host answered a fetch of this URL twice.
     FetchRepeated(HttpsUrl),
     /// The selection's plan digest does not read.
-    Digest(DigestError),
+    Digest(#[from] DigestError),
     /// The selection was made on another plan (A4).
     DigestMismatch,
     /// The selection names an offer the plan lacks (A4).
@@ -54,7 +52,7 @@ pub enum PresentationError {
     /// The selection names two subsets for the member of this query (A3).
     SubsetRepeated(QueryId),
     /// A subset of a member's credentials is refused (A3).
-    Subset(SubsetError),
+    Subset(#[from] SubsetError),
     /// The selection leaves out the credential the transaction entry at `entry` binds to (T4).
     BoundCredentialOmitted {
         /// The entry's position in `transaction_data`.
@@ -63,7 +61,7 @@ pub enum PresentationError {
         credential: EntryRef,
     },
     /// The picked credential picker entries make no selection (K3).
-    Pick(PickError),
+    Pick(#[from] PickError),
     /// A fulfilment without the wallet's UI chose an offer that needs it (A9).
     WalletDisplayNeeded,
     /// A member's credential names no key pair.
@@ -77,57 +75,24 @@ pub enum PresentationError {
     Time,
     /// The request names its audience neither by an origin nor by a Client Identifier.
     AudienceMissing,
-    /// The plan contradicts itself.
-    Inconsistent(Inconsistency),
     /// A proof choice gives no option or usable pair of its query.
-    Choice(ChoiceError),
+    Choice(#[from] ChoiceError),
     /// A nym_auth credential no longer passes its tests, or its seed does not open.
-    Unproven(Unproven),
+    Unproven(#[from] Unproven),
     /// A nym_auth credential does not answer its option.
-    Unanswerable(Unanswerable),
+    Unanswerable(#[from] Unanswerable),
     /// A claims path pointer of the plan selects nothing. The code is its own.
-    Pointer(PathError),
+    Pointer(#[from] PathError),
     /// The KB-JWT claims collide (S4). The code is its own.
-    KeyBinding(KeyBindingError),
+    KeyBinding(#[from] KeyBindingError),
     /// The mdoc elements are no disclosure (M2, M3). The code is its own.
-    Disclosure(DisclosureError),
+    Disclosure(#[from] DisclosureError),
     /// The nym_auth proof failed. The code is its own.
-    Prove(ProveError),
+    Prove(#[from] ProveError),
     /// The host's signatures do not answer the `Sign` effects (A5).
-    Signature(SignatureError),
+    Signature(#[from] SignatureError),
     /// The `vp_token` or its submission could not be built. The code is its own.
-    Response(ResponseError),
-}
-
-/// How a plan contradicts itself: a position or an answer that a list of the plan lacks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Inconsistency {
-    /// A member names a query the matching lacks.
-    Query(QueryIndex),
-    /// A member names a candidate its query lacks.
-    Candidate(QueryIndex, CandidateIndex),
-    /// A proof answers a query without a nym_auth query.
-    ZkpQuery(QueryIndex),
-    /// A proof answers a request that is no nym_auth request, for this reason.
-    NymAuthRequest(RequestRefusal),
-    /// A binding names an entry the request lacks.
-    Entry,
-    /// A binding names a credential the offer lacks.
-    BoundCredential,
-}
-
-impl Inconsistency {
-    /// A stable identifier.
-    pub fn code(self) -> &'static str {
-        match self {
-            Self::Query(_) => "plan_query_unknown",
-            Self::Candidate(..) => "plan_candidate_unknown",
-            Self::ZkpQuery(_) => "plan_zkp_query_missing",
-            Self::NymAuthRequest(_) => "plan_nym_auth_request_missing",
-            Self::Entry => "plan_entry_unknown",
-            Self::BoundCredential => "plan_bound_credential_unknown",
-        }
-    }
+    Response(#[from] ResponseError),
 }
 
 impl PresentationError {
@@ -157,7 +122,6 @@ impl PresentationError {
             Self::KeyFactorsMissing(_) => "key_factors_missing",
             Self::Time => "time_before_epoch",
             Self::AudienceMissing => "audience_missing",
-            Self::Inconsistent(e) => e.code(),
             Self::Choice(e) => e.code(),
             Self::Unproven(e) => e.code(),
             Self::Unanswerable(e) => e.code(),
@@ -200,7 +164,6 @@ impl PresentationError {
             | Self::KeyFactorsMissing(_)
             | Self::Time
             | Self::AudienceMissing
-            | Self::Inconsistent(_)
             | Self::Choice(_)
             | Self::Unproven(_)
             | Self::Unanswerable(_)
@@ -220,45 +183,4 @@ fn oid4vp_code(code: siros_zkp_req::ErrorCode) -> ErrorCode {
         siros_zkp_req::ErrorCode::VpFormatsNotSupported => ErrorCode::VpFormatsNotSupported,
         siros_zkp_req::ErrorCode::AccessDenied => ErrorCode::AccessDenied,
     }
-}
-
-impl fmt::Display for PresentationError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
-
-impl std::error::Error for PresentationError {}
-
-/// Each cause that is its own variant converts into it, so `?` carries it.
-macro_rules! causes {
-    ($($cause:ty => $variant:ident),* $(,)?) => {
-        $(
-            impl From<$cause> for PresentationError {
-                fn from(cause: $cause) -> Self {
-                    Self::$variant(cause)
-                }
-            }
-        )*
-    };
-}
-
-causes! {
-    AskedError => Asked,
-    Failure<Unproven> => NoOffer,
-    TransactionDataError => TransactionData,
-    DisplayError => Display,
-    DigestError => Digest,
-    SubsetError => Subset,
-    PickError => Pick,
-    Inconsistency => Inconsistent,
-    ChoiceError => Choice,
-    Unproven => Unproven,
-    Unanswerable => Unanswerable,
-    PathError => Pointer,
-    KeyBindingError => KeyBinding,
-    DisclosureError => Disclosure,
-    ProveError => Prove,
-    SignatureError => Signature,
-    ResponseError => Response,
 }

@@ -17,6 +17,7 @@ siros-dcql = { workspace = true }
 siros-mdoc = { workspace = true }
 siros-sdjwt = { workspace = true }
 siros-wallet-state = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 sha2 = "0.10.9"

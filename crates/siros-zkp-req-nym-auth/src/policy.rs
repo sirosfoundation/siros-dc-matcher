@@ -1,8 +1,6 @@
 //! The signed-request and encrypted-response policy of nym_auth (nym_auth catalogue, "Binding"
 //! and "Response confidentiality"), and the session it gives.
 
-use std::fmt;
-
 use serde_json::Value;
 
 use siros_oid4vp::{ec_jwk_thumbprint, Handover, JwkThumbprint};
@@ -22,7 +20,8 @@ pub enum Channel {
 }
 
 /// A rule of the policy that a request breaks. Each makes the request invalid.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum PolicyRule {
     /// The request is not signed.
     Unsigned,
@@ -67,22 +66,15 @@ impl PolicyRule {
     }
 }
 
-impl fmt::Display for PolicyRule {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
-
-impl std::error::Error for PolicyRule {}
-
 /// Why a verified request is no nym_auth request: a rule of the policy, or of the Verifier
 /// identity. Each makes a nym_auth query invalid.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum RequestRefusal {
     /// A rule of the signed-request and encrypted-response policy.
-    Policy(PolicyRule),
+    Policy(#[source] PolicyRule),
     /// A rule of the `verifier_id` of the trust framework's form.
-    VerifierId(VerifierIdRule),
+    VerifierId(#[source] VerifierIdRule),
 }
 
 impl RequestRefusal {
@@ -94,14 +86,6 @@ impl RequestRefusal {
         }
     }
 }
-
-impl fmt::Display for RequestRefusal {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
-
-impl std::error::Error for RequestRefusal {}
 
 /// The channel's own value in the `Handover`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -184,16 +168,9 @@ pub fn check_request(
 }
 
 /// The host chose an encryption key that is not one of the request's.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("the JWK thumbprint is of no key in client_metadata.jwks")]
 pub struct KeyNotInRequest;
-
-impl fmt::Display for KeyNotInRequest {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("the JWK thumbprint is of no key in client_metadata.jwks")
-    }
-}
-
-impl std::error::Error for KeyNotInRequest {}
 
 impl CheckedRequest {
     /// The `Handover` of this request, for the response-encryption key whose JWK SHA-256

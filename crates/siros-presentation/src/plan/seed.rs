@@ -2,8 +2,6 @@
 //! `hash_commitment` Auxiliary Data Entry for `ssc` (privatedata 3.1, Section 5A; Credential
 //! Auxiliary Data, Section 4.1; nym_auth rulebook, "Issuance of the seeds").
 
-use std::fmt;
-
 use itertools::Itertools;
 use serde_json::error::Category;
 use serde_json::Value;
@@ -17,7 +15,8 @@ use zeroize::Zeroizing;
 const SSC: [&str; 2] = [MDOC_DOCTYPE, "ssc"];
 
 /// Why a credential gives no `secret_seed`. A credential without one answers no nym_auth query.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum NoSeed {
     /// An `auxiliary_data` value is no JSON array of entries.
     Entries(JsonCause),
@@ -80,14 +79,6 @@ impl JsonCause {
     }
 }
 
-impl fmt::Display for NoSeed {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
-
-impl std::error::Error for NoSeed {}
-
 /// The `secret_seed` delivered with `credential`: the opening of its one `hash_commitment`
 /// entry for `ssc`.
 pub(crate) fn delivered(credential: &Credential) -> Result<SecretSeed, NoSeed> {
@@ -136,6 +127,7 @@ fn opening(entry: &Value) -> Result<SecretSeed, NoSeed> {
     if decoded.len() != seed.len() {
         return Err(NoSeed::Opening);
     }
+    // The lengths are equal, checked above, so the copy cannot panic.
     seed.copy_from_slice(&decoded);
     Ok(SecretSeed::new(seed))
 }

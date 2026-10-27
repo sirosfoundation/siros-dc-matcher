@@ -1,8 +1,6 @@
 //! The Document Signer certificate of `x5chain`: an X.509 certificate with an uncompressed
 //! P-256 key.
 
-use std::fmt;
-
 use der::asn1::ObjectIdentifier;
 use der::{Decode, Encode};
 use p256::ecdsa::signature::Verifier;
@@ -19,13 +17,16 @@ const PRIME256V1: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045
 const ECDSA_SHA256: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.2");
 
 /// Why a certificate is no X.509 certificate with a P-256 key.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum CertificateError {
     /// The bytes are not one DER X.509 certificate.
+    #[error("not a DER X.509 certificate")]
     Der,
     /// The key's algorithm is not `id-ecPublicKey` on `prime256v1`.
+    #[error("the key is not id-ecPublicKey on prime256v1")]
     Algorithm,
     /// The key is not an uncompressed point of P-256.
+    #[error("the key is not an uncompressed P-256 point")]
     Point,
 }
 
@@ -39,18 +40,6 @@ impl CertificateError {
         }
     }
 }
-
-impl fmt::Display for CertificateError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Der => "not a DER X.509 certificate",
-            Self::Algorithm => "the key is not id-ecPublicKey on prime256v1",
-            Self::Point => "the key is not an uncompressed P-256 point",
-        })
-    }
-}
-
-impl std::error::Error for CertificateError {}
 
 /// A parsed certificate with a P-256 key.
 #[derive(Debug, Clone)]

@@ -175,7 +175,8 @@ fn extensions(rest: &mut Subtags<'_>) -> bool {
 }
 
 /// Why text is no language tag.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum LocaleError {
     /// The text is no well-formed BCP 47 language tag (RFC 5646, Section 2.1).
     Malformed,
@@ -189,14 +190,6 @@ impl LocaleError {
         }
     }
 }
-
-impl fmt::Display for LocaleError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
-
-impl std::error::Error for LocaleError {}
 
 /// An entry of display metadata for one locale, or for an unstated one.
 pub trait Localized {

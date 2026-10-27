@@ -28,6 +28,7 @@ siros-codec = { workspace = true }
 siros-dcql = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+thiserror = { workspace = true }
 # The Handover digest and the JWK thumbprint, which the picker build of nym_auth links.
 sha2 = "0.10.9"
 aes-gcm = { version = "0.10.3", default-features = false, features = ["aes", "alloc"], optional = true }

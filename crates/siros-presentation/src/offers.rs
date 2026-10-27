@@ -87,12 +87,14 @@ pub struct Offers {
 }
 
 /// Why a combination the enumeration examined is no offer.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum Refusal<E> {
     /// No join lets it carry every transaction entry (A3).
+    #[error("no join lets it carry every transaction entry (A3)")]
     Uncarried,
     /// The acceptance refused it.
-    Refused(E),
+    #[error("the acceptance refused it")]
+    Refused(#[source] E),
 }
 
 impl Offer {

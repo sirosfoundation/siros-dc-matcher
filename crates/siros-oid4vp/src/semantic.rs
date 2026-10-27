@@ -9,8 +9,6 @@
 //! code; hyphen-minus "-" [...]; and identifier", the type references of TS 119 475 Tables 2
 //! and 4 (GEN-5.1.3-02, GEN-5.1.5-02).
 
-use std::fmt;
-
 /// The identity type references of a legal person (ETSI TS 119 475, Table 2).
 const LEGAL_TYPES: [&str; 5] = ["VAT", "NTR", "LEI", "EOR", "EXC"];
 /// The identity type references of a natural person: TIN (ETSI TS 119 475, Table 4), and items
@@ -46,7 +44,8 @@ impl Person {
 pub struct SemanticIdentifier(String);
 
 /// Why a certificate gives no semantics identifier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum SemanticIdError {
     /// The certificate policies extension does not decode.
     Policies,
@@ -93,14 +92,6 @@ impl SemanticIdError {
         }
     }
 }
-
-impl fmt::Display for SemanticIdError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
-
-impl std::error::Error for SemanticIdError {}
 
 impl SemanticIdentifier {
     /// The semantics identifier `text` of a `person`.

@@ -20,6 +20,7 @@ siros-credential = { workspace = true }
 siros-dcql = { workspace = true }
 siros-display = { workspace = true }
 siros-oid4vp = { workspace = true, features = ["crypto"] }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 # The TS12 schemas as the oracle of the payload parsers. Only the validator: no remote

@@ -16,7 +16,7 @@ use siros_zkp_req_nym_auth::presenter::Prepared as NymPrepared;
 use super::forms::{DeviceResponse, Form};
 use super::selection::Chosen;
 use super::sign::{key_id, Sign, SignId, SigningInput};
-use crate::error::{Inconsistency, PresentationError};
+use crate::error::PresentationError;
 use crate::matching::{Answer, Claims, HolderBinding, ProofChoice};
 use crate::plan::{nym_answer, Bound, Offered};
 use siros_dcql::QueryId;
@@ -93,8 +93,8 @@ impl<'p, 'a> Chosen<'p, 'a> {
         let bindings = planned
             .transactions
             .bind(&planned.answered, self.offer.members())?;
-        let offer = crate::plan::offered(&planned.answered, &self.members)?;
-        let added = crate::plan::offered(&planned.answered, &self.added)?;
+        let offer = crate::plan::offered(&planned.answered, &self.members);
+        let added = crate::plan::offered(&planned.answered, &self.added);
         let mut signs = Vec::new();
         // The bindings name credentials of the offer's members; the additions' carry none.
         let members = offer
@@ -248,6 +248,16 @@ impl<'p, 'a> Chosen<'p, 'a> {
     }
 
     /// The nym_auth statement of `choice` by `credential` in the request's session.
+    ///
+    /// # Panics
+    ///
+    /// When the request is no nym_auth request, or `member`'s query has no nym_auth query.
+    #[expect(
+        clippy::expect_used,
+        reason = "the matching answers with a proof only for a nym_auth query of a request that \
+                  meets the nym_auth policy; a proof without both is a bug of the core, and no \
+                  statement built on it is sound"
+    )]
     fn proof(
         &self,
         member: &Offered<'p, 'a>,
@@ -259,11 +269,11 @@ impl<'p, 'a> Chosen<'p, 'a> {
             .planned
             .nym_auth
             .as_ref()
-            .map_err(|refusal| Inconsistency::NymAuthRequest(*refusal))?;
+            .expect("a proof answers a request that meets the nym_auth policy");
         let zkp = member
             .answers
             .zkp()
-            .ok_or(Inconsistency::ZkpQuery(member.query))?;
+            .expect("a proof answers a query the matching read as nym_auth");
         let answer = nym_answer(credential, zkp, choice, self.planned.input.now)?;
         let prepared = NymPrepared::new(answer, nym_auth, &key_id(credential.credential())?)?;
         Ok(Form::unsigned(prepared, id))

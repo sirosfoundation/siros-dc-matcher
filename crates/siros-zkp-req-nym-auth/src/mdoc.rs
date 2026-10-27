@@ -27,10 +27,12 @@ pub struct StoredCredential {
 }
 
 /// Why an `mso_mdoc` is unreadable, or out of the nym_auth form.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("nym_auth mdoc: {}", self.code())]
 pub enum FormError {
     /// The credential is no mdoc.
-    Mdoc(MdocError),
+    #[error("{0}")]
+    Mdoc(#[source] MdocError),
     /// The issuer does not sign with ES256 (`{1: -7}`).
     Algorithm,
     /// The issuer's signature is not 64 bytes.
@@ -62,17 +64,6 @@ impl FormError {
         }
     }
 }
-
-impl fmt::Display for FormError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Mdoc(e) => e.fmt(f),
-            _ => write!(f, "nym_auth mdoc: {}", self.code()),
-        }
-    }
-}
-
-impl std::error::Error for FormError {}
 
 /// A signed data element and the bytes its digest covers.
 #[derive(Clone, PartialEq, Eq)]

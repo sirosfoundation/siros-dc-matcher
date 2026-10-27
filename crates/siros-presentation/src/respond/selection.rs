@@ -7,7 +7,7 @@ use siros_dcql::QueryId;
 use siros_wallet_state::CredentialId;
 
 use crate::display_rule::WalletDisplay;
-use crate::error::{Inconsistency, PresentationError};
+use crate::error::PresentationError;
 use crate::ids::{AdditionIndex, CandidateIndex, OfferIndex, QueryIndex};
 use crate::offers::{Addition, Member, Offer};
 use crate::plan::{PlanDigest, Planned};
@@ -152,7 +152,7 @@ impl<'a> Planned<'a> {
                 .chain(added.iter_mut())
                 .find(|member| member.query() == query)
                 .ok_or_else(|| PresentationError::SubsetMember(subset.query.clone()))?;
-            let held = self.held(member)?;
+            let held = self.held(member);
             *member = chosen(member, &held, &subset.credentials)?;
         }
         self.keeps_bound_credentials(offer, &members)?;
@@ -191,7 +191,7 @@ impl<'a> Planned<'a> {
             });
             if let Some(member) = shared {
                 return Err(PresentationError::AdditionQueryRepeated(
-                    self.query_id(member.query())?,
+                    self.query_id(member.query()),
                 ));
             }
             additions.push(addition);
@@ -211,25 +211,17 @@ impl<'a> Planned<'a> {
             .ok_or_else(|| PresentationError::SubsetQuery(id.clone()))
     }
 
-    /// Each candidate of `member` with the `credentialId` of its credential.
-    pub(super) fn held(
-        &self,
-        member: &Member,
-    ) -> Result<Vec<(CandidateIndex, CredentialId)>, Inconsistency> {
-        let query = member.query();
-        let answers = self
-            .answered
-            .answers(query)
-            .ok_or(Inconsistency::Query(query))?;
-        member
-            .candidates()
-            .iter()
-            .map(|&index| {
-                answers
-                    .candidate(index)
-                    .map(|c| (index, c.credential().credential().entry().credential_id()))
-                    .ok_or(Inconsistency::Candidate(query, index))
-            })
+    /// Each candidate of `member`, a member of the plan, with the `credentialId` of its
+    /// credential.
+    ///
+    /// # Panics
+    ///
+    /// When `member` names a query or a candidate the matching lacks.
+    pub(super) fn held(&self, member: &Member) -> Vec<(CandidateIndex, CredentialId)> {
+        crate::plan::offered(&self.answered, std::slice::from_ref(member))
+            .into_iter()
+            .flat_map(|offered| offered.candidates)
+            .map(|(index, c)| (index, c.credential().credential().entry().credential_id()))
             .collect()
     }
 
@@ -240,7 +232,7 @@ impl<'a> Planned<'a> {
         offer: &Offer,
         members: &[Member],
     ) -> Result<(), PresentationError> {
-        let chosen = crate::plan::offered(&self.answered, members)?;
+        let chosen = crate::plan::offered(&self.answered, members);
         for (bound, binding) in self.transactions.bind(&self.answered, offer.members())? {
             let kept = chosen.iter().any(|member| {
                 member
@@ -249,8 +241,18 @@ impl<'a> Planned<'a> {
                     .any(|&(_, candidate)| member.carries(&bound, candidate))
             });
             if !kept {
-                let entries = self.transactions.positions(&binding)?;
-                let entry = entries.first().copied().ok_or(Inconsistency::Entry)?;
+                // `bind` makes a binding for a credential that carries at least one entry.
+                #[expect(
+                    clippy::expect_used,
+                    reason = "a binding without an entry is a bug of the core, and the \
+                              refusal it would name has no entry to name"
+                )]
+                let entry = self
+                    .transactions
+                    .positions(&binding)
+                    .first()
+                    .copied()
+                    .expect("a binding binds at least one entry");
                 return Err(PresentationError::BoundCredentialOmitted {
                     entry,
                     credential: bound.credential,
@@ -260,12 +262,21 @@ impl<'a> Planned<'a> {
         Ok(())
     }
 
-    /// The `id` of the Credential Query at `index`.
-    pub(super) fn query_id(&self, index: QueryIndex) -> Result<QueryId, Inconsistency> {
+    /// The `id` of the Credential Query at `index`, a position of the plan's matching.
+    ///
+    /// # Panics
+    ///
+    /// When the matching has no query at `index`.
+    #[expect(
+        clippy::expect_used,
+        reason = "the plan's positions come from its matching; another one is a bug of the \
+                  core, and no response built on it is sound"
+    )]
+    pub(super) fn query_id(&self, index: QueryIndex) -> QueryId {
         self.answered
             .answers(index)
             .map(|answers| answers.id().clone())
-            .ok_or(Inconsistency::Query(index))
+            .expect("a position of the plan names a query of its matching")
     }
 }
 

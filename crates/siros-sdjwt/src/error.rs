@@ -1,9 +1,8 @@
 //! Why a stored SD-JWT or a key binding is refused. Each error has a stable code.
 
-use std::fmt;
-
 /// Why text is not a stored SD-JWT (RFC 9901, Sections 4 and 7.1).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum ParseError {
     /// The issuer JWT is not three base64url segments whose header and payload are JSON objects
     /// with unique member names.
@@ -49,16 +48,9 @@ impl ParseError {
     }
 }
 
-impl fmt::Display for ParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
-
-impl std::error::Error for ParseError {}
-
 /// Why claims do not form a KB-JWT payload.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum KeyBindingError {
     /// An extra claim is named `iat`, `aud`, `nonce` or `sd_hash`, or shares its name with
     /// another extra claim.
@@ -73,11 +65,3 @@ impl KeyBindingError {
         }
     }
 }
-
-impl fmt::Display for KeyBindingError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
-
-impl std::error::Error for KeyBindingError {}
