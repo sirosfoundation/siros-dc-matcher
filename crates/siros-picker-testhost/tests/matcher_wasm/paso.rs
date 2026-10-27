@@ -246,7 +246,8 @@ fn sources() -> Vec<Case> {
     payment_entry["payload"]["payee"]["logo#integrity"] =
         json!("sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
     let configured = json!([{"type": PAYMENT, "vct_values": [CARD], "definition": types[PAYMENT]}]);
-    let mut logo = case(
+    // Over the DC API, both sides refuse the logo at an https URL.
+    let logo = case(
         "PaSO Payment A.1, a logo at an https URL",
         json!({"credentials": [query("bank_payment_card", CARD, &[])]}),
         vec![payment_entry],
@@ -256,9 +257,6 @@ fn sources() -> Vec<Case> {
             &[CARD],
         ),
     );
-    // The wallet fetches the logo, whose integrity the example does not meet; the picker
-    // fetches nothing (T6, K2).
-    logo.exception = Some(Exception::RemoteImage);
     vec![signed_metadata, ad_hoc, logo]
 }
 

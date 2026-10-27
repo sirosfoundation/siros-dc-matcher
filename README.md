@@ -194,8 +194,7 @@ the trust store gave at registration, and the transaction data definitions
 the credential is served by. The picker offers what the wallet's plan offers,
 except where the plan reads what the projection leaves out: the `zkp_req`
 credential tests and seed, the issuer certificates' validity at request time,
-ad-hoc transaction metadata and remote images. The wallet decides those after
-the pick.
+and ad-hoc transaction metadata. The wallet decides those after the pick.
 
 ## Privacy note
 

@@ -5,7 +5,6 @@ mod examples;
 mod fixtures;
 mod graphemes;
 mod hashes;
-mod logos;
 mod projection;
 mod refusals;
 mod schemas;

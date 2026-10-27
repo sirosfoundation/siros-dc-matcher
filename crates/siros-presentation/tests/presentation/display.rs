@@ -144,8 +144,7 @@ fn an_offer_needs_the_wallet_display_unless_a9_holds() {
     ];
     for (case, background, request, display) in cases {
         let wallet = wallet(background);
-        let fetches = wallet.fetches(&request);
-        let input = wallet.input(&request, &fetches);
+        let input = wallet.input(&request);
         let planned = ready(&input).unwrap();
         let offer = &planned.view().offers()[0];
         assert_eq!(offer.wallet_display(), display, "{case}");

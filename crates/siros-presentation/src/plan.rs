@@ -2,7 +2,6 @@
 //! view.
 
 mod digest;
-mod fetches;
 mod proof;
 mod seed;
 mod transactions;
@@ -12,10 +11,8 @@ use rand_core::CryptoRngCore;
 use siros_codec::date::DateTime;
 use siros_credential::{Credential, UsableCredential};
 use siros_display::{DisplayCache, Locale};
-use siros_oid4vp::{ErrorCode, Fetch, Submission, VerifiedRequest};
-use siros_transaction_data::{
-    fetched, Amr, Configuration, HeldMetadata, Step, TransactionDataError,
-};
+use siros_oid4vp::{ErrorCode, Submission, VerifiedRequest};
+use siros_transaction_data::{Amr, Configuration, HeldMetadata, TransactionDataError};
 use siros_trust::TrustStore;
 use siros_wallet_state::{CredentialId, KeyId, PresentationRecord};
 use siros_zkp_req_nym_auth::policy::RequestRefusal;
@@ -32,7 +29,6 @@ use transactions::{context, Wallet};
 use view::Sources;
 
 pub use digest::{DigestError, PlanDigest};
-pub use fetches::Fetches;
 pub(crate) use proof::nym_answer;
 pub use proof::{OptionRefusal, Unproven};
 pub use seed::NoSeed;
@@ -70,19 +66,8 @@ pub struct PlanInput<'a> {
     pub background: &'a [CredentialId],
     /// The authentication factors of each signing key the host reported (H3).
     pub key_factors: &'a [(KeyId, Amr)],
-    /// The host's responses to the fetches the plan asked for.
-    pub fetches: &'a Fetches,
     /// The time: the proof time of a nym_auth proof and the `iat` of a KB-JWT.
     pub now: DateTime,
-}
-
-/// What a step of planning gives.
-pub enum PlanStep<'a> {
-    /// An image for the host to fetch (PaSO View, Section 3, `image`). Its response goes to
-    /// [`Fetches::answer`], and the plan is made again.
-    Fetch(Fetch),
-    /// The plan.
-    Ready(Box<Planned<'a>>),
 }
 
 /// The plan of a request: its offers, and their consent view with its digest.
@@ -108,19 +93,12 @@ pub struct Planned<'a> {
 ///
 /// [`PresentationError::NoOffer`] with the reason when no offer remains, and the first rule
 /// the request, its transaction data or the display breaks.
-pub fn plan<'a>(input: &PlanInput<'a>) -> Result<PlanStep<'a>, PresentationError> {
-    Ok(match planned(input)? {
-        Step::Fetch(fetch) => PlanStep::Fetch(fetch),
-        Step::Done(planned) => PlanStep::Ready(Box::new(planned)),
-    })
-}
-
-fn planned<'a>(input: &PlanInput<'a>) -> Result<Step<Planned<'a>>, PresentationError> {
+pub fn plan<'a>(input: &PlanInput<'a>) -> Result<Planned<'a>, PresentationError> {
     let request = input.request;
     let nym_auth = NymAuthRequest::new(request, input.verifier_id);
     let policy = nym_auth.as_ref().map(drop).map_err(|refusal| *refusal);
     let answered = answered(input, policy)?;
-    let transactions = fetched!(Transactions::read(request, &answered, &context(input))?);
+    let transactions = Transactions::read(request, &answered, &context(input))?;
     let offers = offers(&answered, &transactions)?;
     let sources = Sources {
         answered: &answered,
@@ -138,13 +116,13 @@ fn planned<'a>(input: &PlanInput<'a>) -> Result<Step<Planned<'a>>, PresentationE
         .map(|nym_auth| &nym_auth.session().verifier_id);
     let digest = PlanDigest::of(request, verifier_id, &views);
     let view = ConsentView::new(request.verifier(), digest, views, offers.unexamined());
-    Ok(Step::Done(Planned {
+    Ok(Planned {
         input: *input,
         nym_auth,
         answered,
         transactions,
         view,
-    }))
+    })
 }
 
 /// The candidates of each Credential Query of `input`'s request, over the credentials usable at

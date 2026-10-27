@@ -7,7 +7,7 @@ use itertools::Itertools;
 use siros_credential::{EntryRef, UsableCredential};
 use siros_dcql::QueryId;
 use siros_transaction_data::{
-    Context, Entry, Selection, SourceInputs, Step, Taken, TransactionDataError,
+    Context, Entry, Selection, SourceInputs, Taken, TransactionDataError,
 };
 
 use super::{PlanInput, Unproven};
@@ -15,6 +15,7 @@ use crate::error::Inconsistency;
 use crate::ids::{CandidateIndex, QueryIndex};
 use crate::matching::{Answered, Answers, Candidate};
 use crate::offers::Member;
+use crate::request::MatchRequest;
 use crate::transactions::{Candidacy, TransactionSource, Transactions};
 
 /// The presented credential a transaction entry binds to (T4): the Credential Query it answers,
@@ -57,7 +58,7 @@ impl<'a> TransactionSource<UsableCredential<'a>> for Context<'a> {
         &self,
         entries: &[&Entry],
         credential: &UsableCredential<'a>,
-    ) -> Result<Step<Selection>, TransactionDataError> {
+    ) -> Result<Selection, TransactionDataError> {
         Context::first_match(self, entries, credential.credential())
     }
 
@@ -67,7 +68,8 @@ impl<'a> TransactionSource<UsableCredential<'a>> for Context<'a> {
 }
 
 /// The context of `input`'s transaction data: the trust store, the metadata and display the
-/// host holds, its fetches, the configuration, the wallet's language and the time.
+/// host holds, the configuration, the wallet's language, the time, and how the request reached
+/// the wallet.
 pub(crate) fn context<'a>(input: &PlanInput<'a>) -> Context<'a> {
     Context {
         sources: SourceInputs {
@@ -78,7 +80,7 @@ pub(crate) fn context<'a>(input: &PlanInput<'a>) -> Context<'a> {
             language: input.language,
             now: input.now,
         },
-        fetched: input.fetches.fetched(),
+        channel: input.request.channel(),
         signature: input.request.signature(),
     }
 }

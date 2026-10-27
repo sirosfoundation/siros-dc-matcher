@@ -281,36 +281,22 @@ the 307,200-byte budget (303,418 at v0.11.0), sha256
     wallet's sources, give each candidate credential its first compatible entry (Section 7.4.2): a
     supported type, a conforming payload (`PayloadFault`: `#integrity` companions only beside image
     claims and as strings, a mandatory claim in every element its `null` ranges over and an empty
-    array holding none, an `iso_currency_amount` with its minor unit's digits), at most 200 items
-    counted before any image is fetched, verified images (`VerifiedImage`: Data URLs of PNG, JPEG
-    and SVG, `https` URLs pinned by `#integrity` and fetched through the host with at most 3
-    redirects, 512 KiB, 2048 pixels), and a full rendering (`TransactionView`: rows in claims order,
-    `template:` values as `Segment`s of text and typed values; the UI checks each label again once
-    formatted). An SVG document passes only within a static subset: elements nested at most
-    `MAX_DEPTH` (128) levels, counted before the parse; a DOCTYPE without an internal subset that
-    names no external identifier but a W3C SVG 1.0 or 1.1 DTD's; allowlisted elements of the SVG
-    namespace with their attributes, drawing programs' editing data but its attributes named `href`,
-    `absref`, `style` or as a presentation attribute, and RDF inside `metadata`; CSS read by a CSS
-    Syntax 3 tokenizer with the at-rules `@charset`, `@font-face` and `@media` and known functions,
-    no `var()` inside a function that takes URLs and no string or URL in a custom property
-    (`CssFault`); and each URL a fragment of the document, a Data URL, or an `https` URL pinned in
-    its fragment. A Data URL is read as a renderer reads it, and its media type names its content's
-    kind (`DataFault`). A Data URL's content and each fetched resource pass as a PNG or JPEG image
-    within the image limits or as a font whose header and table directory read and list no `SVG `
-    table (`FontFault`). At most `MAX_RESOURCES` (8) URLs are fetched, each once without its
-    fragment, with `Accept` `MediaType::RESOURCES`, and checked against every integrity value the
-    document gives it; a `Resource` holds that URL and its `ResourceKind`. The host renders the
-    image statically and answers the renderer's request for a resource's URL with it, as its kind;
-    it loads nothing else. Under a TS12 rulebook an image that does not verify is left out
-    (`TransactionView::absent_images`). Every reason an entry does not serve a credential is an
-    `Incompatibility`. A PaSO-sourced definition needs a signed request; a TS12 type in an unsigned
-    request carries `UnsignedWarning::Required`. An SVG document's width and height are exact in
-    decimal.
+    array holding none, an `iso_currency_amount` with its minor unit's digits, an image value of
+    its form: a base64 Data URL of PNG, JPEG or SVG of at most 512 KiB, or an `https` URL with
+    the integrity values of its `#integrity` sibling, which a TS12 logo may lack), at most 200
+    items, images the request's `Channel` admits (over the Digital Credentials API, a Data URL of
+    PNG or JPEG, the formats Credential Manager shows), and a full rendering (`TransactionView`:
+    rows in claims order, `template:` values as `Segment`s of text and typed values; the UI
+    checks each label again once formatted). The view carries each image as an `Image` for the
+    UI, which resolves the URL, verifies its integrity, holds it to `MAX_IMAGE_BYTES` and
+    `MAX_IMAGE_PIXELS`, renders an SVG document statically, and leaves out an image it cannot
+    verify; the core fetches and verifies no image content. Under a TS12 rulebook an image the
+    channel does not admit is left out (`TransactionView::absent_images`). Every reason an entry
+    does not serve a credential is an `Incompatibility`. A PaSO-sourced definition needs a signed
+    request; a TS12 type in an unsigned request carries `UnsignedWarning::Required`.
   - The picker's side, without `wallet`: `Selector::first_match_unverified` runs the first match
     over the projected definitions, and gives `Selection::Deferred` with its `Deferral` for an
-    entry the credential could take only through an ad-hoc metadata JWT or a remote image (K2).
-    A `Selector` reads image bodies from its `Resources`: the wallet's `Fetched`, or `Unfetched`,
-    which has none and links no fetch, integrity check or SHA-2. `ServedTypes` records per
+    entry with an ad-hoc metadata JWT (K2). `ServedTypes` records per
     credential the definition each type is served by, or why it is not (`Unserved`).
     `Taken::payment` gives the payee and amount of a payment rulebook's entry (`Payment`).
     `grapheme_clusters` counts UAX #29 clusters over a table of 1,117 runs of Unicode 16.0;
@@ -322,8 +308,8 @@ the 307,200-byte budget (303,418 at v0.11.0), sha256
     request, `invalid_transaction_data` otherwise.
   - Without the default feature `wallet` the crate holds the selection over a registration for
     the credential picker: definitions, the projection reader, payload conformance, selection and
-    rendering, and links no X.509, ECDSA or trust code. The picker cannot verify an image at a
-    remote URL or an ad-hoc metadata JWT.
+    rendering, and links no X.509, ECDSA or trust code. The picker cannot verify an ad-hoc
+    metadata JWT.
 - `siros-trust`, issuer trust for the wallet core (§4.18).
   - TR1: `TrustStore::parse` reads the host's record, an array of `{type, value, certificates}`
     entries, `type` `etsi_tl` or `openid_federation`, each authority once, with siros-codec's
@@ -430,8 +416,7 @@ the 307,200-byte budget (303,418 at v0.11.0), sha256
     the nym_auth `verifier_id` and every offer's credentials by `credentialId` and instance,
     their answers and bound entries with the source and rulebook of each, its additions and
     display (A4); and the consent view with cards, claim rows, proof statement rows, additions,
-    transactions and whether an offer needs the wallet's display (A9). The plan asks the host
-    for each image. A nym_auth request must be signed, trusted and encrypted, and its
+    transactions and whether an offer needs the wallet's display (A9). A nym_auth request must be signed, trusted and encrypted, and its
     `verifier_id` comes from the authenticated certificate (N2).
   - One Credential Query refused with `invalid_request` refuses the whole request
     (`Answered::invalid_request`): a malformed `aki` value (`QueryRefusal::Authorities`), and a
@@ -453,8 +438,8 @@ the 307,200-byte budget (303,418 at v0.11.0), sha256
     `access_denied`.
   - Positions and identifiers are their own types (`QueryIndex`, `CandidateIndex`, `SetIndex`,
     `OfferIndex`, `AdditionIndex`, `EntryPosition`, `PlanDigest`, `SignId`, and DCQL's
-    `QueryId`), and so are A9's facts. `Fetches` is the one store of the host's responses, and a
-    second answer to a URL is refused. Without the default feature `wallet` it holds the
+    `QueryId`), and so are A9's facts. The plan fetches nothing: the host gives it every input
+    beforehand. Without the default feature `wallet` it holds the
     matching the picker runs, over `MatchCredential`, links no chain validation or response
     crypto, and builds with Rust 1.82: `Asked::of` takes an `UnverifiedRequest` or a
     `VerifiedRequest` (`MatchRequest`), `Transactions` selects transaction data over a

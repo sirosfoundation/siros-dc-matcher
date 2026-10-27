@@ -12,7 +12,7 @@ use crate::definition::{
     BaseType, ClaimDisplay, ClaimIndex, ClaimName, LabelFormat, LabelLength, LabelRole, LabelRules,
     LabelText, Prominence, TextFault, UiLabel,
 };
-use crate::image::{ImageFault, VerifiedImage};
+use crate::image::{Image, ImageFault};
 use crate::payload::{
     scalar, select, Location, PayloadText, Reach, Scalar, Typed, ValueFault, Values,
 };
@@ -87,7 +87,7 @@ pub(crate) enum Ready {
     /// A template and its inner type.
     Template(PayloadText, BaseType),
     /// An image, verified.
-    Image(VerifiedImage),
+    Image(Image),
 }
 
 impl<'p, V> Placed<'p, V> {

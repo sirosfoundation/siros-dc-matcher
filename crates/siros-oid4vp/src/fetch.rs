@@ -5,8 +5,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 pub use siros_codec::url::HttpsUrl;
 
-/// A media type a fetch accepts or a body has, `type/subtype`; or, as the `Accept` value of an
-/// image or resource fetch, a list of the types the wallet admits.
+/// A media type a fetch accepts or a body has, `type/subtype`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MediaType(&'static str);
 
@@ -19,12 +18,6 @@ impl MediaType {
     pub const FORM: Self = Self("application/x-www-form-urlencoded");
     /// `application/cwt`, the body of `direct_post.cwt` (`zkp_req.md`, Section 6.2).
     pub const CWT: Self = Self("application/cwt");
-    /// The image types the wallet shows: PNG, JPEG and SVG (PaSO View, Section 3, `image`).
-    pub const IMAGES: Self = Self("image/png, image/jpeg, image/svg+xml");
-    /// The types of the resources an SVG image draws on: PNG and JPEG images and WOFF2, WOFF,
-    /// TrueType and OpenType fonts (PaSO Proof SD-JWT-VC and SVG, Section 3).
-    pub const RESOURCES: Self =
-        Self("image/png, image/jpeg, font/woff2, font/woff, font/ttf, font/otf");
 
     /// `type/subtype`.
     #[must_use]
@@ -79,12 +72,6 @@ impl Redirects {
     /// None: the response to the first request is the response.
     pub const NONE: Self = Self(0);
 
-    /// At most `hops` redirects.
-    #[must_use]
-    pub const fn at_most(hops: u8) -> Self {
-        Self(hops)
-    }
-
     /// The number of redirects.
     #[must_use]
     pub fn get(self) -> u8 {
@@ -105,6 +92,7 @@ pub struct Fetch {
 }
 
 impl Fetch {
+    #[cfg(feature = "crypto")]
     pub(crate) fn new(url: HttpsUrl, method: Method, accept: MediaType, limit: BodyLimit) -> Self {
         Self {
             url,
@@ -113,12 +101,6 @@ impl Fetch {
             redirects: Redirects::NONE,
             limit,
         }
-    }
-
-    /// A `GET` of `url` that accepts `accept` and reads at most `limit`.
-    #[must_use]
-    pub fn get(url: HttpsUrl, accept: MediaType, limit: BodyLimit) -> Self {
-        Self::new(url, Method::Get, accept, limit)
     }
 
     /// The URL to request.
@@ -131,12 +113,6 @@ impl Fetch {
     #[must_use]
     pub fn method(&self) -> &Method {
         &self.method
-    }
-
-    /// The fetch following at most `redirects` redirects.
-    #[must_use]
-    pub fn following(self, redirects: Redirects) -> Self {
-        Self { redirects, ..self }
     }
 
     /// The `Accept` header value.

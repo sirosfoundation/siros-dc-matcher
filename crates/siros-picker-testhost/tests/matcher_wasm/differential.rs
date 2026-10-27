@@ -6,7 +6,7 @@
 
 use serde_json::Value;
 use siros_presentation::testing::wallet::{ready, Wallet};
-use siros_presentation::{Exclusion, Failure, Fetches, PresentationError};
+use siros_presentation::{Exclusion, Failure, PresentationError};
 use siros_registration::CredentialIcon;
 
 use crate::sides::{
@@ -34,8 +34,6 @@ pub struct Case {
 pub enum Exception {
     /// A `zkp_req` credential test that reads an undisclosable attribute, or the seed (N3, N4).
     CredentialTests,
-    /// An image at an `https` URL (T6).
-    RemoteImage,
     /// An entry's ad-hoc metadata JWT.
     AdHocMetadata,
 }
@@ -64,13 +62,9 @@ fn the_picker_offers_what_the_wallet_plans() {
 /// its picks; or, under an exception, the wallet's offers among more of the picker's.
 fn compare(case: &Case) -> Result<(), String> {
     let request = intake(&case.request);
-    let fetches = match &request {
-        Some(request) => case.wallet.fetches(request),
-        None => Fetches::new(),
-    };
     let planned = request
         .as_ref()
-        .map(|request| ready(&case.wallet.input(request, &fetches)));
+        .map(|request| ready(&case.wallet.input(request)));
     let (wallet, proofs) = match &planned {
         Some(Ok(planned)) => (
             wallet_offers(planned.view(), &case.entries),

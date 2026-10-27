@@ -5,7 +5,7 @@ use siros_credential::EntryRef;
 use siros_dcql::PathError;
 use siros_display::DisplayError;
 use siros_mdoc::DisclosureError;
-use siros_oid4vp::{ErrorCode, HttpsUrl, ResponseError};
+use siros_oid4vp::{ErrorCode, ResponseError};
 use siros_sdjwt::KeyBindingError;
 use siros_transaction_data::TransactionDataError;
 use siros_trust::{ChainRefusal, Unadmitted};
@@ -30,8 +30,6 @@ pub enum PresentationError {
     TransactionData(TransactionDataError),
     /// The consent view cannot show a credential. The code is the display's.
     Display(DisplayError),
-    /// The host answered a fetch of this URL twice.
-    FetchRepeated(HttpsUrl),
     /// The selection's plan digest does not read.
     Digest(DigestError),
     /// The selection was made on another plan (A4).
@@ -135,7 +133,6 @@ impl PresentationError {
             Self::NoOffer(failure) => failure.code(),
             Self::TransactionData(e) => e.code(),
             Self::Display(e) => e.code(),
-            Self::FetchRepeated(_) => "fetch_repeated",
             Self::Digest(e) => e.code(),
             Self::DigestMismatch => "selection_digest_mismatch",
             Self::OfferUnknown(_) => "selection_offer_unknown",
@@ -177,7 +174,6 @@ impl PresentationError {
             Self::TransactionData(e) => e.error_code(),
             Self::Prove(e) => oid4vp_code(e.error_code()),
             Self::Display(_)
-            | Self::FetchRepeated(_)
             | Self::Digest(_)
             | Self::DigestMismatch
             | Self::OfferUnknown(_)

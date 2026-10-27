@@ -22,9 +22,9 @@
 //! [`WalletDisplay`]), for the credential picker to run over its registration projection (K2).
 //! It builds with Rust 1.82 and links no crypto, prover or display resolution.
 //!
-//! The crate performs no I/O. The plan takes the transaction metadata the host holds as input
-//! and asks the host for each image fetch, phase 2 asks it for each signature, randomness comes
-//! from the caller's CSPRNG, and the time is an input.
+//! The crate performs no I/O. The plan takes the transaction metadata the host holds as input,
+//! and carries each transaction image to the consent view for the UI to resolve; phase 2 asks the
+//! host for each signature, randomness comes from the caller's CSPRNG, and the time is an input.
 
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
@@ -75,8 +75,7 @@ pub use error::{Inconsistency, PresentationError};
 #[cfg(feature = "wallet")]
 pub use plan::{
     plan, refusal, AdditionView, BoundTransaction, ConsentView, CredentialView, DigestError,
-    Fetches, MemberView, NoSeed, OfferView, OptionRefusal, PlanDigest, PlanInput, PlanStep,
-    Planned, Shown, Unproven,
+    MemberView, NoSeed, OfferView, OptionRefusal, PlanDigest, PlanInput, Planned, Shown, Unproven,
 };
 #[cfg(feature = "wallet")]
 pub use respond::{

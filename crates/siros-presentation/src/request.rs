@@ -4,9 +4,10 @@
 use serde_json::Value;
 use siros_dcql::DcqlQuery;
 use siros_oid4vp::{RequestSignature, TransactionDataItem, UnverifiedRequest};
+use siros_transaction_data::Channel;
 
 /// What the matching reads of a request: its DCQL query, the Verifier metadata, its
-/// `transaction_data` entries, and whether it arrived signed.
+/// `transaction_data` entries, whether it arrived signed, and how it reached the wallet.
 pub trait MatchRequest {
     /// `dcql_query`.
     fn dcql_query(&self) -> &DcqlQuery;
@@ -19,6 +20,9 @@ pub trait MatchRequest {
 
     /// Whether the request arrived signed.
     fn signature(&self) -> RequestSignature;
+
+    /// How the request reached the wallet, which sets the images transaction data admits.
+    fn channel(&self) -> Channel;
 }
 
 /// The credential picker's request, whose signature intake verifies at selection.
@@ -37,6 +41,11 @@ impl MatchRequest for UnverifiedRequest {
 
     fn signature(&self) -> RequestSignature {
         UnverifiedRequest::signature(self)
+    }
+
+    /// The credential picker reads a request of the Digital Credentials API alone.
+    fn channel(&self) -> Channel {
+        Channel::DcApi
     }
 }
 
@@ -57,5 +66,12 @@ impl MatchRequest for siros_oid4vp::VerifiedRequest {
 
     fn signature(&self) -> RequestSignature {
         siros_oid4vp::VerifiedRequest::signature(self)
+    }
+
+    fn channel(&self) -> Channel {
+        match self.dc_api_protocol() {
+            Some(_) => Channel::DcApi,
+            None => Channel::Redirect,
+        }
     }
 }

@@ -4,7 +4,7 @@
 use siros_oid4vp::RequestSignature;
 
 use crate::definition::{BaseType, LabelFormat, LabelText, Prominence, SecurityHint};
-use crate::image::{ImageFault, VerifiedImage};
+use crate::image::{Image, ImageFault};
 use crate::payload::{Location, Scalar};
 use crate::sources::{Rulebook, SourceKind};
 use crate::type_id::TypeId;
@@ -78,8 +78,8 @@ pub enum RowValue {
     Value(Scalar),
     /// A `template:` value.
     Template(Interpolated),
-    /// An image, verified.
-    Image(VerifiedImage),
+    /// An image, as information for the UI ([`Image`]).
+    Image(Image),
 }
 
 /// Whether the UI warns that the request arrived unsigned, and requires explicit confirmation
@@ -142,7 +142,7 @@ impl TransactionView {
         &self.rows
     }
 
-    /// The images of a TS12 payload that did not verify, each with why: the view leaves them
+    /// The images of a TS12 payload that are not admitted, each with why: the view leaves them
     /// out (PaSO Proof SD-JWT-VC and SVG, Section 2).
     #[must_use]
     pub fn absent_images(&self) -> &[(Location, ImageFault)] {

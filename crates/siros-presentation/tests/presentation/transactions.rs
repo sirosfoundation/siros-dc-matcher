@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 use siros_codec::base64url;
 use siros_oid4vp::ErrorCode;
 use siros_presentation::testing::paso::{approval, entry, paso_wallet, APPROVAL};
-use siros_presentation::{Fetches, PresentationError};
+use siros_presentation::PresentationError;
 use siros_transaction_data::{
     Configuration, EntryPosition, Exclusion, Incompatibility, Location, LocationStep, PayloadFault,
     RowValue, SourceKind, TransactionDataError, UnsignedWarning,
@@ -48,10 +48,7 @@ fn signed_credential_metadata_binds_the_entry_into_the_kb_jwt() {
     let wallet = paso_wallet(json!({APPROVAL: approval()}));
     let approval = entry(APPROVAL, "pid", json!({"what": "Pay 10.00 EUR"}));
     let request = dc_api_signed(&params(&[("pid", VCT)], std::slice::from_ref(&approval)));
-    // The signed credential metadata is the host's input: the plan fetches nothing (Proof
-    // Metadata, Sections 6 and 8).
-    let none = Fetches::new();
-    let input = wallet.input(&request, &none);
+    let input = wallet.input(&request);
     let planned = ready(&input).unwrap();
     let card = &planned.view().offers()[0].members()[0].credentials()[0];
     let view = card.transaction().unwrap().view();
@@ -126,8 +123,7 @@ fn annex_a5_offers_bind_each_credential_its_entry() {
         "client_metadata": client_metadata(), "transaction_data": transaction_data,
         "dcql_query": a5["dcql_query"]
     }));
-    let fetches = wallet.fetches(&request);
-    let planned = ready(&wallet.input(&request, &fetches)).unwrap();
+    let planned = ready(&wallet.input(&request)).unwrap();
     let offers: Vec<Vec<(String, Option<usize>)>> = planned
         .view()
         .offers()
@@ -172,8 +168,7 @@ fn a_credential_takes_the_next_entry_of_a_type_it_supports() {
         entry(APPROVAL, "pid", json!({"what": "Pay"})),
     ];
     let request = dc_api_signed(&params(&[("pid", VCT)], &entries));
-    let fetches = wallet.fetches(&request);
-    let planned = ready(&wallet.input(&request, &fetches)).unwrap();
+    let planned = ready(&wallet.input(&request)).unwrap();
     let card = &planned.view().offers()[0].members()[0].credentials()[0];
     assert_eq!(card.transaction().unwrap().entry(), EntryPosition::new(1));
 }
@@ -233,10 +228,7 @@ fn each_plan_rule_refuses_the_request() {
         ),
     ];
     for (case, request, expected, code) in rows {
-        let fetches = wallet.fetches(&request);
-        let error = ready(&wallet.input(&request, &fetches))
-            .map(drop)
-            .unwrap_err();
+        let error = ready(&wallet.input(&request)).map(drop).unwrap_err();
         assert_eq!(error.error_code(), code, "{case}");
         assert_eq!(
             error,

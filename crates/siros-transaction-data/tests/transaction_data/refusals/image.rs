@@ -1,53 +1,33 @@
-//! The image rules of PaSO View, Section 3: Data URLs of PNG, JPEG and SVG in base64, `https`
-//! URLs pinned by an `#integrity` sibling and fetched through the host with at most 3
-//! redirects, 512 KiB and 2048 pixels, the URLs an SVG document references pinned in their
-//! fragments, and what the scan of an SVG document cannot vouch for refused (PaSO Proof
-//! SD-JWT-VC and SVG, Section 3); and the cap on the items shown, counted before any fetch.
+//! The form of an image value (PaSO View, Section 3, `image`): a base64 Data URL of PNG, JPEG or
+//! SVG of at most 512 KiB, or an `https` URL with the integrity values of its `#integrity`
+//! sibling; over the Digital Credentials API, a Data URL of PNG or JPEG. A PaSO entry with an
+//! image of another form is not compatible. The view carries the image to the UI.
 
 use serde_json::json;
-use siros_oid4vp::{HttpStatus, HttpsUrl, MediaType, Redirects};
 use siros_transaction_data::{
-    ClaimIndex, Dimensions, FetchFault, ImageFault, ImageFormat, Incompatibility, IntegrityFault,
-    Location, LocationStep, PayloadFault, RenderFault, ResourceKind, Selection, SvgFault,
-    ValueFault, MAX_IMAGE_BYTES,
+    Channel, ClaimIndex, ImageFault, ImageFormat, Incompatibility, IntegrityFault, Location,
+    LocationStep, PayloadFault, ValueFault, MAX_IMAGE_BYTES,
 };
 
 use crate::common::{
-    b64, configured, credential, entries, ok, png, query, rows, sri, Documents, Host, Shown, CARD,
+    b64, configured, credential, entries, png, query, rows, sri, Host, Shown, CARD,
 };
 
 const TYPE: &str = "urn:paso:sca:com.example:logo:1";
-
-/// A JPEG of `width` by `height` pixels: an APP0 segment, then a baseline start of frame.
-fn jpeg(width: u16, height: u16) -> Vec<u8> {
-    let mut bytes = vec![0xff, 0xd8, 0xff, 0xe0, 0x00, 0x04, 0x4a, 0x46];
-    bytes.extend_from_slice(&[0xff, 0xc0, 0x00, 0x0b, 0x08]);
-    bytes.extend_from_slice(&height.to_be_bytes());
-    bytes.extend_from_slice(&width.to_be_bytes());
-    bytes.extend_from_slice(&[0x01, 0x01, 0x11, 0x00]);
-    bytes
-}
-
-/// An SVG document of `width` by `height`, holding `inner`.
-fn svg(width: u32, height: u32, inner: &str) -> Vec<u8> {
-    format!(
-        r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="{width}" height="{height}">{inner}</svg>"#
-    )
-    .into_bytes()
-}
+const URL: &str = "https://cdn.example/logo.png";
 
 fn data(media_type: &str, bytes: &[u8]) -> String {
     format!("data:{media_type};base64,{}", b64(bytes))
 }
 
-/// The rows the card shows for a logo of `logo`, its `#integrity` sibling `integrity`, with the
-/// host answering fetches with `documents`.
-fn outcome(logo: &str, integrity: Option<&str>, documents: Documents) -> Shown {
+/// The rows the card shows for a logo of `logo`, its `#integrity` sibling `integrity`, for a
+/// request over `channel`.
+fn outcome(channel: Channel, logo: &str, integrity: Option<&str>) -> Shown {
     let definition = json!({"claims": [
         {"path": ["logo"], "value_type": "image", "display": [{"locale": "en", "name": "Logo"}]}
     ]});
     let mut host = Host::new(json!([configured(TYPE, CARD, &definition)]));
-    host.images = documents;
+    host.channel = channel;
     let mut payload = json!({"logo": logo});
     if let Some(integrity) = integrity {
         payload["logo#integrity"] = json!(integrity);
@@ -57,16 +37,16 @@ fn outcome(logo: &str, integrity: Option<&str>, documents: Documents) -> Shown {
     rows(&host, &entries[0], &credential(CARD, &[]))
 }
 
-fn shown(format: ImageFormat) -> Shown {
-    Ok(vec![("Logo".to_owned(), format!("<image {format:?}>"))])
+fn shown(value: &str) -> Shown {
+    Ok(vec![("Logo".to_owned(), value.to_owned())])
 }
 
 fn logo() -> Location {
     Location::new(vec![LocationStep::Key("logo".to_owned())])
 }
 
-/// A fault of the reference itself, found as the payload conforms.
-fn reference(fault: ImageFault) -> Shown {
+/// A fault of the value's form, found as the payload conforms.
+fn malformed(fault: ImageFault) -> Shown {
     Err(Incompatibility::Payload(PayloadFault::Value(
         ClaimIndex::new(0),
         logo(),
@@ -74,332 +54,172 @@ fn reference(fault: ImageFault) -> Shown {
     )))
 }
 
-/// A fault of the image, found as it is verified.
-fn image(fault: ImageFault) -> Shown {
+/// A fault of the image over the request's channel.
+fn refused(fault: ImageFault) -> Shown {
     Err(Incompatibility::Image(logo(), fault))
 }
 
 #[test]
-fn each_image_rule_is_refused_alone() {
-    const URL: &str = "https://cdn.example/logo.png";
-    const PART: &str = "https://cdn.example/part.png";
-    let served = |bytes: &[u8]| vec![(URL.to_owned(), ok(bytes))];
-    let pinned = |bytes: &[u8]| format!("{PART}#{}", sri(bytes).replace('=', "%3D"));
-    let part = png(1, 1);
-    let rows: Vec<(&str, String, Option<String>, Documents, Shown)> = vec![
+fn each_image_rule_holds_alone() {
+    let pin = sri(&png(5, 5));
+    let large = format!("data:image/png;base64,{}", "A".repeat(MAX_IMAGE_BYTES + 4));
+    let rows: Vec<(&str, Channel, String, Option<&str>, Shown)> = vec![
         (
             "a PNG Data URL",
+            Channel::Redirect,
             data("image/png", &png(10, 10)),
             None,
-            vec![],
-            shown(ImageFormat::Png),
+            shown("<image Png>"),
         ),
         (
-            "a JPEG Data URL",
-            data("image/jpeg", &jpeg(10, 20)),
+            "an SVG Data URL over a redirect",
+            Channel::Redirect,
+            data("image/svg+xml", b"<svg/>"),
             None,
-            vec![],
-            shown(ImageFormat::Jpeg),
+            shown("<image Svg>"),
         ),
         (
-            "an SVG Data URL",
-            data("image/svg+xml", &svg(10, 10, "")),
-            None,
-            vec![],
-            shown(ImageFormat::Svg),
+            "an https URL with #integrity over a redirect",
+            Channel::Redirect,
+            URL.to_owned(),
+            Some(&pin),
+            shown(&format!("<image {URL} pinned>")),
         ),
         (
-            "a PNG of 2048 by 2048",
-            data("image/png", &png(2048, 2048)),
+            "an https URL without #integrity",
+            Channel::Redirect,
+            URL.to_owned(),
             None,
-            vec![],
-            shown(ImageFormat::Png),
+            malformed(ImageFault::IntegrityAbsent),
+        ),
+        (
+            "an #integrity sibling of no SRI syntax",
+            Channel::Redirect,
+            URL.to_owned(),
+            Some("sha1-abc"),
+            malformed(ImageFault::Integrity(IntegrityFault::Malformed)),
+        ),
+        (
+            "an http URL",
+            Channel::Redirect,
+            "http://cdn.example/logo.png".to_owned(),
+            Some(&pin),
+            malformed(ImageFault::NotHttps),
         ),
         (
             "a GIF Data URL",
+            Channel::Redirect,
             data("image/gif", b"GIF89a"),
             None,
-            vec![],
-            reference(ImageFault::DataUrl),
+            malformed(ImageFault::DataUrl),
         ),
         (
             "a Data URL without base64",
+            Channel::Redirect,
             "data:image/png,abc".to_owned(),
             None,
-            vec![],
-            reference(ImageFault::DataUrl),
+            malformed(ImageFault::DataUrl),
         ),
         (
             "a Data URL that is no base64",
+            Channel::Redirect,
             "data:image/png;base64,***".to_owned(),
             None,
-            vec![],
-            reference(ImageFault::Base64(
+            malformed(ImageFault::Base64(
                 siros_codec::base64::decode("***").unwrap_err(),
             )),
         ),
         (
             "a Data URL over 512 KiB",
-            format!("data:image/png;base64,{}", "A".repeat(MAX_IMAGE_BYTES + 4)),
+            Channel::Redirect,
+            large.clone(),
             None,
-            vec![],
-            reference(ImageFault::TooLarge(MAX_IMAGE_BYTES + 4)),
+            malformed(ImageFault::TooLarge(MAX_IMAGE_BYTES + 4)),
         ),
         (
-            "a PNG 2049 pixels wide",
-            data("image/png", &png(2049, 1)),
+            "a PNG Data URL over the DC API",
+            Channel::DcApi,
+            data("image/png", &png(10, 10)),
             None,
-            vec![],
-            image(ImageFault::TooManyPixels(Dimensions {
-                width: 2049,
-                height: 1,
-            })),
+            shown("<image Png>"),
         ),
         (
-            "a JPEG 2049 pixels high",
-            data("image/jpeg", &jpeg(1, 2049)),
+            "a JPEG Data URL over the DC API",
+            Channel::DcApi,
+            data("image/jpeg", &[0xff, 0xd8, 0xff]),
             None,
-            vec![],
-            image(ImageFault::TooManyPixels(Dimensions {
-                width: 1,
-                height: 2049,
-            })),
+            shown("<image Jpeg>"),
         ),
         (
-            "an SVG 3000 pixels wide",
-            data("image/svg+xml", &svg(3000, 10, "")),
-            None,
-            vec![],
-            image(ImageFault::TooManyPixels(Dimensions {
-                width: 3000,
-                height: 10,
-            })),
-        ),
-        (
-            "a JPEG declared PNG",
-            data("image/png", &jpeg(1, 1)),
-            None,
-            vec![],
-            image(ImageFault::FormatMismatch(ImageFormat::Png)),
-        ),
-        (
-            "an http URL",
-            "http://cdn.example/logo.png".to_owned(),
-            None,
-            vec![],
-            reference(ImageFault::NotHttps),
-        ),
-        (
-            "an https URL without #integrity",
+            "an https URL with #integrity over the DC API",
+            Channel::DcApi,
             URL.to_owned(),
+            Some(&pin),
+            refused(ImageFault::RemoteOverDcApi),
+        ),
+        (
+            "an SVG Data URL over the DC API",
+            Channel::DcApi,
+            data("image/svg+xml", b"<svg/>"),
             None,
-            vec![],
-            reference(ImageFault::IntegrityAbsent),
+            refused(ImageFault::FormatOverDcApi(ImageFormat::Svg)),
         ),
         (
-            "an https URL, pinned and served",
-            URL.to_owned(),
-            Some(sri(&png(5, 5))),
-            served(&png(5, 5)),
-            shown(ImageFormat::Png),
-        ),
-        (
-            "content that does not match its pin",
-            URL.to_owned(),
-            Some(sri(&png(5, 5))),
-            served(&png(6, 6)),
-            image(ImageFault::Integrity(IntegrityFault::Mismatch)),
-        ),
-        (
-            "a fetch the host answers with 404",
-            URL.to_owned(),
-            Some(sri(&png(5, 5))),
-            vec![],
-            image(ImageFault::Fetch(FetchFault::Status(HttpStatus::new(404)))),
-        ),
-        (
-            "an SVG referencing a pinned resource",
-            data(
-                "image/svg+xml",
-                &svg(10, 10, &format!(r#"<image href="{}"/>"#, pinned(&part))),
-            ),
+            "a Data URL over 512 KiB over the DC API",
+            Channel::DcApi,
+            large,
             None,
-            vec![(PART.to_owned(), ok(&part))],
-            shown(ImageFormat::Svg),
-        ),
-        (
-            "an SVG referencing an unpinned resource",
-            data(
-                "image/svg+xml",
-                &svg(10, 10, &format!(r#"<image xlink:href="{PART}"/>"#)),
-            ),
-            None,
-            vec![],
-            image(ImageFault::Svg(SvgFault::ReferenceUnpinned(
-                PART.to_owned(),
-            ))),
-        ),
-        (
-            "an SVG referencing a resource that does not match its pin",
-            data(
-                "image/svg+xml",
-                &svg(
-                    10,
-                    10,
-                    &format!(r#"<rect style="fill: url('{}')"/>"#, pinned(&part)),
-                ),
-            ),
-            None,
-            vec![(PART.to_owned(), ok(&png(2, 2)))],
-            image(ImageFault::Svg(SvgFault::ReferenceIntegrity(
-                pinned(&part),
-                IntegrityFault::Mismatch,
-            ))),
-        ),
-        (
-            "an XML document that is no SVG",
-            data("image/svg+xml", b"<html/>"),
-            None,
-            vec![],
-            image(ImageFault::Svg(SvgFault::NotSvg)),
+            malformed(ImageFault::TooLarge(MAX_IMAGE_BYTES + 4)),
         ),
     ];
-    for (case, logo, integrity, documents, expected) in rows {
-        assert_eq!(
-            outcome(&logo, integrity.as_deref(), documents),
-            expected,
-            "{case}"
-        );
+    for (case, channel, logo, integrity, expected) in rows {
+        assert_eq!(outcome(channel, &logo, integrity), expected, "{case}");
     }
 }
 
-/// The view carries the verified bytes, and those of each resource an SVG document references,
-/// by the URL a renderer requests and the kind the host serves it as; a resource fetch accepts
-/// the resource types.
-/// An SVG document's size is its width and height in pixels, exact in decimal and rounded up:
-/// over 2048 it is refused, with the size. Values derived by hand, at 96 pixels per inch.
+/// The view carries an image as information for the UI: a Data URL's format and decoded bytes,
+/// an `https` URL with its integrity values.
 #[test]
-fn an_svg_size_is_exact_in_its_unit() {
-    let sized = |width: &str, height: &str| {
-        let document = format!(
-            r#"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}"/>"#
-        );
-        outcome(&data("image/svg+xml", document.as_bytes()), None, vec![])
-    };
-    let over = |width, height| image(ImageFault::TooManyPixels(Dimensions { width, height }));
-    // (width, height, outcome)
-    let rows = [
-        ("2048", "2048px", shown(ImageFormat::Svg)),
-        ("2048.0001", "1", over(2049, 1)),
-        // A binary float reads this as 2048.
-        ("2048.00000000000000000000001", "1", over(2049, 1)),
-        ("21.35in", "1", over(2050, 1)),
-        // 21.5 inches.
-        ("54.61cm", "1", over(2064, 1)),
-        // A binary float multiplies this to above 2064.
-        ("546.1mm", "1", over(2064, 1)),
-        ("1548pt", "1", over(2064, 1)),
-        ("129pc", "1", over(2064, 1)),
-        (" +.2064e4 ", "1", over(2064, 1)),
-        ("1e999999999", "1", over(u32::MAX, 1)),
-        ("4294967296", "1", over(u32::MAX, 1)),
-        // Under one pixel and above zero: one pixel.
-        ("1e-999999999", "3000", over(1, 3000)),
-        ("0.001", "3000", over(1, 3000)),
-        // Without a size in an absolute unit, the width is 0.
-        ("-0.5in", "3000", over(0, 3000)),
-        ("5em", "3000", over(0, 3000)),
-        ("1E3", "3000", over(0, 3000)),
-        ("1.2.3", "3000", over(0, 3000)),
-        ("1e", "3000", over(0, 3000)),
-        (".", "3000", over(0, 3000)),
-        ("--1", "3000", over(0, 3000)),
-    ];
-    for (width, height, expected) in rows {
-        assert_eq!(sized(width, height), expected, "width {width:?}");
-    }
-}
+fn the_view_carries_the_image() {
+    use siros_transaction_data::{Image, Integrity, RowValue, Selection};
 
-#[test]
-fn the_view_carries_the_verified_bytes() {
-    let part = png(1, 1);
-    let reference = format!("https://cdn.example/part.png#{}", sri(&part));
-    let document = svg(10, 10, &format!(r#"<image href="{reference}"/>"#));
-    let definition = json!({"claims": [
-        {"path": ["logo"], "value_type": "image", "display": [{"locale": "en", "name": "Logo"}]}
-    ]});
-    let mut host = Host::new(json!([configured(TYPE, CARD, &definition)]));
-    host.images = vec![("https://cdn.example/part.png".to_owned(), ok(&part))];
-    let entry = json!({"type": TYPE, "credential_ids": ["card"],
-                       "payload": {"logo": data("image/svg+xml", &document)}});
-    let entries = entries(&[entry.to_string()], &query(&["card"], CARD));
-    let (selection, fetches) = host.select_fetching(&[&entries[0]], &credential(CARD, &[]));
-    let selection = selection.unwrap();
-    let siros_transaction_data::RowValue::Image(image) =
-        crate::common::taken(&selection).view().rows()[0].value()
-    else {
-        panic!("no image")
+    let image = |logo: &str, integrity: Option<&str>| {
+        let definition = json!({"claims": [
+            {"path": ["logo"], "value_type": "image", "display": [{"locale": "en", "name": "Logo"}]}
+        ]});
+        let host = Host::new(json!([configured(TYPE, CARD, &definition)]));
+        let mut payload = json!({"logo": logo});
+        if let Some(integrity) = integrity {
+            payload["logo#integrity"] = json!(integrity);
+        }
+        let entry = json!({"type": TYPE, "credential_ids": ["card"], "payload": payload});
+        let entries = entries(&[entry.to_string()], &query(&["card"], CARD));
+        let Ok(Selection::Takes(taken)) = host.select(&[&entries[0]], &credential(CARD, &[]))
+        else {
+            panic!("{logo}")
+        };
+        let [row] = taken.view().rows() else {
+            panic!("{logo}")
+        };
+        let RowValue::Image(image) = row.value() else {
+            panic!("{logo}")
+        };
+        image.clone()
     };
-    assert_eq!(image.bytes(), document.as_slice());
-    let [resource] = image.resources() else {
-        panic!("{:?}", image.resources())
-    };
-    assert_eq!(resource.bytes(), part);
-    assert_eq!(resource.kind(), ResourceKind::Png);
+    let bytes = png(10, 10);
     assert_eq!(
-        resource.url(),
-        &HttpsUrl::parse("https://cdn.example/part.png").unwrap()
+        image(&data("image/png", &bytes), None),
+        Image::Data {
+            format: ImageFormat::Png,
+            bytes
+        }
     );
-    let [fetch] = fetches.as_slice() else {
-        panic!("{fetches:?}")
-    };
-    assert_eq!(fetch.accept(), MediaType::RESOURCES);
-}
-
-/// An image fetch accepts the image types and follows at most 3 redirects (PaSO View, Section
-/// 3, `image`).
-#[test]
-fn an_image_fetch_follows_at_most_three_redirects() {
-    let definition = json!({"claims": [
-        {"path": ["logo"], "value_type": "image", "display": [{"locale": "en", "name": "Logo"}]}
-    ]});
-    let mut host = Host::new(json!([configured(TYPE, CARD, &definition)]));
-    let logo = png(5, 5);
-    host.images = vec![("https://cdn.example/logo.png".to_owned(), ok(&logo))];
-    let entry = json!({"type": TYPE, "credential_ids": ["card"], "payload": {
-        "logo": "https://cdn.example/logo.png", "logo#integrity": sri(&logo)}});
-    let entries = entries(&[entry.to_string()], &query(&["card"], CARD));
-    let (selection, fetches) = host.select_fetching(&[&entries[0]], &credential(CARD, &[]));
-    assert!(matches!(selection, Ok(Selection::Takes(_))));
-    let [fetch] = fetches.as_slice() else {
-        panic!("{fetches:?}")
-    };
-    assert_eq!(fetch.redirects(), Redirects::at_most(3));
-    assert_eq!(fetch.accept(), MediaType::IMAGES);
-}
-
-/// An entry over the cap of 200 items is refused before any image is fetched (PaSO View,
-/// Section 2).
-#[test]
-fn the_cap_comes_before_any_fetch() {
-    let definition = json!({"claims": [
-        {"path": ["items", null, "logo"], "value_type": "image",
-         "display": [{"locale": "en", "name": "Logo"}]}
-    ]});
-    let host = Host::new(json!([configured(TYPE, CARD, &definition)]));
-    let logo = png(1, 1);
-    let items: Vec<_> = (0..250)
-        .map(|i| json!({"logo": format!("https://img.example/{i}.png"), "logo#integrity": sri(&logo)}))
-        .collect();
-    let entry = json!({"type": TYPE, "credential_ids": ["card"], "payload": {"items": items}});
-    let entries = entries(&[entry.to_string()], &query(&["card"], CARD));
-    let (selection, fetches) = host.select_fetching(&[&entries[0]], &credential(CARD, &[]));
-    assert_eq!(fetches, []);
+    let pin = sri(&png(5, 5));
     assert_eq!(
-        selection,
-        Ok(Selection::Excluded(vec![(
-            siros_transaction_data::EntryPosition::new(0),
-            Incompatibility::Render(RenderFault::TooManyItems(250))
-        )]))
+        image(URL, Some(&pin)),
+        Image::Remote {
+            url: siros_oid4vp::HttpsUrl::parse(URL).unwrap(),
+            integrity: Some(Integrity::parse(&pin).unwrap()),
+        }
     );
 }

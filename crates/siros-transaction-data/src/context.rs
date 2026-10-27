@@ -10,7 +10,7 @@ use siros_trust::TrustStore;
 
 use crate::entry::Entry;
 use crate::error::TransactionDataError;
-use crate::fetched::{Fetched, Step};
+use crate::image::Channel;
 use crate::projection::Projected;
 use crate::select::{Incompatibility, Selection, Selector};
 use crate::served::ServedTypes;
@@ -40,8 +40,8 @@ pub struct SourceInputs<'c> {
 pub struct Context<'c> {
     /// What the credential's sources read.
     pub sources: SourceInputs<'c>,
-    /// The host's responses to the image fetches transaction data asked for.
-    pub fetched: &'c Fetched,
+    /// How the request reached the wallet, which sets the images it admits.
+    pub channel: Channel,
     /// Whether the request arrived signed.
     pub signature: RequestSignature,
 }
@@ -93,7 +93,7 @@ impl<'c> SourceInputs<'c> {
 impl<'c> Context<'c> {
     /// What `credential` takes of `entries`, those that target it in array order (PaSO Core,
     /// Section 7.4.2, steps 2 and 3). A credential whose own metadata is not valid takes none,
-    /// each entry with that cause. The step is a fetch while the host has not given an image.
+    /// each entry with that cause.
     ///
     /// # Errors
     ///
@@ -103,9 +103,9 @@ impl<'c> Context<'c> {
         &self,
         entries: &[&Entry],
         credential: &'c Credential,
-    ) -> Result<Step<Selection>, TransactionDataError> {
+    ) -> Result<Selection, TransactionDataError> {
         let selector = Selector {
-            fetched: self.fetched,
+            channel: self.channel,
             signature: self.signature,
             now: self.sources.now,
         };
@@ -113,12 +113,12 @@ impl<'c> Context<'c> {
             Ok(sources) => selector.first_match(entries, &sources),
             Err(cause) => {
                 let cause = Incompatibility::from(cause);
-                Ok(Step::Done(Selection::Excluded(
+                Ok(Selection::Excluded(
                     entries
                         .iter()
                         .map(|entry| (entry.position(), cause.clone()))
                         .collect(),
-                )))
+                ))
             }
         }
     }

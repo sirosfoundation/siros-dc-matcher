@@ -1,8 +1,8 @@
 //! The wallet: its credentials, its host, and the phases driven to the response.
 
 use crate::{
-    plan, AdditionIndex, Fetches, Fulfilment, OfferIndex, PlanInput, PlanStep, Planned,
-    PresentationError, Response, Selection, SignId, Subset,
+    plan, AdditionIndex, Fulfilment, OfferIndex, PlanInput, Planned, PresentationError, Response,
+    Selection, SignId, Subset,
 };
 use ciborium::Value as Ciborium;
 use p256::ecdsa::signature::Signer;
@@ -15,7 +15,7 @@ use siros_codec::date::DateTime;
 use siros_credential::Credential;
 use siros_dcql::QueryId;
 use siros_display::{DisplayCache, Locale};
-use siros_oid4vp::{FetchResponse, HttpStatus, VerifiedRequest};
+use siros_oid4vp::VerifiedRequest;
 use siros_transaction_data::{Amr, Configuration, Factor, HeldMetadata, Inherence, Possession};
 use siros_trust::TrustStore;
 use siros_wallet_state::{CredentialId, WalletState};
@@ -271,8 +271,6 @@ pub struct Wallet {
     pub key_factors: Vec<(siros_wallet_state::KeyId, Amr)>,
     /// The transaction metadata the host holds.
     pub metadata: HeldMetadata,
-    /// The images the host answers fetches with, by URL.
-    pub images: Vec<(String, FetchResponse)>,
     pub trust: TrustStore,
     state: WalletState,
 }
@@ -353,7 +351,6 @@ impl Wallet {
             background: Vec::new(),
             key_factors,
             metadata: holding_absent(&[VCT]),
-            images: Vec::new(),
             trust: TrustStore::parse("[]").unwrap(),
             state,
         }
@@ -374,11 +371,7 @@ impl Wallet {
         self
     }
 
-    pub fn input<'a>(
-        &'a self,
-        request: &'a VerifiedRequest,
-        fetches: &'a Fetches,
-    ) -> PlanInput<'a> {
+    pub fn input<'a>(&'a self, request: &'a VerifiedRequest) -> PlanInput<'a> {
         PlanInput {
             request,
             credentials: &self.credentials,
@@ -392,37 +385,15 @@ impl Wallet {
             verifier_id: self.verifier_id,
             background: &self.background,
             key_factors: &self.key_factors,
-            fetches,
             now: DateTime::from_unix(NOW).unwrap(),
-        }
-    }
-
-    /// The host's responses to every fetch the plan of `request` asks for.
-    pub fn fetches(&self, request: &VerifiedRequest) -> Fetches {
-        let mut fetches = Fetches::new();
-        loop {
-            let fetch = match plan(&self.input(request, &fetches)) {
-                Ok(PlanStep::Fetch(fetch)) => fetch,
-                Ok(PlanStep::Ready(_)) | Err(_) => return fetches,
-            };
-            let response = self
-                .images
-                .iter()
-                .find(|(url, _)| url == fetch.url().as_str())
-                .map(|(_, r)| r.clone())
-                .unwrap_or_else(|| FetchResponse::new(HttpStatus::new(404), None, Vec::new()));
-            fetches.answer(&fetch, response).unwrap();
         }
     }
 }
 
-/// The plan of `input`, which needs no further fetch. Its view shows neither the seed nym_auth's
-/// test issuer delivers nor the picker's marker of an unverified request.
+/// The plan of `input`. Its view shows neither the seed nym_auth's test issuer delivers nor the
+/// picker's marker of an unverified request.
 pub fn ready<'a>(input: &PlanInput<'a>) -> Result<Planned<'a>, PresentationError> {
-    let planned = match plan(input)? {
-        PlanStep::Ready(planned) => *planned,
-        PlanStep::Fetch(fetch) => panic!("unanswered fetch {}", fetch.url().as_str()),
-    };
+    let planned = plan(input)?;
     let texts = view_texts(planned.view());
     let opening = b64(&SEED);
     assert!(texts.iter().all(|t| !t.contains(&opening)), "{texts:?}");

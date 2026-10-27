@@ -47,8 +47,7 @@ fn selections_and_signatures_parse_against_the_plan() {
             ]
         }
     }));
-    let fetches = wallet.fetches(&request);
-    let input = wallet.input(&request, &fetches);
+    let input = wallet.input(&request);
     let planned = ready(&input).unwrap();
     let digest = planned.view().digest().to_string();
     let set = planned.view().offers()[0].additions()[0].set();

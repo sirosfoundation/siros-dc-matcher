@@ -1,14 +1,15 @@
 //! Transaction data in the matching (PaSO Core, Section 7.4): the entries of the request, the
 //! entry each candidate of a targeted query takes or why it takes none, and the offers over the
 //! candidates the first match leaves (T1, T4). The wallet's plan and the credential picker run
-//! it alike; the picker's selection defers to the wallet what it cannot verify (K2).
+//! it alike; the picker's selection defers to the wallet the ad-hoc metadata it cannot verify
+//! (K2).
 
 use std::convert::Infallible;
 
 use itertools::Itertools;
 use siros_credential::EntryRef;
 use siros_transaction_data::{
-    check_request, fetched, Entry, EntryPosition, Exclusion, Selection, Step, TransactionDataError,
+    check_request, Entry, EntryPosition, Exclusion, Selection, TransactionDataError,
 };
 
 use crate::credential::MatchCredential;
@@ -24,8 +25,7 @@ pub trait TransactionSource<C> {
     type Deferral;
 
     /// What `credential` takes of `entries`, those that target it in array order (PaSO Core,
-    /// Section 7.4.2, steps 2 and 3). The step is a fetch while the host has not given an
-    /// image.
+    /// Section 7.4.2, steps 2 and 3).
     ///
     /// # Errors
     ///
@@ -35,7 +35,7 @@ pub trait TransactionSource<C> {
         &self,
         entries: &[&Entry],
         credential: &C,
-    ) -> Result<Step<Selection<Self::Deferral>>, TransactionDataError>;
+    ) -> Result<Selection<Self::Deferral>, TransactionDataError>;
 
     /// Whether a source defines `entry`'s type for `credential` (OpenID4VP 1.0, Section 5.1),
     /// though the entry may not be compatible.
@@ -87,8 +87,7 @@ pub enum NoOffer<U, R> {
 
 impl<D> Transactions<D> {
     /// The entries of `request` and the first match of each candidate of `answered` whose query
-    /// an entry targets, through `source` (PaSO Core, Sections 7.4.1 and 7.4.2). The step is a
-    /// fetch while the host has not given a document.
+    /// an entry targets, through `source` (PaSO Core, Sections 7.4.1 and 7.4.2).
     ///
     /// # Errors
     ///
@@ -100,7 +99,7 @@ impl<D> Transactions<D> {
         request: &impl MatchRequest,
         answered: &Answered<'_, C, R>,
         source: &impl TransactionSource<C, Deferral = D>,
-    ) -> Result<Step<Self>, TransactionDataError> {
+    ) -> Result<Self, TransactionDataError> {
         let query = request.dcql_query();
         let entries: Vec<Entry> = request
             .transaction_data()
@@ -121,7 +120,7 @@ impl<D> Transactions<D> {
             }
             for (at, candidate) in answers.candidates().iter().enumerate() {
                 let credential = candidate.credential();
-                let selection = fetched!(source.first_match(&targeting, credential)?);
+                let selection = source.first_match(&targeting, credential)?;
                 candidacies.push(Candidacy {
                     query: index,
                     candidate: CandidateIndex::new(at),
@@ -136,7 +135,7 @@ impl<D> Transactions<D> {
         };
         transactions.known(answered, source)?;
         transactions.compatible_left()?;
-        Ok(Step::Done(transactions))
+        Ok(transactions)
     }
 
     /// Checks each entry whose type the wallet knows from no source for any candidate it

@@ -36,8 +36,6 @@ pub(crate) enum Unshown {
     Refused(&'static str),
     /// The request's transaction data is refused: the refusal's code.
     TransactionData(&'static str),
-    /// The selection of transaction data asked the picker for a fetch.
-    Fetch,
     /// The queries the transaction data targets have no candidate.
     CredentialUnavailable,
     /// The matching gives no offer: the failure's code.
@@ -57,7 +55,6 @@ impl Unshown {
             Self::Request(why) => format!("request: {why}"),
             Self::Refused(code) => format!("refused: {code}"),
             Self::TransactionData(code) => format!("transaction data: {code}"),
-            Self::Fetch => "transaction data asked for a fetch".to_owned(),
             Self::CredentialUnavailable => "transaction data: credential_unavailable".to_owned(),
             Self::Unmatched(code) => format!("no offer: {code}"),
             Self::Display(offer, code) => format!("offer {offer}: {code}"),

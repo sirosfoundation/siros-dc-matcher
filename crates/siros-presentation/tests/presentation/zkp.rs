@@ -83,8 +83,7 @@ fn zkp_req_over_redirect_direct_post_cwt() {
         "client_metadata": client_metadata(),
         "dcql_query": {"credentials": [nym_query()]}
     }));
-    let fetches = wallet.fetches(&request);
-    let input = wallet.input(&request, &fetches);
+    let input = wallet.input(&request);
     let response = respond(&input);
     let authorization = decrypt_cwt(response.submission());
     assert_eq!(
@@ -118,8 +117,7 @@ fn zkp_req_and_mdoc_over_dc_api_jwt() {
         "client_metadata": client_metadata(),
         "dcql_query": {"credentials": [mdl, nym_query()]}
     }));
-    let fetches = wallet.fetches(&request);
-    let input = wallet.input(&request, &fetches);
+    let input = wallet.input(&request);
     let planned = ready(&input).unwrap();
     let view = planned.view();
     let [offer] = view.offers() else {
@@ -197,8 +195,7 @@ fn a_credential_answers_the_first_option_it_passes() {
         "client_metadata": client_metadata(),
         "dcql_query": {"credentials": [nym.clone()]}
     }));
-    let fetches = wallet.fetches(&request);
-    let response = respond(&wallet.input(&request, &fetches));
+    let response = respond(&wallet.input(&request));
     let payload = decrypt_jwe(response.submission());
     let encoded = base64url::decode(payload["vp_token"]["nym"][0].as_str().unwrap()).unwrap();
     assert_eq!(

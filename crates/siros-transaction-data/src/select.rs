@@ -2,7 +2,7 @@
 //! first entry, in array order, that targets it, whose type it supports in the wallet's
 //! language, whose payload conforms, that renders within the cap, whose resources verify, and
 //! that renders in full. A credential with none is excluded. The credential picker, which
-//! verifies no ad-hoc metadata and fetches no image, defers such an entry to the wallet (K2).
+//! verifies no ad-hoc metadata, defers such an entry to the wallet (K2).
 
 use std::convert::Infallible;
 
@@ -13,10 +13,8 @@ use siros_oid4vp::RequestSignature;
 use crate::definition::{DefinitionError, Prominence};
 use crate::entry::Entry;
 use crate::error::{EntryPosition, TransactionDataError};
-use crate::fetched;
-use crate::fetched::{Fetched, Resources, Step};
 use crate::hash::AlgClaim;
-use crate::image::ImageFault;
+use crate::image::{Channel, ImageFault};
 use crate::payload::{conform, Location, PayloadFault, Typed, ValueFault, Values};
 use crate::payment::Payment;
 use crate::projection::{Projected, Unmatched};
@@ -170,8 +168,6 @@ pub enum Selection<D = Infallible> {
 pub enum Deferral {
     /// The entry's ad-hoc metadata JWT, which the wallet verifies against the trust store.
     AdHocMetadata,
-    /// An image at an `https` URL, which the wallet fetches and verifies.
-    RemoteImage,
 }
 
 /// A credential the first match excluded, and why each entry that targets it is not compatible.
@@ -203,23 +199,21 @@ impl Taken {
     }
 }
 
-/// What the first match reads beside a credential's definitions: where image bodies come from,
-/// whether the request arrived signed, and the time. The wallet's images are the host's
-/// responses; the credential picker has none.
+/// What the first match reads beside a credential's definitions: how the request reached the
+/// wallet, whether it arrived signed, and the time.
 #[derive(Debug, Clone, Copy)]
-pub struct Selector<'s, R = Fetched> {
-    /// The bodies of the image fetches transaction data asked for.
-    pub fetched: &'s R,
+pub struct Selector {
+    /// How the request reached the wallet, which sets the images it admits.
+    pub channel: Channel,
     /// Whether the request arrived signed.
     pub signature: RequestSignature,
     /// The time, against which a TS12 payload's dates are read.
     pub now: DateTime,
 }
 
-impl<R: Resources> Selector<'_, R> {
+impl Selector {
     /// What a credential whose definitions `definitions` serves takes of `entries`, those that
-    /// target it in array order (Section 7.4.2, steps 2 and 3). The step is a fetch while the
-    /// host has not given an image.
+    /// target it in array order (Section 7.4.2, steps 2 and 3).
     ///
     /// # Errors
     ///
@@ -229,19 +223,18 @@ impl<R: Resources> Selector<'_, R> {
         &self,
         entries: &[&Entry],
         definitions: &impl Definitions,
-    ) -> Result<Step<Selection>, TransactionDataError> {
+    ) -> Result<Selection, TransactionDataError> {
         Ok(
             match first_of(entries, |entry| self.take(entry, definitions))? {
-                Ok(step) => step.map(Selection::Takes),
-                Err(causes) => Step::Done(Selection::Excluded(causes)),
+                Ok(taken) => Selection::Takes(taken),
+                Err(causes) => Selection::Excluded(causes),
             },
         )
     }
 
     /// What a credential whose registered definitions `definitions` serves takes of `entries`,
     /// as the credential picker tells it (K2): the first match of [`Selector::first_match`],
-    /// except that an entry with ad-hoc metadata, and an entry with an image at an `https` URL,
-    /// is [`Selection::Deferred`] to the wallet. The picker's selector holds no fetched image.
+    /// except that an entry with ad-hoc metadata is [`Selection::Deferred`] to the wallet.
     ///
     /// # Errors
     ///
@@ -257,21 +250,18 @@ impl<R: Resources> Selector<'_, R> {
             if entry.metadata().is_some() {
                 return Ok(Ok(Selection::Deferred(position, Deferral::AdHocMetadata)));
             }
-            Ok(self.take(entry, definitions)?.map(|step| match step {
-                Step::Done(taken) => Selection::Takes(taken),
-                Step::Fetch(_) => Selection::Deferred(position, Deferral::RemoteImage),
-            }))
+            Ok(self.take(entry, definitions)?.map(Selection::Takes))
         };
         Ok(first_of(entries, unverified)?.unwrap_or_else(Selection::Excluded))
     }
 
-    /// The entry `entry` for a credential whose definitions `definitions` serves: its view, a
-    /// step that is a fetch while the host has not given an image, or why it is not compatible.
+    /// The entry `entry` for a credential whose definitions `definitions` serves: its view, or
+    /// why it is not compatible.
     fn take(
         &self,
         entry: &Entry,
         definitions: &impl Definitions,
-    ) -> Result<Result<Step<Taken>, Incompatibility>, TransactionDataError> {
+    ) -> Result<Result<Taken, Incompatibility>, TransactionDataError> {
         let projected = match definitions.serve(entry) {
             Ok(projected) => projected,
             Err(cause) => return Ok(Err(cause)),
@@ -279,24 +269,23 @@ impl<R: Resources> Selector<'_, R> {
         if self.signature == RequestSignature::Unsigned && projected.source().is_paso() {
             return Err(TransactionDataError::Unsigned(entry.position()));
         }
-        Ok(self.view(entry, &projected).map(|step| {
-            step.map(|view| Taken {
-                entry: entry.position(),
-                view,
-                payment: Payment::of(entry.type_id(), projected.rulebook(), entry.payload())
-                    .map(Box::new),
-            })
+        Ok(self.view(entry, &projected).map(|view| Taken {
+            entry: entry.position(),
+            view,
+            payment: Payment::of(entry.type_id(), projected.rulebook(), entry.payload())
+                .map(Box::new),
         }))
     }
 
     /// The view of `entry` under `projected`: its typed values, then the cap on the items it
-    /// would show, then its images verified, then the rendering. Under a TS12 rulebook an image
-    /// that does not verify is left out (PaSO Proof SD-JWT-VC and SVG, Section 2).
+    /// would show, then its images admitted over the channel, then the rendering. Under a TS12
+    /// rulebook an image that is not admitted is left out (PaSO Proof SD-JWT-VC and SVG, Section
+    /// 2).
     fn view(
         &self,
         entry: &Entry,
         projected: &Projected,
-    ) -> Result<Step<TransactionView>, Incompatibility> {
+    ) -> Result<TransactionView, Incompatibility> {
         let payload = entry.payload();
         let (values, floors) = self.values(entry, projected)?;
         let placed = layout(projected, payload, &values);
@@ -308,8 +297,8 @@ impl<R: Resources> Selector<'_, R> {
         let mut absent = Vec::new();
         for place in placed {
             let value = match place.value() {
-                Typed::Image(image) => match image.verify(self.fetched) {
-                    Ok(step) => Ready::Image(fetched!(step)),
+                Typed::Image(image) => match image.admit(self.channel) {
+                    Ok(image) => Ready::Image(image),
                     Err(fault) => match projected.rulebook() {
                         Rulebook::Ts12(_) => {
                             absent.push((place.location().clone(), fault));
@@ -336,7 +325,6 @@ impl<R: Resources> Selector<'_, R> {
         };
         rendering
             .render(ready, absent)
-            .map(Step::Done)
             .map_err(Incompatibility::Render)
     }
 

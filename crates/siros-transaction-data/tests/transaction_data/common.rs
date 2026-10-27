@@ -13,12 +13,10 @@ use siros_codec::date::DateTime;
 use siros_credential::Credential;
 use siros_dcql::DcqlQuery;
 use siros_display::{DisplayCache, IssuerMetadata, Locale};
-use siros_oid4vp::{
-    Fetch, FetchResponse, HttpStatus, HttpsUrl, RequestSignature, TransactionDataItem,
-};
+use siros_oid4vp::{HttpsUrl, RequestSignature, TransactionDataItem};
 use siros_transaction_data::{
-    Configuration, Context, Entry, EntryPosition, Fetched, HeldDocument, HeldJwt, HeldMetadata,
-    RowValue, Segment, Selection, ShownLabel, SourceInputs, Step, TransactionView,
+    Channel, Configuration, Context, Entry, EntryPosition, HeldDocument, HeldJwt, HeldMetadata,
+    Image, RowValue, Segment, Selection, ShownLabel, SourceInputs, TransactionView,
 };
 use siros_trust::TrustStore;
 use siros_wallet_state::{ConfigurationId, IssuerIdentifier, WalletState};
@@ -30,9 +28,6 @@ use x509_cert::name::Name;
 use x509_cert::serial_number::SerialNumber;
 use x509_cert::spki::SubjectPublicKeyInfoOwned;
 use x509_cert::time::{Time, Validity};
-
-/// The images the host answers fetches with, by URL.
-pub type Documents = Vec<(String, FetchResponse)>;
 
 /// The rows a card shows, label and value, or why it takes no entry.
 pub type Shown = Result<Vec<(String, String)>, siros_transaction_data::Incompatibility>;
@@ -248,10 +243,6 @@ pub fn display(uri: Option<&str>) -> DisplayCache {
 }
 
 /// A `200` response holding `body`.
-pub fn ok(body: &[u8]) -> FetchResponse {
-    FetchResponse::new(HttpStatus::OK, None, body.to_vec())
-}
-
 /// What the host gives the selection: trust, display metadata, configuration, the metadata it
 /// holds, the images it answers fetches with, the wallet's language and whether the request is
 /// signed.
@@ -265,7 +256,8 @@ pub struct Host {
     pub absent: Vec<String>,
     /// The signed credential metadata JWT the host holds for the card's configuration.
     pub credential_metadata: Option<String>,
-    pub images: Documents,
+    /// How the request reached the wallet.
+    pub channel: Channel,
     pub language: Locale,
     pub signature: RequestSignature,
 }
@@ -281,7 +273,7 @@ impl Host {
             held: Vec::new(),
             absent: vec![CARD.to_owned()],
             credential_metadata: None,
-            images: Vec::new(),
+            channel: Channel::Redirect,
             language: Locale::parse("en").unwrap(),
             signature: RequestSignature::Signed,
         }
@@ -320,55 +312,26 @@ impl Host {
         HeldMetadata::new(jwts, documents).unwrap()
     }
 
-    /// What `credential` takes of `entries`, each image fetch answered from the images, a URL
-    /// without one with `404`.
+    /// What `credential` takes of `entries`, for a request over the host's channel.
     pub fn select(
         &self,
         entries: &[&Entry],
         credential: &Credential,
     ) -> Result<Selection, siros_transaction_data::TransactionDataError> {
-        self.select_fetching(entries, credential).0
-    }
-
-    /// [`Host::select`], and each fetch the selection asked for.
-    pub fn select_fetching(
-        &self,
-        entries: &[&Entry],
-        credential: &Credential,
-    ) -> (
-        Result<Selection, siros_transaction_data::TransactionDataError>,
-        Vec<Fetch>,
-    ) {
         let held = self.metadata();
-        let mut fetched = Fetched::new();
-        let mut fetches = Vec::new();
-        loop {
-            let context = Context {
-                sources: SourceInputs {
-                    trust: &self.trust,
-                    held: &held,
-                    display: &self.display,
-                    configuration: &self.configuration,
-                    language: &self.language,
-                    now: now(),
-                },
-                fetched: &fetched,
-                signature: self.signature,
-            };
-            let fetch = match context.first_match(entries, credential) {
-                Ok(Step::Done(selection)) => return (Ok(selection), fetches),
-                Ok(Step::Fetch(fetch)) => fetch,
-                Err(error) => return (Err(error), fetches),
-            };
-            fetches.push(fetch.clone());
-            let response = self
-                .images
-                .iter()
-                .find(|(url, _)| url == fetch.url().as_str())
-                .map(|(_, response)| response.clone())
-                .unwrap_or_else(|| FetchResponse::new(HttpStatus::new(404), None, Vec::new()));
-            assert!(fetched.insert_first(&fetch, response).is_ok());
-        }
+        let context = Context {
+            sources: SourceInputs {
+                trust: &self.trust,
+                held: &held,
+                display: &self.display,
+                configuration: &self.configuration,
+                language: &self.language,
+                now: now(),
+            },
+            channel: self.channel,
+            signature: self.signature,
+        };
+        context.first_match(entries, credential)
     }
 }
 
@@ -586,7 +549,16 @@ pub fn view_rows(view: &TransactionView) -> Vec<(String, String)> {
                 RowValue::Value(value) => value.text(),
                 RowValue::Template(interpolated) => segments(interpolated.segments()),
                 RowValue::LabelOnly => "-".to_owned(),
-                RowValue::Image(image) => format!("<image {:?}>", image.format()),
+                RowValue::Image(Image::Data { format, .. }) => format!("<image {format:?}>"),
+                RowValue::Image(Image::Remote { url, integrity }) => format!(
+                    "<image {} {}>",
+                    url.as_str(),
+                    if integrity.is_some() {
+                        "pinned"
+                    } else {
+                        "unpinned"
+                    }
+                ),
             };
             (text(row.label()), value)
         })
