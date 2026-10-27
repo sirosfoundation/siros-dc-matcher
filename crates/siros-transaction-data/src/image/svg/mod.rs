@@ -8,6 +8,7 @@
 //! root's `width` and `height` in absolute units.
 
 mod allow;
+mod length;
 mod markup;
 mod resource;
 
@@ -136,8 +137,8 @@ pub(super) fn read(bytes: &[u8], fetched: &impl Resources) -> Result<Step<Docume
         return Err(SvgFault::NotSvg);
     }
     let size = match (
-        length(root.attribute("width")),
-        length(root.attribute("height")),
+        length::pixels(root.attribute("width")),
+        length::pixels(root.attribute("height")),
     ) {
         (None, None) => None,
         (width, height) => Some(Dimensions {
@@ -275,33 +276,3 @@ fn attribute(
     }
 }
 
-/// The pixels of an SVG length attribute in an absolute unit, rounded up; `None` for an absent
-/// attribute, a relative unit, or no number (SVG 1.1, Section 7.10; CSS 96 pixels per inch).
-fn length(value: Option<&str>) -> Option<u32> {
-    let value = value?.trim();
-    let split = value
-        .find(|c: char| !(c.is_ascii_digit() || c == '.' || c == '+' || c == '-' || c == 'e'))
-        .unwrap_or(value.len());
-    let (number, unit) = value.split_at_checked(split)?;
-    let number: f64 = number.parse().ok()?;
-    let per_unit = match unit.trim() {
-        "" | "px" => 1.0,
-        "in" => 96.0,
-        "cm" => 96.0 / 2.54,
-        "mm" => 96.0 / 25.4,
-        "pt" => 96.0 / 72.0,
-        "pc" => 16.0,
-        _ => return None,
-    };
-    let pixels = (number * per_unit).ceil();
-    if pixels.is_finite() && pixels >= 0.0 {
-        // Saturating: a size beyond u32 is over the limit either way.
-        Some(if pixels > f64::from(u32::MAX) {
-            u32::MAX
-        } else {
-            pixels as u32
-        })
-    } else {
-        None
-    }
-}

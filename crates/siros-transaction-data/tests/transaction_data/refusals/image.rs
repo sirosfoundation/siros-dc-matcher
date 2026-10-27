@@ -276,6 +276,50 @@ fn each_image_rule_is_refused_alone() {
 /// The view carries the verified bytes, and those of each resource an SVG document references,
 /// by the URL a renderer requests and the kind the host serves it as; a resource fetch accepts
 /// the resource types.
+/// An SVG document's size is its width and height in pixels, exact in decimal and rounded up:
+/// over 2048 it is refused, with the size. Values derived by hand, at 96 pixels per inch.
+#[test]
+fn an_svg_size_is_exact_in_its_unit() {
+    let sized = |width: &str, height: &str| {
+        let document = format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}"/>"#
+        );
+        outcome(&data("image/svg+xml", document.as_bytes()), None, vec![])
+    };
+    let over = |width, height| image(ImageFault::TooManyPixels(Dimensions { width, height }));
+    // (width, height, outcome)
+    let rows = [
+        ("2048", "2048px", shown(ImageFormat::Svg)),
+        ("2048.0001", "1", over(2049, 1)),
+        // A binary float reads this as 2048.
+        ("2048.00000000000000000000001", "1", over(2049, 1)),
+        ("21.35in", "1", over(2050, 1)),
+        // 21.5 inches.
+        ("54.61cm", "1", over(2064, 1)),
+        // A binary float multiplies this to above 2064.
+        ("546.1mm", "1", over(2064, 1)),
+        ("1548pt", "1", over(2064, 1)),
+        ("129pc", "1", over(2064, 1)),
+        (" +.2064e4 ", "1", over(2064, 1)),
+        ("1e999999999", "1", over(u32::MAX, 1)),
+        ("4294967296", "1", over(u32::MAX, 1)),
+        // Under one pixel and above zero: one pixel.
+        ("1e-999999999", "3000", over(1, 3000)),
+        ("0.001", "3000", over(1, 3000)),
+        // Without a size in an absolute unit, the width is 0.
+        ("-0.5in", "3000", over(0, 3000)),
+        ("5em", "3000", over(0, 3000)),
+        ("1E3", "3000", over(0, 3000)),
+        ("1.2.3", "3000", over(0, 3000)),
+        ("1e", "3000", over(0, 3000)),
+        (".", "3000", over(0, 3000)),
+        ("--1", "3000", over(0, 3000)),
+    ];
+    for (width, height, expected) in rows {
+        assert_eq!(sized(width, height), expected, "width {width:?}");
+    }
+}
+
 #[test]
 fn the_view_carries_the_verified_bytes() {
     let part = png(1, 1);
