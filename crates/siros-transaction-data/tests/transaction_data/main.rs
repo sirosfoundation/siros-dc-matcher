@@ -1,8 +1,11 @@
 //! The tests of siros-transaction-data, in one binary.
 
-mod binding;
 mod common;
+mod examples;
 mod fixtures;
 mod hashes;
+mod logos;
+mod projection;
 mod refusals;
 mod schemas;
+mod selection;

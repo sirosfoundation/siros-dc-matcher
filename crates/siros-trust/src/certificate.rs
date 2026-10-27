@@ -70,8 +70,8 @@ enum SignatureAlgorithm {
 enum SubjectKey {
     /// A P-256 key, with its SEC 1 encoding.
     P256(p256::ecdsa::VerifyingKey, Vec<u8>),
-    /// A P-384 key.
-    P384(p384::ecdsa::VerifyingKey),
+    /// A P-384 key, with its SEC 1 encoding.
+    P384(p384::ecdsa::VerifyingKey, Vec<u8>),
     /// A key of another type.
     Other,
 }
@@ -327,7 +327,16 @@ impl Certificate {
     pub fn p256_key(&self) -> Option<&[u8]> {
         match &self.key {
             SubjectKey::P256(_, sec1) => Some(sec1),
-            SubjectKey::P384(_) | SubjectKey::Other => None,
+            SubjectKey::P384(..) | SubjectKey::Other => None,
+        }
+    }
+
+    /// The SEC 1 encoding of the subject's key, when it is a P-384 key.
+    #[must_use]
+    pub fn p384_key(&self) -> Option<&[u8]> {
+        match &self.key {
+            SubjectKey::P384(_, sec1) => Some(sec1),
+            SubjectKey::P256(..) | SubjectKey::Other => None,
         }
     }
 
@@ -362,7 +371,7 @@ impl Certificate {
                 key.verify(&self.tbs, &signature)
                     .map_err(|_| IssuanceRefusal::Signature)
             }
-            (SignatureAlgorithm::EcdsaSha384, SubjectKey::P384(key)) => {
+            (SignatureAlgorithm::EcdsaSha384, SubjectKey::P384(key, _)) => {
                 let signature = p384::ecdsa::DerSignature::from_bytes(&self.signature)
                     .map_err(|_| IssuanceRefusal::SignatureEncoding)?;
                 key.verify(&self.tbs, &signature)
@@ -370,7 +379,7 @@ impl Certificate {
             }
             (
                 SignatureAlgorithm::EcdsaSha256 | SignatureAlgorithm::EcdsaSha384,
-                SubjectKey::P256(..) | SubjectKey::P384(_) | SubjectKey::Other,
+                SubjectKey::P256(..) | SubjectKey::P384(..) | SubjectKey::Other,
             ) => Err(IssuanceRefusal::IssuerKey),
         }
     }
@@ -419,9 +428,12 @@ impl SubjectKey {
                     .map_err(|_| PublicKeyFault::P256)?;
                 Ok(Self::P256(key, point.to_vec()))
             }
-            Some(Ok(SECP384R1)) => p384::ecdsa::VerifyingKey::from_sec1_bytes(point()?)
-                .map(Self::P384)
-                .map_err(|_| PublicKeyFault::P384),
+            Some(Ok(SECP384R1)) => {
+                let point = point()?;
+                let key = p384::ecdsa::VerifyingKey::from_sec1_bytes(point)
+                    .map_err(|_| PublicKeyFault::P384)?;
+                Ok(Self::P384(key, point.to_vec()))
+            }
             Some(Ok(_) | Err(_)) | None => Ok(Self::Other),
         }
     }

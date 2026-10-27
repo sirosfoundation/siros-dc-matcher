@@ -10,12 +10,14 @@
 
 mod digest;
 mod display;
+mod host;
 mod mdoc;
 mod nym_request;
 mod offers;
 mod refusals;
 mod sd_jwt;
 mod seed;
+mod transactions;
 mod trust;
 mod usable;
 mod verifier;

@@ -157,22 +157,3 @@ impl TrustChain {
         &self.0
     }
 }
-
-/// A string of the `transaction_data` parameter, exactly as the request carried it (Section
-/// 5.1).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct TransactionDataItem(String);
-
-impl TransactionDataItem {
-    /// The string `text`, as a request carries it.
-    #[must_use]
-    pub fn new(text: String) -> Self {
-        Self(text)
-    }
-
-    /// The string.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}

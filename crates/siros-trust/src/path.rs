@@ -123,8 +123,8 @@ struct Signer<'c> {
 }
 
 impl IssuerChain {
-    /// Path validation (TR3): whether the chain's first certificate has a path to one of
-    /// `anchors` at `time`.
+    /// Path validation (TR3): the anchor of `anchors` at which the chain's first certificate
+    /// has a path at `time`.
     ///
     /// An anchor byte-identical to the chain's first certificate admits it. Otherwise each
     /// prefix of the chain is tried, shortest first, and at each the anchors whose subject its
@@ -134,11 +134,11 @@ impl IssuerChain {
     /// # Errors
     ///
     /// [`PathRefusal`]: why the deepest attempt fails.
-    pub fn validate_path(
+    pub fn validate_path<'a>(
         &self,
-        anchors: &[Certificate],
+        anchors: &'a [Certificate],
         time: DateTime,
-    ) -> Result<(), PathRefusal> {
+    ) -> Result<&'a Certificate, PathRefusal> {
         let certificates: Vec<&Certificate> = self.certificates().collect();
         let mut position = 0;
         let mut certificate = self.leaf();
@@ -148,11 +148,13 @@ impl IssuerChain {
         loop {
             let at = ChainIndex::new(position);
             on_path(certificate, OnPath::Chain(at), time)?;
-            if position == 0 && anchors.contains(certificate) {
-                return Ok(());
+            if position == 0 {
+                if let Some(anchor) = anchors.iter().find(|anchor| *anchor == certificate) {
+                    return Ok(anchor);
+                }
             }
             let refusal = match anchored(certificate, at, below, anchors, time) {
-                Ok(()) => return Ok(()),
+                Ok(anchor) => return Ok(anchor),
                 Err(refusal) => refusal,
             };
             let next = certificates.get(position + 1).copied();
@@ -183,17 +185,17 @@ fn on_path(certificate: &Certificate, position: OnPath, time: DateTime) -> Resul
     }
 }
 
-/// Whether an anchor signs `certificate`, at `at` on the chain above `below` non-self-issued
+/// The anchor that signs `certificate`, at `at` on the chain above `below` non-self-issued
 /// intermediate certificates; else the refusal of the first anchor tried, or `None` when no
 /// anchor has the subject `certificate` names as its issuer.
-fn anchored(
+fn anchored<'a>(
     certificate: &Certificate,
     at: ChainIndex,
     below: usize,
-    anchors: &[Certificate],
+    anchors: &'a [Certificate],
     time: DateTime,
-) -> Result<(), Option<PathRefusal>> {
-    let mut named: Vec<(CertificateIndex, &Certificate)> = anchors
+) -> Result<&'a Certificate, Option<PathRefusal>> {
+    let mut named: Vec<(CertificateIndex, &'a Certificate)> = anchors
         .iter()
         .enumerate()
         .filter(|(_, anchor)| certificate.names_as_issuer(anchor))
@@ -214,7 +216,7 @@ fn anchored(
         let signs =
             on_path(anchor, signer.position, time).and_then(|()| link(certificate, at, signer));
         match signs {
-            Ok(()) => return Ok(()),
+            Ok(()) => return Ok(anchor),
             Err(refusal) => {
                 if first.is_none() {
                     first = Some(refusal);

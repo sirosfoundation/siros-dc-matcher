@@ -16,13 +16,14 @@ use siros_presentation::{
     plan, AdditionIndex, Fetches, Fulfilment, OfferIndex, PlanInput, PlanStep, Planned,
     PresentationError, Response, Selection, SignId, Subset,
 };
-use siros_transaction_data::{Amr, Factor, Inherence, Possession};
+use siros_transaction_data::{Amr, Configuration, Factor, HeldMetadata, Inherence, Possession};
 use siros_trust::TrustStore;
 use siros_wallet_state::{CredentialId, WalletState};
 use siros_zkp_req_nym_auth::system::NymAuthSystem;
 use siros_zkp_req_nym_auth::testing::{self, Issuer, Spec, TestProver, SEED};
 use siros_zkp_req_nym_auth::verifier_id::VerifierIdForm;
 
+use crate::host::{holding_absent, issuer_display, label_text};
 use crate::verifier::{b64, Rng, NOW};
 
 /// The holder's key, nym_auth's test device key, which every credential is bound to.
@@ -262,12 +263,16 @@ impl Held {
 pub struct Wallet {
     pub credentials: Vec<Credential>,
     pub display: DisplayCache,
-    pub locales: Vec<Locale>,
+    pub language: Locale,
+    pub configuration: Configuration,
     pub systems: Vec<NymAuthSystem>,
     pub verifier_id: VerifierIdForm,
     pub background: Vec<CredentialId>,
     pub key_factors: Vec<(siros_wallet_state::KeyId, Amr)>,
-    pub documents: Vec<(String, FetchResponse)>,
+    /// The transaction metadata the host holds.
+    pub metadata: HeldMetadata,
+    /// The images the host answers fetches with, by URL.
+    pub images: Vec<(String, FetchResponse)>,
     pub trust: TrustStore,
     state: WalletState,
 }
@@ -340,13 +345,15 @@ impl Wallet {
             .collect();
         Self {
             credentials,
-            display: DisplayCache::new(Vec::new(), Vec::new()).unwrap(),
-            locales: vec![Locale::parse("en").unwrap()],
+            display: issuer_display(),
+            language: Locale::parse("en").unwrap(),
+            configuration: Configuration::default(),
             systems: NymAuthSystem::ALL.to_vec(),
             verifier_id: VerifierIdForm::X509SanDns,
             background: Vec::new(),
             key_factors,
-            documents: Vec::new(),
+            metadata: holding_absent(&[VCT]),
+            images: Vec::new(),
             trust: TrustStore::parse("[]").unwrap(),
             state,
         }
@@ -373,7 +380,9 @@ impl Wallet {
             trust: &self.trust,
             records: self.state.presentations(),
             display: &self.display,
-            locales: &self.locales,
+            language: &self.language,
+            configuration: &self.configuration,
+            held: &self.metadata,
             systems: &self.systems,
             verifier_id: self.verifier_id,
             background: &self.background,
@@ -392,7 +401,7 @@ impl Wallet {
                 Ok(PlanStep::Ready(_)) | Err(_) => return fetches,
             };
             let response = self
-                .documents
+                .images
                 .iter()
                 .find(|(url, _)| url == fetch.url().as_str())
                 .map(|(_, r)| r.clone())
@@ -528,14 +537,13 @@ pub fn view_texts(view: &siros_presentation::ConsentView<'_>) -> Vec<String> {
                     }
                 }
             }
-            for transaction in credential.transactions() {
-                out.push(transaction.affirmative_action_label().as_str().to_owned());
-                for row in transaction.rows() {
-                    out.push(row.label().as_str().to_owned());
-                    match row.value() {
-                        RowValue::Text(t) | RowValue::Number(t) => out.push(t.as_str().to_owned()),
-                        RowValue::Image(url) => out.push(url.as_str().to_owned()),
-                        _ => {}
+            if let Some(transaction) = credential.transaction() {
+                let view = transaction.view();
+                out.extend(view.affirmative_action_label().map(label_text));
+                for row in view.rows() {
+                    out.push(label_text(row.label()));
+                    if let RowValue::Value(value) = row.value() {
+                        out.push(value.text());
                     }
                 }
             }

@@ -70,7 +70,7 @@ fn wallet(background: bool) -> Wallet {
         nym,
         Held::new(4, "dc+sd-jwt", sd_jwt(VCT, &[("given_name", json!("Max"))])),
     ]);
-    wallet.documents.push((VCT.to_owned(), type_metadata()));
+    wallet.metadata = crate::host::holding(vec![(VCT, type_metadata())]);
     if background {
         wallet = wallet.all_in_background();
     }

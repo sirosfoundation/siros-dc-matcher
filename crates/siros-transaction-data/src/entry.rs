@@ -1,81 +1,106 @@
-//! An entry of the `transaction_data` request parameter (T1; OpenID4VP 1.0, Section 5.1).
+//! An entry of the `transaction_data` request parameter (T1; OpenID4VP 1.0, Section 5.1; PaSO
+//! Core, Section 7.1; PaSO Proof Metadata, Section 5.1).
 
 use siros_codec::base64url;
-use siros_codec::date::DateTime;
 use siros_codec::json::Json;
+use siros_codec::member::MemberFault;
 use siros_credential::Format;
-use siros_dcql::{CredentialQuery, DcqlQuery, HolderBinding, QueryId};
+use siros_dcql::{DcqlQuery, HolderBinding, QueryId};
 use siros_oid4vp::TransactionDataItem;
 
-use crate::binding::Binding;
-use crate::error::{MemberPath, TransactionDataError};
+use crate::error::{EntryMember, EntryPosition, EntryRefusal};
+use crate::hash::Accepted;
 use crate::json::{self, Fields};
-use crate::kind::{SupportedType, TransactionType};
+use crate::sources::AdHocMetadata;
+use crate::type_id::{EmptyTypeId, TypeId};
 
-/// A `transaction_data` entry of a supported type, its members parsed into typed values.
+/// A `transaction_data` entry: the string the request carried and its members, read.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Entry {
+    position: EntryPosition,
     raw: TransactionDataItem,
+    type_id: TypeId,
     credential_ids: Vec<QueryId>,
-    body: Box<dyn TransactionType>,
+    payload: Json,
+    metadata: Option<AdHocMetadata>,
+    hashes: Accepted,
 }
 
-/// The paths of the members every entry has.
-const TYPE: MemberPath = MemberPath::new("type");
-const CREDENTIAL_IDS: MemberPath = MemberPath::new("credential_ids");
-
 impl Entry {
-    /// The entry `raw`, a string of the request's `transaction_data` array, against the
-    /// request's `query`, at the time `now`.
+    /// The entry `raw` at `position` of the request's `transaction_data`, against the request's
+    /// `query`.
     ///
     /// `raw` is base64url of a JSON object that repeats no member name in any object, with a
-    /// string `type` and a non-empty array `credential_ids` of Credential Query ids of
-    /// `query`. Its other members belong to its type, which refuses one it does not define.
-    /// Each Credential Query named is of the format of the credentials that can authorize the
-    /// type, and an SD-JWT VC query requires cryptographic holder binding (B.3.3). A rule of the
-    /// type that depends on the time holds at `now`.
+    /// non-empty string `type`, a non-empty array `credential_ids` of Credential Query ids of
+    /// `query`, an object `payload`, an optional string `metadata`, and an optional
+    /// `transaction_data_hashes_alg`. No SD-JWT VC query it names sets
+    /// `require_cryptographic_holder_binding` to `false` (B.3).
     ///
     /// # Errors
     ///
-    /// [`TransactionDataError`]: the first rule `raw` breaks.
+    /// [`EntryRefusal`]: the first rule `raw` breaks.
     pub fn parse(
+        position: EntryPosition,
         raw: &TransactionDataItem,
         query: &DcqlQuery,
-        now: DateTime,
-    ) -> Result<Self, TransactionDataError> {
-        let bytes = base64url::decode(raw.as_str()).map_err(TransactionDataError::NotBase64url)?;
-        let text = String::from_utf8(bytes)
-            .map_err(|error| TransactionDataError::NotUtf8(error.utf8_error()))?;
-        let object =
-            match Json::parse_unique(text.as_bytes()).map_err(TransactionDataError::NotJson)? {
-                Json::Object(members) => members,
-                _ => return Err(TransactionDataError::NotJsonObject),
-            };
-        let mut fields = Fields::new(object);
-        let identifier = json::text(fields.require("type", TYPE)?, TYPE)?;
-        let named = credential_ids(fields.require("credential_ids", CREDENTIAL_IDS)?)?;
-        let body = SupportedType::named(&identifier)
-            .ok_or(TransactionDataError::UnsupportedType)?
-            .parse(fields, now)?;
-        let credential_ids = named
-            .iter()
-            .map(|id| {
-                let credential = query
-                    .credential(id)
-                    .ok_or(TransactionDataError::UnknownCredentialId)?;
-                authorizes(credential, body.format()).map(|()| credential.id().clone())
+    ) -> Result<Self, EntryRefusal> {
+        let bytes = base64url::decode(raw.as_str()).map_err(EntryRefusal::NotBase64url)?;
+        let text =
+            String::from_utf8(bytes).map_err(|error| EntryRefusal::NotUtf8(error.utf8_error()))?;
+        let mut fields = match Json::parse_unique(text.as_bytes()).map_err(EntryRefusal::NotJson)? {
+            Json::Object(members) => Fields::new(members),
+            _ => return Err(EntryRefusal::NotJsonObject),
+        };
+        let member = |member| move |fault| EntryRefusal::Member(member, fault);
+        let type_id = fields
+            .require(EntryMember::Type.as_str())
+            .and_then(json::text)
+            .map_err(member(EntryMember::Type))?;
+        let type_id = TypeId::parse(&type_id).map_err(|EmptyTypeId| EntryRefusal::TypeEmpty)?;
+        let credential_ids = credential_ids(&mut fields, query)?;
+        let payload = fields
+            .require(EntryMember::Payload.as_str())
+            .and_then(|payload| match payload {
+                Json::Object(_) => Ok(payload),
+                _ => Err(MemberFault::WrongType),
             })
-            .collect::<Result<_, _>>()?;
+            .map_err(member(EntryMember::Payload))?;
+        let metadata = fields
+            .optional(EntryMember::Metadata.as_str(), json::text)
+            .map_err(member(EntryMember::Metadata))?
+            .map(AdHocMetadata::new);
+        let hashes = Accepted::parse(fields.take(EntryMember::HashesAlg.as_str()))
+            .map_err(EntryRefusal::HashesAlg)?;
+        if let Some(unknown) = fields.first_left() {
+            return Err(EntryRefusal::MemberUnknown(unknown.to_owned()));
+        }
         Ok(Self {
+            position,
             raw: raw.clone(),
+            type_id,
             credential_ids,
-            body,
+            payload,
+            metadata,
+            hashes,
         })
+    }
+
+    /// The entry's position in the request's `transaction_data`.
+    #[must_use]
+    pub fn position(&self) -> EntryPosition {
+        self.position
+    }
+
+    /// The string the request carried.
+    #[must_use]
+    pub fn raw(&self) -> &TransactionDataItem {
+        &self.raw
     }
 
     /// The `type` value.
     #[must_use]
-    pub fn transaction_type(&self) -> SupportedType {
-        self.body.identifier()
+    pub fn type_id(&self) -> &TypeId {
+        &self.type_id
     }
 
     /// `credential_ids`: the Credential Query ids, at least one, in the verifier's order.
@@ -90,45 +115,51 @@ impl Entry {
         self.credential_ids.contains(id)
     }
 
-    /// The string the request carried.
-    pub(crate) fn raw(&self) -> &TransactionDataItem {
-        &self.raw
+    /// The `payload` object.
+    pub(crate) fn payload(&self) -> &Json {
+        &self.payload
     }
 
-    /// The type of the entry.
-    pub(crate) fn body(&self) -> &dyn TransactionType {
-        self.body.as_ref()
+    /// The ad-hoc metadata JWT, which the wallet verifies and the credential picker cannot.
+    #[must_use]
+    pub fn metadata(&self) -> Option<&AdHocMetadata> {
+        self.metadata.as_ref()
     }
 
-    /// What the entry binds into the presentation that authorizes it.
-    pub(crate) fn binding(&self) -> Binding<'_> {
-        self.body.binding()
+    /// The algorithms of the entry's hash.
+    pub(crate) fn hashes(&self) -> &Accepted {
+        &self.hashes
     }
 }
 
-/// Refuses a Credential Query whose credentials cannot authorize a type of the format
-/// `format`: a query of another format, or an SD-JWT VC query without cryptographic holder
-/// binding (B.3.3).
-fn authorizes(credential: &CredentialQuery, format: Format) -> Result<(), TransactionDataError> {
-    if *credential.format() != format.identifier() {
-        return Err(TransactionDataError::QueryFormat);
-    }
-    if *credential.format() == Format::SdJwtVc.identifier()
-        && credential.holder_binding() == HolderBinding::Optional
-    {
-        return Err(TransactionDataError::HolderBindingNotRequired);
-    }
-    Ok(())
-}
-
-/// `credential_ids`: a non-empty array of strings (Section 5.1).
-fn credential_ids(value: Json) -> Result<Vec<String>, TransactionDataError> {
-    let ids = json::array(value, CREDENTIAL_IDS)?
+/// `credential_ids`: a non-empty array of Credential Query ids of `query` (Section 5.1); an
+/// SD-JWT VC query among them requires holder binding (B.3).
+fn credential_ids(fields: &mut Fields, query: &DcqlQuery) -> Result<Vec<QueryId>, EntryRefusal> {
+    let member = |fault| EntryRefusal::Member(EntryMember::CredentialIds, fault);
+    let ids = fields
+        .require(EntryMember::CredentialIds.as_str())
+        .and_then(json::array)
+        .map_err(member)?
         .into_iter()
-        .map(|id| json::text(id, CREDENTIAL_IDS))
+        .map(|id| json::text(id).map_err(member))
         .collect::<Result<Vec<_>, _>>()?;
     if ids.is_empty() {
-        return Err(TransactionDataError::InvalidValue(CREDENTIAL_IDS));
+        return Err(EntryRefusal::CredentialIdsEmpty);
     }
-    Ok(ids)
+    ids.into_iter()
+        .map(|id| {
+            let credential = query
+                .credentials()
+                .iter()
+                .find(|credential| credential.id().as_str() == id)
+                .ok_or(EntryRefusal::CredentialIdUnknown(id))?;
+            let sd_jwt = *credential.format() == Format::SdJwtVc.identifier();
+            if sd_jwt && credential.holder_binding() == HolderBinding::Optional {
+                return Err(EntryRefusal::HolderBindingNotRequired(
+                    credential.id().clone(),
+                ));
+            }
+            Ok(credential.id().clone())
+        })
+        .collect()
 }

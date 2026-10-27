@@ -7,7 +7,7 @@ use siros_dcql::{ClaimPath, PathComponent};
 use crate::cache::DisplayCache;
 use crate::claims::{describes, ClaimDescription};
 use crate::error::DisplayError;
-use crate::locale::{choose, Locale};
+use crate::locale::{lookup, Locale};
 use crate::text::DisplayText;
 use crate::type_metadata::TypeMetadata;
 
@@ -55,21 +55,22 @@ pub enum DisplayValue {
     Group(Vec<ClaimRow>),
 }
 
-/// The claim descriptions and preferences that label the rows of one credential.
+/// The claim descriptions and the language that label the rows of one credential.
 struct Labels<'a> {
     issuer: &'a [ClaimDescription],
     types: Vec<&'a TypeMetadata>,
-    preferences: &'a [Locale],
+    language: &'a Locale,
 }
 
 impl DisplayCache {
-    /// The rows of the claims `pointers` select in `credential`, one per pointer, for the
-    /// user's `preferences`, most preferred first.
+    /// The rows of the claims `pointers` select in `credential`, one per pointer, in the
+    /// wallet's `language`.
     ///
-    /// [`choose`] takes a row's label from the nearest type of the credential's Type Metadata
-    /// with a labelled claim description that addresses the row's path. Without a type label it
-    /// takes it from the claims description of the credential's configuration that addresses the
-    /// path, the fallback (D3, OpenID4VCI 1.0, Section 12.2.4). Without any label it is the
+    /// [`lookup`] takes a row's label from the nearest type of the credential's Type Metadata
+    /// with a labelled claim description that addresses the row's path. Without a type label
+    /// for the language it takes it from the claims description of the credential's
+    /// configuration that addresses the path, the fallback (D3, OpenID4VCI 1.0, Section
+    /// 12.2.4). Without any label it is the
     /// path's last key. A pointer with a `null` gives a [`DisplayValue::List`] of the values it selects. An
     /// object gives a [`DisplayValue::Group`] of rows, labelled at the member's path; an
     /// array's elements are at its path extended with `null`. A byte string shows its length
@@ -84,15 +85,15 @@ impl DisplayCache {
         &self,
         credential: &Credential,
         pointers: &[ClaimPath],
-        preferences: &[Locale],
+        language: &Locale,
     ) -> Result<Vec<ClaimRow>, DisplayError> {
         let labels = Labels {
             issuer: self
-                .issued(credential)
+                .issuer_metadata(credential)
                 .map(|metadata| metadata.claims())
                 .unwrap_or_default(),
             types: self.types_of(credential),
-            preferences,
+            language,
         };
         pointers
             .iter()
@@ -137,11 +138,8 @@ impl Labels<'_> {
                     .find_map(|claim| claim.labels.as_deref())
             })
             .unwrap_or_default();
-        let candidates = match types {
-            [] => issuer,
-            typed => typed,
-        };
-        if let Some(label) = choose(self.preferences, candidates) {
+        if let Some(label) = lookup(self.language, types).or_else(|| lookup(self.language, issuer))
+        {
             return Ok(label.text.clone());
         }
         let key = path

@@ -1,4 +1,5 @@
-//! Language tags and the locale choice (D2).
+//! Language tags and the locale function (D2): RFC 4647 Lookup with the wallet's language, then
+//! the entry without a locale (PaSO View, Section 4).
 
 use std::fmt;
 use std::hash::{Hash, Hasher};
@@ -50,17 +51,6 @@ impl Locale {
     /// The tag as given.
     pub fn as_str(&self) -> &str {
         &self.0
-    }
-
-    /// The primary language subtag: the first subtag.
-    pub fn primary_language(&self) -> &str {
-        self.0.split('-').next().unwrap_or_default()
-    }
-
-    /// Whether the two tags share their primary language subtag.
-    fn same_language(&self, other: &Self) -> bool {
-        self.primary_language()
-            .eq_ignore_ascii_case(other.primary_language())
     }
 }
 
@@ -206,22 +196,42 @@ impl<T: Localized + ?Sized> Localized for &T {
     }
 }
 
-/// The entry of the user's `preferences`, most preferred first: for each preference in order,
-/// the first entry with its exact tag, else the first entry with its primary language. `None`
-/// when no entry has the language of a preference.
-pub fn preferred<'a, T: Localized>(preferences: &[Locale], entries: &'a [T]) -> Option<&'a T> {
-    preferences.iter().find_map(|wanted| {
-        let tagged = |matches: &dyn Fn(&Locale) -> bool| {
-            entries
-                .iter()
-                .find(|entry| entry.locale().is_some_and(matches))
-        };
-        tagged(&|tag| tag == wanted).or_else(|| tagged(&|tag| tag.same_language(wanted)))
-    })
+/// The entry of `entries` to show in the wallet's `language` (D2; PaSO View, Section 4): the
+/// entry RFC 4647 Lookup (Section 3.4) finds with `language` as the language range and the
+/// entries' locales as the available tags, else the first entry without a locale. `None` when
+/// neither exists.
+///
+/// Lookup tries the range whole, then truncated one subtag at a time from the end. Tags compare
+/// without regard to ASCII case.
+pub fn lookup<'a, T: Localized>(language: &Locale, entries: &'a [T]) -> Option<&'a T> {
+    language
+        .lookup_ranges()
+        .find_map(|range| {
+            entries.iter().find(|entry| {
+                entry
+                    .locale()
+                    .is_some_and(|tag| tag.as_str().eq_ignore_ascii_case(range))
+            })
+        })
+        .or_else(|| entries.iter().find(|entry| entry.locale().is_none()))
 }
 
-/// The entry to show for the user's `preferences`, most preferred first (D2): the
-/// [`preferred`] entry, else the first entry. `None` only for no entry.
-pub fn choose<'a, T: Localized>(preferences: &[Locale], entries: &'a [T]) -> Option<&'a T> {
-    preferred(preferences, entries).or_else(|| entries.first())
+impl Locale {
+    /// The language ranges RFC 4647 Lookup tries for this tag, longest first (Section 3.4).
+    fn lookup_ranges(&self) -> impl Iterator<Item = &str> {
+        let tag = self.0.as_str();
+        let mut next = Some(tag);
+        std::iter::from_fn(move || {
+            let range = next?;
+            next = truncated(range);
+            Some(range)
+        })
+    }
+}
+
+/// `range` without its last subtag; `None` for a range of one subtag. RFC 4647 also drops a
+/// singleton the cut leaves at the end; no well-formed tag ends in one, so that range matches
+/// nothing either way.
+fn truncated(range: &str) -> Option<&str> {
+    range.rsplit_once('-').map(|(rest, _)| rest)
 }

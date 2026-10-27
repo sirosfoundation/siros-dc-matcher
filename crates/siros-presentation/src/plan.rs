@@ -1,19 +1,6 @@
 //! Phase 1: the plan of a verified request over the wallet's usable credentials, and its consent
 //! view.
 
-/// The value of the planning step `step`, or the fetch it waits for, which the enclosing
-/// function returns at once.
-macro_rules! fetched {
-    ($step:expr) => {
-        match $step {
-            siros_transaction_data::Step::Fetch(fetch) => {
-                return Ok(siros_transaction_data::Step::Fetch(fetch))
-            }
-            siros_transaction_data::Step::Done(value) => value,
-        }
-    };
-}
-
 mod digest;
 mod fetches;
 mod proof;
@@ -26,7 +13,9 @@ use siros_codec::date::DateTime;
 use siros_credential::{Credential, UsableCredential};
 use siros_display::{DisplayCache, Locale};
 use siros_oid4vp::{ErrorCode, Fetch, Submission, VerifiedRequest};
-use siros_transaction_data::{Amr, Step, TransactionDataError};
+use siros_transaction_data::{
+    fetched, Amr, Configuration, HeldMetadata, Step, TransactionDataError,
+};
 use siros_trust::TrustStore;
 use siros_wallet_state::{CredentialId, KeyId, PresentationRecord};
 use siros_zkp_req_nym_auth::policy::RequestRefusal;
@@ -37,7 +26,7 @@ use siros_zkp_req_nym_auth::verifier_id::VerifierIdForm;
 use crate::display_rule::TransactionData;
 use crate::error::PresentationError;
 use crate::matching::{Asked, Matching};
-use crate::offers::{Offers, Refusal};
+use crate::offers::Offers;
 use transactions::{Transactions, Wallet};
 use view::Sources;
 
@@ -46,9 +35,10 @@ pub use fetches::Fetches;
 pub(crate) use proof::nym_answer;
 pub use proof::{OptionRefusal, Unproven};
 pub use seed::NoSeed;
-pub use transactions::EntryPosition;
-pub(crate) use transactions::{offered, Bound, Offered};
-pub use view::{AdditionView, ConsentView, CredentialView, MemberView, OfferView, Shown};
+pub(crate) use transactions::{offered, BoundEntry, Offered};
+pub use view::{
+    AdditionView, BoundTransaction, ConsentView, CredentialView, MemberView, OfferView, Shown,
+};
 
 /// What a plan is made from. Phase 2 makes the plan again from the same input.
 #[derive(Clone, Copy)]
@@ -63,8 +53,13 @@ pub struct PlanInput<'a> {
     pub records: &'a [PresentationRecord],
     /// The display metadata the host holds.
     pub display: &'a DisplayCache,
-    /// The user's locales, most preferred first.
-    pub locales: &'a [Locale],
+    /// The wallet's language, which every display array is shown in (PaSO View, Section 4).
+    pub language: &'a Locale,
+    /// The transaction data types the host configures.
+    pub configuration: &'a Configuration,
+    /// The transaction metadata the host holds: signed credential metadata, Type Metadata and
+    /// key sets. The plan fetches none of it.
+    pub held: &'a HeldMetadata,
     /// The nym_auth systems whose circuits the host loaded, in the wallet's order of
     /// preference.
     pub systems: &'a [NymAuthSystem],
@@ -82,8 +77,8 @@ pub struct PlanInput<'a> {
 
 /// What a step of planning gives.
 pub enum PlanStep<'a> {
-    /// A document for the host to fetch. Its response goes to [`Fetches::answer`], and the plan
-    /// is made again.
+    /// An image for the host to fetch (PaSO View, Section 3, `image`). Its response goes to
+    /// [`Fetches::answer`], and the plan is made again.
     Fetch(Fetch),
     /// The plan.
     Ready(Box<Planned<'a>>),
@@ -100,12 +95,13 @@ pub struct Planned<'a> {
 
 /// The plan of `input` (phase 1).
 ///
-/// The request's `transaction_data` entries are read at `now`. The credentials usable at `now`
-/// are matched (A1, A2); a nym_auth candidate answers the first option with a usable pair whose
-/// answer holds: a usable attestation at `now`, its `secret_seed` from the delivered auxiliary
-/// data, and the option's assertions (N3, N4). Of the offers (A3), those that bind every entry
-/// are kept (T4). The view shows each member's card and claim rows or verified proof statement
-/// rows, and the transactions bound to it.
+/// The credentials usable at `now` are matched (A1, A2); a nym_auth candidate answers the first
+/// option with a usable pair whose answer holds: a usable attestation at `now`, its
+/// `secret_seed` from the delivered auxiliary data, and the option's assertions (N3, N4). Each
+/// candidate of a query a `transaction_data` entry targets takes its first compatible entry, and
+/// one with none is excluded (PaSO Core, Section 7.4.2). The offers (A3) are those of the other
+/// candidates. The view shows each member's card and claim rows or verified proof statement
+/// rows, and the transaction bound to it (T4).
 ///
 /// # Errors
 ///
@@ -123,27 +119,21 @@ fn planned<'a>(input: &PlanInput<'a>) -> Result<Step<Planned<'a>>, PresentationE
     let nym_auth = NymAuthRequest::new(request, input.verifier_id);
     let policy = nym_auth.as_ref().map(drop).map_err(|refusal| *refusal);
     let answered = answered(input, policy)?;
-    let transactions = fetched!(Transactions::read(
-        request,
-        &answered,
-        input.fetches,
-        input.now
-    )?);
+    let transactions = fetched!(Transactions::read(input, &answered)?);
     let offers = offers(&answered, &transactions)?;
     let sources = Sources {
         answered: &answered,
         transactions: &transactions,
         display: input.display,
-        locales: input.locales,
+        language: input.language,
         background: input.background,
-        fetched: input.fetches.fetched(),
         transaction_data: if request.transaction_data().is_empty() {
             TransactionData::Absent
         } else {
             TransactionData::Carried
         },
     };
-    let views = fetched!(view::offer_views(&offers, &sources)?);
+    let views = view::offer_views(&offers, &sources)?;
     // A request that is no nym_auth request has no `verifier_id`.
     let verifier_id = nym_auth
         .as_ref()
@@ -197,31 +187,26 @@ fn answered<'a>(
     }
 }
 
-/// The offers of `answered` whose credentials bind every entry of `transactions` (T4).
+/// The offers of `answered` over the candidates the first match of `transactions` leaves.
 ///
 /// # Errors
 ///
-/// [`PresentationError`] when no offer remains: the first binding refused, or
-/// [`TransactionDataError::CredentialUnavailable`] for an offer that cannot carry every entry,
-/// whichever came first; an entry whose queries no credential answers; or why the request has
-/// no offer.
-fn offers<'a>(
-    answered: &Wallet<'a>,
-    transactions: &Transactions<'a>,
+/// [`PresentationError`] when no offer remains:
+/// [`TransactionDataError::CredentialUnavailable`] when the queries the entries target have no
+/// candidate, else why the request has no offer.
+fn offers(
+    answered: &Wallet<'_>,
+    transactions: &Transactions<'_>,
 ) -> Result<Offers, PresentationError> {
-    let entries = transactions.carriers(answered);
-    let (offers, refusal) = Offers::of(answered, &entries, |members| {
-        transactions.bind(answered, members).map(drop)
+    let offers = Offers::of(answered, |query, candidate| {
+        transactions.eligible(query, candidate)
     });
     if !offers.offers().is_empty() {
         return Ok(offers);
     }
-    match refusal {
-        Some(Refusal::Refused(refusal)) => return Err(refusal),
-        Some(Refusal::Uncarried) => return Err(TransactionDataError::CredentialUnavailable.into()),
-        None => {}
+    if transactions.unavailable() {
+        return Err(TransactionDataError::CredentialUnavailable.into());
     }
-    transactions.available(answered)?;
     Err(answered.failure().into())
 }
 

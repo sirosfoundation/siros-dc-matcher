@@ -29,10 +29,10 @@ pub mod client_id;
 pub mod error_code;
 pub mod handover;
 pub mod protocol;
+mod request;
 pub mod semantic;
 pub mod unverified;
 
-#[cfg(feature = "crypto")]
 pub mod fetch;
 #[cfg(feature = "crypto")]
 mod form;
@@ -56,23 +56,25 @@ pub use protocol::Protocol;
 pub use semantic::{Person, SemanticIdError, SemanticIdentifier};
 pub use unverified::{diagnose, CompactFault, NoQuery, PayloadFault, UnverifiedRequest};
 
-#[cfg(feature = "crypto")]
-pub use fetch::{BodyLimit, Fetch, FetchResponse, HttpStatus, HttpsUrl, MediaType, Method};
+pub use fetch::{
+    BodyLimit, Fetch, FetchResponse, HttpStatus, HttpsUrl, MediaType, Method, Redirects,
+};
 #[cfg(feature = "crypto")]
 pub use intake::{
     AttestationClaim, AttestationFault, ChainFault, ClaimsFault, Coordinate, Effect, EffectResult,
     FormFault, IntakeError, IntakeState, JsonParameter, JwkFault, JwsError, JwsFault, KeyMaterial,
     LeafKeyFault, Step, Trust, TrustAnswer, TrustSubject, Verdict, VerifierInfoRule,
 };
+pub use request::{RequestSignature, ResponseMode, TransactionDataItem};
 #[cfg(feature = "crypto")]
 pub use response::{
     concat_kdf, cose_kdf, read_reply, ContentKey, EncryptionFault, Presentation, RedirectUri,
     ReplyFault, ResponseError, Submission, VpToken,
 };
 #[cfg(feature = "crypto")]
-pub use values::{AttestationIssuer, Kid, Nonce, Origin, State, TransactionDataItem, TrustChain};
+pub use values::{AttestationIssuer, Kid, Nonce, Origin, State, TrustChain};
 #[cfg(feature = "crypto")]
 pub use verified::{
     AccessCertificate, AttestationFormat, CertificateDer, ContentEncryption, Encryption,
-    ResponseMode, VerifiedRequest, VerifierView,
+    VerifiedRequest, VerifierView,
 };

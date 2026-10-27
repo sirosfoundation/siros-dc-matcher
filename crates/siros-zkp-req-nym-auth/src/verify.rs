@@ -261,6 +261,7 @@ pub fn verify(
     let chain = IssuerChain::new(checked.signer.certificate().clone(), Vec::new());
     chain
         .validate_path(input.trust_anchors, input.now)
+        .map(drop)
         .map_err(|refusal| Rejection::IssuerKeySet(IssuerKeySetError::Untrusted(refusal)))?;
     let (earliest, cutoff) = checked
         .bounds

@@ -1,7 +1,7 @@
 [package]
 name = "siros-transaction-data"
 version = "0.11.0"
-description = "OpenID4VP transaction data for the SIROS wallet core: entries, the EC TS12 SCA types, their bindings into a presentation, and their display"
+description = "OpenID4VP transaction data for the SIROS wallet core on the PaSO model: type definitions and their sources, payload conformance, images, generic rendering, selection and the KB-JWT binding"
 publish = false
 edition.workspace = true
 license.workspace = true
@@ -9,7 +9,26 @@ repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
 
+[features]
+default = ["wallet"]
+# The wallet's selection: signed and ad-hoc metadata JWTs verified against the trust store,
+# Type Metadata and key sets the host holds, and the credentials' own chains. Without it the
+# crate holds what the credential picker runs over a registration, and links no X.509, ECDSA or
+# trust code.
+wallet = [
+    "dep:p256",
+    "dep:p384",
+    "dep:siros-trust",
+    "dep:siros-wallet-state",
+    "siros-credential/chain",
+    "siros-display/credential",
+]
+
 [dependencies]
+p256 = { version = "0.13.2", default-features = false, features = ["ecdsa", "alloc"], optional = true }
+p384 = { version = "0.13.1", default-features = false, features = ["ecdsa", "alloc"], optional = true }
+# SVG documents, read for their size and the URLs they reference.
+roxmltree = "0.20.0"
 rustc-hash = { workspace = true }
 serde = { workspace = true }
 # `raw_value` gives each JSON value as its text, which keeps numbers as the verifier wrote them.
@@ -19,10 +38,17 @@ siros-codec = { workspace = true, features = ["json"] }
 siros-credential = { workspace = true }
 siros-dcql = { workspace = true }
 siros-display = { workspace = true }
-siros-oid4vp = { workspace = true, features = ["crypto"] }
+siros-oid4vp = { workspace = true }
+siros-trust = { workspace = true, features = ["chain"], optional = true }
+siros-wallet-state = { workspace = true, optional = true }
+# Label lengths in extended grapheme clusters (UAX #29). 1.13 needs Rust 1.85.
+unicode-segmentation = "~1.12.0"
 
 [dev-dependencies]
 # The TS12 schemas as the oracle of the payload parsers. Only the validator: no remote
 # references, no TLS.
 jsonschema = { version = "0.42.0", default-features = false }
+p256 = { version = "0.13.2", default-features = false, features = ["ecdsa", "alloc", "pem"] }
+sha2 = { version = "0.10.9", features = ["oid"] }
 siros-wallet-state = { workspace = true }
+x509-cert = { version = "0.2.5", default-features = false, features = ["std", "builder", "hazmat"] }

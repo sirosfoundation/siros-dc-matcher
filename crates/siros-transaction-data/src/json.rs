@@ -1,9 +1,9 @@
 //! The members of the JSON documents transaction data reads, taken one by one against their
-//! schema. siros-codec's strict reader reads the documents.
+//! schema, and the JSON text a projected definition writes. siros-codec's strict reader reads
+//! the documents.
 
 use siros_codec::json::{Json, JsonNumber};
-
-use crate::error::{MemberPath, TransactionDataError};
+use siros_codec::member::MemberFault;
 
 /// The members of an object not taken yet, in their order.
 pub(crate) struct Fields(Vec<(String, Json)>);
@@ -21,13 +21,17 @@ impl Fields {
     }
 
     /// Takes member `name`, which must be present.
-    pub(crate) fn require(
+    pub(crate) fn require(&mut self, name: &str) -> Result<Json, MemberFault> {
+        self.take(name).ok_or(MemberFault::Absent)
+    }
+
+    /// Takes member `name` when present, read by `read`.
+    pub(crate) fn optional<T>(
         &mut self,
         name: &str,
-        path: MemberPath,
-    ) -> Result<Json, TransactionDataError> {
-        self.take(name)
-            .ok_or(TransactionDataError::MissingMember(path))
+        read: impl FnOnce(Json) -> Result<T, MemberFault>,
+    ) -> Result<Option<T>, MemberFault> {
+        self.take(name).map(read).transpose()
     }
 
     /// The members not taken: those the schema of the object leaves open.
@@ -35,70 +39,120 @@ impl Fields {
         self.0
     }
 
-    /// Refuses a member not taken (Section 8.5, unknown fields).
-    pub(crate) fn finish(self) -> Result<(), TransactionDataError> {
-        if self.0.is_empty() {
-            Ok(())
-        } else {
-            Err(TransactionDataError::UnknownMember)
-        }
+    /// The name of the first member not taken.
+    pub(crate) fn first_left(&self) -> Option<&str> {
+        self.0.first().map(|(name, _)| name.as_str())
     }
 }
 
 /// `value` as a string.
-pub(crate) fn text(value: Json, path: MemberPath) -> Result<String, TransactionDataError> {
+pub(crate) fn text(value: Json) -> Result<String, MemberFault> {
     match value {
         Json::String(text) => Ok(text),
-        _ => Err(TransactionDataError::WrongType(path)),
+        _ => Err(MemberFault::WrongType),
     }
 }
 
 /// `value` as a boolean.
-pub(crate) fn boolean(value: Json, path: MemberPath) -> Result<bool, TransactionDataError> {
+pub(crate) fn boolean(value: Json) -> Result<bool, MemberFault> {
     match value {
         Json::Bool(b) => Ok(b),
-        _ => Err(TransactionDataError::WrongType(path)),
+        _ => Err(MemberFault::WrongType),
     }
 }
 
 /// `value` as a number.
-pub(crate) fn number(value: Json, path: MemberPath) -> Result<JsonNumber, TransactionDataError> {
+pub(crate) fn number(value: Json) -> Result<JsonNumber, MemberFault> {
     match value {
         Json::Number(number) => Ok(number),
-        _ => Err(TransactionDataError::WrongType(path)),
+        _ => Err(MemberFault::WrongType),
     }
 }
 
 /// `value` as a JSON Schema `integer`: a number without a fractional part.
-pub(crate) fn integer(value: Json, path: MemberPath) -> Result<JsonNumber, TransactionDataError> {
+pub(crate) fn integer(value: Json) -> Result<JsonNumber, MemberFault> {
     match value {
         Json::Number(number) if number.is_integer() => Ok(number),
-        _ => Err(TransactionDataError::WrongType(path)),
+        _ => Err(MemberFault::WrongType),
     }
 }
 
 /// `value` as the members of an object.
-pub(crate) fn object(value: Json, path: MemberPath) -> Result<Fields, TransactionDataError> {
+pub(crate) fn object(value: Json) -> Result<Fields, MemberFault> {
     match value {
         Json::Object(members) => Ok(Fields::new(members)),
-        _ => Err(TransactionDataError::WrongType(path)),
+        _ => Err(MemberFault::WrongType),
     }
 }
 
 /// `value` as the elements of an array.
-pub(crate) fn array(value: Json, path: MemberPath) -> Result<Vec<Json>, TransactionDataError> {
+pub(crate) fn array(value: Json) -> Result<Vec<Json>, MemberFault> {
     match value {
         Json::Array(items) => Ok(items),
-        _ => Err(TransactionDataError::WrongType(path)),
+        _ => Err(MemberFault::WrongType),
     }
 }
 
-/// Member `name` of `fields`, read by `read` when present.
-pub(crate) fn optional<T>(
-    fields: &mut Fields,
-    name: &str,
-    path: MemberPath,
-    read: impl FnOnce(Json, MemberPath) -> Result<T, TransactionDataError>,
-) -> Result<Option<T>, TransactionDataError> {
-    fields.take(name).map(|value| read(value, path)).transpose()
+/// The compact JSON text of `value`: members and elements in their order, numbers as their
+/// writer wrote them.
+pub(crate) fn write(value: &Json) -> String {
+    let mut out = String::new();
+    write_into(value, &mut out);
+    out
+}
+
+fn write_into(value: &Json, out: &mut String) {
+    match value {
+        Json::Null => out.push_str("null"),
+        Json::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+        Json::Number(number) => out.push_str(number.text()),
+        Json::String(text) => out.push_str(&quoted(text)),
+        Json::Array(items) => {
+            out.push('[');
+            for (at, item) in items.iter().enumerate() {
+                if at > 0 {
+                    out.push(',');
+                }
+                write_into(item, out);
+            }
+            out.push(']');
+        }
+        Json::Object(members) => {
+            out.push('{');
+            for (at, (name, item)) in members.iter().enumerate() {
+                if at > 0 {
+                    out.push(',');
+                }
+                out.push_str(&quoted(name));
+                out.push(':');
+                write_into(item, out);
+            }
+            out.push('}');
+        }
+    }
+}
+
+/// `value` with the members of every object in the order of RFC 8785, Section 3.2.3: by the
+/// UTF-16 code units of their names.
+pub(crate) fn canonical(value: &Json) -> Json {
+    match value {
+        Json::Object(members) => Json::Object(canonical_members(members)),
+        Json::Array(items) => Json::Array(items.iter().map(canonical).collect()),
+        Json::Null | Json::Bool(_) | Json::Number(_) | Json::String(_) => value.clone(),
+    }
+}
+
+/// `members` in the order of RFC 8785, Section 3.2.3, the members of their values too.
+pub(crate) fn canonical_members(members: &[(String, Json)]) -> Vec<(String, Json)> {
+    let mut sorted: Vec<(String, Json)> = members
+        .iter()
+        .map(|(name, value)| (name.clone(), canonical(value)))
+        .collect();
+    sorted.sort_by(|(a, _), (b, _)| a.encode_utf16().cmp(b.encode_utf16()));
+    sorted
+}
+
+/// The JSON string literal of `text`.
+pub(crate) fn quoted(text: &str) -> String {
+    serde_json::Value::from(text).to_string()
 }

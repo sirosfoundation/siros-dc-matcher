@@ -8,16 +8,15 @@ use siros_codec::base64;
 use siros_codec::date::Date;
 use siros_codec::json::{Json, JsonNumber};
 
-use crate::error::{MemberPath, TransactionDataError};
-use crate::json;
-use crate::ts12::currency::{CurrencyCode, Minor};
+use crate::currency::{CurrencyCode, Fraction};
+use crate::ts12::read::{self as json, MemberPath, Ts12PayloadFault};
 
 /// A string of `MIN` to `MAX` characters (JSON Schema `minLength`, `maxLength`).
 pub(crate) struct Text<const MIN: usize, const MAX: usize>(String);
 
 impl<const MIN: usize, const MAX: usize> Text<MIN, MAX> {
     /// `value` as a string of `MIN` to `MAX` characters.
-    pub(crate) fn parse(value: Json, path: MemberPath) -> Result<Self, TransactionDataError> {
+    pub(crate) fn parse(value: Json, path: MemberPath) -> Result<Self, Ts12PayloadFault> {
         let text = json::text(value, path)?;
         checked((MIN..=MAX).contains(&text.chars().count()), text, path).map(Self)
     }
@@ -36,18 +35,9 @@ pub(crate) struct DomainName(String);
 /// A resolvable URL: `http` or `https`, with an authority, of visible ASCII characters.
 pub(crate) struct WebUrl(String);
 
-/// The URL of an image, for the UI to show: a resolvable `http` or `https` URL, or a `data`
-/// URL (RFC 2397).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ImageUrl(String);
-
-impl ImageUrl {
-    /// The URL.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
+/// The URL of an image: a resolvable `http` or `https` URL, or a `data` URL (RFC 2397). The
+/// view takes it under the image rules of PaSO View, Section 3.
+pub(crate) struct LogoUrl(String);
 
 macro_rules! shown_as_text {
     ($($name:ty),*) => {$(
@@ -59,7 +49,7 @@ macro_rules! shown_as_text {
     )*};
 }
 
-shown_as_text!(DateTimeText, DateOrDateTime, DomainName, WebUrl);
+shown_as_text!(DateTimeText, DateOrDateTime, DomainName, WebUrl, LogoUrl);
 
 impl<const MIN: usize, const MAX: usize> AsRef<str> for Text<MIN, MAX> {
     fn as_ref(&self) -> &str {
@@ -78,15 +68,12 @@ impl Amount {
 }
 
 /// `value` as an ISO 8601 date (RFC 3339 `full-date`).
-pub(crate) fn date(value: Json, path: MemberPath) -> Result<Date, TransactionDataError> {
-    Date::parse(&json::text(value, path)?).ok_or(TransactionDataError::InvalidValue(path))
+pub(crate) fn date(value: Json, path: MemberPath) -> Result<Date, Ts12PayloadFault> {
+    Date::parse(&json::text(value, path)?).ok_or(Ts12PayloadFault::Invalid(path))
 }
 
 /// `value` as an ISO 8601 date and time (RFC 3339 `date-time`).
-pub(crate) fn date_time(
-    value: Json,
-    path: MemberPath,
-) -> Result<DateTimeText, TransactionDataError> {
+pub(crate) fn date_time(value: Json, path: MemberPath) -> Result<DateTimeText, Ts12PayloadFault> {
     let text = json::text(value, path)?;
     checked(is_date_time(&text), text, path).map(DateTimeText)
 }
@@ -95,7 +82,7 @@ pub(crate) fn date_time(
 pub(crate) fn date_or_date_time(
     value: Json,
     path: MemberPath,
-) -> Result<DateOrDateTime, TransactionDataError> {
+) -> Result<DateOrDateTime, Ts12PayloadFault> {
     let text = json::text(value, path)?;
     checked(
         Date::parse(&text).is_some() || is_date_time(&text),
@@ -106,10 +93,7 @@ pub(crate) fn date_or_date_time(
 }
 
 /// `value` as a domain name. A QWAC names its domain in a `dNSName`, of these characters only.
-pub(crate) fn domain_name(
-    value: Json,
-    path: MemberPath,
-) -> Result<DomainName, TransactionDataError> {
+pub(crate) fn domain_name(value: Json, path: MemberPath) -> Result<DomainName, Ts12PayloadFault> {
     let text = json::text(value, path)?;
     let label = |label: &str| {
         (1..=63).contains(&label.len())
@@ -124,23 +108,20 @@ pub(crate) fn domain_name(
 }
 
 /// `value` as a resolvable URL.
-pub(crate) fn url(value: Json, path: MemberPath) -> Result<WebUrl, TransactionDataError> {
+pub(crate) fn url(value: Json, path: MemberPath) -> Result<WebUrl, Ts12PayloadFault> {
     let text = json::text(value, path)?;
     checked(is_url(&text), text, path).map(WebUrl)
 }
 
 /// `value` as a resolvable URL or a `data` URL (RFC 2397).
-pub(crate) fn image(value: Json, path: MemberPath) -> Result<ImageUrl, TransactionDataError> {
+pub(crate) fn image(value: Json, path: MemberPath) -> Result<LogoUrl, Ts12PayloadFault> {
     let text = json::text(value, path)?;
-    checked(is_url(&text) || is_data_url(&text), text, path).map(ImageUrl)
+    checked(is_url(&text) || is_data_url(&text), text, path).map(LogoUrl)
 }
 
 /// `value` as an ISO 4217 alphabetic code.
-pub(crate) fn currency(
-    value: Json,
-    path: MemberPath,
-) -> Result<CurrencyCode, TransactionDataError> {
-    CurrencyCode::of(&json::text(value, path)?).ok_or(TransactionDataError::InvalidValue(path))
+pub(crate) fn currency(value: Json, path: MemberPath) -> Result<CurrencyCode, Ts12PayloadFault> {
+    CurrencyCode::of(&json::text(value, path)?).ok_or(Ts12PayloadFault::Invalid(path))
 }
 
 /// `value` as an amount of `currency`: an optional minus, the major units, and an optional
@@ -150,35 +131,22 @@ pub(crate) fn amount(
     value: Json,
     path: MemberPath,
     currency: CurrencyCode,
-) -> Result<Amount, TransactionDataError> {
+) -> Result<Amount, Ts12PayloadFault> {
     let number = json::number(value, path)?;
     let text = number.text();
-    let unsigned = text.strip_prefix('-').unwrap_or(text);
-    let (major, fraction) = match unsigned.split_once('.') {
-        Some((major, fraction)) => (major, Some(fraction)),
-        None => (unsigned, None),
-    };
-    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
-    let fraction_fits = match (fraction, currency.minor()) {
-        (None, _) => true,
-        (Some(fraction), Minor::Digits(n)) => {
-            n > 0 && digits(fraction) && fraction.len() == usize::from(n)
-        }
-        (Some(_), Minor::Undefined) => false,
-    };
-    if digits(major) && fraction_fits {
+    if currency.admits(text.strip_prefix('-').unwrap_or(text), Fraction::Optional) {
         Ok(Amount(number))
     } else {
-        Err(TransactionDataError::InvalidValue(path))
+        Err(Ts12PayloadFault::Invalid(path))
     }
 }
 
 /// `text` when `valid`.
-fn checked(valid: bool, text: String, path: MemberPath) -> Result<String, TransactionDataError> {
+fn checked(valid: bool, text: String, path: MemberPath) -> Result<String, Ts12PayloadFault> {
     if valid {
         Ok(text)
     } else {
-        Err(TransactionDataError::InvalidValue(path))
+        Err(Ts12PayloadFault::Invalid(path))
     }
 }
 

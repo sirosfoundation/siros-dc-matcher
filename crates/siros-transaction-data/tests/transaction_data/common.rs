@@ -1,5 +1,10 @@
-//! The request, credentials and type metadata the tests share.
+//! The requests, credentials, certificates, metadata JWTs and host the tests share.
 
+use std::str::FromStr;
+use std::time::Duration;
+
+use p256::ecdsa::signature::Signer;
+use p256::ecdsa::{Signature, SigningKey};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use siros_codec::base64url;
@@ -7,148 +12,420 @@ use siros_codec::cbor::Value as Cbor;
 use siros_codec::date::DateTime;
 use siros_credential::Credential;
 use siros_dcql::DcqlQuery;
-use siros_oid4vp::{FetchResponse, HttpStatus, TransactionDataItem};
-use siros_wallet_state::WalletState;
+use siros_display::{DisplayCache, IssuerMetadata, Locale};
+use siros_oid4vp::{
+    Fetch, FetchResponse, HttpStatus, HttpsUrl, RequestSignature, TransactionDataItem,
+};
+use siros_transaction_data::{
+    Configuration, Context, Entry, EntryPosition, Fetched, HeldDocument, HeldJwt, HeldMetadata,
+    RowValue, Segment, Selection, ShownLabel, Step, TransactionView,
+};
+use siros_trust::TrustStore;
+use siros_wallet_state::{ConfigurationId, IssuerIdentifier, WalletState};
+use x509_cert::builder::{Builder, CertificateBuilder, Profile};
+use x509_cert::der::asn1::GeneralizedTime;
+use x509_cert::der::Encode;
+use x509_cert::ext::pkix::BasicConstraints;
+use x509_cert::name::Name;
+use x509_cert::serial_number::SerialNumber;
+use x509_cert::spki::SubjectPublicKeyInfoOwned;
+use x509_cert::time::{Time, Validity};
 
-pub const PAYMENT: &str = "urn:eudi:sca:payment:1";
-pub const LOGIN: &str = "urn:eudi:sca:login_risk_transaction:1";
-pub const ACCESS: &str = "urn:eudi:sca:account_access:1";
-pub const MANDATE: &str = "urn:eudi:sca:emandate:1";
+/// The images the host answers fetches with, by URL.
+pub type Documents = Vec<(String, FetchResponse)>;
 
-/// The `vct` of the SCA Attestation of the tests.
-pub const VCT: &str = "https://pay.example/card";
+/// The rows a card shows, label and value, or why it takes no entry.
+pub type Shown = Result<Vec<(String, String)>, siros_transaction_data::Incompatibility>;
 
-/// The DCQL query: `pay` and `card` ask for SD-JWT VCs with holder binding, `unbound` for one
-/// without, `mdl` for an mdoc.
-pub fn query() -> DcqlQuery {
-    DcqlQuery::from_json(
-        &json!({"credentials": [
-            {"id": "pay", "format": "dc+sd-jwt", "meta": {"vct_values": [VCT]}},
-            {"id": "card", "format": "dc+sd-jwt", "meta": {"vct_values": [VCT]}},
-            {"id": "unbound", "format": "dc+sd-jwt", "meta": {"vct_values": [VCT]},
-             "require_cryptographic_holder_binding": false},
-            {"id": "mdl", "format": "mso_mdoc", "meta": {"doctype_value": "org.iso.18013.5.1.mDL"}}
-        ]})
-        .to_string(),
-    )
-    .unwrap()
+/// The time of the tests: 2026-10-26T12:00:00Z.
+pub fn now() -> DateTime {
+    DateTime::parse("2026-10-26T12:00:00Z").unwrap()
 }
 
-/// The time of the tests' requests.
+/// The Credential Issuer of the PaSO examples.
+pub const ISSUER: &str = "https://issuer.bank.example";
+
+/// The `vct` of the card of the PaSO examples.
+pub const CARD: &str = "https://bank.example/sca/card";
+
+/// Where the card's signed credential metadata is served (PaSO Proof Metadata, Annex A.1).
+pub const METADATA_URI: &str = "https://issuer.bank.example/credential-metadata/BankPaymentCard";
+
 /// The `transaction_data` string `raw`.
 pub fn item(raw: &str) -> TransactionDataItem {
     TransactionDataItem::new(raw.to_owned())
 }
 
-pub fn now() -> DateTime {
-    DateTime::parse("2026-10-26T12:00:00Z").unwrap()
-}
-
-/// The entry of `transaction_type` with the payload of the JSON text `payload`, naming `pay` and
-/// accepting SHA-256, as a verifier sends it.
-pub fn encode_payload(transaction_type: &str, payload: &str) -> String {
-    let text = format!(
-        r#"{{"type":{},"credential_ids":["pay"],"transaction_data_hashes_alg":["sha-256"],"payload":{payload}}}"#,
-        Value::from(transaction_type)
-    );
+/// base64url of the JSON text `text`, as a verifier sends an entry.
+pub fn encode(text: &str) -> String {
     base64url::encode(text.as_bytes()).into()
 }
 
-/// base64url of the JSON text of `entry`, as a verifier sends it.
-pub fn encode(entry: &Value) -> String {
-    base64url::encode(entry.to_string().as_bytes()).into()
-}
-
-/// An entry of `transaction_type` with `payload`, naming `pay` and accepting SHA-256.
-pub fn entry(transaction_type: &str, payload: Value) -> Value {
-    json!({
-        "type": transaction_type,
-        "credential_ids": ["pay"],
-        "transaction_data_hashes_alg": ["sha-256"],
-        "payload": payload
-    })
-}
-
-/// `value` with the members of `changes`; a `null` change removes the member.
-pub fn with(mut value: Value, changes: Value) -> Value {
-    let object = value.as_object_mut().unwrap();
-    for (name, change) in changes.as_object().unwrap() {
-        if change.is_null() {
-            assert!(object.remove(name).is_some(), "{name}");
-        } else {
-            object.insert(name.clone(), change.clone());
-        }
-    }
-    value
-}
-
-/// A payment payload of Section 4.3.1.
-pub fn payment() -> Value {
-    json!({
-        "transaction_id": "tx-0001",
-        "payee": {"name": "Shop AB", "id": "SE1234567890"},
-        "currency": "EUR",
-        "amount": 49.99
-    })
-}
-
-/// The SD-JWT VC payload of the SCA Attestation, with the claims of `extra`.
-pub fn card(extra: Value) -> Value {
-    let card = json!({
-        "iss": "https://bank.example",
-        "vct": VCT,
-        "cnf": {"jwk": {"kty": "EC", "crv": "P-256", "x": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE", "y": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI"}}
-    });
-    with(card, extra)
-}
-
-/// The credentials of the entries `entries`, numbered from 1, each `(format, data)`.
-pub fn credentials(entries: &[(&str, String)]) -> Vec<Credential> {
-    let entries: Vec<Value> = entries
+/// The DCQL query of SD-JWT VC queries `ids` of `vct`, each requiring holder binding.
+pub fn query(ids: &[&str], vct: &str) -> DcqlQuery {
+    let credentials: Vec<Value> = ids
         .iter()
-        .zip(1..)
-        .map(|((format, data), id)| {
-            json!({
-                "credentialId": id,
-                "format": format,
-                "data": data,
-                "kid": "key-1",
-                "instanceId": 0,
-                "batchId": id,
-                "credentialIssuerIdentifier": "https://bank.example",
-                "credentialConfigurationId": "card"
-            })
-        })
+        .map(|id| json!({"id": id, "format": "dc+sd-jwt", "meta": {"vct_values": [vct]}}))
         .collect();
-    let state = json!({
-        "schemaVersion": 4,
-        "credentials": entries,
-        "keypairs": [],
-        "presentations": [],
-        "settings": {},
-        "credentialIssuanceSessions": []
-    });
-    let state = WalletState::parse(&state.to_string()).unwrap();
-    state
-        .credentials()
+    DcqlQuery::from_json(&json!({"credentials": credentials}).to_string()).unwrap()
+}
+
+/// The entries of the JSON texts `texts`, against `query`.
+pub fn entries(texts: &[String], query: &DcqlQuery) -> Vec<Entry> {
+    texts
         .iter()
-        .map(|entry| Credential::parse(entry).unwrap())
+        .enumerate()
+        .map(|(at, text)| {
+            Entry::parse(EntryPosition::new(at), &item(&encode(text)), query).unwrap()
+        })
         .collect()
 }
 
-/// The compact SD-JWT of the issuer payload `payload`, without disclosures.
-pub fn sd_jwt(payload: &Value) -> String {
-    format!(
-        "{}.{}.{}~",
-        base64url::encode(br#"{"alg":"ES256","typ":"dc+sd-jwt"}"#),
-        base64url::encode(payload.to_string().as_bytes()),
-        base64url::encode(&[7; 64]),
-    )
+/// The JSON texts of the elements of the JSON array text `text`.
+pub fn elements(text: &str) -> Vec<String> {
+    let value: Value = serde_json::from_str(text).unwrap();
+    value
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(Value::to_string)
+        .collect()
 }
 
-/// The SD-JWT VC of `payload`.
-pub fn sd_jwt_vc(payload: &Value) -> Credential {
-    credentials(&[("dc+sd-jwt", sd_jwt(payload))]).remove(0)
+/// A P-256 key of the fixed scalar `byte`.
+pub fn key(byte: u8) -> SigningKey {
+    SigningKey::from_bytes(&[byte; 32].into()).unwrap()
+}
+
+/// A certificate: its DER, and the key of its subject.
+#[derive(Clone)]
+pub struct Cert {
+    pub der: Vec<u8>,
+    pub key: SigningKey,
+    pub subject: String,
+}
+
+impl Cert {
+    /// A self-signed certificate authority of the key `byte`, named `cn`.
+    pub fn root(cn: &str, byte: u8) -> Self {
+        let subject = format!("CN={cn},O=Test only");
+        let key = key(byte);
+        Self {
+            der: build(&subject, &subject, &key, &key, true),
+            key,
+            subject,
+        }
+    }
+
+    /// An end-entity certificate of the key `byte`, named `cn`, that `issuer` signs.
+    pub fn leaf(cn: &str, byte: u8, issuer: &Self) -> Self {
+        let subject = format!("CN={cn},O=Test only");
+        let key = key(byte);
+        Self {
+            der: build(&subject, &issuer.subject, &key, &issuer.key, false),
+            key,
+            subject,
+        }
+    }
+
+    /// The base64 of the DER, as `x5c` carries it.
+    pub fn x5c(&self) -> String {
+        b64(&self.der)
+    }
+}
+
+fn build(subject: &str, issuer: &str, key: &SigningKey, signer: &SigningKey, ca: bool) -> Vec<u8> {
+    let time = |text: &str| {
+        let unix = Duration::from_secs(DateTime::parse(text).unwrap().unix() as u64);
+        Time::GeneralTime(GeneralizedTime::from_unix_duration(unix).unwrap())
+    };
+    let validity = Validity {
+        not_before: time("2026-01-01T00:00:00Z"),
+        not_after: time("2027-12-31T23:59:59Z"),
+    };
+    let mut builder = CertificateBuilder::new(
+        Profile::Manual {
+            issuer: Some(Name::from_str(issuer).unwrap()),
+        },
+        SerialNumber::new(&[0x01, subject.len() as u8]).unwrap(),
+        validity,
+        Name::from_str(subject).unwrap(),
+        SubjectPublicKeyInfoOwned::from_key(*key.verifying_key()).unwrap(),
+        signer,
+    )
+    .unwrap();
+    if ca {
+        builder
+            .add_extension(&BasicConstraints {
+                ca: true,
+                path_len_constraint: None,
+            })
+            .unwrap();
+    }
+    builder
+        .build::<p256::ecdsa::DerSignature>()
+        .unwrap()
+        .to_der()
+        .unwrap()
+}
+
+/// The trust store of the anchors `roots`.
+pub fn store(roots: &[&Cert]) -> TrustStore {
+    let certificates: Vec<String> = roots.iter().map(|root| root.x5c()).collect();
+    let record =
+        json!([{"type": "etsi_tl", "value": "https://tl.example", "certificates": certificates}]);
+    TrustStore::parse(&record.to_string()).unwrap()
+}
+
+/// The compact JWS of `header` and `payload`, signed with ES256 by `key`.
+pub fn jwt(header: &Value, payload: &Value, key: &SigningKey) -> String {
+    let input = format!(
+        "{}.{}",
+        base64url::encode(header.to_string().as_bytes()),
+        base64url::encode(payload.to_string().as_bytes())
+    );
+    let signature: Signature = key.sign(input.as_bytes());
+    format!("{input}.{}", base64url::encode(&signature.to_bytes()))
+}
+
+/// The SD-JWT VC of `vct` from the Credential Issuer [`ISSUER`], its issuer JWT with the `x5c`
+/// chain `chain`; none when empty.
+pub fn credential(vct: &str, chain: &[&Cert]) -> Credential {
+    credential_with(vct, chain, &json!({}))
+}
+
+/// The SD-JWT VC of [`credential`] with the claims of `extra`.
+pub fn credential_with(vct: &str, chain: &[&Cert], extra: &Value) -> Credential {
+    let mut header = json!({"alg": "ES256", "typ": "dc+sd-jwt"});
+    if !chain.is_empty() {
+        header["x5c"] = json!(chain.iter().map(|c| c.x5c()).collect::<Vec<_>>());
+    }
+    let mut payload = json!({
+        "iss": ISSUER,
+        "vct": vct,
+        "cnf": {"jwk": {"kty": "EC", "crv": "P-256", "x": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE", "y": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI"}}
+    });
+    for (name, value) in extra.as_object().unwrap() {
+        payload[name] = value.clone();
+    }
+    let sd_jwt = format!(
+        "{}.{}.{}~",
+        base64url::encode(header.to_string().as_bytes()),
+        base64url::encode(payload.to_string().as_bytes()),
+        base64url::encode(&[7; 64]),
+    );
+    held("dc+sd-jwt", &sd_jwt)
+}
+
+/// The credential of the wallet state entry of `format` and `data`.
+fn held(format: &str, data: &str) -> Credential {
+    let state = json!({
+        "schemaVersion": 4,
+        "credentials": [{
+            "credentialId": 1, "format": format, "data": data, "kid": "key-1", "instanceId": 0,
+            "batchId": 1, "credentialIssuerIdentifier": ISSUER,
+            "credentialConfigurationId": "card"
+        }],
+        "keypairs": [], "presentations": [], "settings": {}, "credentialIssuanceSessions": []
+    });
+    let state = WalletState::parse(&state.to_string()).unwrap();
+    Credential::parse(&state.credentials()[0]).unwrap()
+}
+
+/// The display metadata of the card's configuration, its signed credential metadata at
+/// `uri` when given.
+pub fn display(uri: Option<&str>) -> DisplayCache {
+    let mut configuration = json!({"format": "dc+sd-jwt", "vct": CARD});
+    if let Some(uri) = uri {
+        configuration["credential_metadata_uri"] = json!(uri);
+    }
+    let issuer = json!({
+        "credential_issuer": ISSUER,
+        "credential_configurations_supported": {"card": configuration}
+    });
+    let metadata = IssuerMetadata::merge(&issuer, "card", None).unwrap();
+    DisplayCache::new(vec![metadata], Vec::new()).unwrap()
+}
+
+/// A `200` response holding `body`.
+pub fn ok(body: &[u8]) -> FetchResponse {
+    FetchResponse::new(HttpStatus::OK, None, body.to_vec())
+}
+
+/// What the host gives the selection: trust, display metadata, configuration, the metadata it
+/// holds, the images it answers fetches with, the wallet's language and whether the request is
+/// signed.
+pub struct Host {
+    pub trust: TrustStore,
+    pub display: DisplayCache,
+    pub configuration: Configuration,
+    /// The documents the host holds, by URL.
+    pub held: Vec<(String, Vec<u8>)>,
+    /// The URLs the host records as serving no document.
+    pub absent: Vec<String>,
+    /// The signed credential metadata JWT the host holds for the card's configuration.
+    pub credential_metadata: Option<String>,
+    pub images: Documents,
+    pub language: Locale,
+    pub signature: RequestSignature,
+}
+
+impl Host {
+    /// A host with no anchor, the configuration `configuration`, English, and a signed request,
+    /// that holds no metadata and records the card's Type Metadata as absent.
+    pub fn new(configuration: Value) -> Self {
+        Self {
+            trust: TrustStore::parse("[]").unwrap(),
+            display: display(None),
+            configuration: Configuration::parse(&configuration.to_string()).unwrap(),
+            held: Vec::new(),
+            absent: vec![CARD.to_owned()],
+            credential_metadata: None,
+            images: Vec::new(),
+            language: Locale::parse("en").unwrap(),
+            signature: RequestSignature::Signed,
+        }
+    }
+
+    /// The host in the wallet's language `tag`.
+    pub fn speaking(mut self, tag: &str) -> Self {
+        self.language = Locale::parse(tag).unwrap();
+        self
+    }
+
+    /// The metadata the host holds.
+    pub fn metadata(&self) -> HeldMetadata {
+        let jwts = self
+            .credential_metadata
+            .iter()
+            .map(|jwt| {
+                HeldJwt::new(
+                    IssuerIdentifier::parse(ISSUER).unwrap(),
+                    ConfigurationId::parse("card").unwrap(),
+                    jwt.clone(),
+                    HttpsUrl::parse(METADATA_URI).unwrap(),
+                )
+            })
+            .collect();
+        let documents = self
+            .held
+            .iter()
+            .map(|(url, body)| HeldDocument::new(HttpsUrl::parse(url).unwrap(), body.clone()))
+            .chain(
+                self.absent
+                    .iter()
+                    .map(|url| HeldDocument::absent(HttpsUrl::parse(url).unwrap())),
+            )
+            .collect();
+        HeldMetadata::new(jwts, documents).unwrap()
+    }
+
+    /// What `credential` takes of `entries`, each image fetch answered from the images, a URL
+    /// without one with `404`.
+    pub fn select(
+        &self,
+        entries: &[&Entry],
+        credential: &Credential,
+    ) -> Result<Selection, siros_transaction_data::TransactionDataError> {
+        self.select_fetching(entries, credential).0
+    }
+
+    /// [`Host::select`], and each fetch the selection asked for.
+    pub fn select_fetching(
+        &self,
+        entries: &[&Entry],
+        credential: &Credential,
+    ) -> (
+        Result<Selection, siros_transaction_data::TransactionDataError>,
+        Vec<Fetch>,
+    ) {
+        let held = self.metadata();
+        let mut fetched = Fetched::new();
+        let mut fetches = Vec::new();
+        loop {
+            let context = Context {
+                trust: &self.trust,
+                held: &held,
+                fetched: &fetched,
+                display: &self.display,
+                configuration: &self.configuration,
+                language: &self.language,
+                signature: self.signature,
+                now: now(),
+            };
+            let fetch = match context.first_match(entries, credential) {
+                Ok(Step::Done(selection)) => return (Ok(selection), fetches),
+                Ok(Step::Fetch(fetch)) => fetch,
+                Err(error) => return (Err(error), fetches),
+            };
+            fetches.push(fetch.clone());
+            let response = self
+                .images
+                .iter()
+                .find(|(url, _)| url == fetch.url().as_str())
+                .map(|(_, response)| response.clone())
+                .unwrap_or_else(|| FetchResponse::new(HttpStatus::new(404), None, Vec::new()));
+            assert!(fetched.insert_first(&fetch, response).is_ok());
+        }
+    }
+}
+
+/// The text of `label`, each value as the payload writes it.
+pub fn text(label: &ShownLabel) -> String {
+    segments(label.segments())
+}
+
+/// The text of `segments`, each value as the payload writes it.
+fn segments(segments: &[Segment]) -> String {
+    segments
+        .iter()
+        .map(|segment| match segment {
+            Segment::Text(text) => text.clone(),
+            Segment::Value(value) => value.text(),
+        })
+        .collect()
+}
+
+/// A host configuration entry: `definition` for the type `type_id` of credentials of `vct`.
+pub fn configured(type_id: &str, vct: &str, definition: &Value) -> Value {
+    json!({"type": type_id, "vct_values": [vct], "definition": definition})
+}
+
+/// A PNG of `width` by `height` pixels: its signature and IHDR chunk.
+pub fn png(width: u32, height: u32) -> Vec<u8> {
+    let mut bytes = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13];
+    bytes.extend_from_slice(b"IHDR");
+    bytes.extend_from_slice(&width.to_be_bytes());
+    bytes.extend_from_slice(&height.to_be_bytes());
+    bytes.extend_from_slice(&[8, 6, 0, 0, 0, 0, 0, 0, 0]);
+    bytes
+}
+
+/// SRI integrity metadata of `bytes`: `sha256-` and the base64 of their SHA-256.
+pub fn sri(bytes: &[u8]) -> String {
+    format!("sha256-{}", b64(&Sha256::digest(bytes)))
+}
+
+/// The padded base64 of `bytes` (RFC 4648, Section 4).
+pub fn b64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for chunk in bytes.chunks(3) {
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
+        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(char::from(ALPHABET[(n >> (18 - 6 * i) & 0x3f) as usize]));
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
 }
 
 /// An mdoc of one element.
@@ -216,88 +493,99 @@ pub fn mdoc() -> Credential {
             ]),
         ),
     ]);
-    credentials(&[(
+    held(
         "mso_mdoc",
-        base64url::encode(&issuer_signed.encode()).into(),
-    )])
-    .remove(0)
-}
-
-/// Claim metadata of `path` below `payload`, labelled in English, at `visualisation` when
-/// given.
-pub fn claim(path: &[&str], label: &str, visualisation: Option<u64>) -> Value {
-    let mut full = vec!["payload"];
-    full.extend_from_slice(path);
-    let mut claim = json!({"path": full, "display": [{"lang": "en", "label": label}]});
-    if let Some(level) = visualisation {
-        claim = with(claim, json!({"visualisation": level}));
-    }
-    claim
-}
-
-/// Claim metadata for every leaf of [`payment`].
-pub fn payment_claims() -> Value {
-    json!([
-        claim(&["transaction_id"], "Transaction ID", Some(4)),
-        claim(&["payee", "name"], "Payee", Some(1)),
-        claim(&["payee", "id"], "Payee ID", None),
-        claim(&["currency"], "Currency", Some(2)),
-        claim(&["amount"], "Amount", Some(1))
-    ])
-}
-
-/// A UI elements catalogue with all four elements.
-pub fn ui_labels() -> Value {
-    json!({
-        "affirmative_action_label": [{"lang": "en", "value": "Confirm Payment"}],
-        "denial_action_label": [{"lang": "en", "value": "Cancel Payment"}],
-        "transaction_title": [{"lang": "en", "value": "Confirm your payment"}],
-        "security_hint": [{"lang": "en", "value": "Check the amount"}]
-    })
-}
-
-/// The type metadata of the SCA Attestation, listing the payment type with `entry`.
-pub fn type_metadata(entry: Value) -> Value {
-    json!({
-        "vct": VCT,
-        "name": "Pay Card",
-        "category": "urn:eu:europa:ec:eudi:sua:sca",
-        "transaction_data_types": {PAYMENT: entry}
-    })
-}
-
-/// The payment entry of `transaction_data_types` with inline claims and labels.
-pub fn inline_payment_type() -> Value {
-    json!({"schema": PAYMENT, "claims": payment_claims(), "ui_labels": ui_labels()})
-}
-
-/// A `200` response holding the JSON text of `document`.
-pub fn response(document: &Value) -> FetchResponse {
-    FetchResponse::new(
-        HttpStatus::OK,
-        Some("application/json".to_owned()),
-        document.to_string().into_bytes(),
+        base64url::encode(&issuer_signed.encode()).as_str(),
     )
 }
 
-/// SRI integrity metadata of `bytes`: `sha256-` and the base64 of their SHA-256.
-pub fn sri(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::from("sha256-");
-    for chunk in Sha256::digest(bytes).chunks(3) {
-        let b = [
-            chunk[0],
-            *chunk.get(1).unwrap_or(&0),
-            *chunk.get(2).unwrap_or(&0),
-        ];
-        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
-        for i in 0..4 {
-            if i <= chunk.len() {
-                out.push(char::from(ALPHABET[(n >> (18 - 6 * i) & 0x3f) as usize]));
-            } else {
-                out.push('=');
-            }
+/// The entry an honest selection takes.
+pub fn taken(selection: &Selection) -> &siros_transaction_data::Taken {
+    match selection {
+        Selection::Takes(taken) => taken,
+        Selection::Excluded(causes) => panic!("excluded: {causes:?}"),
+    }
+}
+
+pub const PAYMENT: &str = "urn:eudi:sca:payment:1";
+pub const LOGIN: &str = "urn:eudi:sca:login_risk_transaction:1";
+pub const ACCESS: &str = "urn:eudi:sca:account_access:1";
+pub const MANDATE: &str = "urn:eudi:sca:emandate:1";
+
+/// `value` with the members of `changes`; a `null` change removes the member.
+pub fn with(mut value: Value, changes: Value) -> Value {
+    let object = value.as_object_mut().unwrap();
+    for (name, change) in changes.as_object().unwrap() {
+        if change.is_null() {
+            assert!(object.remove(name).is_some(), "{name}");
+        } else {
+            object.insert(name.clone(), change.clone());
         }
     }
-    out
+    value
+}
+
+/// A payment payload of EC TS12 v1.0.1, Section 4.3.1.
+pub fn payment() -> Value {
+    json!({
+        "transaction_id": "tx-0001",
+        "payee": {"name": "Shop AB", "id": "SE1234567890"},
+        "currency": "EUR",
+        "amount": 49.99
+    })
+}
+
+/// The entry of `transaction_type` with the payload of the JSON text `payload`, naming `pay`
+/// and accepting SHA-256, as a verifier writes it.
+pub fn ts12_entry(transaction_type: &str, payload: &str) -> String {
+    format!(
+        r#"{{"type":{},"credential_ids":["pay"],"transaction_data_hashes_alg":["sha-256"],"payload":{payload}}}"#,
+        Value::from(transaction_type)
+    )
+}
+
+/// Whether the TS12 payload parser of `transaction_type` accepts the payload of the JSON text
+/// `payload`: `Ok`, or the code of the refusal of the entry or of the payload.
+pub fn ts12_payload(transaction_type: &str, payload: &str) -> Result<(), &'static str> {
+    let query = query(&["pay"], CARD);
+    let raw = encode(&ts12_entry(transaction_type, payload));
+    let entry = Entry::parse(EntryPosition::new(0), &item(&raw), &query).map_err(|e| e.code())?;
+    let host = Host::new(json!([configured(
+        transaction_type,
+        CARD,
+        &json!({"claims": []})
+    )]));
+    match host.select(&[&entry], &credential(CARD, &[])).unwrap() {
+        Selection::Excluded(causes) => match causes.as_slice() {
+            [(_, siros_transaction_data::Incompatibility::Ts12Payload(fault))] => Err(fault.code()),
+            _ => Ok(()),
+        },
+        Selection::Takes(_) => Ok(()),
+    }
+}
+
+/// The rows `host` shows for the entry `credential` takes of `entry`, each label with its value
+/// as text, or why the credential takes none.
+pub fn rows(host: &Host, entry: &Entry, credential: &Credential) -> Shown {
+    match host.select(&[entry], credential).unwrap() {
+        Selection::Takes(taken) => Ok(view_rows(taken.view())),
+        Selection::Excluded(mut causes) => Err(causes.remove(0).1),
+    }
+}
+
+/// Each label of `view`'s rows with its value as text: `-` for `label_only`, the format of an
+/// image, each value of a template as the payload writes it.
+pub fn view_rows(view: &TransactionView) -> Vec<(String, String)> {
+    view.rows()
+        .iter()
+        .map(|row| {
+            let value = match row.value() {
+                RowValue::Value(value) => value.text(),
+                RowValue::Template(interpolated) => segments(interpolated.segments()),
+                RowValue::LabelOnly => "-".to_owned(),
+                RowValue::Image(image) => format!("<image {:?}>", image.format()),
+            };
+            (text(row.label()), value)
+        })
+        .collect()
 }

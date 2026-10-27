@@ -75,6 +75,7 @@ impl Issuer for ChainAt<'_> {
             .ok_or(ChainRefusal::NoStoreEntry)?;
         self.chain
             .validate_path(entry.certificates(), self.time)
+            .map(drop)
             .map_err(ChainRefusal::Path)
     }
 }

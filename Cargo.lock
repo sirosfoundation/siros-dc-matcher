@@ -2217,6 +2217,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "roxmltree"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
+
+[[package]]
 name = "rustc-demangle"
 version = "0.1.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2617,6 +2623,9 @@ name = "siros-transaction-data"
 version = "0.11.0"
 dependencies = [
  "jsonschema",
+ "p256",
+ "p384",
+ "roxmltree",
  "rustc-hash",
  "serde",
  "serde_json",
@@ -2626,7 +2635,10 @@ dependencies = [
  "siros-dcql",
  "siros-display",
  "siros-oid4vp",
+ "siros-trust",
  "siros-wallet-state",
+ "unicode-segmentation",
+ "x509-cert",
 ]
 
 [[package]]
@@ -3028,6 +3040,12 @@ name = "unicode-ident"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
+
+[[package]]
+name = "unicode-segmentation"
+version = "1.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f6ccf251212114b54433ec949fd6a7841275f9ada20dddd2f29e9ceea4501493"
 
 [[package]]
 name = "unicode-width"

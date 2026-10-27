@@ -113,7 +113,8 @@ against the 307,200-byte budget (303,418 at v0.11.0).
   lengths, no duplicate keys, no trailing bytes, at most `cbor::MAX_DEPTH` (32) levels) and a
   deterministic writer; unpadded base64url and the padded base64 of `x5c` certificates (RFC
   4648, Sections 4 and 5); the calendar dates and UTC times of CBOR's `full-date` and `tdate`;
-  the ES256 signature value (`signature::Es256Signature`); and `json::JsonTextError`, what
+  the ES256 signature value (`signature::Es256Signature`); an `https` URL (`url::HttpsUrl`);
+  and `json::JsonTextError`, what
   serde_json reports of text that is no JSON. With the feature `json` it holds the strict JSON
   reader, `Json::parse_unique`: one value, members in document order, each member name once per
   object, every number with the text its writer chose (`JsonNumber`), at most `json::MAX_DEPTH`
@@ -162,32 +163,39 @@ against the 307,200-byte budget (303,418 at v0.11.0).
   `new_presentation` event (H5). `CredentialId::new` is public, for the ids picker entries
   carry; `IssuerIdentifier::parse` and `ConfigurationId::parse` refuse the empty string
   (`EmptyIdentifier`).
-- `siros-display`, display for the wallet core: display metadata and its locale, credential
-  cards (`Card`, with its `Colour`s and `Logo`), claim rows, purpose lines, and proof statement
-  rows (`proof::verified_rows`, each a `DisplayText` label and value held whole). `DisplayCache`
+- `siros-display`, display for the wallet core: display metadata, credential cards (`Card`, with
+  its `Colour`s and `Logo`), claim rows, purpose lines, and proof statement rows
+  (`proof::verified_rows`, each a `DisplayText` label and value held whole). One locale function,
+  `lookup`, takes the entry of every display array for the wallet's one language, a `Locale` the
+  host gives: RFC 4647 Lookup, then the entry without `locale` (PaSO View, Section 4). A card's
+  title and a claim's label come from the Type Metadata, else, for a language it has no entry for,
+  from the configuration's `credential_metadata` (OpenID4VCI 1.0, Section 12.2.4). `DisplayCache`
   keys Type Metadata by siros-dcql's `Vct` and issuer metadata by siros-wallet-state's
-  `IssuerIdentifier` and `ConfigurationId`. A `DisplayError` carries its cause: a colour that is
-  no numerical colour value of CSS Color Module Level 3 holds its `ColourFault`. Without the
-  default feature `credential` it holds the purpose lines and proof statement rows the matcher
-  links.
+  `IssuerIdentifier` and `ConfigurationId`, and gives a credential's issuer metadata
+  (`DisplayCache::issuer_metadata`). A `DisplayError` carries its cause: a colour that is no
+  numerical colour value of CSS Color Module Level 3 holds its `ColourFault`. Without the default
+  feature `credential` it holds the purpose lines and proof statement rows the matcher links.
 - `siros-oid4vp`, OpenID4VP 1.0 for the wallet core. Without `crypto` it holds the picker's
   request reading (`UnverifiedRequest`, `diagnose`, `NoQuery`, whose `Malformed` holds the
-  `QueryError`) and `ClientId`, whose parse refuses with a `ClientIdError`, and builds with Rust
-  1.82. With `crypto`: sans-IO intake of redirect requests (by value, `request`, `request_uri`
-  with `get` or `post`) and DC API requests (unsigned, signed, multisigned) into a
-  `VerifiedRequest`, with `Fetch` and `Trust` effects for the host; the Client Identifier
-  Prefixes `x509_san_dns`, `x509_hash`, `decentralized_identifier`, `verifier_attestation`,
-  `openid_federation` and `redirect_uri`; ES256 Request Objects; the `vp_token` (`VpToken::json`),
-  its submission per Response Mode, `ECDH-ES` response encryption with `A128GCM` or `A256GCM`,
-  error submissions, and the reply to a direct post. `direct_post.cwt` (`zkp_req.md`, Section
-  6.2) posts the CBOR Authorization Response in a `COSE_Encrypt` by ECDH-ES + HKDF-256 with
-  `A128GCM`, `A192GCM` or `A256GCM`. `Handover` and `ec_jwk_thumbprint` give the session
-  transcript's handover, with `None` for the CBOR `null` of an unencrypted response (B.2.6).
-  `VerifiedRequest::access_certificate` gives the `CertificateDer` and the `SemanticIdentifier`,
-  or the `SemanticIdError`, of an `x509_san_dns` or `x509_hash` signer's certificate: the WRPAC
-  policy (ETSI TS 119 411-8) says whether its subject is a natural person, identified by its
-  `serialNumber`, or a legal person, identified by its `organizationIdentifier` (ETSI TS 119
-  475, Clauses 5.1.3 and 5.1.5). `dc_api_protocol` gives the DC API protocol, and
+  `QueryError`), `ClientId`, whose parse refuses with a `ClientIdError`, the `Fetch` effect, and
+  what transaction data reads of a request (`RequestSignature`, `ResponseMode`,
+  `TransactionDataItem`), and builds with Rust 1.82. With `crypto`: sans-IO intake of redirect
+  requests (by value, `request`, `request_uri` with `get` or `post`) and DC API requests
+  (unsigned, signed, multisigned) into a `VerifiedRequest`, with `Fetch` and `Trust` effects for
+  the host (a `Fetch` states the most redirects it follows, `Fetch::redirects`); the Client
+  Identifier Prefixes `x509_san_dns`, `x509_hash`, `decentralized_identifier`,
+  `verifier_attestation`, `openid_federation` and `redirect_uri`; ES256 Request Objects; the
+  `vp_token` (`VpToken::json`), its submission per Response Mode, `ECDH-ES` response encryption
+  with `A128GCM` or `A256GCM`, error submissions, and the reply to a direct post.
+  `direct_post.cwt` (`zkp_req.md`, Section 6.2) posts the CBOR Authorization Response in a
+  `COSE_Encrypt` by ECDH-ES + HKDF-256 with `A128GCM`, `A192GCM` or `A256GCM`. `Handover` and
+  `ec_jwk_thumbprint` give the session transcript's handover, with `None` for the CBOR `null` of
+  an unencrypted response (B.2.6). `VerifiedRequest::access_certificate` gives the
+  `CertificateDer` and the `SemanticIdentifier`, or the `SemanticIdError`, of an `x509_san_dns` or
+  `x509_hash` signer's certificate: the WRPAC policy (ETSI TS 119 411-8) says whether its subject
+  is a natural person, identified by its `serialNumber`, or a legal person, identified by its
+  `organizationIdentifier` (ETSI TS 119 475, Clauses 5.1.3 and 5.1.5). `dc_api_protocol` gives the
+  DC API protocol, `signature` whether the request arrived signed (`RequestSignature`), and
   `verifier_info_formats` the `AttestationFormat` of each `verifier_info` attestation (Section
   5.1). Each refusal is an `IntakeError` with its cause: the `QueryError` of a `dcql_query`, the
   `JsonTextError` of a parameter or a DC API request that is no JSON, the `Utf8Error` and
@@ -198,15 +206,84 @@ against the 307,200-byte budget (303,418 at v0.11.0).
   (`EncryptionKeyInvalid`). A key that does not read is passed over, as a key of another type or
   curve is (RFC 7517, Section 5).
 - `siros-transaction-data`, the `transaction_data` request parameter (OpenID4VP 1.0, Section
-  5.1) for the wallet core. It parses entries of the four EC TS12 v1.0.1 types into typed
-  payloads, binds each entry to one credential of an offer (`Entry::carried_by`, `Entry::names`,
-  `Entry::credential_ids`, `Presented::query_id`), gives the KB-JWT claims
-  (`transaction_data_hashes`, `transaction_data_hashes_alg`, `jti`, `response_mode`, `amr`) and
-  the consent display, and asks the host to fetch the SD-JWT VC type metadata and the documents
-  it references (`Fetched::insert_first` records the first response to a URL, and
-  `Fetched::response` reads it). Entries and metadata documents read with siros-codec's strict
-  reader: `TransactionDataError::NotJson` and `MetadataNotJson` hold the `JsonFault`, and
-  `NotUtf8` and `MetadataNotUtf8` the `Utf8Error`. It builds with Rust 1.82.
+  5.1) for the wallet core, on the PaSO model (draft 2), with the four EC TS12 v1.0.1 types as
+  built-in rulebooks. It builds with Rust 1.82.
+  - One definition form, a PaSO `transaction_data_types` entry (Proof Metadata, Section 3):
+    `Definition` with its `ClaimDefinition`s (`PayloadPath`, `Mandatory`, `ValueType` with
+    `template:`) and `UiLabels`. A label is a `LabelText` of its `LabelRole`; its source sets
+    its `LabelRules`: PaSO's limits in grapheme clusters (Section 3.3), or TS12's in characters
+    for the UI elements it names and none for claim names (Section 3.3.3). Labels refuse C0
+    controls, DEL, C1 controls, directional overrides and unterminated isolates; a
+    `Description` follows the directional rule alone. A `display` entry whose `display_type` is
+    no label format leaves its array (View, Section 3). The structural rules refuse with a
+    `DefinitionError`.
+  - Sources, each a parser into that form. For one entry and credential: the entry's ad-hoc metadata
+    JWT (Section 5.3); else the credential's own metadata, its signed credential metadata JWT
+    (Sections 4 and 7: ES256 or ES384, an `x5c` chain to the credential's root with its leaf's
+    Subject, or a `kid` of the issuer's JWT VC issuer metadata) or the `transaction_data_types` of
+    its TS12 type metadata, which declare every type the credential supports (`TypeUndeclared`):
+    none outside the SCA category, and the SCA category requires them; else, for a credential known
+    to have no metadata of its own, the host's `Configuration`: a `vct` that is no `https` URL and
+    that `vct#integrity` does not pin (`Ts12Fault::VctNotHttps`), or Type Metadata without
+    `transaction_data_types` or recorded as absent. Type Metadata neither held nor recorded absent
+    (`Ts12Fault::NotHeld`), issuer metadata the host does not hold (`IssuerMetadataNotHeld`), and
+    signed credential metadata that is not held or not valid exclude the credential for every entry,
+    an ad-hoc JWT included; a failed ad-hoc JWT makes its entry incompatible.
+  - Metadata is input: `HeldMetadata` holds the signed credential metadata JWTs, Type Metadata
+    with the documents it references, and issuer key sets, which the host fetches and renews
+    outside presentations, and records a URL whose fetch answered 404 as absent
+    (`HeldDocument::absent`); the wallet verifies each every time it loads it, a JWT's
+    `credential_metadata_uri` against the URL it was served from (Sections 6 to 8).
+    `HeldJwt::verify_fetched` admits a JWT the host fetched and gives its `Renewal`: its expiry
+    and the URL to renew from. `HeldMetadata::wanted` lists what the host should hold for a
+    credential: issuer metadata, signed credential metadata it lacks or whose JWT no longer
+    verifies, and documents neither held nor recorded absent.
+  - `Definition::project` keeps the entry of each array the locale function takes, with the
+    source and the rulebook; a type with an array it leaves empty is unsupported in that
+    language. `Projected::to_json` writes it, additional parameters in the member order of RFC
+    8785, and `Projected::parse` reads it back. `Context::served` gives a credential's
+    definition of a type.
+  - `Entry::parse` reads an entry (T1); `transaction_data_hashes_alg` reads as an array or as
+    CS-12's string, and a TS12 rulebook requires it. `check_request` refuses an unsigned
+    request with a PaSO-targeted entry (Core, Section 3), and targeted queries outside one
+    credential set or alternatives that are not transposable (Section 7.4.1).
+  - `Selector::first_match` over a credential's `Definitions`, and `Context::first_match` over the
+    wallet's sources, give each candidate credential its first compatible entry (Section 7.4.2): a
+    supported type, a conforming payload (`PayloadFault`: `#integrity` companions only beside image
+    claims and as strings, a mandatory claim in every element its `null` ranges over and an empty
+    array holding none, an `iso_currency_amount` with its minor unit's digits), at most 200 items
+    counted before any image is fetched, verified images (`VerifiedImage`: Data URLs of PNG, JPEG
+    and SVG, `https` URLs pinned by `#integrity` and fetched through the host with at most 3
+    redirects, 512 KiB, 2048 pixels), and a full rendering (`TransactionView`: rows in claims order,
+    `template:` values as `Segment`s of text and typed values; the UI checks each label again once
+    formatted). An SVG document passes only within a static subset: elements nested at most
+    `MAX_DEPTH` (128) levels, counted before the parse; a DOCTYPE without an internal subset that
+    names no external identifier but a W3C SVG 1.0 or 1.1 DTD's; allowlisted elements of the SVG
+    namespace with their attributes, drawing programs' editing data but its attributes named `href`,
+    `absref`, `style` or as a presentation attribute, and RDF inside `metadata`; CSS read by a CSS
+    Syntax 3 tokenizer with the at-rules `@charset`, `@font-face` and `@media` and known functions,
+    no `var()` inside a function that takes URLs and no string or URL in a custom property
+    (`CssFault`); and each URL a fragment of the document, a Data URL, or an `https` URL pinned in
+    its fragment. A Data URL is read as a renderer reads it, and its media type names its content's
+    kind (`DataFault`). A Data URL's content and each fetched resource pass as a PNG or JPEG image
+    within the image limits or as a font whose header and table directory read and list no `SVG `
+    table (`FontFault`). At most `MAX_RESOURCES` (8) URLs are fetched, each once without its
+    fragment, with `Accept` `MediaType::RESOURCES`, and checked against every integrity value the
+    document gives it; a `Resource` holds that URL and its `ResourceKind`. The host renders the
+    image statically and answers the renderer's request for a resource's URL with it, as its kind;
+    it loads nothing else. Under a TS12 rulebook an image that does not verify is left out
+    (`TransactionView::absent_images`). Every reason an entry does not serve a credential is an
+    `Incompatibility`. A PaSO-sourced definition needs a signed request; a TS12 type in an unsigned
+    request carries `UnsignedWarning::Required`.
+  - `Binding::kb_jwt_claims` gives the KB-JWT claims of the entry a credential binds:
+    `transaction_data_hashes` over the entry as received, `transaction_data_hashes_alg` when
+    the entry carried it, and under a TS12 rulebook `jti`, `response_mode` and `amr`.
+  - Every refusal of a request is a `TransactionDataError`: `invalid_request` for an unsigned
+    request, `invalid_transaction_data` otherwise.
+  - Without the default feature `wallet` the crate holds what the credential picker runs over
+    a registration: definitions, the projection reader, payload conformance, selection and
+    rendering, and links no X.509, ECDSA or trust code. The picker cannot verify an image at a
+    remote URL or an ad-hoc metadata JWT.
 - `siros-trust`, issuer trust for the wallet core (§4.18).
   - TR1: `TrustStore::parse` reads the host's record, an array of `{type, value, certificates}`
     entries, `type` `etsi_tl` or `openid_federation`, each authority once, with siros-codec's
@@ -224,15 +301,16 @@ against the 307,200-byte budget (303,418 at v0.11.0).
     chain's AuthorityKeyIdentifiers name, or the store entry of an `etsi_tl` or
     `openid_federation` value admits the chain. The `AdmittedIssuer` keeps the query's
     `QueryAuthorities`, which `QueryAuthorities::are_those_of` compares with a Credential Query.
-    Path validation, `IssuerChain::validate_path`, gives the `PathRefusal` of a chain without a
-    path to an anchor at a time. A path is a prefix of the chain, each certificate signed by the
-    next, whose last certificate an anchor signs: every certificate on it, the anchor included,
-    is valid at the time; each signer's subject is the certificate's issuer, the signer is a
-    CA, its keyUsage, when present, includes keyCertSign, and at most its pathLenConstraint of
-    non-self-issued intermediate certificates lie below it, a self-issued link certificate
-    counting none; each signature is ECDSA P-256 with SHA-256 or P-384 with SHA-384 over the
-    `tbsCertificate` as written; and every critical extension on the path is one TR3 processes
-    (`extensions`: basicConstraints, keyUsage, extKeyUsage, authorityKeyIdentifier,
+    Path validation, `IssuerChain::validate_path`, gives the anchor a chain's path ends at at a
+    time, or its `PathRefusal`; `TrustStore::anchor` gives the anchor of the first store entry
+    with a path, or `Unanchored` with each entry's refusal. A path is a prefix of the chain, each
+    certificate signed by the next, whose last certificate an anchor signs: every certificate on
+    it, the anchor included, is valid at the time; each signer's subject is the certificate's
+    issuer, the signer is a CA, its keyUsage, when present, includes keyCertSign, and at most its
+    pathLenConstraint of non-self-issued intermediate certificates lie below it, a self-issued
+    link certificate counting none; each signature is ECDSA P-256 with SHA-256 or P-384 with
+    SHA-384 over the `tbsCertificate` as written; and every critical extension on the path is one
+    TR3 processes (`extensions`: basicConstraints, keyUsage, extKeyUsage, authorityKeyIdentifier,
     subjectKeyIdentifier). Direct trust: a store certificate byte-identical to the chain's first
     certificate admits it while it is valid. The anchor whose SubjectKeyIdentifier equals the
     certificate's AuthorityKeyIdentifier is tried first.
@@ -297,21 +375,21 @@ against the 307,200-byte budget (303,418 at v0.11.0).
     usable attestation and the `secret_seed` delivered in the credential's auxiliary data (A2),
     read with siros-codec's strict reader: a credential without one is excluded with its
     `NoSeed`, an `opening` absent, not a string, not base64url or not 16 bytes each its own.
-    Offers, optional additions, an offer per option when every set is optional, a `multiple`
-    member holding every candidate, and, for an offer whose members leave a transaction entry
-    uncarried, each option of an optional set that can carry it joined in an offer of its own,
-    repeated until every entry is carried, at most one option per set (A3). An offer that cannot
-    carry every entry is dropped, two offers with the same members are one, and the joins spend
-    the examination budget and count among the combinations not examined. `Offers::of` gives the
-    first `Refusal`: an offer no join completes, or one the acceptance refuses.
-  - The plan also gives the transaction entries each credential authorizes, the credential named
-    by `credentialId` and instance (T4); the plan's digest over the request, its trust verdict,
+    Offers, optional additions, an offer per option when every set is optional, and a
+    `multiple` member holding every candidate (A3). Transaction data selects by PaSO's first
+    match (Core, Section 7.4): a candidate of a targeted query that takes no entry is excluded,
+    an entry no presented credential takes stays unused, and an entry of a type no source
+    defines refuses the request unless every credential it targets takes an entry (OpenID4VP
+    1.0, Section 5.1). `PlanInput` takes the wallet's language, the host's transaction data
+    `Configuration`, and the transaction metadata the host holds (`HeldMetadata`).
+  - The plan also gives the entry each presented credential binds, the credential named by
+    `credentialId` and instance (T4); the plan's digest over the request, its trust verdict,
     the nym_auth `verifier_id` and every offer's credentials by `credentialId` and instance,
-    their answers and bound entries, its additions and display (A4); and the consent view with
-    cards, claim rows, proof statement rows, additions, transactions and whether an offer needs
-    the wallet's display (A9). The plan asks the host for each type metadata fetch. A nym_auth
-    request must be signed, trusted and encrypted, and its `verifier_id` comes from the
-    authenticated certificate (N2).
+    their answers and bound entries with the source and rulebook of each, its additions and
+    display (A4); and the consent view with cards, claim rows, proof statement rows, additions,
+    transactions and whether an offer needs the wallet's display (A9). The plan asks the host
+    for each image. A nym_auth request must be signed, trusted and encrypted, and its
+    `verifier_id` comes from the authenticated certificate (N2).
   - One Credential Query refused with `invalid_request` refuses the whole request
     (`Answered::invalid_request`): a malformed `aki` value (`QueryRefusal::Authorities`), and a
     `zkp_req` query that breaks a request rule, the catalogue or the nym_auth policy. A query

@@ -1,4 +1,4 @@
-//! The host's responses to the fetches a plan asks for (H1).
+//! The host's responses to the image fetches a plan asks for (H1).
 
 use siros_oid4vp::{Fetch, FetchResponse};
 use siros_transaction_data::Fetched;
@@ -30,11 +30,6 @@ impl Fetches {
             .insert_first(fetch, response)
             .map(drop)
             .map_err(|_| PresentationError::FetchRepeated(fetch.url().clone()))
-    }
-
-    /// The response to a fetch of the URL `fetch` names.
-    pub(crate) fn response(&self, fetch: &Fetch) -> Option<&FetchResponse> {
-        self.0.response(fetch)
     }
 
     /// The responses, as the transaction data's documents read them.

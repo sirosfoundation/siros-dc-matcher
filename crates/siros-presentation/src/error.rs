@@ -15,9 +15,10 @@ use siros_zkp_req_nym_auth::presenter::{ProveError, Unanswerable};
 
 use crate::ids::{AdditionIndex, CandidateIndex, OfferIndex, QueryIndex, SetIndex};
 use crate::matching::{ChoiceError, Failure};
-use crate::plan::{DigestError, EntryPosition, Unproven};
+use crate::plan::{DigestError, Unproven};
 use crate::respond::{PickError, SignatureError, SubsetError};
 use siros_dcql::QueryId;
+use siros_transaction_data::EntryPosition;
 
 /// Why the core gives no plan, no chosen offer or no response.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -3,6 +3,7 @@
 
 use std::fmt;
 
+use siros_codec::date::DateTime;
 use siros_codec::json::{Json, JsonFault};
 use siros_codec::member::MemberFault;
 use siros_codec::{base64, Base64Error};
@@ -10,6 +11,8 @@ use siros_dcql::{AuthorityType, AuthorityValue};
 
 use crate::authority::{KnownAuthorityType, StoreAuthority};
 use crate::certificate::{Certificate, CertificateError};
+use crate::chain::IssuerChain;
+use crate::path::PathRefusal;
 use crate::position::{CertificateIndex, EntryIndex};
 
 /// The trust store: its entries, each authority once.
@@ -195,7 +198,47 @@ impl TrustStore {
             .iter()
             .find(|entry| entry.authority == *authority)
     }
+
+    /// The store certificate at which `chain`'s path ends at `time` (TR3): the anchor of the
+    /// first entry, in the record's order, to which the chain has a path.
+    ///
+    /// # Errors
+    ///
+    /// [`Unanchored`]: the refusal of each entry, in the record's order.
+    pub fn anchor(&self, chain: &IssuerChain, time: DateTime) -> Result<&Certificate, Unanchored> {
+        let mut refusals = Vec::with_capacity(self.entries.len());
+        for entry in &self.entries {
+            match chain.validate_path(&entry.certificates, time) {
+                Ok(anchor) => return Ok(anchor),
+                Err(refusal) => refusals.push((entry.authority.clone(), refusal)),
+            }
+        }
+        Err(Unanchored(refusals))
+    }
 }
+
+/// Why an issuer chain has a path to no certificate of the trust store: the refusal of each
+/// entry, in the record's order; none for an empty store.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Unanchored(Vec<(StoreAuthority, PathRefusal)>);
+
+impl Unanchored {
+    /// Each entry's authority, with why the chain has no path to its certificates.
+    #[must_use]
+    pub fn refusals(&self) -> &[(StoreAuthority, PathRefusal)] {
+        &self.0
+    }
+
+    /// A stable identifier.
+    #[must_use]
+    pub fn code(&self) -> &'static str {
+        "chain_unanchored"
+    }
+}
+
+siros_codec::display_code!(Unanchored);
+
+impl std::error::Error for Unanchored {}
 
 impl StoreEntry {
     fn parse(entry: &Json) -> Result<Self, EntryError> {

@@ -6,10 +6,11 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use siros_codec::base64url;
 use siros_dcql::QueryId;
-use siros_oid4vp::{FetchResponse, HttpStatus};
 use siros_presentation::{plan, OfferIndex, Pick, PlanStep, PresentationError, WalletDisplay};
+use siros_transaction_data::{RowValue, UnsignedWarning};
 use siros_wallet_state::CredentialId;
 
+use crate::host::{holding, label_text};
 use crate::verifier::{
     b64, client_metadata, dc_api_signed, decrypt_jwe, redirect_unsigned, NONCE, NOW, RESPONSE_URI,
     STATE,
@@ -47,12 +48,12 @@ pub fn payment_naming(queries: &[&str]) -> String {
 }
 
 /// The SCA Attestation type metadata of [`VCT`], listing the payment type with its labels.
-pub fn type_metadata() -> FetchResponse {
+pub fn type_metadata() -> Vec<u8> {
     type_metadata_of(VCT)
 }
 
 /// The SCA Attestation type metadata of `vct`, listing the payment type with its labels.
-pub fn type_metadata_of(vct: &str) -> FetchResponse {
+pub fn type_metadata_of(vct: &str) -> Vec<u8> {
     let claim = |path: &[&str], label: &str| {
         let mut full = vec!["payload"];
         full.extend_from_slice(path);
@@ -63,6 +64,7 @@ pub fn type_metadata_of(vct: &str) -> FetchResponse {
         "name": "Pay Card",
         "category": "urn:eu:europa:ec:eudi:sua:sca",
         "transaction_data_types": {PAYMENT: {
+            "schema_uri": PAYMENT,
             "claims": [
                 claim(&["transaction_id"], "Transaction ID"),
                 claim(&["payee", "name"], "Payee"),
@@ -75,11 +77,7 @@ pub fn type_metadata_of(vct: &str) -> FetchResponse {
             }
         }}
     });
-    FetchResponse::new(
-        HttpStatus::OK,
-        Some("application/json".into()),
-        document.to_string().into_bytes(),
-    )
+    document.to_string().into_bytes()
 }
 
 #[test]
@@ -94,7 +92,7 @@ fn sd_jwt_over_redirect_direct_post_jwt() {
             &[("given_name", given.clone()), ("family_name", family)],
         ),
     )]);
-    wallet.documents.push((VCT.to_owned(), type_metadata()));
+    wallet.metadata = holding(vec![(VCT, type_metadata())]);
     let request = redirect_unsigned(&json!({
         "response_type": "vp_token",
         "response_mode": "direct_post.jwt",
@@ -105,23 +103,42 @@ fn sd_jwt_over_redirect_direct_post_jwt() {
         "dcql_query": {"credentials": [{"id": "pid", "format": "dc+sd-jwt",
             "meta": {"vct_values": [VCT]}, "claims": [{"path": ["given_name"]}]}]}
     }));
+    // The type metadata is the host's input: the plan fetches nothing (PaSO Proof Metadata,
+    // Sections 6 and 8).
     let empty = siros_presentation::Fetches::new();
-    let first = plan(&wallet.input(&request, &empty)).unwrap();
-    let PlanStep::Fetch(fetch) = first else {
-        panic!("the plan fetches the type metadata first")
-    };
-    assert_eq!(fetch.url().as_str(), VCT);
-    let fetches = wallet.fetches(&request);
-    let input = wallet.input(&request, &fetches);
+    let input = wallet.input(&request, &empty);
+    assert!(matches!(plan(&input), Ok(PlanStep::Ready(_))));
 
     let planned = ready(&input).unwrap();
     let offer = &planned.view().offers()[0];
     let card = &offer.members()[0].credentials()[0];
+    let transaction = card.transaction().unwrap();
+    assert_eq!(transaction.entry().value(), 0);
+    let rows: Vec<(String, String)> = transaction
+        .view()
+        .rows()
+        .iter()
+        .map(|row| match row.value() {
+            RowValue::Value(value) => (label_text(row.label()), value.text()),
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    let expected = [
+        ("Transaction ID", "tx-0001"),
+        ("Payee", "Shop AB"),
+        ("Payee ID", "SE1234567890"),
+        ("Currency", "EUR"),
+        ("Amount", "49.99"),
+    ];
     assert_eq!(
-        card.entries().iter().map(|e| e.value()).collect::<Vec<_>>(),
-        [0]
+        rows,
+        expected.map(|(label, value)| (label.to_owned(), value.to_owned()))
     );
-    assert_eq!(card.transactions().len(), 1);
+    // An unsigned request of a TS12 type: the UI warns and asks for explicit confirmation.
+    assert_eq!(
+        transaction.view().unsigned_warning(),
+        UnsignedWarning::Required
+    );
     assert_eq!(offer.wallet_display(), WalletDisplay::Needed);
 
     let response = respond(&input);
@@ -211,7 +228,7 @@ fn a_subset_keeps_the_plans_binding() {
         Held::new(1, "dc+sd-jwt", sd_jwt(VCT, &[("given_name", json!("One"))])),
         Held::new(2, "dc+sd-jwt", sd_jwt(VCT, &[("given_name", json!("Two"))])),
     ]);
-    wallet.documents.push((VCT.to_owned(), type_metadata()));
+    wallet.metadata = holding(vec![(VCT, type_metadata())]);
     let request = redirect_unsigned(&json!({
         "response_type": "vp_token",
         "response_mode": "direct_post.jwt",
@@ -226,18 +243,18 @@ fn a_subset_keeps_the_plans_binding() {
     let input = wallet.input(&request, &fetches);
     let planned = ready(&input).unwrap();
     let credentials = planned.view().offers()[0].members()[0].credentials();
-    let shown: Vec<(CredentialId, Vec<usize>)> = credentials
+    let shown: Vec<(CredentialId, Option<usize>)> = credentials
         .iter()
         .map(|c| {
-            let entries = c.entries().iter().map(|e| e.value()).collect();
-            (c.entry().credential_id(), entries)
+            let entry = c.transaction().map(|t| t.entry().value());
+            (c.entry().credential_id(), entry)
         })
         .collect();
     assert_eq!(
         shown,
         [
-            (CredentialId::new(1), vec![0]),
-            (CredentialId::new(2), vec![])
+            (CredentialId::new(1), Some(0)),
+            (CredentialId::new(2), None)
         ],
         "the view binds the payment to One"
     );
@@ -278,7 +295,7 @@ fn a_subset_keeps_the_plans_binding() {
     assert_eq!(
         respond_to(&input, 0, Vec::new(), ids(&[2])).err(),
         Some(PresentationError::BoundCredentialOmitted {
-            entry: one.entries()[0],
+            entry: one.transaction().unwrap().entry(),
             credential: one.entry(),
         })
     );
