@@ -11,7 +11,7 @@ use super::{Answers, Halt, IntakeError, JwsFault};
 use crate::client_id::ClientId;
 use crate::jose::{self, Signed};
 use crate::protocol::Protocol;
-use crate::unverified::UnverifiedRequest;
+use crate::unverified::{NoQuery, UnverifiedRequest};
 use crate::values::Origin;
 use crate::verified::VerifiedRequest;
 
@@ -24,7 +24,7 @@ pub(super) fn intake(
 ) -> Result<VerifiedRequest, Halt> {
     let envelope: Value = serde_json::from_slice(request)
         .map_err(|error| IntakeError::EnvelopeNotJson(JsonTextError::of(&error)))?;
-    let (protocol, data) = entry(&envelope).ok_or(IntakeError::EnvelopeUnreadable)?;
+    let (protocol, data) = entry(&envelope)?;
     match protocol {
         Protocol::Unsigned => {
             let params = data.as_object().ok_or(IntakeError::EnvelopeUnreadable)?;
@@ -96,17 +96,56 @@ pub(super) fn intake(
 
 /// The entry the credential picker answers: the first that reads as an
 /// [`UnverifiedRequest`].
-fn entry(envelope: &Value) -> Option<(Protocol, &Value)> {
-    envelope
-        .get("requests")?
-        .as_array()?
-        .iter()
-        .find_map(|entry| {
-            let label = entry.get("protocol")?.as_str()?;
-            let data = entry.get("data")?;
-            let read = UnverifiedRequest::read(label, data).ok()?;
-            Some((read.protocol(), data))
-        })
+///
+/// # Errors
+///
+/// The rule the first entry of a known shape breaks of the request parameters or the Client
+/// Identifier when no entry reads, else [`IntakeError::EnvelopeUnreadable`].
+fn entry(envelope: &Value) -> Result<(Protocol, &Value), IntakeError> {
+    let entries = envelope
+        .get("requests")
+        .and_then(Value::as_array)
+        .ok_or(IntakeError::EnvelopeUnreadable)?;
+    let mut refused = None;
+    for entry in entries {
+        let label = entry.get("protocol").and_then(Value::as_str);
+        let (Some(label), Some(data)) = (label, entry.get("data")) else {
+            continue;
+        };
+        match UnverifiedRequest::read(label, data) {
+            Ok(read) => return Ok((read.protocol(), data)),
+            Err(refusal) => {
+                if refused.is_none() {
+                    refused = rule(&refusal);
+                }
+            }
+        }
+    }
+    Err(refused.unwrap_or(IntakeError::EnvelopeUnreadable))
+}
+
+/// The intake rule the request data of `refusal` breaks: a parameter's, or the Client
+/// Identifier's; `None` for an envelope intake does not read.
+fn rule(refusal: &NoQuery) -> Option<IntakeError> {
+    Some(match refusal {
+        NoQuery::Parameter(fault) => IntakeError::Parameter(*fault),
+        NoQuery::ClientIdMissing => IntakeError::ClientIdMissing,
+        NoQuery::ClientId(error) => IntakeError::ClientId(*error),
+        NoQuery::SignedRedirectUri => IntakeError::SignedRedirectUri,
+        NoQuery::ClientIdInPayload => IntakeError::ClientIdInPayload,
+        NoQuery::NoData
+        | NoQuery::NoQueryAndNoRequest
+        | NoQuery::RequestNotAJwsOrObject
+        | NoQuery::JwsObjectHasNoPayload
+        | NoQuery::ShapeDoesNotMatchProtocol
+        | NoQuery::NotACompactJws(_)
+        | NoQuery::PayloadNotBase64url(_)
+        | NoQuery::PayloadNotJson(_)
+        | NoQuery::PayloadHasNoDcqlQuery
+        | NoQuery::Malformed(_)
+        | NoQuery::TransactionData(_)
+        | NoQuery::NoParser => return None,
+    })
 }
 
 fn request_object(payload: &[u8]) -> Result<Map<String, Value>, IntakeError> {

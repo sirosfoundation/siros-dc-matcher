@@ -6,7 +6,7 @@ use serde_json::{Map, Value};
 use crate::colour::Colour;
 use crate::error::{ColourFault, DisplayError, EntryFault};
 use crate::locale::Locale;
-use crate::text::DisplayText;
+use crate::text::LabelText;
 
 /// How many entries an array member holds.
 #[derive(Clone, Copy)]
@@ -40,9 +40,9 @@ pub(crate) fn label(
     object: &Map<String, Value>,
     name: &str,
     malformed: DisplayError,
-) -> Result<Option<DisplayText>, DisplayError> {
+) -> Result<Option<LabelText>, DisplayError> {
     string(object, name, malformed)?
-        .map(|text| DisplayText::label(text).map_err(DisplayError::Text))
+        .map(|text| LabelText::new(text).map_err(DisplayError::Text))
         .transpose()
 }
 

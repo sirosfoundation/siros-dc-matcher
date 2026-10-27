@@ -16,11 +16,13 @@ use siros_zkp_req_nym_auth::presenter::Prepared as NymPrepared;
 use super::forms::{DeviceResponse, Form};
 use super::selection::Chosen;
 use super::sign::{key_id, Sign, SignId, SigningInput};
-use crate::error::{Inconsistency, PresentationError};
+use crate::error::PresentationError;
+use crate::inconsistency::Inconsistency;
 use siros_dcql::HolderBinding;
 
 use crate::matching::{Answer, Candidate, Claims, ProofChoice};
-use crate::plan::{nym_answer, BoundEntry, Offered};
+use crate::plan::{nym_answer, Offered};
+use crate::transactions::{offered, BoundEntry};
 use siros_dcql::QueryId;
 
 /// A chosen offer whose presentations wait for their signatures.
@@ -88,8 +90,8 @@ impl<'p, 'a> Chosen<'p, 'a> {
                     .bind(&planned.answered, addition.members())?,
             );
         }
-        let offer = crate::plan::offered(&planned.answered, &self.members)?;
-        let added = crate::plan::offered(&planned.answered, &self.added)?;
+        let offer = offered(&planned.answered, &self.members)?;
+        let added = offered(&planned.answered, &self.added)?;
         let mut signs = Vec::new();
         let members = offer
             .iter()

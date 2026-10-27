@@ -16,6 +16,8 @@ use siros_codec::json::JsonTextError;
 use siros_codec::Base64Error;
 use siros_dcql::{DcqlQuery, QueryError};
 
+use crate::client_id::{ClientId, ClientIdError, ClientIdPrefix};
+use crate::parameters::{self, DcApiEncoding, Nonce, ParameterFault, Plain, State};
 use crate::protocol::Protocol;
 use crate::request::{
     AttestationFormat, RequestSignature, ResponseMode, TransactionDataInvalid, TransactionDataItem,
@@ -25,7 +27,8 @@ use crate::request::{
 ///
 /// Each variant means "decline this entry", which lets the caller fall through to another
 /// entry the verifier offered.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum NoQuery {
     /// The entry carried no `data`.
     NoData,
@@ -43,13 +46,24 @@ pub enum NoQuery {
     /// The payload segment is no unpadded base64url the picker decodes.
     PayloadNotBase64url(PayloadFault),
     /// The payload decoded, but is not JSON.
-    PayloadNotJson(JsonTextError),
+    PayloadNotJson(#[source] JsonTextError),
     /// The payload is JSON but carries no `dcql_query`.
     PayloadHasNoDcqlQuery,
     /// A `dcql_query` was found but does not parse as DCQL.
-    Malformed(QueryError),
+    Malformed(#[source] QueryError),
     /// `transaction_data` is no non-empty array of strings (Section 5.1).
-    TransactionData(TransactionDataInvalid),
+    TransactionData(#[source] TransactionDataInvalid),
+    /// A request parameter breaks a rule intake applies without a key.
+    Parameter(#[source] ParameterFault),
+    /// A signed request's payload has no string `client_id` (A.2).
+    ClientIdMissing,
+    /// A signed request's `client_id` is no Client Identifier this wallet supports (Section
+    /// 5.9).
+    ClientId(#[source] ClientIdError),
+    /// A signed request uses the `redirect_uri` prefix (Section 5.9.3).
+    SignedRedirectUri,
+    /// An `openid4vp-v1-multisigned` payload holds `client_id` (A.3.2.2).
+    ClientIdInPayload,
     /// The protocol is none of the three of OpenID4VP 1.0, A.1.
     NoParser,
 }
@@ -70,6 +84,11 @@ impl NoQuery {
             Self::PayloadHasNoDcqlQuery => "payload_has_no_dcql_query",
             Self::Malformed(_) => "dcql_query_malformed",
             Self::TransactionData(invalid) => invalid.code(),
+            Self::Parameter(fault) => fault.code(),
+            Self::ClientIdMissing => "client_id_missing",
+            Self::ClientId(error) => error.code(),
+            Self::SignedRedirectUri => "signed_redirect_uri",
+            Self::ClientIdInPayload => "client_id_in_payload",
             Self::NoParser => "protocol_unsupported",
         }
     }
@@ -97,6 +116,11 @@ impl NoQuery {
             Self::PayloadHasNoDcqlQuery => "JWS payload has no `dcql_query`".into(),
             Self::Malformed(e) => format!("dcql_query failed to parse: {e}"),
             Self::TransactionData(_) => "transaction_data is no non-empty array of strings".into(),
+            Self::Parameter(fault) => format!("request parameter refused: {}", fault.code()),
+            Self::ClientIdMissing => "signed request has no string `client_id`".into(),
+            Self::ClientId(error) => format!("client_id refused: {}", error.code()),
+            Self::SignedRedirectUri => "signed request uses the redirect_uri prefix".into(),
+            Self::ClientIdInPayload => "multisigned payload holds `client_id`".into(),
             Self::NoParser => "no parser for this protocol in this build".into(),
         }
     }
@@ -132,6 +156,8 @@ pub enum PayloadFault {
 #[derive(Debug, Clone, PartialEq)]
 pub struct UnverifiedRequest {
     protocol: Protocol,
+    nonce: Nonce,
+    state: Option<State>,
     /// The request object without its `dcql_query` and `transaction_data`, which `query` and
     /// `transaction_data` hold.
     object: Value,
@@ -149,16 +175,22 @@ impl UnverifiedRequest {
     pub fn read(label: &str, data: &Value) -> Result<Self, NoQuery> {
         let protocol = Protocol::from_label(label).ok_or(NoQuery::NoParser)?;
         let mut object = shape::request_object(protocol, data)?.into_owned();
-        let (raw, entries) = match object.as_object_mut() {
-            Some(members) => (
-                members.remove("dcql_query"),
-                members.remove("transaction_data"),
-            ),
-            None => (None, None),
-        };
-        let raw = raw.ok_or(NoQuery::PayloadHasNoDcqlQuery)?;
+        let members = object
+            .as_object_mut()
+            .ok_or(NoQuery::PayloadHasNoDcqlQuery)?;
+        let parameter = NoQuery::Parameter;
+        let Plain { nonce, state } = parameters::plain(members).map_err(parameter)?;
+        let mode = members.get("response_mode").and_then(Value::as_str);
+        DcApiEncoding::of(mode).map_err(parameter)?;
+        if from_request(protocol, members)? {
+            parameters::request_metadata(members).map_err(parameter)?;
+        }
+        let raw = members
+            .remove("dcql_query")
+            .ok_or(NoQuery::PayloadHasNoDcqlQuery)?;
         let query = DcqlQuery::parse(&raw).map_err(NoQuery::Malformed)?;
-        let transaction_data = match entries {
+        parameters::verifier_info(members.get("verifier_info"), &query).map_err(parameter)?;
+        let transaction_data = match members.remove("transaction_data") {
             None => Vec::new(),
             Some(entries) => {
                 TransactionDataItem::list(&entries).map_err(NoQuery::TransactionData)?
@@ -166,6 +198,8 @@ impl UnverifiedRequest {
         };
         Ok(Self {
             protocol,
+            nonce,
+            state,
             object,
             query,
             transaction_data,
@@ -197,6 +231,18 @@ impl UnverifiedRequest {
     #[must_use]
     pub fn protocol(&self) -> Protocol {
         self.protocol
+    }
+
+    /// The request's `nonce`.
+    #[must_use]
+    pub fn nonce(&self) -> &Nonce {
+        &self.nonce
+    }
+
+    /// The request's `state`, when it has one.
+    #[must_use]
+    pub fn state(&self) -> Option<&State> {
+        self.state.as_ref()
     }
 
     /// How the request arrived: a request under a signed protocol arrives as a JWS, whose
@@ -263,6 +309,44 @@ impl UnverifiedRequest {
     #[must_use]
     pub fn query(&self) -> &DcqlQuery {
         &self.query
+    }
+}
+
+/// Whether the Verifier metadata of a request under `protocol` comes from its `client_metadata`,
+/// after the Client Identifier rules intake applies before it verifies a signature: a signed
+/// request's payload names a supported Client Identifier, not of the `redirect_uri` prefix
+/// (Sections 5.9, 5.9.3; A.2), and an `openid_federation` client's metadata comes from its Trust
+/// Chain; a multisigned payload names none (A.3.2.2), and its metadata comes from the signature
+/// intake verifies.
+///
+/// # Errors
+///
+/// [`NoQuery`]: the Client Identifier rule the payload `members` breaks.
+fn from_request(
+    protocol: Protocol,
+    members: &serde_json::Map<String, Value>,
+) -> Result<bool, NoQuery> {
+    match protocol {
+        Protocol::Unsigned => Ok(true),
+        Protocol::Signed => {
+            let text = members
+                .get("client_id")
+                .and_then(Value::as_str)
+                .ok_or(NoQuery::ClientIdMissing)?;
+            let prefix = ClientId::parse(text).map_err(NoQuery::ClientId)?.prefix();
+            if prefix == ClientIdPrefix::RedirectUri {
+                return Err(NoQuery::SignedRedirectUri);
+            }
+            parameters::expected_origins(members).map_err(NoQuery::Parameter)?;
+            Ok(prefix != ClientIdPrefix::OpenidFederation)
+        }
+        Protocol::Multisigned => {
+            if members.contains_key("client_id") {
+                return Err(NoQuery::ClientIdInPayload);
+            }
+            parameters::expected_origins(members).map_err(NoQuery::Parameter)?;
+            Ok(false)
+        }
     }
 }
 

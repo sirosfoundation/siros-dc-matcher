@@ -28,6 +28,7 @@
 pub mod client_id;
 pub mod error_code;
 pub mod handover;
+mod parameters;
 pub mod protocol;
 mod request;
 pub mod semantic;
@@ -52,6 +53,7 @@ mod x509;
 pub use client_id::{ClientId, ClientIdError, ClientIdPrefix};
 pub use error_code::ErrorCode;
 pub use handover::{ec_jwk_thumbprint, Handover, HandoverInvalid, JwkThumbprint};
+pub use parameters::{Nonce, ParameterFault, State, VerifierInfoRule};
 pub use protocol::Protocol;
 pub use semantic::{Person, SemanticIdError, SemanticIdentifier};
 pub use unverified::{diagnose, CompactFault, NoQuery, PayloadFault, UnverifiedRequest};
@@ -63,7 +65,7 @@ pub use fetch::{
 pub use intake::{
     AttestationClaim, AttestationFault, ChainFault, ClaimsFault, Coordinate, Effect, EffectResult,
     FormFault, IntakeError, IntakeState, JsonParameter, JwkFault, JwsError, JwsFault, KeyMaterial,
-    LeafKeyFault, Step, Trust, TrustAnswer, TrustSubject, Verdict, VerifierInfoRule,
+    LeafKeyFault, Step, Trust, TrustAnswer, TrustSubject, Verdict,
 };
 pub use request::{
     AttestationFormat, RequestSignature, ResponseMode, TransactionDataInvalid, TransactionDataItem,
@@ -74,7 +76,7 @@ pub use response::{
     ReplyFault, ResponseError, Submission, VpToken,
 };
 #[cfg(feature = "crypto")]
-pub use values::{AttestationIssuer, Kid, Nonce, Origin, State, TrustChain};
+pub use values::{AttestationIssuer, Kid, Origin, TrustChain};
 #[cfg(feature = "crypto")]
 pub use verified::{
     AccessCertificate, CertificateDer, ContentEncryption, Encryption, VerifiedRequest, VerifierView,

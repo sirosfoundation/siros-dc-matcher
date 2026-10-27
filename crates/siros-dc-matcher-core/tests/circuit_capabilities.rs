@@ -266,7 +266,8 @@ fn nym_query(req: Value) -> Value {
 /// Candidate credential ids for a request.
 fn offered(db: &CredentialDatabase, query: Value) -> Vec<String> {
     let request = json!({"requests": [{"protocol": "openid4vp-v1-unsigned",
-        "data": {"dcql_query": {"credentials": [query]},
+        "data": {"response_type": "vp_token", "response_mode": "dc_api", "nonce": "n-1",
+                 "dcql_query": {"credentials": [query]},
                  "client_metadata": client_metadata(&[CIRCUIT])}}]})
     .to_string();
     let registered = |label: &str| db.profile.parser_for(label).is_some();
@@ -522,6 +523,7 @@ fn the_verifiers_circuit_lists_still_apply_with_capabilities() {
     let req = json!([pseudonym("known-offender-matching-ssc")]);
     let request = |ids: &[&str]| {
         json!({"requests": [{"protocol": "openid4vp-v1-unsigned", "data": {
+            "response_type": "vp_token", "response_mode": "dc_api", "nonce": "n-1",
             "dcql_query": {"credentials": [nym_query(req.clone())]},
             "client_metadata": client_metadata(ids)}}]})
         .to_string()

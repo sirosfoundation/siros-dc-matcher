@@ -10,6 +10,7 @@ use siros_presentation::{KeyHolding, MatchCredential, Presentability};
 use siros_transaction_data::{Definitions, Entry, Incompatibility, Projected, ServedTypes};
 use siros_trust::{Admission, FactRefusal, IssuerFacts, QueryAuthorities, Unadmitted};
 use siros_zkp_req_nym_auth::system::NymAuthSystem;
+use siros_zkp_req_nym_auth::verifier_id::VerifierIdForm;
 
 /// The format version of a registration: the one this crate reads and writes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -47,6 +48,7 @@ pub struct Registration {
     pub(crate) language: Locale,
     pub(crate) diagnostics: Diagnostics,
     pub(crate) systems: Vec<NymAuthSystem>,
+    pub(crate) verifier_id: VerifierIdForm,
     pub(crate) default_icon: Icon,
     pub(crate) credentials: Vec<RegisteredCredential>,
 }
@@ -128,6 +130,11 @@ impl Registration {
     /// The nym_auth systems whose circuits the wallet loaded, in its order of preference.
     pub fn systems(&self) -> &[NymAuthSystem] {
         &self.systems
+    }
+
+    /// The form of the nym_auth `verifier_id` the wallet's trust framework fixes.
+    pub fn verifier_id(&self) -> VerifierIdForm {
+        self.verifier_id
     }
 
     /// The wallet's icon, which a picker entry without a credential shows.

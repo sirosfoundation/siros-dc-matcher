@@ -133,7 +133,9 @@ fn the_envelope_selects_a_supported_protocol() {
     let blob = wallet(None);
     let request = json!({"requests": [
         {"protocol": "some-future-thing", "data": {}},
-        {"protocol": "openid4vp-v1-unsigned", "data": {"dcql_query":
+        {"protocol": "openid4vp-v1-unsigned", "data": {
+            "response_type": "vp_token", "response_mode": "dc_api", "nonce": "n-1",
+            "dcql_query":
             serde_json::from_str::<serde_json::Value>(
                 &dcql("mso_mdoc", age_claim(), json!({"doctype_value": "org.iso.18013.5.1.mDL"}))
             ).expect("query")}}

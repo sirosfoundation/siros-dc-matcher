@@ -9,7 +9,7 @@ use siros_oid4vp::{
     UnverifiedRequest,
 };
 
-use crate::verifier_id::VerifierIdRule;
+use crate::verifier_id::{Intermediary, VerifierId, VerifierIdForm, VerifierIdRule};
 
 /// The `format` of a registration certificate in `verifier_info` (ETSI TS 119 472-2 V1.2.1,
 /// OIDFVP-HAIP-COMMON-REQ-RO-15).
@@ -174,6 +174,29 @@ pub fn signed_and_encrypted<R: PolicyRequest>(
 
 /// The request as the credential picker reads it. The picker holds no trust verdict: the wallet
 /// judges the Client Identifier at intake, and refuses the selection of an untrusted one.
+/// What `request` meets of the policy and of the `verifier_id` rule its Client Identifier decides:
+/// the policy ([`signed_and_encrypted`]), and in the `x509_san_dns` form the Client Identifier's
+/// prefix. Gives the `verifier_id` of the `x509_san_dns` form; `None` in the `semantic` form,
+/// whose identifier comes from the access certificate intake authenticates.
+///
+/// # Errors
+///
+/// [`RequestRefusal`]: the first rule `request` breaks.
+pub fn admitted<R: PolicyRequest>(
+    request: &R,
+    form: VerifierIdForm,
+) -> Result<Option<VerifierId>, RequestRefusal> {
+    let client = signed_and_encrypted(request)?;
+    match form {
+        VerifierIdForm::X509SanDns => {
+            VerifierId::x509_san_dns(client.borrow(), Intermediary::Absent)
+                .map(Some)
+                .map_err(RequestRefusal::VerifierId)
+        }
+        VerifierIdForm::Semantic => Ok(None),
+    }
+}
+
 impl PolicyRequest for UnverifiedRequest {
     type Client<'a> = ClientId;
 

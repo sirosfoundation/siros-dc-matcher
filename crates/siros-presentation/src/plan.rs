@@ -32,7 +32,7 @@ pub use digest::{DigestError, PlanDigest};
 pub(crate) use proof::nym_answer;
 pub use proof::{OptionRefusal, Unproven};
 pub use seed::NoSeed;
-pub(crate) use transactions::{offered, BoundEntry, Offered};
+pub(crate) use transactions::Offered;
 pub use view::{
     AdditionView, BoundTransaction, ConsentView, CredentialView, MemberView, OfferView, Shown,
 };

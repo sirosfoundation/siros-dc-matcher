@@ -6,17 +6,14 @@ use android_credman::{
     SetEntry, SetSink, Shown, Slot, VerificationDisplay,
 };
 use siros_credential::Instance;
-use siros_display::{purpose, Extent};
+use siros_display::purpose;
 use siros_presentation::{
-    Answer, Answered, Answers, Choice, DisplayFacts, HostDisplay, Offer, OfferIndex, Pick,
-    Presentability, Rows, TransactionData, Transactions, WalletDisplay,
+    Choice, DisplayFacts, HostDisplay, Offer, OfferIndex, Pick, Presentability, Rows,
+    TransactionData, WalletDisplay,
 };
-use siros_registration::RegisteredCredential;
-use siros_transaction_data::{Deferral, Selection};
 
-use crate::diagnostics::Unshown;
 use crate::fields::{PaymentShown, TransactionShown};
-use crate::matching::NoChoice;
+use crate::shown::{Matched, Presented};
 
 /// Prefix of the set ids: offer `n` is the set `siros-n`.
 ///
@@ -24,19 +21,31 @@ use crate::matching::NoChoice;
 /// offer, which the user presents as a unit; the alternative offers are separate sets.
 const SET_PREFIX: &str = "siros";
 
-/// The matching the entries are made from.
-pub(crate) struct OfferEntries<'a, 'r> {
-    answered: &'a Answered<'r, &'a RegisteredCredential, NoChoice>,
-    transactions: &'a Transactions<Deferral>,
-    level: u32,
+/// The level the host reported (`GetWasmVersion`), which decides what it shows of an entry
+/// (`display_skipped`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct HostLevel(u32);
+
+impl HostLevel {
+    /// The level `credman` reported.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn reported(credman: &android_credman::Credman) -> Self {
+        Self(credman.level())
+    }
+
+    /// What the host shows of `entry`.
+    fn shows(self, entry: &SetEntry<'_, AnyEntry<'_>>) -> HostDisplay {
+        match entry.shown(self.0) {
+            Shown::Full => HostDisplay::Full,
+            Shown::Skipped => HostDisplay::Skipped,
+        }
+    }
 }
 
-/// One credential of an offer as its entry shows it.
-struct Presented<'a> {
-    credential: &'a RegisteredCredential,
-    pick: Pick,
-    fields: Vec<siros_display::Field>,
-    transaction: TransactionShown,
+/// The matching the entries are made from, and the level of the host they are for.
+pub(crate) struct OfferEntries<'a, 'r> {
+    pub(crate) matched: Matched<'a, 'r>,
+    pub(crate) level: HostLevel,
 }
 
 /// An entry's text as host strings, owned while its set is emitted.
@@ -64,50 +73,30 @@ struct HostPayment {
     additional_info: Option<C8String>,
 }
 
-impl<'a, 'r> OfferEntries<'a, 'r> {
-    /// The entries of the offers of `answered`, whose transaction data `transactions`
-    /// selected, for a host at `level`.
-    pub(crate) fn sources(
-        answered: &'a Answered<'r, &'a RegisteredCredential, NoChoice>,
-        transactions: &'a Transactions<Deferral>,
-        level: u32,
-    ) -> Self {
-        Self {
-            answered,
-            transactions,
-            level,
-        }
-    }
-
-    /// Emits the entry set of `offer`, the offer at `at`, to `sets`: an entry per candidate of
-    /// each member, in order, each in its own slot.
-    ///
-    /// # Errors
-    ///
-    /// [`Unshown`] for an offer whose rows the registration cannot show.
+impl OfferEntries<'_, '_> {
+    /// Emits the entry set of `offer`, shown as the offer at `at`, to `sets`: an entry per
+    /// credential of `presented`, in order, each in its own slot, each carrying its pick (K3).
     ///
     /// # Panics
     ///
-    /// When the presentation component breaks a guarantee of its offers: an offer has a member
-    /// (DCQL refuses an empty `credentials` and an empty option), and each member names a query
-    /// and candidates of the matching it was built from, at least one candidate.
+    /// When `presented` is empty: the presentation component's offer has a member (DCQL refuses
+    /// an empty `credentials` and an empty option), and a member a candidate.
     #[expect(
         clippy::expect_used,
-        reason = "an offer that breaks the presentation component's guarantees is a bug of that \
-                  component, and no entry set the picker could emit for it is right"
+        reason = "an offer without a credential breaks the presentation component's \
+                  guarantees, and no entry set the picker could emit for it is right"
     )]
     pub(crate) fn emit(
         &self,
-        at: usize,
+        at: OfferIndex,
         offer: &Offer,
+        presented: &[Presented<'_>],
         sets: &mut impl SetSink,
-    ) -> Result<(), Unshown> {
-        let index = OfferIndex::new(at);
-        let shown = self.shown(index, offer)?;
+    ) {
         let disclaimer = purpose::line(offer.purposes());
-        let strings: Vec<HostEntry<'_>> = shown
+        let strings: Vec<HostEntry<'_>> = presented
             .iter()
-            .map(|shown| HostEntry::of(shown, disclaimer.as_deref()))
+            .map(|shown| HostEntry::of(at, shown, disclaimer.as_deref()))
             .collect();
         let fields: Vec<Vec<Field<'_>>> = strings.iter().map(HostEntry::fields).collect();
         let entries: Vec<SetEntry<'_, AnyEntry<'_>>> = strings
@@ -115,7 +104,7 @@ impl<'a, 'r> OfferEntries<'a, 'r> {
             .zip(&fields)
             .map(|(strings, fields)| strings.entry(fields))
             .collect();
-        let delegation = self.delegation(offer, &shown, &entries);
+        let delegation = self.delegation(offer, presented, &entries);
         let entries: Vec<SetEntry<'_, AnyEntry<'_>>> = entries
             .into_iter()
             .map(|entry| entry.with_delegation(delegation))
@@ -128,86 +117,31 @@ impl<'a, 'r> OfferEntries<'a, 'r> {
             .expect("an offer has a member with a candidate");
         let id = C8String::from_str_lossy(&format!("{SET_PREFIX}-{at}"));
         sets.add_entry_set(&EntrySet::new(&id, *first, others));
-        Ok(())
-    }
-
-    /// Each candidate of each member of `offer`, the offer at `index`, as its entry shows it.
-    #[expect(
-        clippy::expect_used,
-        reason = "an offer that names what its matching lacks is a bug of the presentation \
-                  component, and no entry the picker could emit for it is right"
-    )]
-    fn shown(&self, index: OfferIndex, offer: &Offer) -> Result<Vec<Presented<'a>>, Unshown> {
-        offer
-            .members()
-            .iter()
-            .flat_map(|member| {
-                // The presentation component's guarantee: an offer's members name queries and
-                // candidates of the matching it was built from.
-                let answers = self
-                    .answered
-                    .answers(member.query())
-                    .expect("an offer's query is a query of its matching");
-                member.candidates().iter().map(move |&candidate| {
-                    let selection = self.transactions.selection(member.query(), candidate);
-                    let candidate = answers
-                        .candidate(candidate)
-                        .expect("an offer's candidate is a candidate of its query");
-                    let credential: &'a RegisteredCredential = candidate.credential();
-                    Ok(Presented {
-                        credential,
-                        pick: Pick::new(
-                            index,
-                            answers.id().clone(),
-                            Instance::entry(&credential).credential_id(),
-                        ),
-                        fields: fields(index, answers, credential, candidate.answer())?,
-                        transaction: match selection {
-                            Some(Selection::Takes(taken)) => TransactionShown::of(taken),
-                            Some(Selection::Deferred(..) | Selection::Excluded(_)) | None => {
-                                TransactionShown::Nothing
-                            }
-                        },
-                    })
-                })
-            })
-            .collect()
     }
 
     /// The delegation of every entry of `offer` (K4): `Full` when the offer needs no wallet
-    /// display (A9), judged with the rows the picker shows and what the host shows of
-    /// `entries`; none otherwise.
+    /// display (A9), judged with the rows the picker shows of `presented` and what the host
+    /// shows of `entries`; none otherwise.
     fn delegation(
         &self,
         offer: &Offer,
-        shown: &[Presented<'_>],
+        presented: &[Presented<'_>],
         entries: &[SetEntry<'_, AnyEntry<'_>>],
     ) -> DelegationType {
-        let presentable = shown
+        let presentable = presented
             .iter()
             .all(|shown| shown.credential.presentability() == Presentability::WithoutUi);
-        let whole = shown
-            .iter()
-            .flat_map(|shown| &shown.fields)
-            .all(|field| field.extent() == Extent::Whole);
-        let full = entries
-            .iter()
-            .all(|entry| entry.shown(self.level) == Shown::Full);
         let facts = DisplayFacts {
             presentability: if presentable {
                 Presentability::WithoutUi
             } else {
                 Presentability::OnWalletUi
             },
-            transaction_data: TransactionData::of(self.transactions),
+            transaction_data: TransactionData::of(self.matched.transactions),
             additions: Choice::of_additions(offer),
             subsets: Choice::of_subsets(offer),
-            rows: if whole { Rows::Whole } else { Rows::Clipped },
-            host: if full {
-                HostDisplay::Full
-            } else {
-                HostDisplay::Skipped
-            },
+            rows: Rows::of(presented.iter().flat_map(|shown| &shown.fields)),
+            host: HostDisplay::of(entries.iter().map(|entry| self.level.shows(entry))),
         };
         match WalletDisplay::of(&facts) {
             WalletDisplay::NotNeeded => DelegationType::Full,
@@ -216,45 +150,12 @@ impl<'a, 'r> OfferEntries<'a, 'r> {
     }
 }
 
-/// The fields of what `credential` answers for `answers`: the rows of the claims it discloses,
-/// or the proof statement rows of the `zkp_req` option it answers.
-#[expect(
-    clippy::expect_used,
-    clippy::panic,
-    reason = "a proof answer without its query's `zkp_req` option is a bug of the presentation \
-              component, and no proof rows the picker could show for it are right"
-)]
-fn fields(
-    index: OfferIndex,
-    answers: &Answers<'_, &RegisteredCredential, NoChoice>,
-    credential: &RegisteredCredential,
-    answer: &Answer,
-) -> Result<Vec<siros_display::Field>, Unshown> {
-    match answer {
-        Answer::Claims(claims) => credential
-            .labels()
-            .rows(credential.claims(), claims.pointers())
-            .map(|rows| rows.iter().map(siros_display::Field::of_claim).collect())
-            .map_err(|error| Unshown::Display(index, error.code())),
-        Answer::Proof(choice) => {
-            // The presentation component's guarantee: a proof answer belongs to a `zkp_req`
-            // query, and its choice is an option of that query.
-            let zkp = answers
-                .zkp()
-                .expect("a proof answer's query is a zkp_req query");
-            // `let … else` keeps the error's `Debug` formatting out of the module.
-            let Ok(option) = zkp.option(choice) else {
-                panic!("a proof answer's choice is an option of its query");
-            };
-            siros_display::proof::rows(zkp.query().query(), option)
-                .map_err(|error| Unshown::Display(index, error.code()))
-        }
-    }
-}
-
 impl<'a> HostEntry<'a> {
-    /// The host strings of `shown`, under the verifier's purpose `disclaimer`.
-    fn of(shown: &Presented<'a>, disclaimer: Option<&str>) -> Self {
+    /// The host strings of `shown`, a credential of the offer shown at `at`, under the
+    /// verifier's purpose `disclaimer`.
+    fn of(at: OfferIndex, shown: &Presented<'a>, disclaimer: Option<&str>) -> Self {
+        let credential = Instance::entry(&shown.credential).credential_id();
+        let pick = Pick::new(at, shown.query.clone(), credential);
         let card = shown.credential.card();
         let mut fields: Vec<HostField> = shown.fields.iter().map(HostField::of).collect();
         let payment = match &shown.transaction {
@@ -266,11 +167,11 @@ impl<'a> HostEntry<'a> {
             TransactionShown::Payment(payment) => Some(HostPayment::of(payment)),
         };
         Self {
-            cred_id: C8String::from_str_lossy(&shown.pick.credential().to_string()),
+            cred_id: C8String::from_str_lossy(&credential.to_string()),
             title: C8String::from_str_lossy(card.title().as_str()),
             subtitle: C8String::from_str_lossy(card.issuer().as_str()),
             disclaimer: disclaimer.map(C8String::from_str_lossy),
-            data: C8String::from_str_lossy(&shown.pick.to_json().to_string()),
+            data: C8String::from_str_lossy(&pick.to_json().to_string()),
             icon: card.icon().as_bytes(),
             fields,
             payment,

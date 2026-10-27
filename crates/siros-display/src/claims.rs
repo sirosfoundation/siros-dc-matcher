@@ -6,13 +6,13 @@ use siros_dcql::{ClaimPath, PathComponent};
 use crate::error::{DisplayError, EntryFault};
 use crate::json::{self, Entries};
 use crate::locale::{Locale, Localized};
-use crate::text::DisplayText;
+use crate::text::LabelText;
 
 /// A label in one locale, or in an unstated one.
 #[derive(Debug, Clone)]
 pub(crate) struct Label {
     pub(crate) locale: Option<Locale>,
-    pub(crate) text: DisplayText,
+    pub(crate) text: LabelText,
 }
 
 impl Localized for Label {

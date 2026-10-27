@@ -20,6 +20,7 @@ use siros_picker_testhost::{run, Invocation};
 
 mod corpus;
 mod differential;
+mod families;
 mod paso;
 mod sides;
 
@@ -116,11 +117,12 @@ fn every_entry_carries_an_image() {
         icon: sides::icon(120, 80),
     }];
     let request = json!({"requests": [{"protocol": "openid4vp-v1-unsigned", "data": {
+        "response_type": "vp_token", "response_mode": "dc_api", "nonce": "n-1",
         "dcql_query": {"credentials": [{"id": "q1", "format": "mso_mdoc",
             "meta": {"doctype_value": MDL}, "claims": [{"path": [MDL_NS, "age_over_18"]}]}]}}}]})
     .to_string()
     .into_bytes();
-    let captured = sides::picker_run(&request, sides::registration(&wallet, &icons));
+    let captured = sides::picker_run(&request, sides::registration(&wallet, &icons), 7);
     let icon = |credential: &str| {
         let entry = captured
             .entries

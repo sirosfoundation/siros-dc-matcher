@@ -4,9 +4,10 @@
 use siros_dcql::{Multiplicity, QueryId};
 use siros_wallet_state::CredentialId;
 
-use crate::display_rule::WalletDisplay;
-use crate::error::{Inconsistency, PresentationError};
+use crate::display_rule::{DisplayFacts, HostDisplay, WalletDisplay};
+use crate::error::PresentationError;
 use crate::ids::{AdditionIndex, CandidateIndex, OfferIndex, QueryIndex};
+use crate::inconsistency::Inconsistency;
 use crate::offers::{Addition, Member, Offer};
 use crate::plan::{PlanDigest, Planned};
 
@@ -85,8 +86,10 @@ impl Selection {
 pub enum Fulfilment {
     /// On its own UI, where the user consented.
     WalletUi,
-    /// From its background service, after the user consented on the picker's display.
-    Background,
+    /// From its background service, after the user consented on the picker's display, which
+    /// showed the picked entries as this says: skipped when a picked entry's metadata says
+    /// `display_skipped`.
+    Background(HostDisplay),
 }
 
 /// An offer and additions of a plan that the user chose, with the credentials chosen for each
@@ -155,8 +158,14 @@ impl<'a> Planned<'a> {
         for addition in &additions {
             self.keeps_bound_credentials(addition.members(), &added)?;
         }
-        if fulfilment == Fulfilment::Background && view.wallet_display() == WalletDisplay::Needed {
-            return Err(PresentationError::WalletDisplayNeeded);
+        if let Fulfilment::Background(host) = fulfilment {
+            let facts = DisplayFacts {
+                host,
+                ..view.facts()
+            };
+            if WalletDisplay::of(&facts) == WalletDisplay::Needed {
+                return Err(PresentationError::WalletDisplayNeeded);
+            }
         }
         Ok(Chosen {
             planned: self,
@@ -241,7 +250,7 @@ impl<'a> Planned<'a> {
         planned: &[Member],
         chosen: &[Member],
     ) -> Result<(), PresentationError> {
-        let chosen = crate::plan::offered(&self.answered, chosen)?;
+        let chosen = crate::transactions::offered(&self.answered, chosen)?;
         for binding in self.transactions.bind(&self.answered, planned)? {
             let kept = chosen.iter().any(|member| {
                 member

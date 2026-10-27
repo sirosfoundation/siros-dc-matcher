@@ -5,50 +5,6 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use siros_codec::base64url::{self, Base64Url};
 
-/// `nonce` (Section 5.2): ASCII URL-safe characters, at least one.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Nonce(String);
-
-/// `state` (Section 5.2): ASCII URL-safe characters, at least one.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct State(String);
-
-/// `text` when it holds ASCII URL-safe characters only, at least one (Section 5.2).
-fn url_safe(text: &str) -> Option<String> {
-    let safe = text
-        .bytes()
-        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~'));
-    (!text.is_empty() && safe).then(|| text.to_owned())
-}
-
-impl Nonce {
-    /// The nonce `text`; `None` for text with another character, or none.
-    #[must_use]
-    pub fn parse(text: &str) -> Option<Self> {
-        url_safe(text).map(Self)
-    }
-
-    /// The nonce.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl State {
-    /// The state `text`; `None` for text with another character, or none.
-    #[must_use]
-    pub fn parse(text: &str) -> Option<Self> {
-        url_safe(text).map(Self)
-    }
-
-    /// The state.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
 /// The origin the platform attests for a DC API request (Appendix A.2).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]

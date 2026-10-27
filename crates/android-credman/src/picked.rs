@@ -34,7 +34,15 @@ pub enum PickedMember {
 /// Why a text is no standard metadata object.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PickedError {
-    /// The text is no JSON object.
+    /// The text is no JSON text: where its reading stopped.
+    #[error("entry metadata is no JSON text at line {line}, column {column}")]
+    NotJson {
+        /// The line, from 1.
+        line: usize,
+        /// The column, from 1.
+        column: usize,
+    },
+    /// The text is JSON, of another type than an object.
     #[error("entry metadata is no JSON object")]
     NotObject,
     /// A member is absent or of the wrong type.
@@ -67,7 +75,13 @@ impl Picked {
     pub fn parse(metadata: &str) -> Result<Self, PickedError> {
         let object = match serde_json::from_str::<Value>(metadata) {
             Ok(Value::Object(object)) => object,
-            Ok(_) | Err(_) => return Err(PickedError::NotObject),
+            Ok(_) => return Err(PickedError::NotObject),
+            Err(error) => {
+                return Err(PickedError::NotJson {
+                    line: error.line(),
+                    column: error.column(),
+                })
+            }
         };
         let known = [
             PickedMember::DisplaySkipped.as_str(),

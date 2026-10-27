@@ -35,6 +35,7 @@ fn first_supported_request(
 fn request_object() -> String {
     serde_json::json!({
         "client_id": "x509_san_dns:verifier.example",
+        "response_type": "vp_token",
         "response_mode": "dc_api.jwt",
         "nonce": "n-0S6_WzA2Mj",
         "expected_origins": ["https://verifier.example"],
@@ -49,6 +50,14 @@ fn request_object() -> String {
         "client_metadata": {"jwks": {"keys": []}}
     })
     .to_string()
+}
+
+/// The request object of a multisigned request: its Client Identifiers are its signatures'
+/// (A.3.2.2).
+fn multisigned_object() -> String {
+    let mut object: serde_json::Value = serde_json::from_str(&request_object()).expect("json");
+    object.as_object_mut().expect("object").remove("client_id");
+    object.to_string()
 }
 
 fn envelope(protocol: &str, data: serde_json::Value) -> Vec<u8> {
@@ -96,7 +105,7 @@ fn a_signed_request_is_read_from_the_jws_payload() {
 fn a_multisigned_request_is_read_from_the_payload_member() {
     let data = serde_json::json!({
         "request": {
-            "payload": b64(request_object().as_bytes()).to_string(),
+            "payload": b64(multisigned_object().as_bytes()).to_string(),
             "signatures": [{"protected": b64(br#"{"alg":"ES256"}"#).to_string(), "signature": b64(b"sig").to_string()}]
         }
     });
@@ -112,7 +121,7 @@ fn a_multisigned_request_is_read_from_the_payload_member() {
 #[test]
 fn a_multisigned_payload_at_the_top_level_of_data_is_accepted_too() {
     let data = serde_json::json!({
-        "payload": b64(request_object().as_bytes()).to_string(),
+        "payload": b64(multisigned_object().as_bytes()).to_string(),
         "signatures": [{"signature": b64(b"sig").to_string()}]
     });
     let found =
@@ -304,7 +313,8 @@ fn an_unsecured_token_has_an_empty_signature_not_a_missing_one() {
 /// missing one.
 #[test]
 fn a_malformed_dcql_query_reports_the_parse_error() {
-    let data = serde_json::json!({"dcql_query": {"credentials": "not an array"}});
+    let data = serde_json::json!({"response_type": "vp_token", "response_mode": "dc_api",
+        "nonce": "n-1", "dcql_query": {"credentials": "not an array"}});
     assert_eq!(
         UnverifiedRequest::read("openid4vp-v1-unsigned", &data),
         Err(NoQuery::Malformed(QueryError::Form {
@@ -356,7 +366,7 @@ fn a_signed_label_does_not_accept_an_inline_query() {
 fn the_two_signed_protocols_do_not_accept_each_other_s_shape() {
     let compact = serde_json::json!({"request": compact_jws(&request_object())});
     let json = serde_json::json!({
-        "request": {"payload": b64(request_object().as_bytes()).to_string(), "signatures": []}
+        "request": {"payload": b64(multisigned_object().as_bytes()).to_string(), "signatures": []}
     });
 
     assert!(UnverifiedRequest::read("openid4vp-v1-signed", &compact).is_ok());
@@ -507,7 +517,8 @@ fn a_signed_request_yields_its_full_context() {
 
 #[test]
 fn origins_client_id_and_metadata_are_none_when_absent() {
-    let data = serde_json::json!({"dcql_query": {"credentials": [{
+    let data = serde_json::json!({"response_type": "vp_token", "response_mode": "dc_api",
+        "nonce": "n-1", "dcql_query": {"credentials": [{
         "id": "pid", "format": "mso_mdoc",
         "meta": {"doctype_value": "org.iso.18013.5.1.mDL"},
         "claims": [{"path": ["org.iso.18013.5.1", "age_over_18"]}]
@@ -523,7 +534,8 @@ fn origins_client_id_and_metadata_are_none_when_absent() {
 #[test]
 fn object_claims_are_malformed_in_every_format() {
     for format in ["zkp_req", "mso_mdoc"] {
-        let data = serde_json::json!({"dcql_query": {"credentials": [{
+        let data = serde_json::json!({"response_type": "vp_token", "response_mode": "dc_api",
+            "nonce": "n-1", "dcql_query": {"credentials": [{
             "id": "nym", "format": format,
             "meta": {"doctype_value": "eu.europa.ec.eudi.nym_auth.1"},
             "claims": {"_req": [{"fn_id": "age_check", "params": {"ge": "2008-10-10"}}]}

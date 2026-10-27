@@ -2,6 +2,7 @@
 //! whether a text was cut to fit, which decides the wallet's display (A9).
 
 use crate::labels::{ClaimRow, DisplayValue};
+use crate::text::{LabelText, TextError};
 
 /// The most characters of a field's label or value.
 pub const FIELD_MAX: usize = 80;
@@ -22,11 +23,49 @@ pub struct FieldText {
     extent: Extent,
 }
 
+/// The label of a field: [`FieldText`] with a character other than white space, which the host
+/// requires of a field's name.
+#[derive(Clone, PartialEq, Eq)]
+pub struct FieldName(FieldText);
+
 /// A field of a picker entry: its label, and its value when it has one.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Field {
-    name: FieldText,
+    name: FieldName,
     value: Option<FieldText>,
+}
+
+impl FieldName {
+    /// The name of `label`.
+    #[must_use]
+    pub fn of(label: &LabelText) -> Self {
+        Self(FieldText::fit(label.as_str().trim_start()))
+    }
+
+    /// `text` from its first character other than white space, cut to [`FIELD_MAX`]
+    /// characters.
+    ///
+    /// # Errors
+    ///
+    /// [`TextError::Empty`] for white space alone.
+    pub fn fit(text: &str) -> Result<Self, TextError> {
+        match text.trim_start() {
+            "" => Err(TextError::Empty),
+            text => Ok(Self(FieldText::fit(text))),
+        }
+    }
+
+    /// The text.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+
+    /// The extent.
+    #[must_use]
+    pub fn extent(&self) -> Extent {
+        self.0.extent()
+    }
 }
 
 impl FieldText {
@@ -86,13 +125,13 @@ impl FieldText {
 impl Field {
     /// The field of `name` and `value`.
     #[must_use]
-    pub fn new(name: FieldText, value: Option<FieldText>) -> Self {
+    pub fn new(name: FieldName, value: Option<FieldText>) -> Self {
         Self { name, value }
     }
 
     /// The label.
     #[must_use]
-    pub fn name(&self) -> &FieldText {
+    pub fn name(&self) -> &FieldName {
         &self.name
     }
 
@@ -105,7 +144,7 @@ impl Field {
     /// Whether the label and the value are whole.
     #[must_use]
     pub fn extent(&self) -> Extent {
-        let clipped = std::iter::once(&self.name)
+        let clipped = std::iter::once(&self.name.0)
             .chain(&self.value)
             .any(|text| text.extent == Extent::Clipped);
         if clipped {
@@ -121,7 +160,7 @@ impl Field {
     #[must_use]
     pub fn of_claim(row: &ClaimRow) -> Self {
         Self {
-            name: FieldText::fit(row.label().as_str()),
+            name: FieldName::of(row.label()),
             value: line(row.value()),
         }
     }

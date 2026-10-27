@@ -55,6 +55,7 @@ fn registration() -> Result<Vec<u8>, String> {
         configuration: &wallet.configuration,
         trust: &wallet.trust,
         systems: &wallet.systems,
+        verifier_id: wallet.verifier_id,
         background: &wallet.background,
         icons: &[],
         default_icon: &default_icon,

@@ -20,6 +20,38 @@ pub const TEMPLATE_MAX: usize = 100;
 /// The most characters of a card's title or issuer line: a label within an issuer template.
 pub const CARD_TEXT_MAX: usize = LABEL_MAX + TEMPLATE_MAX;
 
+/// A label, a name, a title or a hint: display text of at most [`LABEL_MAX`] characters, one of
+/// them other than white space. The host refuses a blank field name.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct LabelText(DisplayText);
+
+impl LabelText {
+    /// The label `text`.
+    ///
+    /// # Errors
+    ///
+    /// [`TextError::Empty`] for white space alone; the rule of [`DisplayText`] it breaks.
+    pub fn new(text: &str) -> Result<Self, TextError> {
+        DisplayText::non_blank(text, LABEL_MAX).map(Self)
+    }
+
+    /// The text.
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+
+    /// The label as display text.
+    pub fn text(&self) -> &DisplayText {
+        &self.0
+    }
+}
+
+impl From<LabelText> for DisplayText {
+    fn from(label: LabelText) -> Self {
+        label.0
+    }
+}
+
 /// A card's title or issuer line: display text of at most [`CARD_TEXT_MAX`] characters, one of
 /// them other than white space.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -32,20 +64,80 @@ impl CardText {
     ///
     /// [`TextError::Empty`] for white space alone; the rule of [`DisplayText`] it breaks.
     pub fn new(text: &str) -> Result<Self, TextError> {
-        if text.chars().all(char::is_whitespace) {
-            return Err(TextError::Empty);
-        }
-        DisplayText::new(text, CARD_TEXT_MAX).map(Self)
+        DisplayText::non_blank(text, CARD_TEXT_MAX).map(Self)
     }
 
-    /// The line `text`, when it has a character other than white space.
-    pub fn of(text: &DisplayText) -> Option<Self> {
-        (!text.as_str().chars().all(char::is_whitespace)).then(|| Self(text.clone()))
+    /// The line of the label `label`.
+    pub fn of(label: &LabelText) -> Self {
+        Self(label.0.clone())
     }
 
     /// The text.
     pub fn as_str(&self) -> &str {
         self.0.as_str()
+    }
+}
+
+/// An issuer line around the issuer's name: text with [`IssuerTemplate::PLACEHOLDER`] once.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IssuerTemplate {
+    before: DisplayText,
+    after: DisplayText,
+}
+
+/// Why text is no issuer template.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
+pub enum TemplateError {
+    /// The text has no `{issuer}`, or has it twice.
+    Placeholder,
+    /// The text around `{issuer}` breaks a rule of display text, or has more than
+    /// [`TEMPLATE_MAX`] characters.
+    Text(#[source] TextError),
+}
+
+impl TemplateError {
+    /// A stable identifier.
+    #[must_use]
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Placeholder => "template_placeholder",
+            Self::Text(error) => error.code(),
+        }
+    }
+}
+
+impl IssuerTemplate {
+    /// Where the issuer's name goes.
+    pub const PLACEHOLDER: &'static str = "{issuer}";
+
+    /// The template `text`.
+    ///
+    /// # Errors
+    ///
+    /// [`TemplateError`]: `{issuer}` absent or repeated, or the text around it unsafe or longer
+    /// than [`TEMPLATE_MAX`] characters.
+    pub fn parse(text: &str) -> Result<Self, TemplateError> {
+        let (before, after) = text
+            .split_once(Self::PLACEHOLDER)
+            .ok_or(TemplateError::Placeholder)?;
+        if after.contains(Self::PLACEHOLDER) {
+            return Err(TemplateError::Placeholder);
+        }
+        let part = |text| DisplayText::new(text, TEMPLATE_MAX).map_err(TemplateError::Text);
+        let (before, after) = (part(before)?, part(after)?);
+        if before.as_str().chars().count() + after.as_str().chars().count() > TEMPLATE_MAX {
+            return Err(TemplateError::Text(TextError::TooLong));
+        }
+        Ok(Self { before, after })
+    }
+
+    /// The line of the issuer named `name`: safe text, with a character other than white space
+    /// in the name, of at most [`LABEL_MAX`] and [`TEMPLATE_MAX`] characters, which make
+    /// [`CARD_TEXT_MAX`].
+    pub fn line(&self, name: &LabelText) -> CardText {
+        let (before, after) = (self.before.as_str(), self.after.as_str());
+        CardText(DisplayText(format!("{before}{}{after}", name.as_str())))
     }
 }
 
@@ -60,15 +152,6 @@ impl CardText {
 pub struct DisplayText(String);
 
 impl DisplayText {
-    /// A label, a name, a title or a hint: at most [`LABEL_MAX`] characters.
-    ///
-    /// # Errors
-    ///
-    /// [`TextError`]: the rule `text` breaks.
-    pub fn label(text: &str) -> Result<Self, TextError> {
-        Self::new(text, LABEL_MAX)
-    }
-
     /// A value: at most [`VALUE_MAX`] characters.
     ///
     /// # Errors
@@ -78,8 +161,17 @@ impl DisplayText {
         Self::new(text, VALUE_MAX)
     }
 
+    /// Text of at most `max` characters, one of them other than white space.
+    fn non_blank(text: &str, max: usize) -> Result<Self, TextError> {
+        let text = Self::new(text, max)?;
+        if text.0.chars().all(char::is_whitespace) {
+            return Err(TextError::Empty);
+        }
+        Ok(text)
+    }
+
     /// Text of at most `max` characters.
-    pub(crate) fn new(text: &str, max: usize) -> Result<Self, TextError> {
+    fn new(text: &str, max: usize) -> Result<Self, TextError> {
         if text.chars().any(unsafe_to_show) {
             return Err(TextError::Unsafe);
         }
@@ -125,7 +217,7 @@ pub enum TextError {
     Unsafe,
     /// The text has more characters than its kind allows.
     TooLong,
-    /// The text of a card's title or issuer line is white space alone.
+    /// The text of a label, a card's title or an issuer line is white space alone.
     Empty,
 }
 

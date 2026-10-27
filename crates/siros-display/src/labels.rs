@@ -7,14 +7,14 @@ use siros_credential::{ClaimSource, TypedValue};
 use siros_dcql::{ClaimPath, PathComponent};
 
 use crate::error::DisplayError;
-use crate::text::DisplayText;
+use crate::text::LabelText;
 
 /// A claim description of display metadata, with the label the locale function takes from it
 /// for the wallet's language: `None` when it has no entry for the language.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DescribedLabel {
     path: ClaimPath,
-    label: Option<DisplayText>,
+    label: Option<LabelText>,
 }
 
 /// The labels of one credential's claims in the wallet's language: the labelled claim
@@ -29,7 +29,7 @@ pub struct ClaimLabels {
 /// A claim as the user sees it: its label and its value.
 #[derive(Clone, PartialEq)]
 pub struct ClaimRow {
-    label: DisplayText,
+    label: LabelText,
     value: DisplayValue,
 }
 
@@ -61,7 +61,7 @@ pub enum DisplayValue {
 impl DescribedLabel {
     /// The description of the claims at `path`, labelled `label` in the wallet's language.
     #[must_use]
-    pub fn new(path: ClaimPath, label: Option<DisplayText>) -> Self {
+    pub fn new(path: ClaimPath, label: Option<LabelText>) -> Self {
         Self { path, label }
     }
 
@@ -73,14 +73,14 @@ impl DescribedLabel {
 
     /// The label in the wallet's language.
     #[must_use]
-    pub fn label(&self) -> Option<&DisplayText> {
+    pub fn label(&self) -> Option<&LabelText> {
         self.label.as_ref()
     }
 }
 
 impl ClaimRow {
     /// The label.
-    pub fn label(&self) -> &DisplayText {
+    pub fn label(&self) -> &LabelText {
         &self.label
     }
 
@@ -118,7 +118,7 @@ impl ClaimLabels {
     ///
     /// [`DisplayError::PointerUnlabelled`] for a path without a label and without a key, and
     /// [`DisplayError::Text`] for a key that is no safe label.
-    pub fn label(&self, path: &[PathComponent]) -> Result<DisplayText, DisplayError> {
+    pub fn label(&self, path: &[PathComponent]) -> Result<LabelText, DisplayError> {
         let described = |descriptions: &[DescribedLabel]| {
             descriptions
                 .iter()
@@ -133,7 +133,7 @@ impl ClaimLabels {
             .rev()
             .find_map(PathComponent::as_key)
             .ok_or(DisplayError::PointerUnlabelled)?;
-        DisplayText::label(key).map_err(DisplayError::Text)
+        LabelText::new(key).map_err(DisplayError::Text)
     }
 
     /// The rows of the claims `pointers` select in `claims`, one per pointer. A pointer with a

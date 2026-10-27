@@ -4,8 +4,8 @@ use serde_json::Value;
 use siros_zkp_req::{QueryOption, ReqItem, ZkpReqQuery};
 
 use crate::error::DisplayError;
-use crate::field::{Field, FieldText, FIELD_MAX};
-use crate::text::DisplayText;
+use crate::field::{Field, FieldName, FieldText, FIELD_MAX};
+use crate::text::{DisplayText, LabelText};
 
 /// The end of every row value. The rows come from a request whose signature nobody has
 /// checked, so they state what is asked and nothing more.
@@ -35,7 +35,8 @@ pub fn rows(query: &ZkpReqQuery, option: &QueryOption) -> Result<Vec<Field>, Dis
                 Some(detail) => FieldText::fit_within(&detail, FIELD_MAX - UNVERIFIED.len() - 1)
                     .marked(UNVERIFIED),
             };
-            Ok(Field::new(FieldText::fit(label), Some(value)))
+            let name = LabelText::new(label).map_err(DisplayError::Text)?;
+            Ok(Field::new(FieldName::of(&name), Some(value)))
         })
         .collect()
 }
@@ -67,13 +68,13 @@ fn parts(item: &ReqItem) -> (&str, Option<String>) {
 /// A proof statement row of a request intake verified.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProofRow {
-    label: DisplayText,
+    label: LabelText,
     value: Option<DisplayText>,
 }
 
 impl ProofRow {
     /// The label: the function's name.
-    pub fn label(&self) -> &DisplayText {
+    pub fn label(&self) -> &LabelText {
         &self.label
     }
 
@@ -99,7 +100,7 @@ pub fn verified_rows(
         .map(|item| {
             let (label, detail) = parts(item?);
             Ok(ProofRow {
-                label: DisplayText::label(label).map_err(DisplayError::Text)?,
+                label: LabelText::new(label).map_err(DisplayError::Text)?,
                 value: detail
                     .map(|detail| DisplayText::value(&detail))
                     .transpose()

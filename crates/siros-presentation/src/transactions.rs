@@ -8,14 +8,16 @@ use std::convert::Infallible;
 
 use itertools::Itertools;
 use siros_credential::EntryRef;
+use siros_dcql::QueryId;
 use siros_transaction_data::{
-    check_request, Entry, EntryPosition, Exclusion, Selection, TransactionDataError,
+    check_request, Entry, EntryPosition, Exclusion, Selection, Taken, TransactionDataError,
 };
 
 use crate::credential::MatchCredential;
 use crate::ids::{CandidateIndex, QueryIndex};
-use crate::matching::{Answered, Failure};
-use crate::offers::Offers;
+use crate::inconsistency::Inconsistency;
+use crate::matching::{Answered, Answers, Candidate, Failure};
+use crate::offers::{Member, Offers};
 use crate::request::MatchRequest;
 
 /// What gives a candidate credential the entry it takes: the wallet's sources, or the
@@ -40,6 +42,103 @@ pub trait TransactionSource<C> {
     /// Whether a source defines `entry`'s type for `credential` (OpenID4VP 1.0, Section 5.1),
     /// though the entry may not be compatible.
     fn knows(&self, entry: &Entry, credential: &C) -> bool;
+}
+
+/// The presented credential a transaction entry binds to (T4): the Credential Query it answers,
+/// and its entry, named by `credentialId` and instance.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct Bound {
+    pub(crate) query: QueryId,
+    pub(crate) credential: EntryRef,
+}
+
+impl Bound {
+    /// The credential `candidate` presented for the query of `answers`.
+    pub(crate) fn of<C: MatchCredential, R>(
+        answers: &Answers<'_, C, R>,
+        candidate: &Candidate<C>,
+    ) -> Self {
+        Self {
+            query: answers.id().clone(),
+            credential: candidate.credential().entry(),
+        }
+    }
+}
+
+/// An entry a presented credential binds (T4): the credential, the entry, and the view it took.
+pub struct BoundEntry<'t> {
+    pub(crate) bound: Bound,
+    pub(crate) entry: &'t Entry,
+    pub(crate) taken: &'t Taken,
+}
+
+impl<'t> BoundEntry<'t> {
+    /// Whether the entry binds to `candidate`, a candidate of the query of `answers`.
+    pub fn binds<C: MatchCredential, R>(
+        &self,
+        answers: &Answers<'_, C, R>,
+        candidate: &Candidate<C>,
+    ) -> bool {
+        self.bound == Bound::of(answers, candidate)
+    }
+
+    /// The entry.
+    pub fn entry(&self) -> &'t Entry {
+        self.entry
+    }
+
+    /// What the credential takes of it: its view, and the payment it names.
+    pub fn taken(&self) -> &'t Taken {
+        self.taken
+    }
+}
+
+/// A member of an offer as the matching answers it: its query, and each of its candidates.
+pub(crate) struct Offered<'w, 'a, C: MatchCredential, R> {
+    pub(crate) query: QueryIndex,
+    pub(crate) answers: &'w Answers<'a, C, R>,
+    pub(crate) candidates: Vec<(CandidateIndex, &'w Candidate<C>)>,
+}
+
+#[cfg(feature = "wallet")]
+impl<C: MatchCredential, R> Offered<'_, '_, C, R> {
+    /// Whether the entry of `bound` binds to the member's candidate `candidate`.
+    pub(crate) fn carries(&self, bound: &Bound, candidate: &Candidate<C>) -> bool {
+        *bound == Bound::of(self.answers, candidate)
+    }
+}
+
+/// Each member of `members` as the matching answers it, in order.
+///
+/// # Errors
+///
+/// [`Inconsistency`] for a member or a candidate the matching lacks.
+pub(crate) fn offered<'w, 'a, C: MatchCredential, R>(
+    answered: &'w Answered<'a, C, R>,
+    members: &[Member],
+) -> Result<Vec<Offered<'w, 'a, C, R>>, Inconsistency> {
+    members
+        .iter()
+        .map(|member| {
+            let query = member.query();
+            let answers = answered.answers(query).ok_or(Inconsistency::Query(query))?;
+            let candidates = member
+                .candidates()
+                .iter()
+                .map(|&index| {
+                    let candidate = answers
+                        .candidate(index)
+                        .ok_or(Inconsistency::Candidate(query, index))?;
+                    Ok((index, candidate))
+                })
+                .try_collect()?;
+            Ok(Offered {
+                query,
+                answers,
+                candidates,
+            })
+        })
+        .collect()
 }
 
 /// A candidate of a targeted query, its entry, and what it takes.
@@ -210,6 +309,63 @@ impl<D> Transactions<D> {
     /// candidate: the referenced credentials are not available (OpenID4VP 1.0, Section 8.5).
     fn unavailable(&self) -> bool {
         !self.entries.is_empty() && self.candidacies.is_empty()
+    }
+
+    /// The entries the presented credentials of `members` bind, one group (T4): each credential
+    /// binds the entry it takes, and an entry two of them take binds to the one whose query
+    /// comes first in its `credential_ids`, then the first presented (OpenID4VP 1.0, Section
+    /// 5.1). An entry the wallet decides after selection binds nothing here (K2).
+    ///
+    /// # Errors
+    ///
+    /// [`Inconsistency`] for a member or a candidate the matching lacks, or an entry the
+    /// request lacks.
+    pub fn bind<'t, C: MatchCredential, R>(
+        &'t self,
+        answered: &Answered<'_, C, R>,
+        members: &[Member],
+    ) -> Result<Vec<BoundEntry<'t>>, Inconsistency> {
+        let presented: Vec<(Bound, &'t Candidacy<D>)> = offered(answered, members)?
+            .iter()
+            .flat_map(|member| {
+                member
+                    .candidates
+                    .iter()
+                    .filter_map(move |&(index, candidate)| {
+                        let candidacy = self
+                            .candidacies
+                            .iter()
+                            .find(|c| c.query == member.query && c.candidate == index)?;
+                        Some((Bound::of(member.answers, candidate), candidacy))
+                    })
+            })
+            .collect();
+        let mut bound: Vec<BoundEntry<'t>> = Vec::new();
+        for (credential, candidacy) in &presented {
+            let Selection::Takes(taken) = &candidacy.selection else {
+                continue;
+            };
+            let entry = self
+                .entries
+                .get(taken.entry().value())
+                .ok_or(Inconsistency::Entry)?;
+            let rank = |query: &QueryId| entry.credential_ids().iter().position(|id| id == query);
+            let first = presented
+                .iter()
+                .filter(|(_, other)| {
+                    matches!(&other.selection, Selection::Takes(t) if t.entry() == taken.entry())
+                })
+                .min_by_key(|(other, _)| rank(&other.query))
+                .map(|(other, _)| other);
+            if first == Some(credential) {
+                bound.push(BoundEntry {
+                    bound: credential.clone(),
+                    entry,
+                    taken,
+                });
+            }
+        }
+        Ok(bound)
     }
 
     /// The offers of `answered` over the candidates the first match leaves.

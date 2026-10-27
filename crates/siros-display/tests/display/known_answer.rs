@@ -230,7 +230,7 @@ fn the_configuration_serves_a_language_the_type_metadata_lacks() {
     let metadata = IssuerMetadata::merge(&issuer_metadata, CONFIGURATION, None).unwrap();
     let type_metadata = siros_display::TypeMetadata::parse(&json!({
         "vct": CONFIGURATION,
-        "display": [{"locale": "fr", "name": "Identité"}, {"locale": "it", "name": " "}],
+        "display": [{"locale": "fr", "name": "Identité"}],
         "claims": [{"path": ["given_name"], "display": [{"locale": "fr", "label": "Prénom"}]}]
     }))
     .unwrap();
@@ -239,8 +239,6 @@ fn the_configuration_serves_a_language_the_type_metadata_lacks() {
     for (language, title, label) in [
         ("fr", "Identité", "Prénom"),
         ("en-US", "IdentityCredential", "Given Name"),
-        // A name of spaces alone gives the host's title.
-        ("it", "Credential", "given_name"),
     ] {
         let language = Locale::parse(language).unwrap();
         let card = cache.card(&credential, &language, &wording(None));

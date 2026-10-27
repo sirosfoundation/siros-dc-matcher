@@ -5,8 +5,9 @@ use siros_dcql::{Multiplicity, QueryId};
 use siros_wallet_state::CredentialId;
 
 use super::selection::{Selection, Subset};
-use crate::error::{Inconsistency, PresentationError};
+use crate::error::PresentationError;
 use crate::ids::{AdditionIndex, OfferIndex, QueryIndex};
+use crate::inconsistency::Inconsistency;
 use crate::offers::{Addition, Member};
 use crate::pick::Pick;
 use crate::plan::Planned;

@@ -40,7 +40,8 @@ pub(crate) enum Unshown {
     CredentialUnavailable,
     /// The matching gives no offer: the failure's code.
     Unmatched(&'static str),
-    /// The rows of the offer at this position do not show: the error's code.
+    /// The rows of the matching's offer at this position do not show, which leaves it out:
+    /// the error's code.
     Display(OfferIndex, &'static str),
 }
 

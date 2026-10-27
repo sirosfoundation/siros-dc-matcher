@@ -10,6 +10,7 @@ use siros_trust::{IssuerFacts, TrustStore};
 use siros_wallet_state::{CredentialId, PresentationRecord};
 use siros_zkp_req_nym_auth::catalogue::{ATTESTATION_TYPES, UNDISCLOSABLE};
 use siros_zkp_req_nym_auth::system::NymAuthSystem;
+use siros_zkp_req_nym_auth::verifier_id::VerifierIdForm;
 
 use crate::error::Member;
 use crate::icon::RasterIcon;
@@ -41,6 +42,9 @@ pub struct RegistrationInput<'a> {
     /// The nym_auth systems whose circuits the host loaded, in the wallet's order of
     /// preference.
     pub systems: &'a [NymAuthSystem],
+    /// The form of the nym_auth `verifier_id` the wallet's trust framework fixes, which the
+    /// picker applies as the wallet's plan does.
+    pub verifier_id: VerifierIdForm,
     /// The credentials the wallet declares presentable without its UI (A9).
     pub background: &'a [CredentialId],
     /// The icon the host prepared for each credential whose display metadata gives one: its
@@ -163,6 +167,10 @@ pub fn write(input: &RegistrationInput<'_>) -> Result<Vec<u8>, WriteError> {
                     .map(|system| Cbor::text(system.id().as_str()))
                     .collect(),
             ),
+        ),
+        (
+            Member::VerifierId,
+            Cbor::text(crate::wire::verifier_id_form_name(input.verifier_id)),
         ),
         (
             Member::Icons,

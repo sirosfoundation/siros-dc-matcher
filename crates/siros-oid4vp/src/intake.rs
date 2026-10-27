@@ -22,7 +22,7 @@ use siros_codec::date::DateTime;
 
 pub use error::{
     AttestationClaim, AttestationFault, ChainFault, ClaimsFault, Coordinate, FormFault,
-    IntakeError, JsonParameter, JwkFault, JwsError, JwsFault, LeafKeyFault, VerifierInfoRule,
+    IntakeError, JsonParameter, JwkFault, JwsError, JwsFault, LeafKeyFault,
 };
 pub use trust::{KeyMaterial, Trust, TrustAnswer, TrustSubject, Verdict};
 

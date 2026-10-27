@@ -1,5 +1,7 @@
 //! The wallet's display (A9): whether the user must consent to an offer on the wallet's UI.
 
+use siros_display::{Extent, Field};
+
 use crate::offers::Offer;
 use crate::transactions::Transactions;
 
@@ -95,6 +97,33 @@ impl WalletDisplay {
             Self::NotNeeded
         } else {
             Self::Needed
+        }
+    }
+}
+
+impl Rows {
+    /// Whether `fields`, the picker's fields of every disclosed claim and proof statement of an
+    /// offer, each show whole.
+    pub fn of<'f>(fields: impl IntoIterator<Item = &'f Field>) -> Self {
+        if fields
+            .into_iter()
+            .all(|field| field.extent() == Extent::Whole)
+        {
+            Self::Whole
+        } else {
+            Self::Clipped
+        }
+    }
+}
+
+impl HostDisplay {
+    /// What the host shows of an offer whose entries it showed as `entries`: skipped when it
+    /// skipped text of one of them.
+    pub fn of(entries: impl IntoIterator<Item = HostDisplay>) -> Self {
+        if entries.into_iter().all(|entry| entry == Self::Full) {
+            Self::Full
+        } else {
+            Self::Skipped
         }
     }
 }

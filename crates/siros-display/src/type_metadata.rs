@@ -9,7 +9,7 @@ use crate::entry::DisplayEntry;
 use crate::error::{DisplayError, EntryFault};
 use crate::json::{self, Entries};
 use crate::locale::{Locale, Localized};
-use crate::text::DisplayText;
+use crate::text::LabelText;
 
 /// The Type Metadata of one `vct`: its display and its claim labels.
 #[derive(Debug, Clone)]
@@ -108,7 +108,7 @@ fn required_label(
     entry: &Map<String, Value>,
     name: &str,
     malformed: fn(EntryFault) -> DisplayError,
-) -> Result<DisplayText, DisplayError> {
+) -> Result<LabelText, DisplayError> {
     json::label(entry, name, malformed(EntryFault::MemberType))?
         .ok_or(malformed(EntryFault::MemberMissing))
 }

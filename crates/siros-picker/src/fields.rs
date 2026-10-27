@@ -1,7 +1,7 @@
 //! What an entry shows of the transaction its credential takes: the rows of the transaction's
 //! view as fields, or, for a payment, the payee, the amount and the other rows.
 
-use siros_display::{Field, FieldText};
+use siros_display::{Field, FieldName, FieldText, TextError};
 use siros_transaction_data::{
     Location, LocationStep, Payment, Row, RowValue, Segment, ShownLabel, Taken, TransactionView,
 };
@@ -30,39 +30,44 @@ pub(crate) struct PaymentShown {
 impl TransactionShown {
     /// What an entry shows of `taken`: a payment entry when the entry is of a payment rulebook
     /// whose payload names the payee and the amount, else the view's rows.
-    pub(crate) fn of(taken: &Taken) -> Self {
+    ///
+    /// # Errors
+    ///
+    /// [`TextError::Empty`] for a row label of white space alone, which siros-transaction-data
+    /// refuses before it renders a view.
+    pub(crate) fn of(taken: &Taken) -> Result<Self, TextError> {
         let view = taken.view();
-        match taken.payment() {
-            Some(payment) => Self::Payment(PaymentShown::of(payment, view)),
-            None => Self::Rows(view.rows().iter().map(field).collect()),
-        }
+        Ok(match taken.payment() {
+            Some(payment) => Self::Payment(PaymentShown::of(payment, view)?),
+            None => Self::Rows(view.rows().iter().map(field).collect::<Result<_, _>>()?),
+        })
     }
 }
 
 impl PaymentShown {
-    fn of(payment: &Payment, view: &TransactionView) -> Self {
+    fn of(payment: &Payment, view: &TransactionView) -> Result<Self, TextError> {
         let lines: Vec<String> = view
             .transaction_title()
-            .map(text)
+            .map(|title| Ok(text(title)))
             .into_iter()
             .chain(
                 view.rows()
                     .iter()
                     .filter(|row| !paid(row.location()))
                     .map(|row| {
-                        let field = field(row);
-                        match field.value() {
+                        let field = field(row)?;
+                        Ok(match field.value() {
                             Some(value) => format!("{}: {}", field.name().as_str(), value.as_str()),
                             None => field.name().as_str().to_owned(),
-                        }
+                        })
                     }),
             )
-            .collect();
-        Self {
+            .collect::<Result<_, TextError>>()?;
+        Ok(Self {
             payee: payment.payee().as_str().to_owned(),
             amount: payment.amount().text(),
             additional_info: (!lines.is_empty()).then(|| lines.join("\n")),
-        }
+        })
     }
 }
 
@@ -81,7 +86,7 @@ fn paid(location: &Location) -> bool {
 
 /// The field of a displayed claim: its label, and its value as one line. An image shows
 /// clipped.
-fn field(row: &Row) -> Field {
+fn field(row: &Row) -> Result<Field, TextError> {
     let value = match row.value() {
         RowValue::LabelOnly => None,
         RowValue::Value(scalar) => Some(FieldText::fit(&scalar.text())),
@@ -90,7 +95,7 @@ fn field(row: &Row) -> Field {
         }
         RowValue::Image(_) => Some(FieldText::partial("")),
     };
-    Field::new(FieldText::fit(&text(row.label())), value)
+    Ok(Field::new(FieldName::fit(&text(row.label()))?, value))
 }
 
 /// The text of `label`, each value as the payload writes it.

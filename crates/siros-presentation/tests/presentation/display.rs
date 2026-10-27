@@ -5,7 +5,9 @@
 use serde_json::{json, Value};
 use siros_codec::cbor::Value as Cbor;
 use siros_oid4vp::{Method, Submission, VerifiedRequest};
-use siros_presentation::{Fulfilment, OfferIndex, PresentationError, Selection, WalletDisplay};
+use siros_presentation::{
+    Fulfilment, HostDisplay, OfferIndex, PresentationError, Selection, WalletDisplay,
+};
 use siros_zkp_req_nym_auth::testing::{query, Spec};
 
 use crate::sd_jwt::{payment, type_metadata};
@@ -155,9 +157,19 @@ fn an_offer_needs_the_wallet_display_unless_a9_holds() {
             Vec::new(),
             Vec::new(),
         );
-        let background = planned.choose(&selection, Fulfilment::Background);
+        let background = planned.choose(&selection, Fulfilment::Background(HostDisplay::Full));
         match display {
-            WalletDisplay::NotNeeded => assert!(background.is_ok(), "{case}"),
+            WalletDisplay::NotNeeded => {
+                assert!(background.is_ok(), "{case}");
+                // K4: an offer the host showed only in part needs the wallet's display.
+                let skipped =
+                    planned.choose(&selection, Fulfilment::Background(HostDisplay::Skipped));
+                assert_eq!(
+                    skipped.err(),
+                    Some(PresentationError::WalletDisplayNeeded),
+                    "{case}"
+                );
+            }
             WalletDisplay::Needed => {
                 let error = background.err().unwrap();
                 assert_eq!(error, PresentationError::WalletDisplayNeeded, "{case}");

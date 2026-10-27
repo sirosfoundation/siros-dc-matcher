@@ -36,6 +36,7 @@ mod diagnostics;
 mod entries;
 mod fields;
 mod matching;
+mod shown;
 #[cfg(target_arch = "wasm32")]
 mod simple_allocator;
 
@@ -55,6 +56,7 @@ use android_credman::SetSink;
 use siros_registration::Registration;
 
 use crate::diagnostics::Diagnostics;
+use crate::entries::HostLevel;
 
 #[cfg(target_arch = "wasm32")]
 fn main() {
@@ -73,7 +75,7 @@ fn main() {
     let input = Input {
         request: &request,
         registration: &registration,
-        level: host.credman().level(),
+        level: HostLevel::reported(host.credman()),
     };
     run(&input, &mut sets);
 }
@@ -89,7 +91,7 @@ struct Input<'a> {
     /// The registration the wallet registered.
     registration: &'a [u8],
     /// The host level, which decides what the entries show (`display_skipped`).
-    level: u32,
+    level: HostLevel,
 }
 
 /// One matcher invocation, from the host's inputs to emitted entry sets.

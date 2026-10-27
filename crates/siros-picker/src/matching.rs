@@ -3,12 +3,15 @@
 
 use android_credman::SetSink;
 use siros_oid4vp::{diagnose, Protocol, UnverifiedRequest};
-use siros_presentation::{Asked, Matching, NoOffer, ProofChoice, Transactions, ZkpQuery};
+use siros_presentation::{
+    Asked, Matching, NoOffer, OfferIndex, ProofChoice, Transactions, ZkpQuery,
+};
 use siros_registration::{RegisteredCredential, Registration, Unverified};
-use siros_zkp_req_nym_auth::policy::signed_and_encrypted;
+use siros_zkp_req_nym_auth::policy::admitted;
 
 use crate::diagnostics::Unshown;
-use crate::entries::OfferEntries;
+use crate::entries::{HostLevel, OfferEntries};
+use crate::shown::Matched;
 
 /// Why a `zkp_req` candidate answers no option in the picker: its query has none with a usable
 /// pair.
@@ -16,16 +19,18 @@ use crate::entries::OfferEntries;
 pub(crate) struct NoChoice;
 
 /// Emits the entry set of each offer of `request` over `registration` to `sets`, for a host at
-/// `level`, and gives why it emitted none, or which offers it could not show.
+/// `level`, and gives why it emitted none, or which offers it could not show. The offers that
+/// show are numbered in order, as the wallet's plan numbers its views.
 ///
 /// The request is the first entry of the DC API request under a protocol of OpenID4VP 1.0,
 /// A.1. Its `zkp_req` candidates answer the first option with a usable pair: the credential
 /// tests and the seed are the wallet's (N3, N4). Its issuers are admitted from the facts the
-/// wallet registered (TR5), at the registration's time.
+/// wallet registered (TR5), at the registration's time. A nym_auth request meets the policy and
+/// the `verifier_id` rule of the wallet's form as the plan applies them.
 pub(crate) fn pick(
     request: &[u8],
     registration: &Registration,
-    level: u32,
+    level: HostLevel,
     sets: &mut impl SetSink,
 ) -> Vec<Unshown> {
     let known = |label: &str| Protocol::from_label(label).is_some();
@@ -40,13 +45,13 @@ pub(crate) fn pick(
         &[],
         registration.systems(),
         registration.registered_at().date(),
-        signed_and_encrypted(&request).map(drop),
+        admitted(&request, registration.verifier_id()).map(drop),
     );
     let answered = matching.answer(|_, _, zkp: &ZkpQuery| first_choice(zkp));
     if let Some(failure) = answered.invalid_request() {
         return vec![Unshown::Refused(failure.code())];
     }
-    let source = Unverified::new(registration, request.signature());
+    let source = Unverified::new(registration, &request);
     let transactions = match Transactions::read(&request, &answered, &source) {
         Ok(transactions) => transactions,
         Err(error) => return vec![Unshown::TransactionData(error.code())],
@@ -56,13 +61,25 @@ pub(crate) fn pick(
         Err(NoOffer::CredentialUnavailable) => return vec![Unshown::CredentialUnavailable],
         Err(NoOffer::Unmatched(failure)) => return vec![Unshown::Unmatched(failure.code())],
     };
-    let shown = OfferEntries::sources(&answered, &transactions, level);
-    offers
-        .offers()
-        .iter()
-        .enumerate()
-        .filter_map(|(at, offer)| shown.emit(at, offer, sets).err())
-        .collect()
+    let entries = OfferEntries {
+        matched: Matched {
+            answered: &answered,
+            transactions: &transactions,
+        },
+        level,
+    };
+    let mut unshown = Vec::new();
+    let mut at = 0;
+    for (index, offer) in offers.offers().iter().enumerate() {
+        match entries.matched.shown(OfferIndex::new(index), offer) {
+            Ok(presented) => {
+                entries.emit(OfferIndex::new(at), offer, &presented, sets);
+                at += 1;
+            }
+            Err(reason) => unshown.push(reason),
+        }
+    }
+    unshown
 }
 
 /// The first option of `zkp` with a usable pair: the picker applies no credential test.

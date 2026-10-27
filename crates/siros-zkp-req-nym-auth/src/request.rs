@@ -3,9 +3,9 @@
 
 use siros_oid4vp::{AttestationFormat, ClientId, Protocol, ResponseMode, Verdict, VerifiedRequest};
 
-use crate::policy::{signed_and_encrypted, PolicyRequest, PolicyRule, RequestRefusal};
+use crate::policy::{admitted, PolicyRequest, PolicyRule, RequestRefusal};
 use crate::presenter::Session;
-use crate::verifier_id::{Intermediary, VerifierId, VerifierIdForm, VerifierIdRule};
+use crate::verifier_id::{VerifierId, VerifierIdForm, VerifierIdRule};
 
 /// A request intake verified that meets the nym_auth policy, with the session it binds.
 #[derive(Debug, Clone)]
@@ -17,7 +17,7 @@ pub struct NymAuthRequest<'r> {
 impl<'r> NymAuthRequest<'r> {
     /// The nym_auth request of `request`, its `verifier_id` in the form `verifier_id`.
     ///
-    /// The request meets the policy ([`signed_and_encrypted`]): signed, trusted, answered in an
+    /// The request meets the policy ([`admitted`]): signed, trusted, answered in an
     /// encrypted Response Mode, which intake gives an encryption key, and without a
     /// registration certificate. Over the Digital Credentials API the calling origin is in
     /// `expected_origins`. The session's `Handover` binds the encryption key's thumbprint.
@@ -33,12 +33,10 @@ impl<'r> NymAuthRequest<'r> {
         request: &'r VerifiedRequest,
         verifier_id: VerifierIdForm,
     ) -> Result<Self, RequestRefusal> {
-        let client_id = signed_and_encrypted(request)?;
-        let verifier_id = match verifier_id {
-            VerifierIdForm::X509SanDns => VerifierId::x509_san_dns(client_id, Intermediary::Absent),
-            VerifierIdForm::Semantic => semantic_id(request),
-        }
-        .map_err(RequestRefusal::VerifierId)?;
+        let verifier_id = match admitted(request, verifier_id)? {
+            Some(verifier_id) => verifier_id,
+            None => semantic_id(request).map_err(RequestRefusal::VerifierId)?,
+        };
         Ok(Self {
             request,
             session: Session {

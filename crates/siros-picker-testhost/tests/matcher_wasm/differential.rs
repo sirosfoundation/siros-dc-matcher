@@ -13,10 +13,10 @@ use siros_presentation::{Exclusion, Failure, PresentationError};
 use siros_registration::CredentialIcon;
 
 use crate::sides::{
-    chosen_through_picks, intake, picker_offers, picker_run, proof_queries, registration,
-    wallet_offers, Offered,
+    chosen_through_picks, intake, picker_offers, picker_run, registration, wallet_offers, Offered,
+    LEVELS,
 };
-use crate::{corpus, paso};
+use crate::{corpus, families, paso};
 
 /// A request over a wallet, and what the picker cannot verify of it.
 pub struct Case {
@@ -39,51 +39,68 @@ pub enum Exception {
     CredentialTests,
     /// An entry's ad-hoc metadata JWT.
     AdHocMetadata,
+    /// The `semantic` form of the nym_auth `verifier_id`, read from the access certificate's
+    /// DER, which the picker does not read until the owner rules on it.
+    SemanticVerifierId,
+    /// The purpose of an offer a payment entry shows, which the wallet configuration maps to a
+    /// payment entry's fields in a later wave: the picker's payment entry shows none.
+    PaymentPurpose,
 }
 
 #[test]
 fn the_picker_offers_what_the_wallet_plans() {
-    let cases: Vec<Case> = corpus::cases().into_iter().chain(paso::cases()).collect();
+    let cases: Vec<Case> = corpus::cases()
+        .into_iter()
+        .chain(paso::cases())
+        .chain(families::cases())
+        .collect();
     let disagreements: Vec<String> = cases
         .iter()
-        .filter_map(|case| {
-            compare(case)
+        .flat_map(|case| LEVELS.map(|level| (case, level)))
+        .filter_map(|(case, level)| {
+            compare(case, level)
                 .err()
-                .map(|why| format!("{}: {why}", case.name))
+                .map(|why| format!("{} at level {level}: {why}", case.name))
         })
         .collect();
     assert!(
         disagreements.is_empty(),
         "{} of {} cases disagree:\n{}",
         disagreements.len(),
-        cases.len(),
+        cases.len() * LEVELS.len(),
         disagreements.join("\n")
     );
 }
 
-/// What the picker and the wallet offer for `case` agree: equal offers, each chosen through
-/// its picks; or, under an exception, the wallet's offers among more of the picker's.
-fn compare(case: &Case) -> Result<(), String> {
+/// What the picker, for a host at `level`, and the wallet offer for `case` agree: equal
+/// offers, each chosen through its picks; or, under an exception, each of the wallet's offers
+/// shown alike by one of more of the picker's.
+fn compare(case: &Case, level: u32) -> Result<(), String> {
     let request = intake(&case.request);
     let planned = request
         .as_ref()
         .map(|request| ready(&case.wallet.input(request)));
-    let (wallet, proofs) = match &planned {
-        Some(Ok(planned)) => (
-            wallet_offers(planned.view(), &case.entries),
-            proof_queries(planned.view()),
-        ),
-        Some(Err(_)) | None => (Vec::new(), Vec::new()),
+    let wallet = match &planned {
+        Some(Ok(planned)) => wallet_offers(planned.view(), &case.entries, level),
+        Some(Err(_)) | None => Vec::new(),
     };
-    let captured = picker_run(&case.request, registration(&case.wallet, &case.icons));
+    let captured = picker_run(
+        &case.request,
+        registration(&case.wallet, &case.icons),
+        level,
+    );
     host_rules(&captured)?;
-    let picker = picker_offers(&captured, &proofs);
+    let picker = picker_offers(&captured, level);
     let exception = case.exception.or_else(|| match &planned {
         Some(Err(refusal)) if unproven(refusal) => Some(Exception::CredentialTests),
         _ => None,
     });
     match exception {
-        None => {
+        None | Some(Exception::PaymentPurpose) => {
+            let wallet = match exception {
+                Some(Exception::PaymentPurpose) => without_purpose(wallet),
+                _ => wallet,
+            };
             if picker != wallet {
                 return Err(format!("wallet {wallet:#?}\npicker {picker:#?}"));
             }
@@ -97,17 +114,55 @@ fn compare(case: &Case) -> Result<(), String> {
             Ok(())
         }
         Some(exception) => {
-            let (wallet, picker) = (credentials(&wallet), credentials(&picker));
-            let among = wallet.iter().all(|offer| picker.contains(offer));
-            if among && picker.len() > wallet.len() {
+            let unmatched: Vec<&Offered> = wallet
+                .iter()
+                .filter(|offer| !picker.iter().any(|shown| shows(shown, offer)))
+                .collect();
+            if unmatched.is_empty() && picker.len() > wallet.len() {
                 Ok(())
             } else {
                 Err(format!(
-                    "{exception:?}: wallet {wallet:?} not among more of picker {picker:?}"
+                    "{exception:?}: wallet {unmatched:#?} not shown alike among more of picker \
+                     {picker:#?}"
                 ))
             }
         }
     }
+}
+
+/// `offers` with no purpose: what the picker shows of an offer whose entries are payment entries.
+fn without_purpose(offers: Vec<Offered>) -> Vec<Offered> {
+    offers
+        .into_iter()
+        .map(|offer| Offered {
+            purpose: None,
+            ..offer
+        })
+        .collect()
+}
+
+/// Whether the picker's offer `shown` shows the wallet's offer `offer` alike under a K2
+/// exception: the same queries and purpose, each of the wallet's credentials presented as the
+/// wallet presents it, and the same delegation when it presents the same credentials. The
+/// picker may present more credentials of a query, which the wallet decides after the pick.
+fn shows(shown: &Offered, offer: &Offered) -> bool {
+    let queries = |offered: &Offered| -> Vec<String> {
+        offered
+            .members
+            .iter()
+            .map(|(query, _)| query.clone())
+            .collect()
+    };
+    if queries(shown) != queries(offer) || shown.purpose != offer.purpose {
+        return false;
+    }
+    let presented = offer
+        .members
+        .iter()
+        .zip(&shown.members)
+        .all(|((_, wallet), (_, picker))| wallet.iter().all(|p| picker.contains(p)));
+    let same = credentials(std::slice::from_ref(shown)) == credentials(std::slice::from_ref(offer));
+    presented && (!same || shown.background == offer.background)
 }
 
 /// Whether the wallet refuses with no offer because every credential of a query fails the

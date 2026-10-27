@@ -8,10 +8,11 @@ use crate::client_id::{ClientId, ClientIdPrefix};
 use crate::fetch::HttpsUrl;
 use crate::handover::{Handover, JwkThumbprint};
 use crate::intake::Verdict;
+use crate::parameters::{Nonce, State};
 use crate::protocol::Protocol;
 use crate::request::{AttestationFormat, RequestSignature, ResponseMode, TransactionDataItem};
 use crate::semantic::{SemanticIdError, SemanticIdentifier};
-use crate::values::{Kid, Nonce, Origin, State};
+use crate::values::{Kid, Origin};
 
 /// An OpenID4VP request that intake verified. Only intake constructs it.
 ///

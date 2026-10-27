@@ -10,6 +10,7 @@ use siros_dcql::{AuthorityValue, ClaimPath, ClaimPathError, ComponentIndex, Path
 use siros_transaction_data::{CredentialSource, Unserved};
 use siros_trust::{StoreAuthority, StoreType};
 use siros_wallet_state::{BatchId, CredentialId, InstanceId};
+use siros_zkp_req_nym_auth::verifier_id::VerifierIdForm;
 
 use crate::error::{CredentialFault, Member, RegistrationError};
 
@@ -22,6 +23,7 @@ impl Member {
             Self::Language => "language",
             Self::Diagnostics => "diagnostics",
             Self::Systems => "systems",
+            Self::VerifierId => "verifier_id",
             Self::Icons => "icons",
             Self::DefaultIcon => "default_icon",
             Self::Definitions => "definitions",
@@ -116,6 +118,12 @@ pub(crate) fn unsigned(item: &Item<'_>) -> Option<u64> {
     }
 }
 
+/// A position in a table: an unsigned integer within the platform's addresses, the type of a
+/// table reference.
+pub(crate) fn position(item: &Item<'_>) -> Option<usize> {
+    unsigned(item).and_then(|n| usize::try_from(n).ok())
+}
+
 /// A boolean.
 pub(crate) fn boolean(item: &Item<'_>) -> Option<bool> {
     match item.kind() {
@@ -163,6 +171,21 @@ pub(crate) fn authority(item: &Item<'_>) -> Result<StoreAuthority, CredentialFau
     };
     let kind = StoreType::named(kind).ok_or_else(|| CredentialFault::StoreType(kind.to_owned()))?;
     Ok(StoreAuthority::new(kind, AuthorityValue::new(value)))
+}
+
+/// The name a registration writes for the `verifier_id` form `form`.
+pub(crate) fn verifier_id_form_name(form: VerifierIdForm) -> &'static str {
+    match form {
+        VerifierIdForm::X509SanDns => "x509_san_dns",
+        VerifierIdForm::Semantic => "semantic",
+    }
+}
+
+/// The `verifier_id` form `name` names.
+pub(crate) fn verifier_id_form(name: &str) -> Option<VerifierIdForm> {
+    [VerifierIdForm::X509SanDns, VerifierIdForm::Semantic]
+        .into_iter()
+        .find(|form| verifier_id_form_name(*form) == name)
 }
 
 /// Every reason a registration records.

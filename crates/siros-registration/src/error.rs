@@ -23,6 +23,8 @@ pub enum Member {
     Diagnostics,
     /// `systems`: the nym_auth systems the wallet proves.
     Systems,
+    /// `verifier_id`: the form of the nym_auth `verifier_id` the wallet's trust framework fixes.
+    VerifierId,
     /// `icons`.
     Icons,
     /// `default_icon`: the position of the wallet's icon, which a picker entry without a
@@ -92,10 +94,12 @@ pub enum RegistrationError {
     Language(#[source] LocaleError),
     /// `systems` names this system, which the picker does not know.
     System(String),
+    /// `verifier_id` names this form, which the picker does not know.
+    VerifierIdForm(String),
     /// The icon at this position has no byte.
     IconEmpty(IconIndex),
     /// `default_icon` names an icon at this position, which the registration lacks.
-    DefaultIconUnknown(u64),
+    DefaultIconUnknown(IconIndex),
     /// The definition at this position is no projection.
     Definition(DefinitionIndex, #[source] ProjectionError),
     /// The definition at this position is projected to another language than the
@@ -119,6 +123,8 @@ pub enum CredentialFault {
     MemberUnknown(String),
     /// `format` names this format, which is neither `dc+sd-jwt` nor `mso_mdoc`.
     Format(String),
+    /// `type` is the empty string: no `vct` or `docType` is.
+    TypeEmpty,
     /// `claims` is no claim tree.
     Claims(#[source] TreeError),
     /// A label, or the card's title or issuer, is no safe label.
@@ -134,9 +140,9 @@ pub enum CredentialFault {
     /// A served type is named twice.
     TypeRepeated(#[source] TypeRepeated),
     /// The card names an icon at this position, which the registration lacks.
-    IconUnknown(u64),
+    IconUnknown(IconIndex),
     /// A served type names a definition at this position, which the registration lacks.
-    DefinitionUnknown(u64),
+    DefinitionUnknown(DefinitionIndex),
     /// A served type's reason is none a registration records.
     UnservedUnknown(String),
 }
@@ -154,6 +160,7 @@ impl RegistrationError {
             }
             Self::Language(error) => error.code(),
             Self::System(_) => "registration_system_unknown",
+            Self::VerifierIdForm(_) => "registration_verifier_id_form_unknown",
             Self::IconEmpty(_) => "registration_icon_empty",
             Self::DefaultIconUnknown(_) => "registration_icon_unknown",
             Self::Definition(_, error) => error.code(),
@@ -173,6 +180,7 @@ impl CredentialFault {
                 "registration_credential_malformed"
             }
             Self::Format(_) => "registration_format_unknown",
+            Self::TypeEmpty => "registration_credential_type_empty",
             Self::Claims(error) => error.code(),
             Self::Text(error) => error.code(),
             Self::Path(error) => error.code(),

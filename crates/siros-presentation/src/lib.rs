@@ -41,6 +41,7 @@
 mod credential;
 mod display_rule;
 mod ids;
+mod inconsistency;
 mod matching;
 mod offers;
 mod pick;
@@ -52,6 +53,7 @@ pub use display_rule::{
     Choice, DisplayFacts, HostDisplay, Presentability, Rows, TransactionData, WalletDisplay,
 };
 pub use ids::{AdditionIndex, CandidateIndex, OfferIndex, OptionIndex, QueryIndex, SetIndex};
+pub use inconsistency::Inconsistency;
 pub use matching::{
     Answer, Answered, Answers, Asked, Candidate, ChoiceError, Claims, Excluded, Exclusion, Failure,
     Matching, ProofChoice, QueryRefusal, ZkpQuery, ZkpRefusal,
@@ -59,7 +61,7 @@ pub use matching::{
 pub use offers::{Addition, Member, Offer, Offers, MAX_ADDITIONS, MAX_EXAMINED, MAX_OFFERS};
 pub use pick::{Pick, PickFault};
 pub use request::MatchRequest;
-pub use transactions::{NoOffer, TransactionSource, Transactions};
+pub use transactions::{BoundEntry, NoOffer, TransactionSource, Transactions};
 
 #[cfg(feature = "wallet")]
 mod error;
@@ -71,7 +73,7 @@ mod respond;
 pub mod testing;
 
 #[cfg(feature = "wallet")]
-pub use error::{Inconsistency, PresentationError};
+pub use error::PresentationError;
 #[cfg(feature = "wallet")]
 pub use plan::{
     plan, refusal, AdditionView, BoundTransaction, ConsentView, CredentialView, DigestError,

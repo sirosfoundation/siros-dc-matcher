@@ -10,6 +10,7 @@ use super::trust::{self, KeyMaterial, MetadataAnswer, TrustSubject, Verdict};
 use super::{attestation, Answers, Halt, IntakeError, JwsFault};
 use crate::client_id::{ClientId, ClientIdPrefix};
 use crate::jose::Signed;
+use crate::parameters::strings;
 use crate::values::{Kid, TrustChain};
 use crate::verified::AccessCertificate;
 use crate::x509::Chain;
@@ -167,13 +168,4 @@ pub(super) fn by_request(client_id: ClientId, trusted: Verdict, response_uri: Ur
         metadata: Metadata::Request,
         response_uri,
     }
-}
-
-/// A JSON array of strings.
-pub(super) fn strings(value: &Value) -> Option<Vec<String>> {
-    value
-        .as_array()?
-        .iter()
-        .map(|s| s.as_str().map(str::to_owned))
-        .collect()
 }

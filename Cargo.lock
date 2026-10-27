@@ -2561,6 +2561,7 @@ version = "0.1.0"
 dependencies = [
  "android-credman",
  "siros-credential",
+ "siros-dcql",
  "siros-display",
  "siros-oid4vp",
  "siros-presentation",

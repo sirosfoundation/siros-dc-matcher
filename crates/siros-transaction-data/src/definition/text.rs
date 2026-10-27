@@ -6,7 +6,8 @@ use std::fmt;
 use std::marker::PhantomData;
 
 /// What a label or a payload string breaks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum TextFault {
     /// A label holds this C0 control, DEL or C1 control character.
     Control(char),
@@ -16,6 +17,9 @@ pub enum TextFault {
     IsolateUnterminated,
     /// The label is this long, in the unit of its limit, more than its role allows.
     TooLong(usize),
+    /// The label, interpolated when a template, is white space alone: a host refuses a blank
+    /// field name.
+    Blank,
 }
 
 impl TextFault {
@@ -27,13 +31,10 @@ impl TextFault {
             Self::DirectionalOverride(_) => "text_directional_override",
             Self::IsolateUnterminated => "text_isolate_unterminated",
             Self::TooLong(_) => "label_too_long",
+            Self::Blank => "label_blank",
         }
     }
 }
-
-siros_codec::display_code!(TextFault);
-
-impl std::error::Error for TextFault {}
 
 /// The rules a definition's labels follow, which its source sets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -157,7 +158,8 @@ pub enum LabelLength {
 }
 
 /// A label of role `R`: no C0 control, DEL or C1 control, no directional embedding or
-/// override, every isolate terminated, and, when final, within its role's limit.
+/// override, every isolate terminated, and, when final, a character other than white space and
+/// within its role's limit.
 pub struct LabelText<R> {
     text: String,
     role: PhantomData<R>,
@@ -175,6 +177,9 @@ impl<R: LabelRole> LabelText<R> {
         }
         bidi(text)?;
         if length == LabelLength::Final {
+            if text.chars().all(char::is_whitespace) {
+                return Err(TextFault::Blank);
+            }
             fits::<R>(text, rules)?;
         }
         Ok(Self {

@@ -14,12 +14,11 @@ rust-version.workspace = true
 [features]
 default = ["wallet"]
 # Phase 1's plan and consent view over a verified request, and phase 2. Without it the crate
-# holds the matching and its transaction data selection: no crypto, no prover and no display
-# resolution.
+# holds the matching, its transaction data selection and the display rule (A9): no crypto, no
+# prover and no display resolution.
 wallet = [
     "dep:rand_core",
     "dep:sha2",
-    "dep:siros-display",
     "dep:siros-mdoc",
     "dep:siros-sdjwt",
     "dep:zeroize",
@@ -59,7 +58,7 @@ siros-zkp-req = { workspace = true }
 siros-zkp-req-nym-auth = { workspace = true }
 rand_core = { version = "0.6.4", optional = true }
 sha2 = { version = "0.10.9", optional = true }
-siros-display = { workspace = true, optional = true }
+siros-display = { workspace = true }
 siros-mdoc = { workspace = true, optional = true }
 siros-sdjwt = { workspace = true, optional = true }
 thiserror = { workspace = true }
