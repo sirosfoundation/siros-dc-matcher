@@ -16,7 +16,7 @@ commit `e65861c`), and adds the components of the SIROS wallet core up to the co
 **Breaking**: requests and presentations follow the draft, the FFI loses `zkp_req_plan`, and the
 vectors move to the crates that own their rules. Consumers that keep a copy of the vectors
 (siros-sdk-kotlin, siros-sdk-swift) must re-copy them from the new directories; the vector set
-digest below identifies them. `matcher.wasm` is 300,441 bytes
+digest below identifies them. `matcher.wasm` is 299,441 bytes
 against the 307,200-byte budget (303,418 at v0.11.0).
 
 ### Changed
@@ -68,8 +68,14 @@ against the 307,200-byte budget (303,418 at v0.11.0).
   which the query parse refuses outside its characters, and `resolve` runs §7.1.1 over any claim
   tree that implements `ClaimNode`. See [its changelog](crates/siros-dcql/CHANGELOG.md).
 - Every error type derives `Display` and `Error` with `thiserror`; the text is unchanged.
-  `PathError`, `DecodeError` and `NoQuery` implement `std::error::Error`. `NoQuery::reason`
-  is removed: `NoQuery`'s `Display` gives the same text.
+  `PathError`, `DecodeError`, `NoQuery` and `ZkpError` implement `std::error::Error`, and so do
+  the fault, failure and refusal enums the errors hold, each variant with a text of its own.
+  `NoQuery::reason` is removed: `NoQuery`'s `Display` gives the same text.
+- `source()` returns the cause a variant holds. It returned `None` in `ChoiceError`,
+  `CredentialError`, `DisplayError`, `EncodingError`, `FormError`, `HandoverInvalid`,
+  `IntakeError`, `InvalidRequest`, `MdocError`, `PresentationError`, `ProveError`,
+  `QueryRefusal`, `Rejection`, `RequestRefusal`, `TransactionDataError`, `Unproven`, `Unusable`,
+  `WalletStateError` and `ZkpRefusal`.
 
 ### Fixed
 
