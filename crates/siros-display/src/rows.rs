@@ -89,7 +89,7 @@ impl DisplayCache {
     ) -> Result<Vec<ClaimRow>, DisplayError> {
         let labels = Labels {
             issuer: self
-                .issued(credential)
+                .issuer_metadata(credential)
                 .map(|metadata| metadata.claims())
                 .unwrap_or_default(),
             types: self.types_of(credential),

@@ -6,4 +6,5 @@ mod image;
 mod payload;
 mod request;
 mod signed;
+mod svg;
 mod ts12;

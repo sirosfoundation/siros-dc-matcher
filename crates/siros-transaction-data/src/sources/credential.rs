@@ -29,14 +29,15 @@ pub(crate) struct CredentialSources<'c> {
 
 impl<'c> CredentialSources<'c> {
     /// The sources of `credential`, read in `language`. A credential whose configuration names
-    /// a `credential_metadata_uri` in `display` is a PaSO Credential: the host holds its signed
-    /// credential metadata (PaSO Proof Metadata, Section 3).
+    /// a `credential_metadata_uri` in the issuer metadata `display` holds is a PaSO Credential:
+    /// the host holds its signed credential metadata (PaSO Proof Metadata, Section 3).
     ///
     /// # Errors
     ///
-    /// [`Incompatibility::Format`] for a credential other than an SD-JWT VC, and
-    /// [`Incompatibility::CredentialMetadata`] for signed credential metadata that is not held
-    /// or not valid: the credential takes no entry (Sections 3, 6 and 7).
+    /// The credential takes no entry: [`Incompatibility::Format`] for a credential other than an
+    /// SD-JWT VC, [`Incompatibility::IssuerMetadataNotHeld`] when the host holds no issuer
+    /// metadata of its configuration, and [`Incompatibility::CredentialMetadata`] for signed
+    /// credential metadata that is not held or not valid (Sections 3, 6 and 7).
     pub(crate) fn load(
         credential: &'c Credential,
         verifier: Verifier<'c>,
@@ -47,8 +48,11 @@ impl<'c> CredentialSources<'c> {
         if credential.format() != Format::SdJwtVc {
             return Err(Incompatibility::Format);
         }
-        let paso = display
-            .credential_metadata_uri(credential)
+        let issued = display
+            .issuer_metadata(credential)
+            .ok_or(Incompatibility::IssuerMetadataNotHeld)?;
+        let paso = issued
+            .credential_metadata_uri()
             .map(|_| CredentialMetadata::load(credential, verifier))
             .transpose()
             .map_err(Incompatibility::CredentialMetadata)?;

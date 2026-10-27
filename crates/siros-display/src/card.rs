@@ -1,6 +1,5 @@
 //! Credential cards (D2, D3).
 
-use siros_codec::url::HttpsUrl;
 use siros_credential::{Credential, Format};
 
 use crate::cache::DisplayCache;
@@ -65,7 +64,7 @@ impl DisplayCache {
     /// [`DisplayError::Text`] when the title or the issuer line falls back to an identifier
     /// that is no safe label.
     pub fn card(&self, credential: &Credential, language: &Locale) -> Result<Card, DisplayError> {
-        let issued = self.issued(credential);
+        let issued = self.issuer_metadata(credential);
         let type_display = self
             .types_of(credential)
             .into_iter()
@@ -100,15 +99,9 @@ impl DisplayCache {
         })
     }
 
-    /// The OpenID4VCI display metadata of `credential`'s configuration.
-    pub(crate) fn issued(&self, credential: &Credential) -> Option<&IssuerMetadata> {
+    /// The issuer metadata of `credential`'s configuration, when the host holds it.
+    pub fn issuer_metadata(&self, credential: &Credential) -> Option<&IssuerMetadata> {
         self.issuer(credential.issuer()?, credential.configuration_id()?)
-    }
-
-    /// Where the signed credential metadata of `credential`'s configuration is served: its
-    /// `credential_metadata_uri` (PaSO Proof Metadata, Section 2).
-    pub fn credential_metadata_uri(&self, credential: &Credential) -> Option<&HttpsUrl> {
-        self.issued(credential)?.credential_metadata_uri()
     }
 
     /// The Type Metadata of an SD-JWT VC's `vct` and of the types it extends.

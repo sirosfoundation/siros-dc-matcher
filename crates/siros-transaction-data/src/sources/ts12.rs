@@ -10,7 +10,7 @@ use siros_credential::{Credential, Format, TypedValue};
 use siros_dcql::{ClaimPath, PathError};
 use siros_oid4vp::HttpsUrl;
 
-use super::held::HeldMetadata;
+use super::held::{HeldMetadata, Holding};
 use super::ts12_map;
 use crate::definition::{Definition, DefinitionError};
 use crate::integrity::{Integrity, IntegrityFault};
@@ -56,9 +56,12 @@ pub enum Ts12Fault {
     /// integrity metadata this wallet reads (SD-JWT VC, Section 7): its claims path processing
     /// gives this error, or its value does not read.
     Pin(Result<IntegrityFault, PathError>),
-    /// The credential pins a document the host does not hold: its Type Metadata, or a
-    /// document an entry references.
+    /// The host neither holds the document of this URL nor records it as absent: the Type
+    /// Metadata of an `https` `vct`, or a document an entry references.
     NotHeld(HttpsUrl),
+    /// The host records the document of this URL as absent, which the credential pins or an
+    /// entry references.
+    Absent(HttpsUrl),
     /// A document's bytes are no UTF-8 text.
     NotUtf8(Utf8Error),
     /// A document's text is no JSON document the strict reader holds.
@@ -95,6 +98,7 @@ impl Ts12Fault {
         match self {
             Self::Pin(_) => "type_metadata_pin_malformed",
             Self::NotHeld(_) => "type_metadata_not_held",
+            Self::Absent(_) => "type_metadata_absent",
             Self::NotUtf8(_) | Self::NotJson(_) | Self::Member(..) | Self::OneOf(_) => {
                 "type_metadata_malformed"
             }
@@ -129,8 +133,9 @@ enum Document {
 impl TypeMetadata {
     /// The SCA type metadata of `credential`, an SD-JWT VC: the document at its `vct` (SD-JWT
     /// VC, Section 6.3.1), as the host holds it, when its `category` is the SCA one and it has
-    /// `transaction_data_types`. A `vct` that is no `https` URL locates no document; without
-    /// the document there is no type metadata, unless `vct#integrity` pins one.
+    /// `transaction_data_types`. A `vct` that is no `https` URL locates no document, and the
+    /// host's record that the document is absent stands for none, unless `vct#integrity` pins
+    /// one.
     pub(crate) fn load(
         credential: &Credential,
         held: &HeldMetadata,
@@ -140,9 +145,10 @@ impl TypeMetadata {
         };
         let pin = pin(credential, "vct#integrity")?;
         let body = match (held.document(&url), &pin) {
-            (Some(body), _) => body,
-            (None, None) => return Ok(None),
-            (None, Some(_)) => return Err(Ts12Fault::NotHeld(url)),
+            (Holding::Body(body), _) => body,
+            (Holding::Absent, None) => return Ok(None),
+            (Holding::Absent, Some(_)) => return Err(Ts12Fault::Absent(url)),
+            (Holding::NotHeld, _) => return Err(Ts12Fault::NotHeld(url)),
         };
         let mut fields = json::object(document_of(body, pin.as_ref())?)
             .map_err(|fault| Ts12Fault::Member(Ts12Member::Vct, fault))?;
@@ -177,7 +183,7 @@ impl TypeMetadata {
             return Ok(Vec::new());
         };
         let mut urls = vec![url.clone()];
-        if held.document(&url).is_none() {
+        if !matches!(held.document(&url), Holding::Body(_)) {
             return Ok(urls);
         }
         let Some(metadata) = Self::load(credential, held)? else {
@@ -297,12 +303,11 @@ fn source(
 fn resolve(document: Document, held: &HeldMetadata) -> Result<Json, Ts12Fault> {
     match document {
         Document::Inline(value) => Ok(value),
-        Document::Referenced(url, pin) => {
-            let body = held
-                .document(&url)
-                .ok_or_else(|| Ts12Fault::NotHeld(url.clone()))?;
-            document_of(body, pin.as_ref())
-        }
+        Document::Referenced(url, pin) => match held.document(&url) {
+            Holding::Body(body) => document_of(body, pin.as_ref()),
+            Holding::Absent => Err(Ts12Fault::Absent(url)),
+            Holding::NotHeld => Err(Ts12Fault::NotHeld(url)),
+        },
     }
 }
 

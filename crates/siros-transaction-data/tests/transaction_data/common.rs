@@ -261,6 +261,8 @@ pub struct Host {
     pub configuration: Configuration,
     /// The documents the host holds, by URL.
     pub held: Vec<(String, Vec<u8>)>,
+    /// The URLs the host records as serving no document.
+    pub absent: Vec<String>,
     /// The signed credential metadata JWT the host holds for the card's configuration.
     pub credential_metadata: Option<String>,
     pub images: Documents,
@@ -269,14 +271,15 @@ pub struct Host {
 }
 
 impl Host {
-    /// A host with no anchor, no metadata, the configuration `configuration`, English, and a
-    /// signed request.
+    /// A host with no anchor, the configuration `configuration`, English, and a signed request,
+    /// that holds no metadata and records the card's Type Metadata as absent.
     pub fn new(configuration: Value) -> Self {
         Self {
             trust: TrustStore::parse("[]").unwrap(),
             display: display(None),
             configuration: Configuration::parse(&configuration.to_string()).unwrap(),
             held: Vec::new(),
+            absent: vec![CARD.to_owned()],
             credential_metadata: None,
             images: Vec::new(),
             language: Locale::parse("en").unwrap(),
@@ -300,6 +303,7 @@ impl Host {
                     IssuerIdentifier::parse(ISSUER).unwrap(),
                     ConfigurationId::parse("card").unwrap(),
                     jwt.clone(),
+                    HttpsUrl::parse(METADATA_URI).unwrap(),
                 )
             })
             .collect();
@@ -307,6 +311,11 @@ impl Host {
             .held
             .iter()
             .map(|(url, body)| HeldDocument::new(HttpsUrl::parse(url).unwrap(), body.clone()))
+            .chain(
+                self.absent
+                    .iter()
+                    .map(|url| HeldDocument::absent(HttpsUrl::parse(url).unwrap())),
+            )
             .collect();
         HeldMetadata::new(jwts, documents).unwrap()
     }

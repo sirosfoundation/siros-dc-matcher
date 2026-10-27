@@ -4,13 +4,13 @@
 //! | Requirement | API |
 //! | --- | --- |
 //! | One definition form: a `transaction_data_types` entry (Proof Metadata, Section 3), its labels typed by role, their limits and character rules set by the source ([`LabelRules`]: PaSO's Section 3.3, or TS12's Section 3.3.3), its structural rules (Section 3.3) | [`Definition`], [`ClaimDefinition`], [`UiLabels`], [`LabelText`], [`ValueType`] |
-//! | Sources, each a parser into it: the signed credential metadata JWT (Sections 4 and 7), TS12 v1.0.1 type metadata (`lang` → `locale`, `label` → `name`, `visualisation` as [`Prominence`]), the host's [`Configuration`], and the entry's ad-hoc metadata JWT (Section 5). Ad-hoc first; then the credential's own metadata, which declares every type it supports and fails closed; else, for a credential without metadata of its own, the configuration | [`SourceKind`], [`Configuration::parse`] |
-//! | Metadata is input: the host holds signed credential metadata, Type Metadata and key sets, fetched and renewed outside presentations (Proof Metadata, Sections 6 and 8), and the wallet verifies each every time it loads it | [`HeldMetadata`], [`HeldJwt::verify_fetched`], [`HeldMetadata::wanted`] |
+//! | Sources, each a parser into it: the signed credential metadata JWT (Sections 4 and 7), TS12 v1.0.1 type metadata (`lang` → `locale`, `label` → `name`, `visualisation` as [`Prominence`]), the host's [`Configuration`], and the entry's ad-hoc metadata JWT (Section 5). Ad-hoc first; then the credential's own metadata, which declares every type it supports and fails closed; else, for a credential known to have no metadata of its own, the configuration | [`SourceKind`], [`Configuration::parse`] |
+//! | Metadata is input: the host holds signed credential metadata, Type Metadata and key sets, fetched and renewed outside presentations, and records what is absent (Proof Metadata, Sections 6 and 8); the wallet verifies each every time it loads it | [`HeldMetadata`], [`HeldDocument::absent`], [`HeldJwt::verify_fetched`], [`HeldMetadata::wanted`] |
 //! | The projection to the wallet's language: one entry per array, made only by the locale function (View, Section 4), with its source and rulebook, written deterministically and read back | [`Definition::project`], [`Projected::to_json`], [`Projected::parse`], [`Context::served`] |
 //! | T1: entries: base64url JSON without repeated names, `type`, `credential_ids` of DCQL query ids, `payload`, ad-hoc `metadata`, `transaction_data_hashes_alg` as an array or CS-12's string | [`Entry::parse`] |
 //! | The request's rules: PaSO-targeted entries only in a signed request (Core, Section 3); the targeted queries in one credential set, its alternatives transposable (Core, Section 7.4.1) | [`check_request`] |
 //! | Payload conformance: coverage, `#integrity` companions of images, mandatory claims, value types (Core, Section 7.4.2; View, Section 3) | [`PayloadFault`], [`Scalar`] |
-//! | Images: Data URLs of PNG, JPEG and SVG, `https` URLs with `#integrity` fetched with at most 3 redirects, 512 KiB and 2048 px, SVG references pinned (View, Section 3); a TS12 logo that does not verify is left out | [`VerifiedImage`], [`ImageFault`], [`TransactionView::absent_images`] |
+//! | Images: Data URLs of PNG, JPEG and SVG, `https` URLs with `#integrity` fetched with at most 3 redirects, 512 KiB and 2048 px (View, Section 3); SVG within a static subset, its CSS read by a CSS Syntax 3 tokenizer, every URL a fragment, a PNG or JPEG Data URL or a pinned `https` URL, at most [`MAX_RESOURCES`] resources, each an image or a font (SVG module, Section 3); a TS12 logo that does not verify is left out | [`VerifiedImage`], [`ImageFault`], [`SvgFault`], [`CssFault`], [`TransactionView::absent_images`] |
 //! | Generic rendering: rows in claims order, `null` paths, `template:` as segments of text and typed values, label limits after interpolation, at most 200 items counted before any image is verified, `security_hint` as given (View, Section 2) | [`TransactionView`], [`Segment`], [`RenderFault`] |
 //! | Selection: each candidate credential takes its first compatible entry (Core, Section 7.4.2) | [`Selector::first_match`] over [`Definitions`], [`Context::first_match`], [`Selection`] |
 //! | T3, T6: the B.3.3.1 hash over the entry as received, one algorithm per credential, `transaction_data_hashes_alg` repeated when the request carried it; `jti`, `response_mode` and `amr` under a TS12 rulebook; SD-JWT VC only | [`Binding::kb_jwt_claims`], [`Amr`] |
@@ -75,8 +75,8 @@ pub use error::{EntryMember, EntryPosition, EntryRefusal, TransactionDataError};
 pub use fetched::{FetchFault, Fetched, Step};
 pub use hash::{AlgClaim, HashAlg, HashesAlgFault};
 pub use image::{
-    Dimensions, ImageFault, ImageFormat, ImageRef, RasterFault, Resource, SvgFault, VerifiedImage,
-    MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS,
+    CssFault, Dimensions, ImageFault, ImageFormat, ImageRef, RasterFault, Resource, SvgFault,
+    VerifiedImage, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, MAX_RESOURCES,
 };
 pub use integrity::{Integrity, IntegrityFault};
 pub use output::{Binding, Jti, KbJwtInputs};

@@ -40,6 +40,9 @@ pub enum Incompatibility {
     /// Metadata, Section 5.3).
     #[cfg(feature = "wallet")]
     AdHoc(SignedFault),
+    /// The host holds no issuer metadata of the credential's configuration, which tells whether
+    /// it is a PaSO Credential: the credential is excluded.
+    IssuerMetadataNotHeld,
     /// The credential's signed credential metadata is not held or invalid, which excludes the
     /// credential (PaSO Proof Metadata, Sections 3 and 7).
     #[cfg(feature = "wallet")]
@@ -75,6 +78,7 @@ impl Incompatibility {
             Self::Format => "transaction_data_format_unsupported",
             Self::TypeUnsupported => "transaction_data_type_unsupported",
             Self::TypeUndeclared => "transaction_data_type_undeclared",
+            Self::IssuerMetadataNotHeld => "transaction_data_issuer_metadata_not_held",
             #[cfg(feature = "wallet")]
             Self::AdHoc(fault) => fault.code(),
             #[cfg(feature = "wallet")]
@@ -101,7 +105,8 @@ impl Incompatibility {
             Self::Format | Self::TypeUnsupported | Self::TypeUndeclared => false,
             #[cfg(feature = "wallet")]
             Self::AdHoc(_) | Self::CredentialMetadata(_) | Self::TypeMetadata(_) => true,
-            Self::Definition(..)
+            Self::IssuerMetadataNotHeld
+            | Self::Definition(..)
             | Self::Language(_)
             | Self::HashesAlgAbsent
             | Self::Payload(_)

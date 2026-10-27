@@ -10,7 +10,7 @@ use siros_codec::cbor::Value as Cbor;
 use siros_codec::date::DateTime;
 use siros_credential::Credential;
 use siros_dcql::QueryId;
-use siros_display::{DisplayCache, Locale};
+use siros_display::{DisplayCache, IssuerMetadata, Locale};
 use siros_oid4vp::HttpsUrl;
 use siros_oid4vp::{FetchResponse, HttpStatus, VerifiedRequest};
 use siros_presentation::{
@@ -348,14 +348,14 @@ impl Wallet {
             .collect();
         Self {
             credentials,
-            display: DisplayCache::new(Vec::new(), Vec::new()).unwrap(),
+            display: issuer_display(),
             language: Locale::parse("en").unwrap(),
             configuration: Configuration::default(),
             systems: NymAuthSystem::ALL.to_vec(),
             verifier_id: VerifierIdForm::X509SanDns,
             background: Vec::new(),
             key_factors,
-            metadata: HeldMetadata::default(),
+            metadata: holding_absent(&[VCT]),
             images: Vec::new(),
             trust: TrustStore::parse("[]").unwrap(),
             state,
@@ -412,6 +412,26 @@ impl Wallet {
             fetches.answer(&fetch, response).unwrap();
         }
     }
+}
+
+/// The display metadata of the wallet's credentials: the issuer metadata of the configuration
+/// `example` of `https://issuer.example`, without a `credential_metadata_uri`.
+pub fn issuer_display() -> DisplayCache {
+    let issuer = json!({
+        "credential_issuer": "https://issuer.example",
+        "credential_configurations_supported": {"example": {"format": "dc+sd-jwt", "vct": VCT}}
+    });
+    let metadata = IssuerMetadata::merge(&issuer, "example", None).unwrap();
+    DisplayCache::new(vec![metadata], Vec::new()).unwrap()
+}
+
+/// The metadata of the host's records that the documents of `urls` are absent.
+pub fn holding_absent(urls: &[&str]) -> HeldMetadata {
+    let documents = urls
+        .iter()
+        .map(|url| HeldDocument::absent(HttpsUrl::parse(url).unwrap()))
+        .collect();
+    HeldMetadata::new(Vec::new(), documents).unwrap()
 }
 
 /// The metadata of the documents `documents`, each the body the host fetched from its URL.

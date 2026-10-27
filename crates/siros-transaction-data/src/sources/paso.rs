@@ -56,16 +56,17 @@ impl std::error::Error for CredentialMetadataFault {}
 pub(crate) struct CredentialMetadata(Vec<(TypeId, Result<Definition, DefinitionError>)>);
 
 impl CredentialMetadata {
-    /// The signed credential metadata the host holds for `credential`, verified (Section 7).
+    /// The signed credential metadata the host holds for `credential`, verified: Section 7, and
+    /// its `credential_metadata_uri` the URL it answered from (Section 8).
     pub(crate) fn load(
         credential: &Credential,
         verifier: Verifier<'_>,
     ) -> Result<Self, CredentialMetadataFault> {
-        let jwt = verifier
+        let held = verifier
             .held
             .jwt(credential)
             .ok_or(CredentialMetadataFault::NotHeld)?;
-        verified(jwt, credential, verifier).map(|(metadata, _)| metadata)
+        served(held.jwt(), held.served_from(), credential, verifier).map(|(metadata, _)| metadata)
     }
 
     /// The definition of `type_id`, when the metadata lists the type.
@@ -98,22 +99,39 @@ impl HeldJwt {
         now: DateTime,
     ) -> Result<(Self, Renewal), CredentialMetadataFault> {
         let verifier = Verifier { trust, held, now };
-        let (_, renewal) = verified(&jwt, credential, verifier)?;
-        if renewal.from != *served_from {
-            return Err(CredentialMetadataFault::UriMismatch(
-                renewal.from.as_str().to_owned(),
-            ));
-        }
+        let (_, renewal) = served(&jwt, served_from, credential, verifier)?;
         let (Some(issuer), Some(configuration)) =
             (credential.issuer(), credential.configuration_id())
         else {
             return Err(CredentialMetadataFault::Invalid(SignedFault::Issuer));
         };
         Ok((
-            Self::new(issuer.clone(), configuration.clone(), jwt),
+            Self::new(
+                issuer.clone(),
+                configuration.clone(),
+                jwt,
+                served_from.clone(),
+            ),
             renewal,
         ))
     }
+}
+
+/// The metadata of the JWT `jwt` for `credential`, served from `served_from` after redirects:
+/// verified (Section 7), its `credential_metadata_uri` `served_from` (Section 8).
+fn served(
+    jwt: &str,
+    served_from: &HttpsUrl,
+    credential: &Credential,
+    verifier: Verifier<'_>,
+) -> Result<(CredentialMetadata, Renewal), CredentialMetadataFault> {
+    let (metadata, renewal) = verified(jwt, credential, verifier)?;
+    if renewal.from != *served_from {
+        return Err(CredentialMetadataFault::UriMismatch(
+            renewal.from.as_str().to_owned(),
+        ));
+    }
+    Ok((metadata, renewal))
 }
 
 /// The metadata of the JWT `jwt` for `credential`, verified (Section 7), and how the host

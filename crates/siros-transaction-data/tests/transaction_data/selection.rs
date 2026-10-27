@@ -41,7 +41,7 @@ fn a5_each_credential_takes_its_entry() {
     check_request(&entries, &query, RequestSignature::Signed).unwrap();
     let card = "https://bank.example/sca/card";
     let account = "https://bank.example/sca/account";
-    let host = Host::new(json!([
+    let mut host = Host::new(json!([
         configured("urn:paso:sca:global:payment:1", card, &payment_definition()),
         configured(
             "urn:paso:sca:global:payment:1",
@@ -49,6 +49,8 @@ fn a5_each_credential_takes_its_entry() {
             &payment_definition()
         )
     ]));
+    // The issuer publishes no Type Metadata: the configuration serves the cards.
+    host.absent = vec![card.to_owned(), account.to_owned()];
     for (id, vct, entry) in [("sca_card", card, 0), ("sca_account", account, 1)] {
         let selection = host
             .select(&targeting(&entries, id), &credential(vct, &[]))
@@ -126,11 +128,12 @@ fn a7_versioned_transaction_data() {
         "https://bank.example/sca/new",
         "https://bank.example/sca/old",
     );
-    let host = Host::new(json!([
+    let mut host = Host::new(json!([
         configured("urn:paso:sca:com.example.pay:transaction:2", new, &v2),
         configured("urn:paso:sca:com.example.pay:transaction:1", new, &v1),
         configured("urn:paso:sca:com.example.pay:transaction:1", old, &v1)
     ]));
+    host.absent = vec![new.to_owned(), old.to_owned()];
     let all: Vec<&Entry> = entries.iter().collect();
     for (vct, entry) in [(new, 0), (old, 1)] {
         let selection = host.select(&all, &credential(vct, &[])).unwrap();

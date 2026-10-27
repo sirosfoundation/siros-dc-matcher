@@ -5,11 +5,12 @@
 //!
 //! What the host holds, for each credential:
 //!
-//! - when the credential's issuer metadata configuration names a `credential_metadata_uri`, the
-//!   signed credential metadata JWT it serves, fetched with `Accept: application/jwt` and the
-//!   wallet's language as `Accept-Language`, and admitted by [`HeldJwt::verify_fetched`]; the
-//!   host renews it before the [`Renewal`]'s expiry, from the URL the [`Renewal`] names (Section
-//!   8);
+//! - the issuer metadata of its configuration, in the [`DisplayCache`];
+//! - when that configuration names a `credential_metadata_uri`, the signed credential metadata
+//!   JWT it serves, fetched with `Accept: application/jwt` and the wallet's language as
+//!   `Accept-Language`, and admitted by [`HeldJwt::verify_fetched`] with the URL it answered
+//!   from; the host renews it before the [`Renewal`]'s expiry, from the URL the [`Renewal`]
+//!   names (Section 8);
 //! - when the credential is an SD-JWT VC whose `vct` is an `https` URL, the Type Metadata at that
 //!   URL and the documents its `transaction_data_types` entries reference (EC TS12 v1.0.1,
 //!   Section 4.1). The credential's `#integrity` claims pin them, so they change only with the
@@ -17,38 +18,78 @@
 //! - when the credential carries no `x5c` chain, its issuer's JWT VC Issuer Metadata and the key
 //!   set its `jwks_uri` names (SD-JWT VC, Section 4.3).
 //!
-//! [`HeldMetadata::wanted`] lists the documents of a credential the host does not hold yet.
+//! A document whose fetch answered 404 the host records as absent ([`HeldDocument::absent`]):
+//! the wallet tells a document the issuer does not publish from one the host never fetched,
+//! which it does not read as absent. [`HeldMetadata::wanted`] lists what the host should hold
+//! for a credential and does not.
 
 use rustc_hash::FxHashMap;
 use siros_codec::date::DateTime;
 use siros_credential::Credential;
 use siros_display::DisplayCache;
 use siros_oid4vp::HttpsUrl;
+use siros_trust::TrustStore;
 use siros_wallet_state::{ConfigurationId, IssuerIdentifier};
 
 use super::issuer_keys::{self, KeySetFault};
+use super::paso::CredentialMetadata;
+use super::signed::Verifier;
 use super::ts12::{Ts12Fault, TypeMetadata};
 
-/// A signed credential metadata JWT the host holds for a credential configuration.
+/// A signed credential metadata JWT the host holds for a credential configuration, with the URL
+/// it answered from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeldJwt {
     issuer: IssuerIdentifier,
     configuration: ConfigurationId,
     jwt: String,
+    served_from: HttpsUrl,
 }
 
-/// A document the host holds, by the URL it fetched it from.
+/// A document the host holds, by the URL it fetched it from, or its record that the URL serves
+/// none.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeldDocument {
     url: HttpsUrl,
-    body: Vec<u8>,
+    content: Content,
+}
+
+/// What the host holds for a URL.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Content {
+    /// The document.
+    Body(Vec<u8>),
+    /// The fetch answered 404: the URL serves no document.
+    Absent,
+}
+
+/// What the host holds for a URL, as the wallet reads it.
+pub(crate) enum Holding<'h> {
+    /// The document.
+    Body(&'h [u8]),
+    /// The host's record that the URL serves no document.
+    Absent,
+    /// Nothing: the host never fetched it.
+    NotHeld,
 }
 
 impl HeldDocument {
     /// The document `body` the host fetched from `url`.
     #[must_use]
     pub fn new(url: HttpsUrl, body: Vec<u8>) -> Self {
-        Self { url, body }
+        Self {
+            url,
+            content: Content::Body(body),
+        }
+    }
+
+    /// The host's record that `url` serves no document: its fetch answered 404 Not Found.
+    #[must_use]
+    pub fn absent(url: HttpsUrl) -> Self {
+        Self {
+            url,
+            content: Content::Absent,
+        }
     }
 }
 
@@ -102,8 +143,8 @@ impl std::error::Error for HeldError {}
 /// and documents by URL.
 #[derive(Debug, Clone, Default)]
 pub struct HeldMetadata {
-    jwts: FxHashMap<(IssuerIdentifier, ConfigurationId), String>,
-    documents: FxHashMap<HttpsUrl, Vec<u8>>,
+    jwts: FxHashMap<(IssuerIdentifier, ConfigurationId), HeldJwt>,
+    documents: FxHashMap<HttpsUrl, Content>,
 }
 
 impl HeldMetadata {
@@ -114,20 +155,15 @@ impl HeldMetadata {
     /// [`HeldError`]: two JWTs of one configuration, or two documents of one URL.
     pub fn new(jwts: Vec<HeldJwt>, documents: Vec<HeldDocument>) -> Result<Self, HeldError> {
         let mut held = Self::default();
-        for HeldJwt {
-            issuer,
-            configuration,
-            jwt,
-        } in jwts
-        {
-            let key = (issuer, configuration);
+        for jwt in jwts {
+            let key = (jwt.issuer.clone(), jwt.configuration.clone());
             if held.jwts.insert(key.clone(), jwt).is_some() {
                 let (issuer, configuration) = key;
                 return Err(HeldError::JwtRepeated(issuer, configuration));
             }
         }
-        for HeldDocument { url, body } in documents {
-            if held.documents.insert(url.clone(), body).is_some() {
+        for HeldDocument { url, content } in documents {
+            if held.documents.insert(url.clone(), content).is_some() {
                 return Err(HeldError::DocumentRepeated(url));
             }
         }
@@ -135,21 +171,28 @@ impl HeldMetadata {
     }
 
     /// The signed credential metadata JWT held for `credential`'s configuration.
-    pub(crate) fn jwt(&self, credential: &Credential) -> Option<&str> {
+    pub(crate) fn jwt(&self, credential: &Credential) -> Option<&HeldJwt> {
         let key = (
             credential.issuer()?.clone(),
             credential.configuration_id()?.clone(),
         );
-        self.jwts.get(&key).map(String::as_str)
+        self.jwts.get(&key)
     }
 
-    /// The document held for `url`.
-    pub(crate) fn document(&self, url: &HttpsUrl) -> Option<&[u8]> {
-        self.documents.get(url).map(Vec::as_slice)
+    /// What the host holds for `url`.
+    pub(crate) fn document(&self, url: &HttpsUrl) -> Holding<'_> {
+        match self.documents.get(url) {
+            Some(Content::Body(body)) => Holding::Body(body),
+            Some(Content::Absent) => Holding::Absent,
+            None => Holding::NotHeld,
+        }
     }
 
-    /// The documents the host should hold for `credential` and does not, in the order the
-    /// wallet reads them; `display` locates the signed credential metadata.
+    /// What the host should hold for `credential` and does not, in the order the wallet reads
+    /// it: its issuer metadata in `display`; its signed credential metadata, or a new one where
+    /// the JWT held does not verify against `trust` at `now` (Section 6); and the documents
+    /// it has neither fetched nor recorded as absent. The host fetches each; a document whose
+    /// fetch answers 404 it records with [`HeldDocument::absent`].
     ///
     /// # Errors
     ///
@@ -159,11 +202,24 @@ impl HeldMetadata {
         &self,
         credential: &Credential,
         display: &DisplayCache,
+        trust: &TrustStore,
+        now: DateTime,
     ) -> Result<Vec<Wanted>, WantedFault> {
         let mut wanted = Vec::new();
-        if let Some(uri) = display.credential_metadata_uri(credential) {
-            if self.jwt(credential).is_none() {
-                wanted.push(Wanted::CredentialMetadata(uri.clone()));
+        match display.issuer_metadata(credential) {
+            None => wanted.push(Wanted::IssuerMetadata),
+            Some(issued) => {
+                if let Some(uri) = issued.credential_metadata_uri() {
+                    let verifier = Verifier {
+                        trust,
+                        held: self,
+                        now,
+                    };
+                    if CredentialMetadata::load(credential, verifier).is_err() {
+                        let from = self.jwt(credential).map_or(uri, |held| &held.served_from);
+                        wanted.push(Wanted::CredentialMetadata(from.clone()));
+                    }
+                }
             }
         }
         let referenced =
@@ -181,7 +237,7 @@ impl HeldMetadata {
             referenced
                 .into_iter()
                 .chain(keys)
-                .filter(|url| self.document(url).is_none())
+                .filter(|url| matches!(self.document(url), Holding::NotHeld))
                 .map(Wanted::Document),
         );
         Ok(wanted)
@@ -189,13 +245,21 @@ impl HeldMetadata {
 }
 
 impl HeldJwt {
-    /// The JWT `jwt` the host holds for the configuration `configuration` of `issuer`.
+    /// The JWT `jwt` the host holds for the configuration `configuration` of `issuer`, fetched
+    /// from `served_from` after redirects. The wallet verifies it each time it loads it: Section
+    /// 7, and its `credential_metadata_uri` against `served_from` (Section 8).
     #[must_use]
-    pub fn new(issuer: IssuerIdentifier, configuration: ConfigurationId, jwt: String) -> Self {
+    pub fn new(
+        issuer: IssuerIdentifier,
+        configuration: ConfigurationId,
+        jwt: String,
+        served_from: HttpsUrl,
+    ) -> Self {
         Self {
             issuer,
             configuration,
             jwt,
+            served_from,
         }
     }
 
@@ -216,12 +280,20 @@ impl HeldJwt {
     pub fn jwt(&self) -> &str {
         &self.jwt
     }
+
+    /// The URL the JWT answered from, after redirects.
+    #[must_use]
+    pub fn served_from(&self) -> &HttpsUrl {
+        &self.served_from
+    }
 }
 
-/// A document the host should hold.
+/// What the host should hold.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Wanted {
-    /// The signed credential metadata JWT this `credential_metadata_uri` serves.
+    /// The issuer metadata of the credential's configuration (OpenID4VCI 1.0, Section 12.2).
+    IssuerMetadata,
+    /// The signed credential metadata JWT this URL serves.
     CredentialMetadata(HttpsUrl),
     /// The document at this URL.
     Document(HttpsUrl),

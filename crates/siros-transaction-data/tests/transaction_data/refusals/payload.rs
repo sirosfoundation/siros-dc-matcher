@@ -201,6 +201,18 @@ fn each_payload_rule_is_refused_alone() {
             ))),
         ),
         (
+            "a mandatory claim whose null ranges over an empty array",
+            redefined(
+                1,
+                json!({"path": ["items", null, "name"], "mandatory": true,
+                       "display": [{"locale": "en", "name": "Item"}]}),
+            ),
+            changed(json!({"items": []})),
+            Err(Incompatibility::Payload(PayloadFault::MandatoryAbsent(
+                ClaimIndex::new(1),
+            ))),
+        ),
+        (
             "an #integrity companion beside a text claim",
             definition(),
             changed(json!({"text#integrity": "sha256-AAAA"})),

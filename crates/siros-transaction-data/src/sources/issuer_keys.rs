@@ -6,7 +6,7 @@ use siros_codec::json::{Json, JsonFault};
 use siros_oid4vp::HttpsUrl;
 use siros_wallet_state::IssuerIdentifier;
 
-use super::held::HeldMetadata;
+use super::held::{HeldMetadata, Holding};
 use super::jws::{JwkFault, VerifyingKey};
 use crate::json;
 
@@ -18,8 +18,10 @@ const WELL_KNOWN: &str = "/.well-known/jwt-vc-issuer";
 pub enum KeySetFault {
     /// The Credential Issuer Identifier is no `https` URL.
     IssuerNotHttps,
-    /// The host holds no document of this URL.
+    /// The host neither holds the document of this URL nor records it as absent.
     NotHeld(HttpsUrl),
+    /// The host records the document of this URL as absent.
+    Absent(HttpsUrl),
     /// A document is no JSON document the strict reader holds.
     Json(JsonFault),
     /// The issuer metadata names another `issuer`, or names its keys by both `jwks` and
@@ -40,6 +42,7 @@ impl KeySetFault {
         match self {
             Self::IssuerNotHttps => "key_set_issuer_not_https",
             Self::NotHeld(_) => "key_set_not_held",
+            Self::Absent(_) => "key_set_absent",
             Self::Json(_) | Self::Metadata | Self::Keys => "key_set_malformed",
             Self::KidUnknown => "key_set_kid_unknown",
             Self::Key(fault) => fault.code(),
@@ -81,7 +84,7 @@ pub(crate) fn documents(
 ) -> Result<Vec<HttpsUrl>, KeySetFault> {
     let metadata_url = well_known(issuer).ok_or(KeySetFault::IssuerNotHttps)?;
     let mut urls = vec![metadata_url.clone()];
-    if held.document(&metadata_url).is_some() {
+    if matches!(held.document(&metadata_url), Holding::Body(_)) {
         if let KeySetSource::Uri(url) = source(issuer, &metadata_url, held)? {
             urls.push(url);
         }
@@ -144,8 +147,9 @@ fn well_known(issuer: &IssuerIdentifier) -> Option<HttpsUrl> {
 
 /// The JSON document held for `url`.
 fn document(url: &HttpsUrl, held: &HeldMetadata) -> Result<Json, KeySetFault> {
-    let body = held
-        .document(url)
-        .ok_or_else(|| KeySetFault::NotHeld(url.clone()))?;
-    Json::parse_unique(body).map_err(KeySetFault::Json)
+    match held.document(url) {
+        Holding::Body(body) => Json::parse_unique(body).map_err(KeySetFault::Json),
+        Holding::Absent => Err(KeySetFault::Absent(url.clone())),
+        Holding::NotHeld => Err(KeySetFault::NotHeld(url.clone())),
+    }
 }

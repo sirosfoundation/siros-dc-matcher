@@ -11,6 +11,12 @@ use crate::type_id::TypeId;
 
 /// The display of one transaction data entry: its UI elements and a row per displayed claim
 /// instance, in the order of the definition's claims.
+///
+/// The core checks each label against its role's limit with each value as the payload writes
+/// it, since the UI formats the values. The UI checks each label again once formatted, with
+/// [`LabelText::parse`] under [`LabelLength::Final`](crate::LabelLength::Final) and the rules of
+/// [`TransactionView::source`], and treats a label over its limit as an entry that is not
+/// compatible (PaSO View, Section 2).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TransactionView {
     pub(crate) type_id: TypeId,
@@ -36,7 +42,8 @@ pub enum Segment {
 }
 
 /// A label as shown: its segments, one text unless it was a template, and how the whole is
-/// formatted. The label's length rule counts each value as the payload writes it.
+/// formatted. The core's length check counts each value as the payload writes it; the UI checks
+/// the formatted label again ([`TransactionView`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShownLabel {
     pub(crate) segments: Vec<Segment>,

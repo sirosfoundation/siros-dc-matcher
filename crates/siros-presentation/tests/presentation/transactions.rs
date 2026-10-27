@@ -9,11 +9,12 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use siros_codec::base64url;
 use siros_display::{DisplayCache, IssuerMetadata};
-use siros_oid4vp::ErrorCode;
+use siros_oid4vp::{ErrorCode, HttpsUrl};
 use siros_presentation::{Fetches, PresentationError};
 use siros_transaction_data::{
-    Configuration, EntryPosition, Exclusion, HeldJwt, HeldMetadata, Incompatibility, Location,
-    LocationStep, PayloadFault, RowValue, SourceKind, TransactionDataError, UnsignedWarning,
+    Configuration, EntryPosition, Exclusion, HeldDocument, HeldJwt, HeldMetadata, Incompatibility,
+    Location, LocationStep, PayloadFault, RowValue, SourceKind, TransactionDataError,
+    UnsignedWarning,
 };
 use siros_trust::TrustStore;
 use siros_wallet_state::{ConfigurationId, IssuerIdentifier};
@@ -22,7 +23,9 @@ use siros_zkp_req_nym_auth::testing::Issuer;
 use crate::verifier::{
     b64, client_metadata, dc_api_signed, dc_api_unsigned, decrypt_jwe, NONCE, NOW,
 };
-use crate::wallet::{base64, label_text, ready, respond, sd_jwt, sd_jwt_x5c, Held, Wallet, VCT};
+use crate::wallet::{
+    base64, holding_absent, label_text, ready, respond, sd_jwt, sd_jwt_x5c, Held, Wallet, VCT,
+};
 
 const APPROVAL: &str = "urn:paso:sca:com.example:approval:1";
 const METADATA_URI: &str = "https://issuer.example/metadata/pid";
@@ -89,8 +92,10 @@ fn paso_wallet() -> Wallet {
         IssuerIdentifier::parse("https://issuer.example").unwrap(),
         ConfigurationId::parse("example").unwrap(),
         credential_metadata(&signer),
+        HttpsUrl::parse(METADATA_URI).unwrap(),
     );
-    wallet.metadata = HeldMetadata::new(vec![jwt], Vec::new()).unwrap();
+    let absent = HeldDocument::absent(HttpsUrl::parse(VCT).unwrap());
+    wallet.metadata = HeldMetadata::new(vec![jwt], vec![absent]).unwrap();
     wallet
 }
 
@@ -184,6 +189,7 @@ fn annex_a5_offers_bind_each_credential_its_entry() {
     let configured =
         json!([{"type": payment, "vct_values": [CARD, ACCOUNT], "definition": definition}]);
     wallet.configuration = Configuration::parse(&configured.to_string()).unwrap();
+    wallet.metadata = holding_absent(&[CARD, ACCOUNT, PID]);
     let a5: Value = serde_json::from_str(include_str!(
         "../../../siros-transaction-data/tests/vectors/paso/core-a5-request.json"
     ))

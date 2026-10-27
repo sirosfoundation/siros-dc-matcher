@@ -10,7 +10,7 @@ use siros_transaction_data::{
     Selection, SourceKind, TextFault, Ts12Fault, Ts12Member, Ts12Type, UiElementKey, Wanted,
 };
 
-use crate::common::{configured, credential_with, entries, query, sri, text, Host, PAYMENT};
+use crate::common::{configured, credential_with, entries, now, query, sri, text, Host, PAYMENT};
 
 /// The documents the host holds, by URL.
 type Held = Vec<(String, Vec<u8>)>;
@@ -185,10 +185,10 @@ fn each_type_metadata_rule_is_refused_alone() {
             fault(Ts12Fault::NotHeld(HttpsUrl::parse(VCT).unwrap())),
         ),
         (
-            "no document: no source",
+            "no document held",
             none.clone(),
             vec![],
-            Some(Incompatibility::TypeUnsupported),
+            fault(Ts12Fault::NotHeld(HttpsUrl::parse(VCT).unwrap())),
         ),
         (
             "no SCA category (Section 3.2): no source",
@@ -414,15 +414,41 @@ fn the_configuration_serves_only_credentials_without_metadata() {
                        "payload": {"action": "Raise limit"}});
     let entries = entries(&[entry.to_string()], &query(&["pay"], VCT));
     let card = credential_with(VCT, &[], &json!({}));
-    let Selection::Takes(taken) = host.select(&[&entries[0]], &card).unwrap() else {
-        panic!("a credential without type metadata takes the configured type")
+    let source = |host: &Host| match host.select(&[&entries[0]], &card).unwrap() {
+        Selection::Takes(taken) => Ok(taken.view().source()),
+        Selection::Excluded(mut causes) => Err(causes.remove(0).1),
     };
-    assert_eq!(taken.view().source(), SourceKind::Configuration);
+    // Neither held nor recorded absent: whether the credential has metadata is unknown.
+    assert_eq!(
+        source(&host),
+        Err(Incompatibility::TypeMetadata(Ts12Fault::NotHeld(
+            HttpsUrl::parse(VCT).unwrap()
+        )))
+    );
+    host.absent = vec![VCT.to_owned()];
+    assert_eq!(
+        source(&host),
+        Ok(SourceKind::Configuration),
+        "recorded absent"
+    );
+    host.absent = Vec::new();
+    host.held = served(&json!({"vct": VCT, "name": "Card"}));
+    assert_eq!(
+        source(&host),
+        Ok(SourceKind::Configuration),
+        "held without SCA types"
+    );
     host.held = served(&document(payment_type(json!({}))));
     assert_eq!(
-        cause(host.select(&[&entries[0]], &card).unwrap()),
-        Some(Incompatibility::TypeUndeclared)
+        source(&host),
+        Err(Incompatibility::TypeUndeclared),
+        "held with SCA types"
     );
+    // Without its issuer metadata, whether the credential is a PaSO Credential is unknown.
+    host.absent = vec![VCT.to_owned()];
+    host.held = Vec::new();
+    host.display = siros_display::DisplayCache::new(Vec::new(), Vec::new()).unwrap();
+    assert_eq!(source(&host), Err(Incompatibility::IssuerMetadataNotHeld));
 }
 
 /// The documents the host should hold for a credential without a chain: its Type Metadata and
@@ -433,8 +459,15 @@ fn the_host_learns_the_documents_to_hold() {
     let issuer_metadata = "https://issuer.bank.example/.well-known/jwt-vc-issuer";
     let url = |text: &str| Wanted::Document(HttpsUrl::parse(text).unwrap());
     let mut host = Host::new(json!([]));
-    let wanted = |host: &Host| host.metadata().wanted(&card, &host.display).unwrap();
+    let wanted = |host: &Host| {
+        host.metadata()
+            .wanted(&card, &host.display, &host.trust, now())
+            .unwrap()
+    };
     assert_eq!(wanted(&host), [url(VCT), url(issuer_metadata)]);
+    host.absent = vec![issuer_metadata.to_owned()];
+    assert_eq!(wanted(&host), [url(VCT)], "recorded absent");
+    host.absent = Vec::new();
     let referenced = document(payment_type(
         json!({"claims": null, "claims_uri": CLAIMS_URI}),
     ));

@@ -163,19 +163,18 @@ against the 307,200-byte budget (303,418 at v0.11.0).
   `new_presentation` event (H5). `CredentialId::new` is public, for the ids picker entries
   carry; `IssuerIdentifier::parse` and `ConfigurationId::parse` refuse the empty string
   (`EmptyIdentifier`).
-- `siros-display`, display for the wallet core: display metadata, credential cards (`Card`,
-  with its `Colour`s and `Logo`), claim rows, purpose lines, and proof statement rows
-  (`proof::verified_rows`, each a `DisplayText` label and value held whole). One locale
-  function, `lookup`, takes the entry of every display array for the wallet's one language, a
-  `Locale` the host gives: RFC 4647 Lookup, then the entry without `locale` (PaSO View, Section
-  4). A card's title and a claim's label come from the Type Metadata, else, for a language it
-  has no entry for, from the configuration's `credential_metadata` (OpenID4VCI 1.0, Section
-  12.2.4). `DisplayCache` keys Type Metadata by siros-dcql's `Vct` and issuer metadata by
-  siros-wallet-state's `IssuerIdentifier` and `ConfigurationId`, and gives a configuration's
-  `credential_metadata_uri`. A `DisplayError` carries its cause: a colour that is no numerical
-  colour value of CSS Color Module Level 3 holds its `ColourFault`. Without the
-  default feature `credential` it holds the purpose lines and proof statement rows the matcher
-  links.
+- `siros-display`, display for the wallet core: display metadata, credential cards (`Card`, with
+  its `Colour`s and `Logo`), claim rows, purpose lines, and proof statement rows
+  (`proof::verified_rows`, each a `DisplayText` label and value held whole). One locale function,
+  `lookup`, takes the entry of every display array for the wallet's one language, a `Locale` the
+  host gives: RFC 4647 Lookup, then the entry without `locale` (PaSO View, Section 4). A card's
+  title and a claim's label come from the Type Metadata, else, for a language it has no entry for,
+  from the configuration's `credential_metadata` (OpenID4VCI 1.0, Section 12.2.4). `DisplayCache`
+  keys Type Metadata by siros-dcql's `Vct` and issuer metadata by siros-wallet-state's
+  `IssuerIdentifier` and `ConfigurationId`, and gives a credential's issuer metadata
+  (`DisplayCache::issuer_metadata`). A `DisplayError` carries its cause: a colour that is no
+  numerical colour value of CSS Color Module Level 3 holds its `ColourFault`. Without the default
+  feature `credential` it holds the purpose lines and proof statement rows the matcher links.
 - `siros-oid4vp`, OpenID4VP 1.0 for the wallet core. Without `crypto` it holds the picker's
   request reading (`UnverifiedRequest`, `diagnose`, `NoQuery`, whose `Malformed` holds the
   `QueryError`), `ClientId`, whose parse refuses with a `ClientIdError`, the `Fetch` effect, and
@@ -223,15 +222,21 @@ against the 307,200-byte budget (303,418 at v0.11.0).
     metadata JWT (Sections 4 and 7: ES256 or ES384, an `x5c` chain to the credential's root with
     its leaf's Subject, or a `kid` of the issuer's JWT VC issuer metadata) or its TS12 SCA type
     metadata, which declares every type the credential supports (`TypeUndeclared`); else, for a
-    credential without metadata of its own, the host's `Configuration`. Signed credential
-    metadata that is not held or not valid excludes the credential for every entry, an ad-hoc
-    JWT included; a failed ad-hoc JWT makes its entry incompatible.
+    credential known to have no metadata of its own, the host's `Configuration`: a `vct` that is
+    no `https` URL, or Type Metadata held without SCA types or recorded as absent. Type Metadata
+    neither held nor recorded absent (`Ts12Fault::NotHeld`), issuer metadata the host does not
+    hold (`IssuerMetadataNotHeld`), and signed credential metadata that is not held or not valid
+    exclude the credential for every entry, an ad-hoc JWT included; a failed ad-hoc JWT makes
+    its entry incompatible.
   - Metadata is input: `HeldMetadata` holds the signed credential metadata JWTs, Type Metadata
     with the documents it references, and issuer key sets, which the host fetches and renews
-    outside presentations; the wallet verifies each every time it loads it (Sections 6 and 8).
-    `HeldJwt::verify_fetched` admits a JWT the host fetched, its `credential_metadata_uri` the
-    URL it was served from, and gives its `Renewal`: its expiry and the URL to renew from.
-    `HeldMetadata::wanted` lists the documents of a credential the host does not hold.
+    outside presentations, and records a URL whose fetch answered 404 as absent
+    (`HeldDocument::absent`); the wallet verifies each every time it loads it, a JWT's
+    `credential_metadata_uri` against the URL it was served from (Sections 6 to 8).
+    `HeldJwt::verify_fetched` admits a JWT the host fetched and gives its `Renewal`: its expiry
+    and the URL to renew from. `HeldMetadata::wanted` lists what the host should hold for a
+    credential: issuer metadata, signed credential metadata it lacks or whose JWT no longer
+    verifies, and documents neither held nor recorded absent.
   - `Definition::project` keeps the entry of each array the locale function takes, with the
     source and the rulebook; a type with an array it leaves empty is unsupported in that
     language. `Projected::to_json` writes it, additional parameters in the member order of RFC
@@ -245,12 +250,19 @@ against the 307,200-byte budget (303,418 at v0.11.0).
     the wallet's sources, give each candidate credential its first compatible entry (Section
     7.4.2): a supported type, a conforming payload (`PayloadFault`: `#integrity` companions
     only beside image claims and as strings, a mandatory claim in every element its `null`
-    ranges over, an `iso_currency_amount` with its minor unit's digits), at most 200 items
-    counted before any image is fetched, verified images (`VerifiedImage`: Data URLs of PNG,
-    JPEG and SVG, `https` URLs pinned by `#integrity` and fetched through the host with at most
-    3 redirects, 512 KiB, 2048 pixels, SVG references pinned; an SVG construct the scan cannot
-    vouch for refuses the image), and a full rendering (`TransactionView`: rows in claims order,
-    `template:` values as `Segment`s of text and typed values). Under a TS12 rulebook an image
+    ranges over and an empty array holding none, an `iso_currency_amount` with its minor unit's
+    digits), at most 200 items counted before any image is fetched, verified images
+    (`VerifiedImage`: Data URLs of PNG, JPEG and SVG, `https` URLs pinned by `#integrity` and
+    fetched through the host with at most 3 redirects, 512 KiB, 2048 pixels), and a full
+    rendering (`TransactionView`: rows in claims order, `template:` values as `Segment`s of text
+    and typed values; the UI checks each label again once formatted). An SVG document passes
+    only within a static subset: allowlisted elements of the SVG namespace with their
+    attributes, CSS read by a CSS Syntax 3 tokenizer with the at-rules `@font-face` and
+    `@media` and known functions (`CssFault`), and each URL a fragment of the document, a Data
+    URL of a PNG or JPEG image, or an `https` URL pinned in its fragment. At most
+    `MAX_RESOURCES` (8) pinned resources are fetched, each a PNG or JPEG image within the image
+    limits or a font. The host renders the image statically and loads nothing outside its
+    resources. Under a TS12 rulebook an image
     that does not verify is left out (`TransactionView::absent_images`). Every reason an entry
     does not serve a credential is an `Incompatibility`. A PaSO-sourced definition needs a
     signed request; a TS12 type in an unsigned request carries `UnsignedWarning::Required`.

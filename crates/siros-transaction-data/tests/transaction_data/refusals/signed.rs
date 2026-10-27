@@ -7,7 +7,7 @@ use siros_oid4vp::HttpsUrl;
 use siros_oid4vp::RequestSignature;
 use siros_transaction_data::{
     CredentialMetadataFault, HeldJwt, HeldMetadata, Incompatibility, KeySetFault, Selection,
-    SignedFault, SourceKind, TransactionDataError,
+    SignedFault, SourceKind, TransactionDataError, Wanted,
 };
 
 use crate::common::{
@@ -344,6 +344,49 @@ fn signed_credential_metadata_serves_or_excludes() {
         cause(outcome(None, None)),
         Incompatibility::CredentialMetadata(CredentialMetadataFault::NotHeld)
     );
+    // Section 8 again at each load: the JWT names another URL than it was served from.
+    let elsewhere = "https://issuer.bank.example/metadata/moved";
+    let moved = jwt(
+        &header("credential-metadata+jwt", &[&pki.signer]),
+        &metadata_claims(1_820_000_000, elsewhere),
+        &pki.signer.key,
+    );
+    assert_eq!(
+        cause(outcome(Some(moved), None)),
+        Incompatibility::CredentialMetadata(CredentialMetadataFault::UriMismatch(
+            elsewhere.to_owned()
+        ))
+    );
+}
+
+/// The host learns to fetch the signed credential metadata it lacks, and a new one where the
+/// JWT it holds no longer verifies (Section 6), from the URL that JWT answered from.
+#[test]
+fn the_host_renews_credential_metadata_that_fails() {
+    let pki = pki();
+    let token = |exp: i64| {
+        jwt(
+            &header("credential-metadata+jwt", &[&pki.signer]),
+            &metadata_claims(exp, METADATA_URI),
+            &pki.signer.key,
+        )
+    };
+    let card = credential(CARD, &[&pki.issuer]);
+    let mut host = Host::new(json!([]));
+    host.trust = store(&[&pki.root]);
+    host.display = display(Some(METADATA_URI));
+    let metadata = Wanted::CredentialMetadata(HttpsUrl::parse(METADATA_URI).unwrap());
+    let wants_metadata = |host: &Host| {
+        host.metadata()
+            .wanted(&card, &host.display, &host.trust, now())
+            .unwrap()
+            .contains(&metadata)
+    };
+    assert!(wants_metadata(&host), "not held");
+    host.credential_metadata = Some(token(1_700_000_000));
+    assert!(wants_metadata(&host), "expired");
+    host.credential_metadata = Some(token(1_820_000_000));
+    assert!(!wants_metadata(&host), "valid");
 }
 
 /// The host admits a JWT it fetched: verified, and naming the URL it was served from (Section

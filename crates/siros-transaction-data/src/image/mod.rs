@@ -4,6 +4,7 @@
 //! verified bytes. A TS12 logo may be a URL without `#integrity` (EC TS12 v1.0.1, Section
 //! 4.3.1): it cannot be verified.
 
+mod css;
 mod raster;
 mod svg;
 
@@ -15,8 +16,9 @@ use crate::fetched;
 use crate::fetched::{FetchFault, Fetched, Step};
 use crate::integrity::{Integrity, IntegrityFault};
 
+pub use css::CssFault;
 pub use raster::RasterFault;
-pub use svg::SvgFault;
+pub use svg::{SvgFault, MAX_RESOURCES};
 
 /// The most bytes of an image: of a Data URL's payload, or of the fetched content.
 pub const MAX_IMAGE_BYTES: usize = 512 * 1024;
@@ -47,7 +49,7 @@ pub struct Dimensions {
 
 impl Dimensions {
     /// Whether the image is over [`MAX_IMAGE_PIXELS`] in a direction.
-    fn over(self) -> bool {
+    pub(crate) fn over(self) -> bool {
         self.width > MAX_IMAGE_PIXELS || self.height > MAX_IMAGE_PIXELS
     }
 }
@@ -125,6 +127,10 @@ pub enum ImageRef {
 
 /// An image whose bytes the wallet verified: within the limits, of its format, and with each
 /// resource an SVG document references fetched and verified.
+///
+/// The host renders it statically: it runs no script and no animation, and it loads nothing
+/// outside [`VerifiedImage::resources`] (PaSO View, Section 3, `image`). An SVG document's
+/// references resolve to those bytes, by the reference as the document writes it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerifiedImage {
     format: ImageFormat,

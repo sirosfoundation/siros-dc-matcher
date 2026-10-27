@@ -227,8 +227,8 @@ fn covered<'c>(
     }
 }
 
-/// Whether `root` holds what `components` addresses: every array a `null` ranges over exists,
-/// and each of its elements holds the rest of the path. `offset` is the position of
+/// Whether `root` holds what `components` addresses: every array a `null` ranges over exists
+/// and has elements, and each of its elements holds the rest of the path. `offset` is the position of
 /// `components` in the claim's path.
 ///
 /// # Errors
@@ -250,6 +250,10 @@ fn present(root: &Json, components: &[PathComponent], offset: usize) -> Result<b
                 at: ComponentIndex::new(offset + null),
             });
         };
+        // A `null` over an empty array selects nothing (OpenID4VP 1.0, Section 7.1.1, step 3).
+        if items.is_empty() {
+            return Ok(false);
+        }
         for item in items {
             if !present(item, rest, offset + null + 1)? {
                 return Ok(false);
