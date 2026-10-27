@@ -3,12 +3,12 @@
 
 use std::fmt;
 
-use siros_codec::json::{Json, ReadFault};
+use siros_codec::json::{Json, JsonFault};
 use siros_codec::member::MemberFault;
 use siros_codec::{base64, Base64Error};
 use siros_dcql::{AuthorityType, AuthorityValue};
 
-use crate::authority::{AuthorityKind, StoreAuthority};
+use crate::authority::{KnownAuthorityType, StoreAuthority};
 use crate::certificate::{Certificate, CertificateError};
 use crate::position::{CertificateIndex, EntryIndex};
 
@@ -28,8 +28,8 @@ pub struct StoreEntry {
 /// Why a record is no trust store (TR1).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StoreError {
-    /// The record is no JSON value the strict reader holds.
-    Json(ReadFault),
+    /// The strict reader refuses the record: a member name an object repeats among its faults.
+    Json(JsonFault),
     /// The record is not a JSON array.
     NotArray,
     /// An entry breaks a rule.
@@ -50,8 +50,6 @@ pub enum EntryError {
     NotObject,
     /// The entry has this member, other than `type`, `value` and `certificates`.
     UnknownMember(String),
-    /// The entry names this member twice.
-    RepeatedMember(String),
     /// `type` is absent or not a string.
     Type(MemberFault),
     /// `type` names this type, other than `etsi_tl` and `openid_federation`.
@@ -83,7 +81,8 @@ impl StoreError {
     #[must_use]
     pub fn code(&self) -> &'static str {
         match self {
-            Self::Json(_) => "trust_store_json",
+            Self::Json(JsonFault::Read(_)) => "trust_store_json",
+            Self::Json(JsonFault::RepeatedMember(_)) => "trust_store_member_repeated",
             Self::NotArray => "trust_store_not_array",
             Self::Entry { error, .. } => error.code(),
             Self::Repeated(_) => "trust_store_entry_repeated",
@@ -120,7 +119,6 @@ impl EntryError {
         match self {
             Self::NotObject => "trust_store_entry_not_object",
             Self::UnknownMember(_) => "trust_store_entry_member_unknown",
-            Self::RepeatedMember(_) => "trust_store_entry_member_repeated",
             Self::Type(_) => "trust_store_entry_type",
             Self::UnknownType(_) => "trust_store_entry_type_unknown",
             Self::Value(_) => "trust_store_entry_value",
@@ -145,7 +143,6 @@ impl std::error::Error for EntryError {
             Self::Certificate { error, .. } => Some(error),
             Self::NotObject
             | Self::UnknownMember(_)
-            | Self::RepeatedMember(_)
             | Self::Type(_)
             | Self::UnknownType(_)
             | Self::Value(_)
@@ -159,13 +156,16 @@ impl TrustStore {
     /// The trust store of the JSON record `record`: an array of entries `{type, value,
     /// certificates}`, `type` `etsi_tl` or `openid_federation`, `value` the authority's value as
     /// a Verifier sends it, and `certificates` a non-empty array of DER certificates, each in
-    /// base64 with padding. No two entries share a `type` and a `value`.
+    /// base64 with padding. No two entries share a `type` and a `value`, and no object repeats
+    /// a member name.
     ///
     /// # Errors
     ///
     /// [`StoreError`]: the first rule the record breaks.
     pub fn parse(record: &str) -> Result<Self, StoreError> {
-        let Json::Array(entries) = Json::parse(record.as_bytes()).map_err(StoreError::Json)? else {
+        let Json::Array(entries) =
+            Json::parse_unique(record.as_bytes()).map_err(StoreError::Json)?
+        else {
             return Err(StoreError::NotArray);
         };
         let mut parsed: Vec<StoreEntry> = Vec::with_capacity(entries.len());
@@ -212,13 +212,10 @@ impl StoreEntry {
         {
             return Err(EntryError::UnknownMember(name.clone()));
         }
-        if let Some(name) = entry.repeated_member() {
-            return Err(EntryError::RepeatedMember(name.to_owned()));
-        }
         let kind = AuthorityType::new(text(entry, "type").map_err(EntryError::Type)?);
-        let kind = match AuthorityKind::of(&kind) {
-            Some(AuthorityKind::Store(store)) => store,
-            Some(AuthorityKind::Aki) | None => return Err(EntryError::UnknownType(kind)),
+        let kind = match KnownAuthorityType::of(&kind) {
+            Some(KnownAuthorityType::Store(store)) => store,
+            Some(KnownAuthorityType::Aki) | None => return Err(EntryError::UnknownType(kind)),
         };
         let value = text(entry, "value").map_err(EntryError::Value)?;
         let certificates = match entry.member("certificates") {

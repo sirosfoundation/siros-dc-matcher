@@ -9,7 +9,7 @@ use serde_json::Value;
 use siros_codec::cbor::Value as Cbor;
 use siros_codec::date::DateTime;
 use siros_mdoc::{device_signing_input, DeviceNameSpaces, SessionTranscript};
-use siros_trust::{Certificate, IssuerChain, PathRefusal, TrustPath};
+use siros_trust::{Certificate, IssuerChain, PathRefusal};
 use siros_zkp_req::{
     answered_option, EncodingError, InputName, ProofBackend, ProofEnvelope, QueryOption,
     ReqSetIndex, ResultKey, StructureRejection, ZkProof, ZkpFormats, ZkpPresentation, ZkpReqQuery,
@@ -256,7 +256,8 @@ pub fn verify(
         return Err(Rejection::ProofTime(ProofTimeError::Tolerance));
     }
     let chain = IssuerChain::new(checked.signer.certificate().clone(), Vec::new());
-    TrustPath::new(&chain, input.trust_anchors, input.now)
+    chain
+        .validate_path(input.trust_anchors, input.now)
         .map_err(|refusal| Rejection::IssuerKeySet(IssuerKeySetError::Untrusted(refusal)))?;
     let (earliest, cutoff) = checked
         .bounds

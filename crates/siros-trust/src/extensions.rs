@@ -8,7 +8,7 @@
 //! | --- | --- |
 //! | basicConstraints | a signer is a CA; its pathLenConstraint bounds the intermediates below it (Section 6.1.4 (k) to (m)) |
 //! | keyUsage | a signer's keyUsage, when present, includes keyCertSign (Section 6.1.4 (n)) |
-//! | extKeyUsage | parsed; Section 6.1 gives it no rule, and the Document Signer's `id-mdl-kp-mdlDS` admits |
+//! | extKeyUsage | parsed: a critical extKeyUsage that parses counts as processed, so the Document Signer certificate, whose profile marks its extKeyUsage `id-mdl-kp-mdlDS` critical, passes Section 6.1.4 (o) |
 //! | authorityKeyIdentifier | parsed; an `aki` value matches its keyIdentifier, and path building tries the anchor it names first |
 //! | subjectKeyIdentifier | parsed; path building matches it to an authorityKeyIdentifier |
 //!

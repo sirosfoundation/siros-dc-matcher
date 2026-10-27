@@ -1,11 +1,13 @@
 //! JSON text errors as serde_json reports them, and, with the feature `json`, the strict JSON
-//! reader (RFC 8259): one value, members in document order with the repeated member names a
-//! document holds, every number with the text its writer chose, at most [`MAX_DEPTH`] levels
-//! of objects and arrays.
+//! reader (RFC 8259): one value, members in document order, every number with the text its
+//! writer chose, at most [`MAX_DEPTH`] levels of objects and arrays, and each member name once
+//! per object.
 //!
 //! RFC 7519, Section 4 lets a JWT parser reject duplicate claim names, and a record a host
 //! provisions names each member once: [`Json::parse_unique`] refuses a repeated name at every
-//! level, and [`Json::repeated_member`] finds the first one.
+//! level. `siros-wallet-state` keeps its own reader of the wallet state: a repeated name keeps
+//! its last value there, as `JSON.parse` in `wallet-frontend` does, and each `metadata` value
+//! keeps its text.
 
 use std::fmt;
 

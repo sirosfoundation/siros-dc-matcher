@@ -1,6 +1,7 @@
 //! TR1: the trust store record, one refusal per rule, each by its reason.
 
 use serde_json::json;
+use siros_codec::json::JsonFault;
 use siros_codec::member::MemberFault;
 use siros_codec::Base64Error;
 use siros_dcql::AuthorityType;
@@ -9,11 +10,13 @@ use x509_cert::der::Decode;
 
 use crate::support::{base64, record, Cert, Key};
 
-/// The outcome of a parse, comparable: the entry and its error, or the record's error code.
+/// The outcome of a parse, comparable: the entry and its error, the member name an object
+/// repeats, or the record's error code.
 #[derive(Debug, PartialEq)]
 enum Verdict {
     Parsed,
     Record(&'static str),
+    RepeatedMember(String),
     Entry(usize, EntryError),
     Repeated(usize),
 }
@@ -23,6 +26,7 @@ fn verdict(record: &str) -> Verdict {
         Ok(_) => Verdict::Parsed,
         Err(StoreError::Entry { entry, error }) => Verdict::Entry(entry.value(), error),
         Err(StoreError::Repeated(entry)) => Verdict::Repeated(entry.value()),
+        Err(StoreError::Json(JsonFault::RepeatedMember(name))) => Verdict::RepeatedMember(name),
         Err(error) => Verdict::Record(error.code()),
     }
 }
@@ -115,7 +119,7 @@ fn each_rule_of_tr1() {
             format!(
                 r#"[{{"type":"openid_federation","type":"etsi_tl","value":"https://tl.example/eu","certificates":["{certificate}"]}}]"#
             ),
-            Verdict::Entry(0, EntryError::RepeatedMember("type".to_owned())),
+            Verdict::RepeatedMember("type".to_owned()),
         ),
         (
             "a repeated type and value",

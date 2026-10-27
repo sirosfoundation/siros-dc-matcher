@@ -6,7 +6,7 @@
 //! | --- | --- |
 //! | TR1: the store, constructible only by parsing its record | [`TrustStore::parse`] |
 //! | TR2: the issuer chain, its certificates and their AuthorityKeyIdentifier keyIdentifiers | [`IssuerChain::parse`], [`Certificate`] |
-//! | TR3: the resolution, per Credential Query and issuer at a time, into the [`AdmittedIssuer`] witness; a malformed `aki` value makes the query invalid; the path rules of RFC 5280 over the [`extensions`] TR3 processes, and direct trust in a store certificate byte-identical to the chain's first | [`QueryAuthorities::of`], [`AdmittedIssuer::resolve`], [`TrustPath::new`] |
+//! | TR3: the resolution, per Credential Query and issuer at a time, into the [`AdmittedIssuer`] witness; a malformed `aki` value makes the query invalid; path validation, which returns the refusal of a chain without a path: the path rules of RFC 5280 over the [`extensions`] TR3 processes, and direct trust in a store certificate byte-identical to the chain's first | [`QueryAuthorities::of`], [`AdmittedIssuer::resolve`], [`IssuerChain::validate_path`] |
 //! | TR5: the facts the wallet records at registration, and the picker's admission from them alone | [`IssuerFacts::at`], [`Admission::of`] over [`IssuerFacts`] |
 //!
 //! One rule serves both sides: [`QueryAuthorities::admit`] over an [`Issuer`]. The wallet's
@@ -32,8 +32,8 @@ mod facts;
 
 pub use admission::{Admission, Ground, Issuer, Refusal, Unadmitted};
 pub use authority::{
-    AkiError, Authority, AuthorityError, AuthorityKind, KeyIdentifier, KeyIdentifierError,
-    QueryAuthorities, StoreAuthority, StoreType,
+    AkiError, Authority, AuthorityError, KeyIdentifier, KeyIdentifierError, QueryAuthorities,
+    StoreAuthority, StoreType,
 };
 pub use facts::{FactRefusal, IssuerFacts};
 
@@ -64,7 +64,7 @@ pub use chain::{ChainError, IssuerChain};
 #[cfg(feature = "chain")]
 pub use extensions::{CertSigning, CertificateRole, PathLength};
 #[cfg(feature = "chain")]
-pub use path::{OnPath, PathRefusal, TrustPath};
+pub use path::{OnPath, PathRefusal};
 #[cfg(feature = "chain")]
 pub use position::{CertificateIndex, ChainIndex, EntryIndex};
 #[cfg(feature = "chain")]

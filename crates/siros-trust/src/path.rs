@@ -3,13 +3,17 @@
 //!
 //! A path is a prefix of the chain, each certificate signed by the next, whose last certificate
 //! an anchor signs; or the chain's first certificate alone, when an anchor is byte-identical to
-//! it. Each signer names its subject as the certificate's issuer, is a CA whose keyUsage, when
-//! present, includes keyCertSign, and has at most its pathLenConstraint of non-self-issued
-//! intermediate certificates below it. Every certificate on the path, the anchor included, is
-//! valid at the time and has no critical extension outside the set
-//! [`extensions`](crate::extensions) processes. Signatures are ECDSA P-256 with SHA-256 or
-//! P-384 with SHA-384, over the `tbsCertificate` as written. Name constraints, policies and
-//! revocation are outside TR3.
+//! it (direct trust). TR3 applies these rules to a path:
+//!
+//! | Rule | RFC 5280 |
+//! | --- | --- |
+//! | every certificate on the path, the anchor included, is valid at the time | 6.1.3 (a)(2) |
+//! | each signer's subject is the certificate's issuer, compared as DER bytes | 6.1.3 (a)(4) |
+//! | each signature verifies under its signer's key: ECDSA P-256 with SHA-256 or P-384 with SHA-384, over the `tbsCertificate` as written | 6.1.3 (a)(1) |
+//! | each signer is a CA | 6.1.4 (k) |
+//! | at most its pathLenConstraint of non-self-issued intermediate certificates lie below a signer | 6.1.4 (l), (m) |
+//! | a signer's keyUsage, when present, includes keyCertSign | 6.1.4 (n) |
+//! | every certificate on the path, the anchor included, has each critical extension in the set [`extensions`](crate::extensions) processes | 6.1.4 (o) |
 
 use std::fmt;
 
@@ -109,22 +113,6 @@ impl fmt::Display for PathRefusal {
 
 impl std::error::Error for PathRefusal {}
 
-/// A validated path (TR3).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum TrustPath {
-    /// The chain's certificates up to `anchored_at`, each signed by the next, the last signed by
-    /// the anchor at `anchor`, all valid at the time.
-    Signed {
-        /// The position of the path's last chain certificate.
-        anchored_at: ChainIndex,
-        /// The position of the anchor among the anchors.
-        anchor: CertificateIndex,
-    },
-    /// The anchor at this position is byte-identical to the chain's first certificate, which
-    /// is valid at the time.
-    Listed(CertificateIndex),
-}
-
 /// A signer on a path, with its position and the number of non-self-issued intermediate
 /// certificates below it.
 #[derive(Clone, Copy)]
@@ -134,8 +122,9 @@ struct Signer<'c> {
     below: usize,
 }
 
-impl TrustPath {
-    /// The path from `chain`'s first certificate up to one of `anchors` at `time`.
+impl IssuerChain {
+    /// Path validation (TR3): whether the chain's first certificate has a path to one of
+    /// `anchors` at `time`.
     ///
     /// An anchor byte-identical to the chain's first certificate admits it. Otherwise each
     /// prefix of the chain is tried, shortest first, and at each the anchors whose subject its
@@ -145,32 +134,25 @@ impl TrustPath {
     /// # Errors
     ///
     /// [`PathRefusal`]: why the deepest attempt fails.
-    pub fn new(
-        chain: &IssuerChain,
+    pub fn validate_path(
+        &self,
         anchors: &[Certificate],
         time: DateTime,
-    ) -> Result<Self, PathRefusal> {
-        let certificates: Vec<&Certificate> = chain.certificates().collect();
+    ) -> Result<(), PathRefusal> {
+        let certificates: Vec<&Certificate> = self.certificates().collect();
         let mut position = 0;
-        let mut certificate = chain.leaf();
+        let mut certificate = self.leaf();
         // The non-self-issued intermediate certificates of the prefix: every certificate after
         // the first.
         let mut below = 0;
         loop {
             let at = ChainIndex::new(position);
             on_path(certificate, OnPath::Chain(at), time)?;
-            if position == 0 {
-                if let Some(listed) = anchors.iter().position(|anchor| anchor == certificate) {
-                    return Ok(Self::Listed(CertificateIndex::new(listed)));
-                }
+            if position == 0 && anchors.contains(certificate) {
+                return Ok(());
             }
             let refusal = match anchored(certificate, at, below, anchors, time) {
-                Ok(anchor) => {
-                    return Ok(Self::Signed {
-                        anchored_at: at,
-                        anchor,
-                    })
-                }
+                Ok(()) => return Ok(()),
                 Err(refusal) => refusal,
             };
             let next = certificates.get(position + 1).copied();
@@ -182,14 +164,6 @@ impl TrustPath {
             if !certificate.self_issued() {
                 below += 1;
             }
-        }
-    }
-
-    /// The position of the anchor among the anchors.
-    #[must_use]
-    pub fn anchor(self) -> CertificateIndex {
-        match self {
-            Self::Signed { anchor, .. } | Self::Listed(anchor) => anchor,
         }
     }
 }
@@ -209,7 +183,7 @@ fn on_path(certificate: &Certificate, position: OnPath, time: DateTime) -> Resul
     }
 }
 
-/// The anchor that signs `certificate`, at `at` on the chain above `below` non-self-issued
+/// Whether an anchor signs `certificate`, at `at` on the chain above `below` non-self-issued
 /// intermediate certificates; else the refusal of the first anchor tried, or `None` when no
 /// anchor has the subject `certificate` names as its issuer.
 fn anchored(
@@ -218,7 +192,7 @@ fn anchored(
     below: usize,
     anchors: &[Certificate],
     time: DateTime,
-) -> Result<CertificateIndex, Option<PathRefusal>> {
+) -> Result<(), Option<PathRefusal>> {
     let mut named: Vec<(CertificateIndex, &Certificate)> = anchors
         .iter()
         .enumerate()
@@ -240,7 +214,7 @@ fn anchored(
         let signs =
             on_path(anchor, signer.position, time).and_then(|()| link(certificate, at, signer));
         match signs {
-            Ok(()) => return Ok(index),
+            Ok(()) => return Ok(()),
             Err(refusal) => {
                 if first.is_none() {
                     first = Some(refusal);

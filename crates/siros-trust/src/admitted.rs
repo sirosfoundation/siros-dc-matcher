@@ -12,7 +12,7 @@ use crate::authority::{KeyIdentifier, QueryAuthorities, StoreAuthority};
 use crate::certificate::Certificate;
 use crate::chain::IssuerChain;
 use crate::facts::IssuerFacts;
-use crate::path::{PathRefusal, TrustPath};
+use crate::path::PathRefusal;
 use crate::store::TrustStore;
 
 /// Why an authority does not admit a credential's issuer, from its chain and the store.
@@ -79,8 +79,8 @@ impl Issuer for ChainAt<'_> {
             .store
             .entry(authority)
             .ok_or(ChainRefusal::NoStoreEntry)?;
-        TrustPath::new(self.chain, entry.certificates(), self.time)
-            .map(|_path| ())
+        self.chain
+            .validate_path(entry.certificates(), self.time)
             .map_err(ChainRefusal::Path)
     }
 }
@@ -206,7 +206,7 @@ impl IssuerFacts {
             store
                 .entries()
                 .iter()
-                .filter(|entry| TrustPath::new(chain, entry.certificates(), time).is_ok())
+                .filter(|entry| chain.validate_path(entry.certificates(), time).is_ok())
                 .map(|entry| entry.authority().clone())
                 .collect(),
         )

@@ -75,20 +75,18 @@ pub enum StoreType {
     OpenidFederation,
 }
 
-/// What a `trusted_authorities` `type` names (OpenID4VP 1.0, Section 6.1.1), among the types
-/// TR3 reads.
+/// A `trusted_authorities` `type` (OpenID4VP 1.0, Section 6.1.1) that TR3 reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum AuthorityKind {
+pub(crate) enum KnownAuthorityType {
     /// `aki`: the keyIdentifier of a certificate of the issuer's chain.
     Aki,
     /// An authority whose certificates a trust store entry holds.
     Store(StoreType),
 }
 
-impl AuthorityKind {
-    /// The kind of the `type` `kind`; `None` for another type.
-    #[must_use]
-    pub fn of(kind: &AuthorityType) -> Option<Self> {
+impl KnownAuthorityType {
+    /// The known type `kind` names; `None` for another type.
+    pub(crate) fn of(kind: &AuthorityType) -> Option<Self> {
         match kind.as_str() {
             "aki" => Some(Self::Aki),
             "etsi_tl" => Some(Self::Store(StoreType::EtsiTl)),
@@ -271,14 +269,14 @@ impl QueryAuthorities {
 impl Authority {
     /// The authority of the value `value` of an entry of type `kind`.
     fn read(kind: &AuthorityType, value: &AuthorityValue) -> Result<Self, AuthorityError> {
-        Ok(match AuthorityKind::of(kind) {
-            Some(AuthorityKind::Aki) => KeyIdentifier::from_aki(value)
+        Ok(match KnownAuthorityType::of(kind) {
+            Some(KnownAuthorityType::Aki) => KeyIdentifier::from_aki(value)
                 .map(Self::KeyIdentifier)
                 .map_err(|error| AuthorityError::Aki {
                     value: value.clone(),
                     error,
                 })?,
-            Some(AuthorityKind::Store(store)) => {
+            Some(KnownAuthorityType::Store(store)) => {
                 Self::Store(StoreAuthority::new(store, value.clone()))
             }
             None => Self::Other(kind.clone()),
