@@ -261,7 +261,8 @@ impl TestedAttestation {
 pub enum OtherIssuer {
     /// The admission names another certificate than the attestation's Document Signer.
     Certificate,
-    /// The admission is for another query.
+    /// The admission is for the authorities of another query: another `id`, or other
+    /// `trusted_authorities`.
     Query,
 }
 
@@ -298,7 +299,7 @@ impl UsableAttestation {
     /// # Errors
     ///
     /// [`OtherIssuer`]: `issuer` names another certificate than `tested`'s Document Signer, or
-    /// another query than `query`.
+    /// other authorities than those of `query`.
     pub fn new(
         tested: TestedAttestation,
         issuer: AdmittedIssuer,
@@ -307,7 +308,10 @@ impl UsableAttestation {
         if issuer.leaf() != Some(tested.credential().signer().certificate()) {
             return Err(OtherIssuer::Certificate);
         }
-        if issuer.query() != query.query().id() {
+        if !issuer
+            .authorities()
+            .are_those_of(query.query().credential_query())
+        {
             return Err(OtherIssuer::Query);
         }
         Ok(Self { tested, issuer })

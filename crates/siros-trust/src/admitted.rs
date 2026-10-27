@@ -97,11 +97,12 @@ impl Issuer for NoChain {
     }
 }
 
-/// The issuer of a credential that the authorities of one query admit (TR3): the query, the
-/// chain's first certificate, and the ground. A usable nym_auth attestation requires it (N3).
+/// The issuer of a credential that the authorities of one query admit (TR3): the authorities,
+/// the chain's first certificate, and the ground. A usable nym_auth attestation requires it
+/// (N3).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdmittedIssuer {
-    query: QueryId,
+    authorities: QueryAuthorities,
     admitted: Admitted,
 }
 
@@ -157,7 +158,7 @@ impl AdmittedIssuer {
             }
         };
         Ok(Self {
-            query: authorities.query().clone(),
+            authorities: authorities.clone(),
             admitted,
         })
     }
@@ -165,7 +166,13 @@ impl AdmittedIssuer {
     /// The query.
     #[must_use]
     pub fn query(&self) -> &QueryId {
-        &self.query
+        self.authorities.query()
+    }
+
+    /// The authorities that admit the issuer: those of the query.
+    #[must_use]
+    pub fn authorities(&self) -> &QueryAuthorities {
+        &self.authorities
     }
 
     /// The chain's first certificate: the Document Signer's of an mdoc. `None` for a credential

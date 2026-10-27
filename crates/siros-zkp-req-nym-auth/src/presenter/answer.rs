@@ -20,7 +20,8 @@ pub struct Answer<'q> {
 /// Why an attestation does not answer an option.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Unanswerable {
-    /// The attestation is usable for another query than the pair's.
+    /// The attestation is usable for the authorities of another query than the pair's: another
+    /// `id`, or other `trusted_authorities`.
     OtherQuery,
     /// The attestation was tested at another date than the pair's proof date.
     ProofDate,
@@ -54,8 +55,8 @@ impl<'q> Answer<'q> {
     ///
     /// # Errors
     ///
-    /// [`Unanswerable::OtherQuery`] for an attestation usable for another query,
-    /// [`Unanswerable::ProofDate`] for one tested at another date than the pair's, and
+    /// [`Unanswerable::OtherQuery`] for an attestation usable for the authorities of another
+    /// query, [`Unanswerable::ProofDate`] for one tested at another date than the pair's, and
     /// [`Unanswerable::Failed`] with the `age_check` that fails and `seed_mismatch` for a seed
     /// that does not open `ssc`.
     pub fn new(
@@ -63,7 +64,8 @@ impl<'q> Answer<'q> {
         attestation: UsableAttestation,
         secret_seed: &SecretSeed,
     ) -> Result<Self, Unanswerable> {
-        if attestation.issuer().query() != pair.option().query().query().id() {
+        let query = pair.option().query().query().credential_query();
+        if !attestation.issuer().authorities().are_those_of(query) {
             return Err(Unanswerable::OtherQuery);
         }
         if attestation.proof_time().date() != pair.date() {

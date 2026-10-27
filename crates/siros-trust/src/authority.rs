@@ -4,7 +4,7 @@
 use std::fmt;
 
 use siros_codec::{base64url, Base64Error};
-use siros_dcql::{AuthorityType, AuthorityValue, CredentialQuery, QueryId};
+use siros_dcql::{AuthorityType, AuthorityValue, CredentialQuery, QueryId, TrustedAuthorities};
 
 /// The keyIdentifier of an AuthorityKeyIdentifier extension (RFC 5280, Section 4.2.1.1): the
 /// bytes by which a certificate names its signer's key. Never empty.
@@ -151,8 +151,12 @@ pub enum Authority {
 enum Named {
     /// The query has no `trusted_authorities`: every issuer is admitted.
     Nothing,
-    /// The authorities of its values, at least one, in the Verifier's order.
-    Authorities(Vec<Authority>),
+    /// `trusted_authorities` as DCQL parsed it, and the authorities of its values, at least
+    /// one, in the Verifier's order.
+    Authorities {
+        sent: TrustedAuthorities,
+        read: Vec<Authority>,
+    },
 }
 
 /// The authorities a Credential Query names, read for the admission rule.
@@ -230,8 +234,8 @@ impl QueryAuthorities {
     pub fn of(query: &CredentialQuery) -> Result<Self, AuthorityError> {
         let named = match query.trusted_authorities() {
             None => Named::Nothing,
-            Some(authorities) => Named::Authorities(
-                authorities
+            Some(authorities) => Named::Authorities {
+                read: authorities
                     .entries()
                     .iter()
                     .flat_map(|entry| {
@@ -241,7 +245,8 @@ impl QueryAuthorities {
                             .map(|value| Authority::read(entry.kind(), value))
                     })
                     .collect::<Result<_, _>>()?,
-            ),
+                sent: authorities.clone(),
+            },
         };
         Ok(Self {
             query: query.id().clone(),
@@ -261,8 +266,18 @@ impl QueryAuthorities {
     pub fn authorities(&self) -> Option<&[Authority]> {
         match &self.named {
             Named::Nothing => None,
-            Named::Authorities(authorities) => Some(authorities),
+            Named::Authorities { read, .. } => Some(read),
         }
+    }
+
+    /// Whether these are the authorities of `query`: its `id` and its `trusted_authorities`.
+    #[must_use]
+    pub fn are_those_of(&self, query: &CredentialQuery) -> bool {
+        let sent = match &self.named {
+            Named::Nothing => None,
+            Named::Authorities { sent, .. } => Some(sent),
+        };
+        self.query == *query.id() && sent == query.trusted_authorities()
     }
 }
 
