@@ -265,8 +265,7 @@ fn dcql_query(params: &Map<String, Value>) -> Result<(DcqlQuery, Value), IntakeE
         (None, true) => Err(IntakeError::ScopeUnsupported),
         (None, false) => Err(IntakeError::DcqlQueryMissing),
         (Some(raw), false) => {
-            let query = DcqlQuery::from_json(&raw.to_string())
-                .map_err(|_| IntakeError::DcqlQueryInvalid)?;
+            let query = DcqlQuery::parse(raw).map_err(|_| IntakeError::DcqlQueryInvalid)?;
             Ok((query, raw.clone()))
         }
     }
