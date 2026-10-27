@@ -1,8 +1,10 @@
 # siros-dc-matcher
 
-A credential matcher for the W3C Digital Credentials API on Android, the DCQL
-engine behind it, and typed bindings of the Credential Manager host ABI, as a
-Rust workspace.
+A credential matcher for the W3C Digital Credentials API on Android, and the
+matching half of the SIROS wallet core: reading a request, matching it against
+the wallet's credentials, and the consent view. The Rust workspace also holds
+the DCQL engine, the `zkp_req` protocol with the nym_auth catalogue and its
+provers, and typed bindings of the Credential Manager host ABI.
 
 On Android, a wallet does not answer a `navigator.credentials.get({digital: …})`
 call directly. It registers a snapshot of its credentials with Play Services
@@ -20,6 +22,12 @@ Released artifacts are on the
 [releases page](https://github.com/sirosfoundation/siros-dc-matcher/releases):
 `matcher.wasm` and its digest, an Android AAR, and an XCFramework.
 `siros-dcql` is on [crates.io](https://crates.io/crates/siros-dcql).
+
+## Overview
+
+![The crates of the workspace in five layers, the artifacts built from them, and the host each platform provides](docs/ecosystem.svg)
+
+`scripts/gen_ecosystem_svg.py` writes the diagram; change it there when a crate is added, renamed or removed.
 
 ## Build and test
 
@@ -58,15 +66,19 @@ make matcher && python3 scripts/check_matcher_abi.py \
 make check-bindings    # committed bindings match the current API
 cargo publish --locked --dry-run -p siros-dcql
 cargo +1.82 check --locked --all-features \
-  -p siros-dcql -p siros-dc-matcher-core -p siros-dc-matcher-wasm \
-  -p android-credman-sys -p android-credman
+  -p siros-codec -p siros-dcql -p siros-dc-matcher-core -p siros-dc-matcher-wasm \
+  -p android-credman-sys -p android-credman \
+  -p siros-zkp-req -p siros-zkp-req-nym-auth -p siros-sdjwt -p siros-mdoc \
+  -p siros-wallet-state -p siros-credential -p siros-display -p siros-transaction-data
+cargo +1.82 check --locked -p siros-oid4vp
+cargo +1.82 check --locked -p siros-presentation --no-default-features
 cargo +1.82 check --locked --all-features --target wasm32-wasip1 \
   -p siros-dc-matcher-wasm -p android-credman-sys -p android-credman
 cargo semver-checks --package siros-dcql
 ```
 
-The last three need `rustup toolchain install 1.82 --target wasm32-wasip1`
-and `cargo install cargo-semver-checks --locked`.
+The `+1.82` checks need `rustup toolchain install 1.82 --target wasm32-wasip1`,
+and the semver check `cargo install cargo-semver-checks --locked`.
 
 The proof backends and the browser presenter are in the `proving/` workspace; its CI runs from
 there:
@@ -79,15 +91,18 @@ cargo test --locked --workspace
 scripts/fetch-artifacts.sh && cargo test --locked --release -p siros-zkp-proving-e2e -- --ignored
 cargo clippy --locked -p siros-zkp-req-wasm --target wasm32-unknown-unknown \
   -- -D warnings       # after rustup target add wasm32-unknown-unknown
+cargo build --locked -p siros-zkp-req-wasm --target wasm32-unknown-unknown --release
 ```
 
-CI also enforces two things a green build does not imply:
+CI also enforces three things a green build does not imply:
 
 - **Host ABI imports.** `scripts/check_matcher_abi.py` checks each import of
   `matcher.wasm`, with its signature, against the Credential Manager ABI
   table and the WASI functions the host provides.
 - **A 307,200-byte (300 KiB) size budget** for `matcher.wasm`, which runs in someone else's
   process. Raising it takes a line in `.github/workflows/ci.yml` and a reason.
+- **Browser imports.** The browser presenter's module imports only wasm-bindgen's modules, the
+  only ones a browser page provides.
 
 ### Bindings and mobile artifacts
 
@@ -128,25 +143,34 @@ Two profile details are load-bearing and easy to undo:
 
 | Crate | Target | Contents |
 |---|---|---|
-| [`android-credman-sys`](crates/android-credman-sys) | `wasm32` | The Credential Manager host imports, one module per host level. [`ABI.md`](crates/android-credman-sys/ABI.md) is the contract and its evidence. |
-| [`android-credman`](crates/android-credman) | any | The host ABI as types: nullability, version gating, set shape. |
-| [`siros-dcql`](crates/siros-dcql) | any | OpenID4VP 1.0 DCQL: claims-path pointers (§7), credential and credential-set queries (§6.1–6.3), selection (§6.4). No I/O, no platform. Published to crates.io. |
-| [`siros-dc-matcher-core`](crates/siros-dc-matcher-core) | any | The credential blob and its CBOR codec, the match profile and its evaluator, protocol dispatch, purpose lines, and the `zkp_req` planner and response check. |
-| [`siros-dc-matcher-wasm`](crates/siros-dc-matcher-wasm) | `wasm32-wasip1` | The matcher binary. Ships `matcher.wasm`. |
-| [`siros-dc-matcher-ffi`](crates/siros-dc-matcher-ffi) | UniFFI | Kotlin and Swift surface: build the registration blob, run the same match in-process, and present and verify `zkp_req`. |
-| [`siros-dc-matcher-testhost`](crates/siros-dc-matcher-testhost) | native, dev | A wasmtime host implementing the Credential Manager ABI, so the shipping `.wasm` is testable off-device. |
+| [`siros-codec`](crates/siros-codec) | any | The encodings every wallet core crate shares: strict CBOR, unpadded base64url, the padded base64 of `x5c`, and CBOR's dates. |
+| [`siros-dcql`](crates/siros-dcql) | any | OpenID4VP 1.0 DCQL: claims path pointers (§7) over any claim tree, credential and credential-set queries (§6.1–6.3) with `QueryId`s, selection (§6.4). No I/O, no platform. Published to crates.io. |
+| [`siros-sdjwt`](crates/siros-sdjwt) | any | SD-JWT VC (RFC 9901): the stored credential and its claim tree. |
+| [`siros-mdoc`](crates/siros-mdoc) | any | ISO/IEC 18013-5 mdocs: the stored credential with its MSO, and the device signature's signing input. |
+| [`siros-oid4vp`](crates/siros-oid4vp) | any | OpenID4VP 1.0: the request as the picker reads it, and, with `crypto`, request intake to a verified request and the mdoc `Handover`. |
 | [`siros-zkp-req`](crates/siros-zkp-req) | any | The `zkp_req` protocol layer: the query and its options, the usable pair, the presentation and the `vp_token`, the Verifier's structural checks. |
 | [`siros-zkp-req-nym-auth`](crates/siros-zkp-req-nym-auth) | any | The nym_auth catalogue and its Longfellow and Vega systems: session binding, credential checks, the presenter and verifier around a host's prover. |
+| [`siros-wallet-state`](crates/siros-wallet-state) | any | The decrypted wallet state `S` of the private data container. |
+| [`siros-credential`](crates/siros-credential) | any | The format-independent credential: typed claims, claims path pointers, validity, the instance of a batch. |
+| [`siros-display`](crates/siros-display) | any | Display metadata and its locale, credential cards, claim rows, display text, purpose lines and proof statement rows. |
+| [`siros-transaction-data`](crates/siros-transaction-data) | any | `transaction_data` entries and the four EC TS12 types: their binding to a credential, their display and the KB-JWT claims. |
+| [`siros-presentation`](crates/siros-presentation) | any | The plan of a request over the wallet's credentials and its consent view. Without `wallet`, the matching for the picker. |
+| [`siros-dc-matcher-core`](crates/siros-dc-matcher-core) | any | The credential blob and its CBOR codec, the match profile and its evaluator, the capabilities of a registered circuit. |
+| [`siros-dc-matcher-wasm`](crates/siros-dc-matcher-wasm) | `wasm32-wasip1` | The matcher binary. Ships `matcher.wasm`. |
+| [`android-credman`](crates/android-credman) | any | The host ABI as types: nullability, version gating, set shape. |
+| [`android-credman-sys`](crates/android-credman-sys) | `wasm32` | The Credential Manager host imports, one module per host level. [`ABI.md`](crates/android-credman-sys/ABI.md) is the contract and its evidence. |
+| [`siros-dc-matcher-testhost`](crates/siros-dc-matcher-testhost) | native, dev | A wasmtime host implementing the Credential Manager ABI, so the shipping `.wasm` is testable off-device. |
+| [`siros-dc-matcher-ffi`](crates/siros-dc-matcher-ffi) | UniFFI | Kotlin and Swift surface: build the registration blob, run the same match in-process, and present and verify `zkp_req`. |
+| [`siros-zkp-req-wasm`](proving/siros-zkp-req-wasm) | `wasm32-unknown-unknown` | The `zkp_req` presenter for the browser, with both provers, built with `wasm-pack`. In `proving/`. |
 | [`siros-zkp-backend-longfellow`](proving/siros-zkp-backend-longfellow) | any | The Longfellow nym_auth system on `longfellow-libzk-v1`: zk-cred-longfellow behind the rulebook's artifact pins. In `proving/`. |
 | [`siros-zkp-backend-vega`](proving/siros-zkp-backend-vega) | any | The Vega nym_auth system on `vega-v1`: zk-cred-vega behind the rulebook's artifact pins. In `proving/`. |
-| [`siros-zkp-req-wasm`](proving/siros-zkp-req-wasm) | `wasm32-unknown-unknown` | The `zkp_req` presenter for the browser, with both provers, built with `wasm-pack`. In `proving/`. |
+| [`siros-zkp-proving-e2e`](proving/e2e) | native, dev | Real proofs of both nym_auth systems through the presenter and the Verifier. In `proving/`. |
 
 [`docs/abi.md`](docs/abi.md) covers the host ABI as `matcher.wasm` uses it.
-[`docs/zkp_req_request.md`](docs/zkp_req_request.md) and
+[`docs/zkp_req_core.md`](docs/zkp_req_core.md) covers the `zkp_req` crates, their API and the
+prover interface. [`docs/zkp_req_request.md`](docs/zkp_req_request.md) and
 [`docs/zkp_req_response.md`](docs/zkp_req_response.md) cover the `zkp_req` request and
 presentation.
-[`docs/zkp_req_core.md`](docs/zkp_req_core.md) covers the `zkp_req` crates, their API and the
-prover interface.
 
 ## The match profile
 
