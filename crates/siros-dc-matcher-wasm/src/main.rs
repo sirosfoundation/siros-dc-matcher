@@ -11,7 +11,8 @@
 //! tell apart from "you have no matching credential". There is no error
 //! surface at all. That is why `unwrap` and `expect` are denied below rather
 //! than merely discouraged, and why the release profile aborts instead of
-//! unwinding.
+//! unwinding. The deliberate traps are a host that breaks its ABI, which
+//! `android-credman` turns into panics, and inputs too large to allocate.
 //!
 //! # Two host behaviours every emitter must respect
 //!
@@ -47,7 +48,7 @@ extern "C" fn _start() {
     main();
 }
 
-use android_credman::{CallingAppError, SetSink};
+use android_credman::SetSink;
 use picker::{emit_set, Member};
 use siros_dc_matcher_core::db::CredentialDatabase;
 use siros_dc_matcher_core::evaluator::{credentials, resolve, ProfilePolicy};
@@ -78,19 +79,12 @@ fn main() {
         return;
     };
     let request = host.request();
-    // Without the blob there is nothing to offer, and no debug flag to report
-    // the failure with.
-    let Ok(blob) = host.credentials() else {
-        return;
-    };
+    let blob = host.credentials();
     let caller = host.calling_app();
     let input = Input {
         request: &request,
         blob: &blob,
-        origin: caller
-            .as_ref()
-            .map(|app| app.origin().map_or("", android_credman::C8Str::as_str))
-            .map_err(|error| *error),
+        origin: caller.origin().map_or("", android_credman::C8Str::as_str),
     };
     run(&input, &mut sets);
 }
@@ -106,9 +100,8 @@ struct Input<'a> {
     request: &'a [u8],
     /// The blob this wallet registered.
     blob: &'a [u8],
-    /// The caller's origin as the platform verified it, empty for an app;
-    /// the error when the host's report could not be read.
-    origin: Result<&'a str, CallingAppError>,
+    /// The caller's origin as the platform verified it, empty for an app.
+    origin: &'a str,
 }
 
 /// One matcher invocation, from the host's inputs to emitted entries.
@@ -128,15 +121,6 @@ fn run(input: &Input<'_>, sets: &mut impl SetSink) {
     };
     let diag = Diagnostics {
         enabled: db.profile.debug,
-    };
-    // Every entry carries the verified origin for the wallet to check, so a
-    // caller the host reported unreadably leaves nothing to offer.
-    let origin = match input.origin {
-        Ok(origin) => origin,
-        Err(error) => {
-            diag.emit(sets, "caller", || error.to_string());
-            return;
-        }
     };
 
     // The whole request, not only the query: a `zkp_req` request is matched
@@ -248,7 +232,7 @@ fn run(input: &Input<'_>, sets: &mut impl SetSink) {
                 // origin inside the request body is the request describing
                 // itself. The wallet is told it separately, so carrying it
                 // lets the wallet check the matcher was shown the same caller.
-                "verified_origin": origin,
+                "verified_origin": input.origin,
                 // How many further options existed. A picker showing the first
                 // few of many is telling the user those are all they have.
                 //
@@ -433,18 +417,13 @@ mod tests {
     }
 
     /// One invocation of the decision path, with emission dropped.
-    fn invoke(request: &[u8], blob: &[u8], origin: Result<&str, CallingAppError>) {
+    fn invoke(request: &[u8], blob: &[u8], origin: &str) {
         let input = Input {
             request,
             blob,
             origin,
         };
         run(&input, &mut Discard);
-    }
-
-    /// What `calling_app` returns for an origin field with no NUL.
-    fn unreadable_caller() -> CallingAppError {
-        CallingAppError::Origin(android_credman::C8Str::from_bytes_until_nul(b"x").unwrap_err())
     }
 
     fn mdl_request(claim: &str) -> String {
@@ -464,25 +443,15 @@ mod tests {
         invoke(
             mdl_request("family_name").as_bytes(),
             &blob,
-            Ok("https://verifier.example"),
+            "https://verifier.example",
         );
         // Unsatisfiable: it has no age_over_21. §6.4 says offer nothing.
-        invoke(mdl_request("age_over_21").as_bytes(), &blob, Ok(""));
+        invoke(mdl_request("age_over_21").as_bytes(), &blob, "");
         // No supported request at all.
-        invoke(b"{\"requests\":[]}", &blob, Ok(""));
+        invoke(b"{\"requests\":[]}", &blob, "");
         // A blob the decoder rejects.
-        invoke(
-            mdl_request("family_name").as_bytes(),
-            b"\x00\x01\x02",
-            Ok(""),
-        );
-        invoke(b"", b"", Ok(""));
-        // A caller the host reported unreadably.
-        invoke(
-            mdl_request("family_name").as_bytes(),
-            &blob,
-            Err(unreadable_caller()),
-        );
+        invoke(mdl_request("family_name").as_bytes(), b"\x00\x01\x02", "");
+        invoke(b"", b"", "");
     }
 
     /// With the debug flag in the profile, the same paths run through the
@@ -492,18 +461,13 @@ mod tests {
         let mut db = CredentialDatabase::from_cbor(&golden_blob()).unwrap();
         db.profile.debug = true;
         let blob = db.to_cbor().unwrap();
-        invoke(mdl_request("age_over_21").as_bytes(), &blob, Ok(""));
+        invoke(mdl_request("age_over_21").as_bytes(), &blob, "");
         invoke(
             b"{\"requests\":[{\"protocol\":\"urn:example:x\",\"data\":{}}]}",
             &blob,
-            Ok(""),
+            "",
         );
-        invoke(mdl_request("family_name").as_bytes(), &blob, Ok(""));
-        invoke(
-            mdl_request("family_name").as_bytes(),
-            &blob,
-            Err(unreadable_caller()),
-        );
+        invoke(mdl_request("family_name").as_bytes(), &blob, "");
     }
 
     /// Off is the production state, and it must cost nothing: the message
@@ -561,7 +525,7 @@ mod tests {
         for debug in [false, true] {
             for blob in [nym_blob(debug), golden_blob()] {
                 for query in &queries {
-                    invoke(zkp_req_request(query.clone()).as_bytes(), &blob, Ok(""));
+                    invoke(zkp_req_request(query.clone()).as_bytes(), &blob, "");
                 }
             }
         }

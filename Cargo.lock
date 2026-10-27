@@ -52,7 +52,6 @@ version = "0.1.0"
 dependencies = [
  "android-credman-sys",
  "c8str",
- "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -2356,6 +2355,7 @@ dependencies = [
  "siros-oid4vp",
  "siros-zkp-req",
  "siros-zkp-req-nym-auth",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -2405,6 +2405,7 @@ dependencies = [
  "rustc-hash",
  "serde",
  "serde_json",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -2447,6 +2448,7 @@ dependencies = [
  "siros-codec",
  "siros-dcql",
  "siros-oid4vp",
+ "thiserror 2.0.20",
  "x509-cert",
 ]
 

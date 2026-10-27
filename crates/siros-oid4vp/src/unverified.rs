@@ -25,30 +25,41 @@ use crate::protocol::Protocol;
 ///
 /// Each variant means "decline this entry", which lets the caller fall through to another
 /// entry the verifier offered.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum NoQuery {
     /// The entry carried no `data`.
+    #[error("request entry has no `data`")]
     NoData,
     /// `data` had neither `dcql_query` nor anything shaped like a JWS.
+    #[error("data has neither `dcql_query` nor a `request` to decode")]
     NoQueryAndNoRequest,
     /// `data.request` is present but is neither a string nor an object.
+    #[error("data.request is neither a JWS string nor a JWS JSON object")]
     RequestNotAJwsOrObject,
     /// A JWS JSON Serialization object is present but carries no string `payload`.
+    #[error("the JWS JSON object has no string `payload` member")]
     JwsObjectHasNoPayload,
     /// The data carries a `request` under the unsigned protocol, or an inline query under a
     /// signed one: the label and the shape disagree.
+    #[error("the request shape does not match the protocol it is labelled with")]
     ShapeDoesNotMatchProtocol,
     /// `data.request` of a signed request is no compact JWS.
+    #[error("data.request is not a compact JWS")]
     NotACompactJws(CompactFault),
     /// The payload segment is no unpadded base64url the picker decodes.
+    #[error("JWS payload is not unpadded base64url")]
     PayloadNotBase64url(PayloadFault),
     /// The payload decoded, but is not JSON.
+    #[error("JWS payload is not JSON")]
     PayloadNotJson,
     /// The payload is JSON but carries no `dcql_query`.
+    #[error("JWS payload has no `dcql_query`")]
     PayloadHasNoDcqlQuery,
     /// A `dcql_query` was found but does not parse as DCQL.
+    #[error("dcql_query failed to parse: {0}")]
     Malformed(String),
     /// The protocol is none of the three of OpenID4VP 1.0, A.1.
+    #[error("no parser for this protocol in this build")]
     NoParser,
 }
 
@@ -68,32 +79,6 @@ impl NoQuery {
             Self::PayloadHasNoDcqlQuery => "payload_has_no_dcql_query",
             Self::Malformed(_) => "dcql_query_malformed",
             Self::NoParser => "protocol_unsupported",
-        }
-    }
-
-    /// One line for the picker's debug entry.
-    #[must_use]
-    pub fn reason(&self) -> String {
-        match self {
-            Self::NoData => "request entry has no `data`".into(),
-            Self::NoQueryAndNoRequest => {
-                "data has neither `dcql_query` nor a `request` to decode".into()
-            }
-            Self::RequestNotAJwsOrObject => {
-                "data.request is neither a JWS string nor a JWS JSON object".into()
-            }
-            Self::JwsObjectHasNoPayload => {
-                "the JWS JSON object has no string `payload` member".into()
-            }
-            Self::ShapeDoesNotMatchProtocol => {
-                "the request shape does not match the protocol it is labelled with".into()
-            }
-            Self::NotACompactJws(_) => "data.request is not a compact JWS".into(),
-            Self::PayloadNotBase64url(_) => "JWS payload is not unpadded base64url".into(),
-            Self::PayloadNotJson => "JWS payload is not JSON".into(),
-            Self::PayloadHasNoDcqlQuery => "JWS payload has no `dcql_query`".into(),
-            Self::Malformed(e) => format!("dcql_query failed to parse: {e}"),
-            Self::NoParser => "no parser for this protocol in this build".into(),
         }
     }
 }
@@ -245,14 +230,14 @@ fn entry_diagnosis(entry: &Value, registered: &dyn Fn(&str) -> bool) -> String {
         return format!("{protocol}: not in registered profile");
     }
     let Some(data) = entry.get("data") else {
-        return format!("{protocol}: {}", NoQuery::NoData.reason());
+        return format!("{protocol}: {}", NoQuery::NoData);
     };
     match strict_query(protocol, data) {
         Ok(q) => format!(
             "{protocol}: dcql_query parsed ({} credential queries) - should not have reached here",
             q.credentials.len()
         ),
-        Err(e) => format!("{protocol}: {}", e.reason()),
+        Err(e) => format!("{protocol}: {e}"),
     }
 }
 

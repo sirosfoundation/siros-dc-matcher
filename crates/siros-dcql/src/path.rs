@@ -46,10 +46,11 @@ impl PathComponent {
 /// selection. Collapsing the two would turn "this credential lacks the claim"
 /// into "this query is malformed", and the caller responds differently to
 /// each.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PathError {
     /// A component was applied to an element of the wrong kind — a string
     /// component to a non-object, or a null/integer to a non-array (§7.1.1).
+    #[error("path component {at} applied to the wrong kind of element")]
     TypeMismatch {
         /// Index of the offending component within the pointer.
         at: usize,
@@ -57,24 +58,13 @@ pub enum PathError {
     /// Nothing was selected once the pointer had been fully processed
     /// (§7.1.1 step 3). Ordinarily this means the credential does not carry
     /// the claim.
+    #[error("path selected nothing")]
     Empty,
     /// The pointer is not valid for this credential format — for mdoc, "does
     /// not contain exactly two components or one of the components is not a
     /// string" (§7.2.1 step 1).
+    #[error("path is not valid for this credential format")]
     Malformed,
-}
-
-impl core::fmt::Display for PathError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::TypeMismatch { at } => write!(
-                f,
-                "path component {at} applied to the wrong kind of element"
-            ),
-            Self::Empty => write!(f, "path selected nothing"),
-            Self::Malformed => write!(f, "path is not valid for this credential format"),
-        }
-    }
 }
 
 impl PathError {

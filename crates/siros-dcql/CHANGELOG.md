@@ -22,12 +22,15 @@ this file.
   refused.
   `QueryError::EmptyCredentialId` is gone: `QueryIdError::Empty` covers it. The version is
   0.12.0.
+- `PathError`, `QueryError` and `QueryIdError` derive `Display` and `Error` with
+  `thiserror`, a new dependency. Their text and `QueryError::source` are unchanged.
 
 ### Added
 
 - The `id` module: `QueryId` (`parse`, `as_str`) and `QueryIdError` (`code`). `QueryError::Id`.
 - `resolve`, the §7.1.1 processing over any claim tree that implements `ClaimNode` (with
   `Lookup`); `resolve_json` runs on it. `PathError::code`.
+- `PathError` implements `std::error::Error`.
 
 ### Fixed
 

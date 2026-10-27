@@ -40,8 +40,17 @@ impl CallingAppInfo {
     };
 }
 
-const _: () = assert!(core::mem::size_of::<CallingAppInfo>() == 256 + 512);
-const _: () = assert!(core::mem::align_of::<CallingAppInfo>() == 1);
+// Evaluated at compile time. GetCallingAppInfo writes the C struct
+// `{ char package_name[256]; char origin[512]; }` through the pointer; any
+// other layout lets the host write outside the value, so the build fails.
+const _: () = assert!(
+    core::mem::size_of::<CallingAppInfo>() == 256 + 512,
+    "CallingAppInfo must be the host's 768-byte struct"
+);
+const _: () = assert!(
+    core::mem::align_of::<CallingAppInfo>() == 1,
+    "CallingAppInfo must have the host struct's byte alignment"
+);
 
 /// Functions every host provides: the inputs, the level probe, and the
 /// standalone entries a matcher adds on a host below level 2.

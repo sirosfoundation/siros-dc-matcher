@@ -129,58 +129,30 @@ fn is_true(b: &bool) -> bool {
 ///
 /// A credential query `id` is a [`QueryId`]: the parse refuses one that
 /// breaks §6.1, because the response keys the presentations by it.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum QueryError {
     /// Not well-formed JSON, or not shaped like a DCQL query.
-    Json(serde_json::Error),
+    #[error("not a DCQL query: {0}")]
+    Json(#[from] serde_json::Error),
     /// A credential query `id` breaks §6.1.
-    Id(QueryIdError),
+    #[error("not a DCQL query: {0}")]
+    Id(#[source] QueryIdError),
     /// Two credential queries share this `id`. §6.1 requires it to "be unique
     /// across all Credential Query objects": a reference from
     /// `credential_sets` to a duplicated id names two different requests, and
     /// answering the first silently drops the second.
+    #[error("two credential queries share the id {0:?} (§6.1)")]
     DuplicateCredentialId(QueryId),
     /// Two claims queries within one credential query share this `id`. §6.3
     /// requires uniqueness "within the particular claims array", for the same
     /// reason one level down: `claim_sets` refers to claims by id.
+    #[error("credential query {credential:?} has two claims with the id {claim:?} (§6.3)")]
     DuplicateClaimId {
         /// The `id` of the credential query holding the duplicate.
         credential: QueryId,
         /// The duplicated claims query `id`.
         claim: String,
     },
-}
-
-impl core::fmt::Display for QueryError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::Json(e) => write!(f, "not a DCQL query: {e}"),
-            Self::Id(e) => write!(f, "not a DCQL query: {e}"),
-            Self::DuplicateCredentialId(id) => {
-                write!(f, "two credential queries share the id {id:?} (§6.1)")
-            }
-            Self::DuplicateClaimId { credential, claim } => write!(
-                f,
-                "credential query {credential:?} has two claims with the id {claim:?} (§6.3)"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for QueryError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Json(e) => Some(e),
-            Self::Id(e) => Some(e),
-            Self::DuplicateCredentialId(_) | Self::DuplicateClaimId { .. } => None,
-        }
-    }
-}
-
-impl From<serde_json::Error> for QueryError {
-    fn from(e: serde_json::Error) -> Self {
-        Self::Json(e)
-    }
 }
 
 impl DcqlQuery {
