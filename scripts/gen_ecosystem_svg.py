@@ -22,14 +22,17 @@ BANDS = [
     ]]),
     ("l4", "L4", "facades · picker · provers", [
         [
-            ("siros-dc-matcher-wasm", "the picker binary"),
+            ("siros-picker", "the picker binary"),
+            ("siros-registration", "the picker's registration"),
             ("android-credman", "host ABI as types"),
             ("android-credman-sys", "Credential Manager imports"),
-            ("siros-dc-matcher-ffi", "UniFFI surface"),
         ],
         [
-            ("siros-dc-matcher-core", "registration blob, profile"),
+            ("siros-dc-matcher-ffi", "UniFFI surface"),
+            ("siros-dc-matcher-core", "v1 blob and profile, for the FFI"),
             ("siros-zkp-req-wasm", "browser presenter"),
+        ],
+        [
             ("siros-zkp-backend-longfellow", "Longfellow prover"),
             ("siros-zkp-backend-vega", "Vega prover"),
         ],
