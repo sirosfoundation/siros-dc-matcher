@@ -1,0 +1,260 @@
+//! The strict JSON reader.
+
+use std::fmt;
+
+use rustc_hash::FxHashSet;
+use serde::de::{Deserialize, Deserializer, MapAccess, Visitor};
+use serde_json::value::RawValue;
+use serde_json::Number;
+
+use super::JsonTextError;
+
+/// The deepest nesting of objects and arrays a document may have.
+pub const MAX_DEPTH: usize = 64;
+
+/// One JSON value.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Json {
+    /// `null`.
+    Null,
+    /// `true` or `false`.
+    Bool(bool),
+    /// A number.
+    Number(JsonNumber),
+    /// A string.
+    String(String),
+    /// An array.
+    Array(Vec<Json>),
+    /// An object: its members in document order, repeated names kept.
+    Object(Vec<(String, Json)>),
+}
+
+/// A JSON number: the text its writer chose, which denotes a finite binary64 value.
+#[derive(Debug, Clone, PartialEq)]
+pub struct JsonNumber {
+    text: String,
+    number: Number,
+}
+
+impl JsonNumber {
+    /// The text the writer chose.
+    #[must_use]
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// The number the text denotes.
+    #[must_use]
+    pub fn number(&self) -> &Number {
+        &self.number
+    }
+
+    /// The number the text denotes, taken.
+    #[must_use]
+    pub fn into_number(self) -> Number {
+        self.number
+    }
+
+    /// Whether the value has no fractional part: a JSON Schema `integer`.
+    #[must_use]
+    pub fn is_integer(&self) -> bool {
+        self.number.is_i64()
+            || self.number.is_u64()
+            || self
+                .number
+                .as_f64()
+                .is_some_and(|value| value.fract() == 0.0)
+    }
+}
+
+/// Why bytes are no JSON value this reader holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ReadFault {
+    /// The bytes are no JSON text.
+    Text(JsonTextError),
+    /// A number has no finite binary64 value.
+    NumberUnrepresentable,
+    /// Objects and arrays nest deeper than [`MAX_DEPTH`].
+    TooDeep,
+}
+
+impl fmt::Display for ReadFault {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Text(error) => error.fmt(f),
+            Self::NumberUnrepresentable => f.write_str("a number beyond binary64"),
+            Self::TooDeep => write!(f, "nested deeper than {MAX_DEPTH}"),
+        }
+    }
+}
+
+impl std::error::Error for ReadFault {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Text(error) => Some(error),
+            Self::NumberUnrepresentable | Self::TooDeep => None,
+        }
+    }
+}
+
+/// Why bytes are no JSON value whose objects name each member once.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum JsonFault {
+    /// The bytes are no JSON value this reader holds.
+    Read(ReadFault),
+    /// An object repeats this member name.
+    RepeatedMember(String),
+}
+
+impl fmt::Display for JsonFault {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Read(fault) => fault.fmt(f),
+            Self::RepeatedMember(name) => write!(f, "member {name:?} repeated"),
+        }
+    }
+}
+
+impl std::error::Error for JsonFault {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Read(fault) => Some(fault),
+            Self::RepeatedMember(_) => None,
+        }
+    }
+}
+
+impl Json {
+    /// The value `bytes` encode, alone and in UTF-8, members in document order.
+    ///
+    /// # Errors
+    ///
+    /// [`ReadFault`]: text that is no JSON value, a number beyond binary64, or nesting deeper
+    /// than [`MAX_DEPTH`].
+    pub fn parse(bytes: &[u8]) -> Result<Self, ReadFault> {
+        let raw: &RawValue = serde_json::from_slice(bytes).map_err(text)?;
+        value(raw, 0)
+    }
+
+    /// The value `bytes` encode, each object naming each member once.
+    ///
+    /// # Errors
+    ///
+    /// [`JsonFault`]: the [`ReadFault`] of the bytes, or the first repeated member name.
+    pub fn parse_unique(bytes: &[u8]) -> Result<Self, JsonFault> {
+        let json = Self::parse(bytes).map_err(JsonFault::Read)?;
+        match json.repeated_member() {
+            Some(name) => Err(JsonFault::RepeatedMember(name.to_owned())),
+            None => Ok(json),
+        }
+    }
+
+    /// The first member name an object of this value repeats, depth first in document order.
+    #[must_use]
+    pub fn repeated_member(&self) -> Option<&str> {
+        match self {
+            Self::Array(items) => items.iter().find_map(Self::repeated_member),
+            Self::Object(members) => {
+                let mut names = FxHashSet::default();
+                members.iter().find_map(|(name, value)| {
+                    if names.insert(name.as_str()) {
+                        value.repeated_member()
+                    } else {
+                        Some(name.as_str())
+                    }
+                })
+            }
+            Self::Null | Self::Bool(_) | Self::Number(_) | Self::String(_) => None,
+        }
+    }
+
+    /// The value of the member `name`, when this is an object that has one.
+    #[must_use]
+    pub fn member(&self, name: &str) -> Option<&Self> {
+        match self {
+            Self::Object(members) => members
+                .iter()
+                .find(|(member, _)| member == name)
+                .map(|(_, value)| value),
+            Self::Null | Self::Bool(_) | Self::Number(_) | Self::String(_) | Self::Array(_) => None,
+        }
+    }
+}
+
+/// The [`ReadFault`] of serde_json's `error`.
+fn text(error: serde_json::Error) -> ReadFault {
+    ReadFault::Text(JsonTextError::of(&error))
+}
+
+/// The value `raw` holds, `depth` levels below the document. The document's syntax is read
+/// already: serde_json reads each part again only for its value.
+fn value(raw: &RawValue, depth: usize) -> Result<Json, ReadFault> {
+    let text_of = raw.get();
+    match text_of.as_bytes().first() {
+        Some(b'{') => {
+            let depth = nested(depth)?;
+            let Members(members) = serde_json::from_str(text_of).map_err(text)?;
+            let members = members
+                .into_iter()
+                .map(|(name, raw)| Ok((name, value(raw, depth)?)))
+                .collect::<Result<_, ReadFault>>()?;
+            Ok(Json::Object(members))
+        }
+        Some(b'[') => {
+            let depth = nested(depth)?;
+            let items: Vec<&RawValue> = serde_json::from_str(text_of).map_err(text)?;
+            let items = items
+                .into_iter()
+                .map(|raw| value(raw, depth))
+                .collect::<Result<_, ReadFault>>()?;
+            Ok(Json::Array(items))
+        }
+        Some(b'"') => Ok(Json::String(serde_json::from_str(text_of).map_err(text)?)),
+        Some(b't') => Ok(Json::Bool(true)),
+        Some(b'f') => Ok(Json::Bool(false)),
+        Some(b'n') => Ok(Json::Null),
+        // serde_json read the text as a number of RFC 8259, Section 6; its value may lie beyond
+        // binary64.
+        _ => match serde_json::from_str::<Number>(text_of) {
+            Ok(number) => Ok(Json::Number(JsonNumber {
+                text: text_of.to_owned(),
+                number,
+            })),
+            Err(_) => Err(ReadFault::NumberUnrepresentable),
+        },
+    }
+}
+
+/// The depth of a value inside an object or array at `depth`.
+fn nested(depth: usize) -> Result<usize, ReadFault> {
+    if depth < MAX_DEPTH {
+        Ok(depth + 1)
+    } else {
+        Err(ReadFault::TooDeep)
+    }
+}
+
+/// The members of an object, each value as its text, repeated names kept.
+struct Members<'a>(Vec<(String, &'a RawValue)>);
+
+impl<'de> Deserialize<'de> for Members<'de> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_map(MembersVisitor)
+    }
+}
+
+struct MembersVisitor;
+
+impl<'de> Visitor<'de> for MembersVisitor {
+    type Value = Members<'de>;
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("a JSON object")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+        std::iter::from_fn(|| map.next_entry::<String, &'de RawValue>().transpose())
+            .collect::<Result<_, _>>()
+            .map(Members)
+    }
+}

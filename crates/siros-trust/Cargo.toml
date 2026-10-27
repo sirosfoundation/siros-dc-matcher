@@ -13,7 +13,7 @@ rust-version.workspace = true
 
 [features]
 # The trust store, issuer chains, path validation and the admission witness: X.509 and ECDSA.
-chain = ["dep:der", "dep:p256", "dep:p384", "dep:x509-cert"]
+chain = ["dep:der", "dep:p256", "dep:p384", "dep:x509-cert", "siros-codec/json"]
 
 [dependencies]
 siros-codec = { workspace = true }

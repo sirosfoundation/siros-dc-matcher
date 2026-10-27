@@ -15,7 +15,7 @@ Adopts the `zkp_req` draft 0.1 and the nym_auth catalogue 0.5 (nym_auth rulebook
 commit `e65861c`). **Breaking**: requests and presentations follow the draft, the FFI loses
 `zkp_req_plan`, and the vectors move to the crates that own their rules. Consumers that keep a
 copy of the vectors (siros-sdk-kotlin, siros-sdk-swift) must re-copy them from the new
-directories; the vector set digest below identifies them. `matcher.wasm` is 296,397 bytes
+directories; the vector set digest below identifies them. `matcher.wasm` is 296,180 bytes
 against the 307,200-byte budget (303,914 before).
 
 ### Changed
@@ -237,8 +237,8 @@ against the 307,200-byte budget (303,914 before).
   (feature `credential`), whose `parse` refuses the empty string: an empty `credential_issuer`
   or `credential_configuration_id` is `DisplayError::IssuerIdentifier` or `ConfigurationId`.
   Display's own identifier types are gone.
-- **BREAKING (Rust API):** `siros-codec`'s strict JSON reader is the one reader: it keeps each
-  number with the text its writer chose (`JsonNumber`), refuses a number beyond binary64 and
+- **BREAKING (Rust API):** `siros-codec`'s strict JSON reader (feature `json`) is the one
+  reader: it keeps each number with the text its writer chose (`JsonNumber`), refuses a number beyond binary64 and
   nesting deeper than `json::MAX_DEPTH` (64) with a `ReadFault`, and `Json::parse_unique`
   adds the repeated member name (`JsonFault`). `siros-transaction-data` reads its entries and
   metadata documents with it: its own reader, `JsonError` and `MAX_DEPTH` are gone,
