@@ -5,8 +5,9 @@ environ_get / environ_sizes_get imports as local no-op functions.
 
 These two imports come from Rust's WASI command-model CRT startup
 (crt1-command.o), unconditionally, regardless of user code. If the host
-does not provide them, the module fails to instantiate at all -
-indistinguishable, from the outside, from "never invoked".
+does not provide them, a call to either traps
+(crates/android-credman-sys/ABI.md section 3) - indistinguishable, from the
+outside, from "never invoked".
 
 This rewrites:
   - the import section (drops the two entries)

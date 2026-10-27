@@ -1,4 +1,5 @@
-//! Kotlin and Swift access to the credential blob and the matching engine.
+//! Kotlin and Swift access to the credential blob, the matching engine, and the `zkp_req`
+//! presenter and verifier ([`zkp_req`]).
 //!
 //! Two callers need this. The Kotlin SDK builds the blob it registers, and
 //! matches again after the user has selected an entry. iOS has no WASM matcher

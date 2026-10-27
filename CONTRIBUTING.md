@@ -48,10 +48,7 @@ carried over line by line, or comments.
   as copying, and considerably harder to catch in review.
 - Copy their comments, or adopt their identifier set wholesale.
 - Vendor their binaries into this repository. Redistributing an Apache-2.0
-  artifact from a BSD-2 tree drags in notice obligations for no benefit — the
-  differential tests fetch the oracle at test time from a pinned upstream
-  commit, or read it from a local checkout via `MULTIPAZ_MATCHER_WASM`, and skip
-  when it is absent.
+  artifact from a BSD-2 tree drags in notice obligations for no benefit.
 
 ### Cite the spec, not the implementation
 
@@ -66,12 +63,7 @@ structural resemblance to the oracle as a blocker.
 
 ## Development
 
-```sh
-cargo test                      # everything, host targets
-cargo clippy --all-targets -- -D warnings
-cargo fmt --all -- --check
-cargo build -p siros-dc-matcher-wasm --target wasm32-wasip1 --release
-```
+[README.md](README.md#build-and-test) gives the commands CI runs.
 
 `proving/` is a second workspace: the proof backends, which depend on edition-2024 crates that
 Cargo 1.82 cannot read, and the browser presenter that links them. Run its commands from there.
@@ -80,22 +72,9 @@ Cargo 1.82 cannot read, and the browser presenter that links them. Run its comma
 crate in this workspace. CI enforces this with `cargo publish --dry-run`; please
 do not work around it.
 
-Two floors are checked separately, because they differ on purpose:
-
-```sh
-# Everything that ships inside the credential picker holds Rust 1.82.
-cargo +1.82 check --locked --all-features \
-  -p siros-dcql -p siros-dc-matcher-core -p siros-dc-matcher-wasm \
-  -p siros-zkp-req -p siros-zkp-req-nym-auth
-cargo +1.82 check --locked -p siros-oid4vp
-
-# siros-dcql's public API against the version it declares.
-# Unlike fmt and clippy this is not part of the toolchain:
-#   cargo install cargo-semver-checks --locked
-cargo semver-checks --package siros-dcql
-```
-
-`cargo +1.82` needs that toolchain present: `rustup toolchain install 1.82`.
+Rust 1.82 is the floor of every crate in the root workspace except `siros-dc-matcher-ffi` and
+`-testhost`. The MSRV job checks them on 1.82, `siros-presentation` without its `wallet` feature,
+and the matcher and the host ABI crates for `wasm32-wasip1` as well.
 
 `siros-dc-matcher-ffi` and `-testhost` declare 1.88 in their own manifests —
 uniffi's bindgen chain and wasmtime need it — and neither ships in the picker.

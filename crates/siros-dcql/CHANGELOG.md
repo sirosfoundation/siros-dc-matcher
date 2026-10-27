@@ -25,9 +25,15 @@ this file.
 
 ### Added
 
-- `QueryId`, `QueryIdError` and `QueryError::Id`.
+- The `id` module: `QueryId` (`parse`, `as_str`) and `QueryIdError` (`code`). `QueryError::Id`.
+- `resolve`, the §7.1.1 processing over any claim tree that implements `ClaimNode` (with
+  `Lookup`); `resolve_json` runs on it. `PathError::code`.
 
-- `resolve`, the §7.1.1 processing over any claim tree that implements `ClaimNode` (with `Lookup`), which `resolve_json` now runs on, and `PathError::code`.
+### Fixed
+
+- `DcqlQuery::validate` hashes with `rustc-hash`'s `FxHashSet`, whose hasher takes no seed: a
+  `wasm32-wasip1` build runs on a host that lacks WASI `random_get`. The crate depends on
+  `rustc-hash`.
 
 ## 0.11.0 — 2026-10-20
 

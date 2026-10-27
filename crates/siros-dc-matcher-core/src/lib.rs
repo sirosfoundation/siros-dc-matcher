@@ -1,10 +1,7 @@
-//! The parts of the matcher that are not the DCQL engine and not the WASM
-//! binary: the credential blob we register with the platform, and the match
-//! profile that makes the rules configurable.
-//!
-//! # Status
-//!
-//! Phase 0 scaffolding. See the repository's `docs/plan.md`.
+//! The parts of the matcher outside the DCQL engine and the WASM binary: the
+//! credential blob a wallet registers with the platform ([`db`]), the match
+//! profile and its evaluator ([`profile`], [`evaluator`]), and the
+//! capabilities of a registered circuit ([`circuit_capabilities`]).
 
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
