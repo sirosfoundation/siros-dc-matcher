@@ -1,4 +1,4 @@
-use crate::app::{CallingApp, CallingAppError};
+use crate::app::CallingApp;
 use crate::entry::{
     DelegationType, InlineIssuanceEntry, LegacyEntry, PackageInfo, PaymentEntry, StringIdEntry,
 };
@@ -55,52 +55,79 @@ impl Host {
     /// the host copied, which may be lower than `buffer.len()` and is 0 past
     /// the end.
     ///
-    /// # Errors
+    /// # Panics
     ///
-    /// [`CredentialsError::Overrun`] when the host reports more bytes than
-    /// `buffer` holds.
-    pub fn read_credentials_at(
+    /// When the host reports more bytes than `buffer` holds.
+    pub fn read_credentials_at(&self, buffer: &mut [u8], offset: usize) -> usize {
+        let asked = buffer.len();
+        let copied = self.credman.read_credentials_buffer(buffer, offset);
+        // ReadCredentialsBuffer copies at most the bytes asked for. A host
+        // that reports more either wrote past `buffer` or reports a false
+        // count, and no byte of the blob can be trusted after either.
+        assert!(
+            copied <= asked,
+            "host reported {copied} credential bytes for a {asked}-byte buffer"
+        );
+        copied
+    }
+
+    /// Copies the blob's bytes from `offset`, which lies before `size`, the
+    /// length the host reported, into `buffer`. Returns the count the host
+    /// copied: at least 1, and at most what remains of the blob.
+    ///
+    /// # Panics
+    ///
+    /// When the host copies nothing, or more than `buffer` holds or than
+    /// remains of the blob.
+    pub(crate) fn read_credentials_before_end(
         &self,
         buffer: &mut [u8],
         offset: usize,
-    ) -> Result<usize, CredentialsError> {
-        let asked = buffer.len();
-        let copied = self.credman.read_credentials_buffer(buffer, offset);
-        if copied > asked {
-            return Err(CredentialsError::Overrun { asked, copied });
-        }
-        Ok(copied)
+        size: usize,
+    ) -> usize {
+        let copied = self.read_credentials_at(buffer, offset);
+        // The host holds the `size` bytes it reported and copies from what
+        // remains of them (ReadCredentialsBuffer). A host that copies none
+        // before the end, or more than remains, broke that contract: the
+        // blob it reported does not exist, and no read can recover it.
+        assert!(
+            copied > 0,
+            "host stopped at credential byte {offset} of {size}"
+        );
+        assert!(
+            copied <= size.saturating_sub(offset),
+            "host reported {copied} credential bytes from {offset}, past its size {size}"
+        );
+        copied
     }
 
     /// The credential blob the wallet registered, read in as many calls as
     /// the host needs. A matcher reads it once.
     ///
-    /// # Errors
+    /// # Panics
     ///
-    /// [`CredentialsError`] when the host copies nothing before the length it
-    /// reported, or reports more bytes than it was asked for.
-    pub fn credentials(&self) -> Result<Vec<u8>, CredentialsError> {
+    /// When the reported length cannot be allocated, when the host copies
+    /// nothing before that length, and when it reports more bytes than it
+    /// was asked for.
+    pub fn credentials(&self) -> Vec<u8> {
         let size = self.credentials_size();
+        // The blob is the matcher's only input besides the request. A size
+        // the module cannot allocate leaves nothing to match against, and the
+        // allocation aborts.
         let mut blob = vec![0; size];
         let mut delivered = 0;
         while let Some(rest) = blob.get_mut(delivered..).filter(|rest| !rest.is_empty()) {
-            let copied = self.read_credentials_at(rest, delivered)?;
-            if copied == 0 {
-                return Err(CredentialsError::Incomplete { delivered, size });
-            }
-            // At most `rest.len()`, so `delivered` stays within `size`.
-            delivered += copied;
+            delivered += self.read_credentials_before_end(rest, delivered, size);
         }
-        Ok(blob)
+        blob
     }
 
     /// The app that called the Digital Credentials API, converted once.
     ///
-    /// # Errors
+    /// # Panics
     ///
-    /// [`CallingAppError`] when a field holds no NUL or is not UTF-8 before
-    /// it.
-    pub fn calling_app(&self) -> Result<CallingApp, CallingAppError> {
+    /// When a field holds no NUL, or bytes before it that are not UTF-8.
+    pub fn calling_app(&self) -> CallingApp {
         CallingApp::from_host(&self.credman.calling_app_info())
     }
 
@@ -138,27 +165,6 @@ impl Host {
     pub fn add_inline_issuance_entry(&self, entry: &InlineIssuanceEntry<'_>) {
         self.credman.add_inline_issuance_entry(entry);
     }
-}
-
-/// Why the credential blob could not be read: the host broke the
-/// [`V1::read_credentials_buffer`] contract.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum CredentialsError {
-    /// The host reported copying `copied` bytes into a buffer of `asked`.
-    #[error("host reported {copied} credential bytes for a {asked}-byte buffer")]
-    Overrun { asked: usize, copied: usize },
-    /// The host copied nothing at byte `delivered` of the `size` bytes it
-    /// reported.
-    #[error("host stopped at credential byte {delivered} of {size}")]
-    Incomplete { delivered: usize, size: usize },
-    /// The host reported copying `copied` bytes from `offset`, past the
-    /// `size` bytes it reported.
-    #[error("host reported {copied} credential bytes from {offset}, past its size {size}")]
-    PastEnd {
-        offset: usize,
-        copied: usize,
-        size: usize,
-    },
 }
 
 /// What [`Host::connect_with`] applies after reading the host level.

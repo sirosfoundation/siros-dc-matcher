@@ -1,4 +1,4 @@
-use crate::host::{CredentialsError, Host};
+use crate::host::Host;
 use std::io::{self, Read, Seek, SeekFrom};
 
 /// The credential blob the wallet registered, as [`Read`] and [`Seek`], for
@@ -34,37 +34,23 @@ impl CredentialReader {
 
 impl Read for CredentialReader {
     /// Asks the host for up to `out.len()` bytes; it copies at most what
-    /// remains of the blob. A host that breaks that contract makes an
-    /// [`io::Error`] carrying a [`CredentialsError`].
+    /// remains of the blob.
+    ///
+    /// # Panics
+    ///
+    /// When the host copies nothing before the end of the blob, or more
+    /// than remains of it.
     fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
         // A position beyond usize lies past the end, where a read returns 0.
         let Ok(offset) = usize::try_from(self.position) else {
             return Ok(0);
         };
-        let size = self.size;
-        let remaining = size.saturating_sub(offset);
-        if remaining == 0 || out.is_empty() {
+        if offset >= self.size || out.is_empty() {
             return Ok(0);
         }
         let copied = self
             .host
-            .read_credentials_at(out, offset)
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-        if copied == 0 {
-            let error = CredentialsError::Incomplete {
-                delivered: offset,
-                size,
-            };
-            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, error));
-        }
-        if copied > remaining {
-            let error = CredentialsError::PastEnd {
-                offset,
-                copied,
-                size,
-            };
-            return Err(io::Error::new(io::ErrorKind::InvalidData, error));
-        }
+            .read_credentials_before_end(out, offset, self.size);
         self.position += copied as u64;
         Ok(copied)
     }
