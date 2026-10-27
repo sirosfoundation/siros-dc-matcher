@@ -1,9 +1,9 @@
 //! The references of an SVG document (PaSO Proof SD-JWT-VC and SVG, Section 3). A reference is
 //! a fragment of the document, a Data URL, or an `https` URL whose fragment carries an
 //! integrity value. A Data URL's content and each fetched resource pass by their signature and
-//! header: a PNG or JPEG image within the image limits, or a font. The wallet fetches each
-//! `https` URL once, without its fragment, and checks its content against every integrity value
-//! the document gives it.
+//! header: a PNG or JPEG image within the image limits, or a font. A Data URL's media type
+//! names its content's kind. The wallet fetches each `https` URL once, without its fragment,
+//! and checks its content against every integrity value the document gives it.
 
 use siros_codec::{base64, Base64Error};
 use siros_oid4vp::{HttpsUrl, MediaType};
@@ -16,7 +16,8 @@ use crate::fetched;
 use crate::fetched::{Fetched, Step};
 use crate::integrity::{Integrity, IntegrityFault};
 
-/// Why a Data URL gives no content (Fetch, Section 4.2.1, "data: URL processor").
+/// Why a Data URL is refused: it gives no content (Fetch, Section 4.2.1, "data: URL
+/// processor"), or its media type names another kind than its content's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DataFault {
     /// No comma ends the media type.
@@ -25,6 +26,8 @@ pub enum DataFault {
     Percent,
     /// The payload of a `;base64` Data URL is no base64.
     Base64(Base64Error),
+    /// The media type does not name the kind of the content, this one.
+    MediaType(ResourceKind),
 }
 
 impl DataFault {
@@ -35,6 +38,7 @@ impl DataFault {
             Self::Comma => "data_url_comma",
             Self::Percent => "data_url_percent",
             Self::Base64(fault) => fault.code(),
+            Self::MediaType(_) => "data_url_media_type",
         }
     }
 }
@@ -69,12 +73,14 @@ impl Pins {
                 continue;
             }
             if let Some(rest) = strip_prefix_ignore_case(trimmed, "data:") {
-                let content = data(rest)
-                    .map_err(|fault| SvgFault::DataReference(reference.clone(), fault))?;
-                // The renderer reads the content from the document itself.
-                match admit(reference, &content)? {
-                    ResourceKind::Png | ResourceKind::Jpeg | ResourceKind::Font(_) => continue,
+                let refused = |fault| SvgFault::DataReference(reference.clone(), fault);
+                let data = DataUrl::read(rest).map_err(refused)?;
+                let kind = admit(reference, &data.content)?;
+                if !data.names(kind) {
+                    return Err(refused(DataFault::MediaType(kind)));
                 }
+                // The renderer reads the content from the document itself.
+                continue;
             }
             let (url, integrity) = pinned(reference, trimmed)?;
             match pins.iter_mut().find(|pin| pin.url == url) {
@@ -154,28 +160,56 @@ fn admit(reference: &str, body: &[u8]) -> Result<ResourceKind, SvgFault> {
     }
 }
 
-/// The content of a Data URL, `rest` its text after `data:`, as a renderer reads it (Fetch,
-/// Section 4.2.1): without ASCII tabs and newlines and without its fragment, its payload
-/// percent-decoded, then base64-decoded when the media type ends in `;base64`.
-fn data(rest: &str) -> Result<Vec<u8>, DataFault> {
-    let rest: String = rest
-        .chars()
-        .filter(|c| !matches!(c, '\t' | '\n' | '\r'))
-        .collect();
-    let without_fragment = rest.split('#').next().unwrap_or_default();
-    let (header, payload) = without_fragment.split_once(',').ok_or(DataFault::Comma)?;
-    let body = percent_decoded(payload).ok_or(DataFault::Percent)?;
-    if base64_header(header) {
-        forgiving_base64(&body).map_err(DataFault::Base64)
-    } else {
-        Ok(body)
+/// A Data URL as a renderer reads it (Fetch, Section 4.2.1).
+struct DataUrl {
+    /// The essence of the media type, `type/subtype` in ASCII lower case.
+    essence: String,
+    content: Vec<u8>,
+}
+
+impl DataUrl {
+    /// The Data URL of `rest`, its text after `data:`: without ASCII tabs and newlines and
+    /// without its fragment, its payload percent-decoded, then base64-decoded when the media
+    /// type ends in `;`, spaces and `base64`.
+    fn read(rest: &str) -> Result<Self, DataFault> {
+        let rest: String = rest
+            .chars()
+            .filter(|c| !matches!(c, '\t' | '\n' | '\r'))
+            .collect();
+        let without_fragment = rest.split('#').next().unwrap_or_default();
+        let (header, payload) = without_fragment.split_once(',').ok_or(DataFault::Comma)?;
+        // The URL parser percent-encodes every other control: only spaces remain to strip.
+        let header = header.trim_matches(' ');
+        let body = percent_decoded(payload).ok_or(DataFault::Percent)?;
+        let content = if base64_header(header) {
+            forgiving_base64(&body).map_err(DataFault::Base64)?
+        } else {
+            body
+        };
+        let essence = header
+            .split(';')
+            .next()
+            .unwrap_or_default()
+            .trim_matches(' ')
+            .to_ascii_lowercase();
+        Ok(Self { essence, content })
+    }
+
+    /// Whether the media type names `kind`: its own for an image; for a font, a `font/` type
+    /// or `application/font-woff`, which browsers accept.
+    fn names(&self, kind: ResourceKind) -> bool {
+        match kind {
+            ResourceKind::Png | ResourceKind::Jpeg => self.essence == kind.media_type(),
+            ResourceKind::Font(_) => {
+                self.essence.starts_with("font/") || self.essence == "application/font-woff"
+            }
+        }
     }
 }
 
-/// Whether the media type `header` ends in `;base64`, spaces allowed before `base64`, without
-/// regard to ASCII case.
+/// Whether the media type `header`, stripped of its surrounding spaces, ends in `;`, spaces and
+/// `base64`, without regard to ASCII case.
 fn base64_header(header: &str) -> bool {
-    let header = header.trim_matches(|c: char| c.is_ascii_whitespace());
     header
         .len()
         .checked_sub("base64".len())
@@ -185,8 +219,9 @@ fn base64_header(header: &str) -> bool {
         })
 }
 
-/// The bytes of base64 `text` without its ASCII whitespace, its padding optional (Infra,
-/// Section 4.2, "forgiving-base64 decode"), with zero trailing bits.
+/// The bytes of base64 `text` without its ASCII whitespace, its padding optional and only on a
+/// length that is a multiple of 4 (Infra, Section 4.2, "forgiving-base64 decode"), with zero
+/// trailing bits.
 fn forgiving_base64(text: &[u8]) -> Result<Vec<u8>, Base64Error> {
     let mut compact: Vec<u8> = text
         .iter()
@@ -203,6 +238,9 @@ fn forgiving_base64(text: &[u8]) -> Result<Vec<u8>, Base64Error> {
     }
     if compact.len() % 4 == 1 {
         return Err(Base64Error::Length);
+    }
+    if let Some(at) = compact.iter().position(|&byte| byte == b'=') {
+        return Err(Base64Error::Alphabet(at));
     }
     while compact.len() % 4 != 0 {
         compact.push(b'=');

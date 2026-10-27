@@ -1,5 +1,6 @@
 //! A linear scan of an XML document's markup before the parser reads it (XML 1.0, Sections 2.5
-//! to 2.8 and 3.1): the nesting of its elements, at most [`MAX_DEPTH`] levels, and its DOCTYPE.
+//! to 2.8 and 3.1): the nesting of its elements, at most [`MAX_DEPTH`] levels, and its DOCTYPE,
+//! whose external identifier, when it has one, is a W3C SVG 1.0 or 1.1 DTD's.
 //! The scan delimits comments, CDATA sections, processing instructions, the DOCTYPE and quoted
 //! attribute values as XML does. Where the markup breaks XML, the scan ends: the parser refuses
 //! the document there, with no element open beyond those the scan counted.
@@ -10,6 +11,30 @@ use super::SvgFault;
 /// 128 levels fit a 2 MiB thread stack in a debug build.
 pub const MAX_DEPTH: usize = 128;
 
+/// The public and system identifiers of the W3C SVG 1.0 and 1.1 DTDs.
+const IDENTIFIERS: [(&str, &str); 5] = [
+    (
+        "-//W3C//DTD SVG 1.0//EN",
+        "http://www.w3.org/TR/2001/REC-SVG-20010904/DTD/svg10.dtd",
+    ),
+    (
+        "-//W3C//DTD SVG 20010904//EN",
+        "http://www.w3.org/TR/2001/REC-SVG-20010904/DTD/svg10.dtd",
+    ),
+    (
+        "-//W3C//DTD SVG 1.1//EN",
+        "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd",
+    ),
+    (
+        "-//W3C//DTD SVG 1.1 Basic//EN",
+        "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11-basic.dtd",
+    ),
+    (
+        "-//W3C//DTD SVG 1.1 Tiny//EN",
+        "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11-tiny.dtd",
+    ),
+];
+
 /// The markup that opens and closes around the content it skips.
 const SKIPPED: [(&[u8], &[u8]); 3] = [(b"<!--", b"-->"), (b"<![CDATA[", b"]]>"), (b"<?", b"?>")];
 
@@ -18,7 +43,8 @@ const SKIPPED: [(&[u8], &[u8]); 3] = [(b"<!--", b"-->"), (b"<![CDATA[", b"]]>"),
 pub(super) enum Doctype {
     /// The document has none.
     Absent,
-    /// A name and an external identifier: the parser reads it and loads nothing.
+    /// A name and, when any, the external identifier of a W3C SVG 1.0 or 1.1 DTD: the parser
+    /// reads it and loads nothing.
     External,
     /// An internal subset, whose entities the parser would expand.
     Internal,
@@ -35,8 +61,9 @@ impl Doctype {
 enum Markup {
     /// A comment, a CDATA section or a processing instruction.
     Skipped(usize),
-    /// A DOCTYPE without an internal subset.
-    Doctype(usize),
+    /// A DOCTYPE without an internal subset, and whether it names no external identifier but
+    /// a W3C SVG DTD's.
+    Doctype(usize, bool),
     /// A DOCTYPE with an internal subset.
     Subset,
     /// An end tag.
@@ -51,7 +78,8 @@ enum Markup {
 ///
 /// # Errors
 ///
-/// [`SvgFault::Nesting`] for an element nested deeper.
+/// [`SvgFault::Nesting`] for an element nested deeper, and [`SvgFault::Doctype`] for an external
+/// identifier of another DTD.
 pub(super) fn scan(text: &str) -> Result<Doctype, SvgFault> {
     let bytes = text.as_bytes();
     let mut doctype = Doctype::Absent;
@@ -61,9 +89,13 @@ pub(super) fn scan(text: &str) -> Result<Doctype, SvgFault> {
     while let Some(start) = find(bytes, at, b"<") {
         at = match markup(bytes, start, rooted) {
             Markup::Skipped(end) => end,
-            Markup::Doctype(end) => {
+            Markup::Doctype(end, true) => {
                 doctype = Doctype::External;
                 end
+            }
+            Markup::Doctype(end, false) => {
+                let declaration = text.get(start..end).unwrap_or_default();
+                return Err(SvgFault::Doctype(declaration.to_owned()));
             }
             Markup::Subset => return Ok(Doctype::Internal),
             Markup::Broken => break,
@@ -105,22 +137,43 @@ fn markup(bytes: &[u8], start: usize, rooted: bool) -> Markup {
     }
 }
 
-/// The DOCTYPE at `start`: its quoted literals skipped, an internal subset at its first `[`
+/// The DOCTYPE at `start`: its quoted literals read, an internal subset at its first `[`
 /// (Section 2.8, `doctypedecl`).
 fn declared(bytes: &[u8], start: usize) -> Markup {
     let mut at = start;
+    let mut literals: Vec<&[u8]> = Vec::new();
     while let Some(&byte) = bytes.get(at) {
         at = match byte {
             b'"' | b'\'' => match find(bytes, at + 1, &[byte]) {
-                Some(quote) => quote + 1,
+                Some(quote) => {
+                    literals.push(bytes.get(at + 1..quote).unwrap_or_default());
+                    quote + 1
+                }
                 None => return Markup::Broken,
             },
             b'[' => return Markup::Subset,
-            b'>' => return Markup::Doctype(at + 1),
+            b'>' => return Markup::Doctype(at + 1, svg_dtd(&literals)),
             _ => at + 1,
         };
     }
     Markup::Broken
+}
+
+/// Whether the quoted `literals` of a DOCTYPE name no external identifier, a W3C SVG DTD's
+/// system identifier, or the public and system identifiers of one.
+fn svg_dtd(literals: &[&[u8]]) -> bool {
+    let named = |public: Option<&[u8]>, system: &[u8]| {
+        IDENTIFIERS.iter().any(|(known_public, known_system)| {
+            public.is_none_or(|public| public == known_public.as_bytes())
+                && system == known_system.as_bytes()
+        })
+    };
+    match literals {
+        [] => true,
+        [system] => named(None, system),
+        [public, system] => named(Some(public), system),
+        _ => false,
+    }
 }
 
 /// The position after the start tag at `start`, and whether it is an empty-element tag

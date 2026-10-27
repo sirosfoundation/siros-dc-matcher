@@ -257,16 +257,19 @@ against the 307,200-byte budget (303,418 at v0.11.0).
     redirects, 512 KiB, 2048 pixels), and a full rendering (`TransactionView`: rows in claims order,
     `template:` values as `Segment`s of text and typed values; the UI checks each label again once
     formatted). An SVG document passes only within a static subset: elements nested at most
-    `MAX_DEPTH` (128) levels, counted before the parse; a DOCTYPE without an internal subset;
-    allowlisted elements of the SVG namespace with their attributes, drawing programs' editing data,
-    and RDF inside `metadata`; CSS read by a CSS Syntax 3 tokenizer with the at-rules `@charset`,
-    `@font-face` and `@media` and known functions, no `var()` inside a function that takes URLs and
-    no string or URL in a custom property (`CssFault`); and each URL a fragment of the document, a
-    Data URL, or an `https` URL pinned in its fragment. A Data URL's content and each fetched
-    resource pass as a PNG or JPEG image within the image limits or as a font whose header and table
-    directory read (`FontFault`). At most `MAX_RESOURCES` (8) URLs are fetched, each once without
-    its fragment, with `Accept` `MediaType::RESOURCES`, and checked against every integrity value
-    the document gives it; a `Resource` holds that URL and its `ResourceKind`. The host renders the
+    `MAX_DEPTH` (128) levels, counted before the parse; a DOCTYPE without an internal subset that
+    names no external identifier but a W3C SVG 1.0 or 1.1 DTD's; allowlisted elements of the SVG
+    namespace with their attributes, drawing programs' editing data but its attributes named `href`,
+    `absref`, `style` or as a presentation attribute, and RDF inside `metadata`; CSS read by a CSS
+    Syntax 3 tokenizer with the at-rules `@charset`, `@font-face` and `@media` and known functions,
+    no `var()` inside a function that takes URLs and no string or URL in a custom property
+    (`CssFault`); and each URL a fragment of the document, a Data URL, or an `https` URL pinned in
+    its fragment. A Data URL is read as a renderer reads it, and its media type names its content's
+    kind (`DataFault`). A Data URL's content and each fetched resource pass as a PNG or JPEG image
+    within the image limits or as a font whose header and table directory read and list no `SVG `
+    table (`FontFault`). At most `MAX_RESOURCES` (8) URLs are fetched, each once without its
+    fragment, with `Accept` `MediaType::RESOURCES`, and checked against every integrity value the
+    document gives it; a `Resource` holds that URL and its `ResourceKind`. The host renders the
     image statically and answers the renderer's request for a resource's URL with it, as its kind;
     it loads nothing else. Under a TS12 rulebook an image that does not verify is left out
     (`TransactionView::absent_images`). Every reason an entry does not serve a credential is an

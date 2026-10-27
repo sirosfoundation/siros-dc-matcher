@@ -17,13 +17,18 @@ pub(super) const XLINK: &str = "http://www.w3.org/1999/xlink";
 pub(super) const XML: &str = "http://www.w3.org/XML/1998/namespace";
 
 /// The namespaces of drawing programs' editing data, which renderers ignore: Inkscape,
-/// Sodipodi, Affinity (Serif) and CorelDRAW. Their elements and attributes pass.
+/// Sodipodi, Affinity (Serif) and CorelDRAW. Their elements pass, and their attributes but
+/// those of [`EDITOR_REFUSED`] and the presentation attributes' names.
 const EDITORS: [&str; 4] = [
     "http://www.inkscape.org/namespaces/inkscape",
     "http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd",
     "http://www.serif.com/",
     "http://www.corel.com/coreldraw/odm/2003",
 ];
+
+/// The local names of editing-data attributes that hold a URL or CSS, refused in the editors'
+/// namespaces as everywhere else.
+const EDITOR_REFUSED: [&str; 3] = ["href", "absref", "style"];
 
 /// The vocabularies of the RDF inside a `metadata` element: RDF, Dublin Core and Creative
 /// Commons, in its current and its former namespace. There, their elements and attributes pass.
@@ -427,6 +432,11 @@ pub(super) fn takes(element: &str, own: &[&str], name: &str) -> bool {
 /// Whether `namespace` is that of a drawing program's editing data.
 pub(super) fn editor(namespace: &str) -> bool {
     EDITORS.contains(&namespace)
+}
+
+/// Whether the attribute `name` of an editor's namespace passes: neither a URL position nor CSS.
+pub(super) fn editing(name: &str) -> bool {
+    !EDITOR_REFUSED.contains(&name) && !PRESENTATION.contains(&name)
 }
 
 /// Whether `namespace` is a vocabulary of the RDF inside a `metadata` element.

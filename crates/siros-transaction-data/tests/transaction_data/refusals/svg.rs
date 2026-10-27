@@ -18,6 +18,7 @@ const XHTML: &str = "http://www.w3.org/1999/xhtml";
 const XML: &str = "http://www.w3.org/XML/1998/namespace";
 const SODIPODI: &str = "http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd";
 const RDF: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
+const INKSCAPE: &str = "http://www.inkscape.org/namespaces/inkscape";
 
 /// An SVG document of 10 by 10 holding `inner`.
 pub(crate) fn svg(inner: &str) -> String {
@@ -70,9 +71,9 @@ pub(crate) fn data(media_type: &str, bytes: &[u8]) -> String {
     format!("data:{media_type};base64,{}", b64(bytes))
 }
 
-/// A WOFF2 font of one table: its header, a directory entry for `cmap` of 4 bytes, and 4 bytes
-/// of compressed data.
-pub(crate) fn woff2() -> Vec<u8> {
+/// A WOFF2 font of one table: its header, a directory entry of the known-tag index `table`
+/// (0 is `cmap`) of 4 bytes, null-transformed, and 4 bytes of compressed data.
+pub(crate) fn woff2(table: u8) -> Vec<u8> {
     let mut font = b"wOF2".to_vec();
     font.extend_from_slice(&[0, 1, 0, 0]); // flavor: TrueType outlines
     font.extend_from_slice(&54_u32.to_be_bytes()); // length
@@ -80,7 +81,7 @@ pub(crate) fn woff2() -> Vec<u8> {
     font.extend_from_slice(&8_u32.to_be_bytes()); // totalSfntSize
     font.extend_from_slice(&4_u32.to_be_bytes()); // totalCompressedSize
     font.extend_from_slice(&[0; 24]); // versions, metadata and private blocks
-    font.extend_from_slice(&[0, 4]); // flags: cmap, null transform; origLength 4
+    font.extend_from_slice(&[table, 4]); // flags: the table, null transform; origLength 4
     font.extend_from_slice(b"data");
     font
 }
@@ -270,6 +271,35 @@ fn each_vector_outside_the_subset_is_refused() {
                 r#"<sodipodi:namedview xmlns:sodipodi="{SODIPODI}" href="{x}"/>"#
             )),
             attribute("namedview", None, "href"),
+        ),
+        (
+            "an editor's href on an image",
+            svg(&format!(
+                r##"<image xmlns:inkscape="{INKSCAPE}" width="1" height="1" href="#a" inkscape:href="{x}"/>"##
+            )),
+            attribute("image", Some(INKSCAPE), "href"),
+        ),
+        (
+            "sodipodi:absref on an image",
+            svg(&format!(
+                r##"<image xmlns:sodipodi="{SODIPODI}" width="1" height="1" href="#a" sodipodi:absref="{x}"/>"##
+            )),
+            attribute("image", Some(SODIPODI), "absref"),
+        ),
+        (
+            "an editor's style with url(",
+            svg(&format!(
+                r#"<rect xmlns:inkscape="{INKSCAPE}" width="1" height="1" inkscape:style="fill:url({x})"/>"#
+            )),
+            attribute("rect", Some(INKSCAPE), "style"),
+        ),
+        (
+            "a DOCTYPE naming another DTD",
+            format!(
+                r#"<!DOCTYPE svg SYSTEM "https://evil.example/x.dtd">{}"#,
+                svg("")
+            ),
+            SvgFault::Doctype(r#"<!DOCTYPE svg SYSTEM "https://evil.example/x.dtd">"#.to_owned()),
         ),
         (
             "RDF outside metadata",

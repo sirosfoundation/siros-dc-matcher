@@ -160,7 +160,7 @@ fn each_exported_logo_is_shown() {
     );
     let embedded_font = format!(
         r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 40"><style>@font-face{{font-family:'Brand';src:url("{}") format("woff2")}}.t{{font-family:'Brand'}}</style><text class="t" x="0" y="20">Bank</text></svg>"#,
-        data("application/font-woff2", &woff2())
+        data("font/woff2", &woff2(0))
     );
     let logos: [(&str, &str); 17] = [
         ("Illustrator CC", ILLUSTRATOR_CC),

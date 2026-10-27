@@ -36,6 +36,9 @@ pub enum SvgFault {
     NotUtf8,
     /// The document nests elements deeper than [`MAX_DEPTH`] levels.
     Nesting,
+    /// The document's DOCTYPE, this declaration, names an external identifier other than a W3C
+    /// SVG 1.0 or 1.1 DTD's.
+    Doctype(String),
     /// The text is no XML document whose DOCTYPE has no internal subset.
     Xml(roxmltree::Error),
     /// The root element is no `svg` element of the SVG namespace.
@@ -87,6 +90,7 @@ impl SvgFault {
         match self {
             Self::NotUtf8 => "svg_not_utf8",
             Self::Nesting => "svg_nesting",
+            Self::Doctype(_) => "svg_doctype",
             Self::Xml(_) => "svg_xml",
             Self::NotSvg => "svg_root",
             Self::ProcessingInstruction(_) => "svg_processing_instruction",
@@ -247,7 +251,9 @@ fn attribute(
         (Some(allow::XLINK), "title") | (Some(allow::XML), "space" | "lang" | "id") => {
             Ok(Vec::new())
         }
-        (Some(namespace), _) if allow::editor(namespace) => Ok(Vec::new()),
+        (Some(namespace), name) if allow::editor(namespace) && allow::editing(name) => {
+            Ok(Vec::new())
+        }
         (Some(namespace), _) if matches!(kind, Kind::Inert) && allow::metadata(namespace) => {
             Ok(Vec::new())
         }

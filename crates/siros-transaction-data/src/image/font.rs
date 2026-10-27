@@ -1,6 +1,7 @@
 //! The header and table directory of a font an SVG document references: an sfnt font,
 //! TrueType or OpenType (OpenType 1.9, "Organization of an OpenType Font"), a WOFF font (WOFF
-//! 1.0, Sections 3 and 4), or a WOFF2 font (WOFF2, Sections 3 and 4).
+//! 1.0, Sections 3 and 4), or a WOFF2 font (WOFF2, Sections 3 and 4). The directory lists no
+//! `SVG ` table: its glyphs are SVG documents outside the static subset (OpenType 1.9, "SVG").
 
 /// The sfnt version of TrueType outlines, and Apple's.
 const TRUETYPE: [[u8; 4]; 2] = [[0, 1, 0, 0], *b"true"];
@@ -31,6 +32,12 @@ const WOFF2_HEADER: usize = 48;
 
 /// The known-tag indices of `glyf` and `loca` (WOFF2, Section 4.1, Table 1).
 const GLYF_LOCA: [u8; 2] = [10, 11];
+
+/// The tag of the table of SVG glyph documents.
+const SVG_TAG: &[u8; 4] = b"SVG ";
+
+/// The known-tag index of `SVG ` (WOFF2, Section 4.1, Table 1).
+const SVG_INDEX: u8 = 36;
 
 /// The flag value that an explicit tag follows (WOFF2, Section 4.1).
 const EXPLICIT_TAG: u8 = 63;
@@ -101,6 +108,8 @@ pub enum FontFault {
     NoTables,
     /// A table tag holds a byte outside printable ASCII.
     Tag,
+    /// The directory lists the `SVG ` table of SVG glyph documents.
+    SvgTable,
     /// A UIntBase128 of the WOFF2 table directory does not read (WOFF2, Section 4.1).
     Base128,
     /// A table, or the WOFF2 compressed data, lies outside the font.
@@ -118,6 +127,7 @@ impl FontFault {
             Self::Reserved => "font_reserved",
             Self::NoTables => "font_no_tables",
             Self::Tag => "font_tag",
+            Self::SvgTable => "font_svg_table",
             Self::Base128 => "font_base128",
             Self::TableBounds => "font_table_bounds",
         }
@@ -171,6 +181,9 @@ fn woff2(bytes: &[u8]) -> Result<(), FontFault> {
         let flags = *bytes.get(at).ok_or(FontFault::Truncated)?;
         at += 1;
         let index = flags & 0x3f;
+        if index == SVG_INDEX {
+            return Err(FontFault::SvgTable);
+        }
         let explicit = if index == EXPLICIT_TAG {
             tag(bytes, at)?;
             let explicit = bytes.get(at..at + 4);
@@ -219,13 +232,15 @@ fn tables(bytes: &[u8], at: usize) -> Result<usize, FontFault> {
     }
 }
 
-/// Checks that the tag at `at` is four bytes of printable ASCII.
+/// Checks that the tag at `at` is four bytes of printable ASCII other than `SVG `.
 fn tag(bytes: &[u8], at: usize) -> Result<(), FontFault> {
     let tag = bytes.get(at..at + 4).ok_or(FontFault::Truncated)?;
-    if tag.iter().all(|byte| (0x20..=0x7e).contains(byte)) {
-        Ok(())
-    } else {
+    if !tag.iter().all(|byte| (0x20..=0x7e).contains(byte)) {
         Err(FontFault::Tag)
+    } else if tag == SVG_TAG {
+        Err(FontFault::SvgTable)
+    } else {
+        Ok(())
     }
 }
 
