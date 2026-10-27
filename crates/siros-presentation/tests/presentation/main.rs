@@ -16,6 +16,7 @@ mod offers;
 mod refusals;
 mod sd_jwt;
 mod seed;
+mod transactions;
 mod trust;
 mod usable;
 mod verifier;

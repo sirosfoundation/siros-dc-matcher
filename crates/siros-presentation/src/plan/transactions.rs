@@ -48,6 +48,19 @@ struct Candidacy<'a> {
     selection: Selection,
 }
 
+impl Candidacy<'_> {
+    /// The credential and why it takes no entry, when the first match excluded it.
+    fn exclusion(&self) -> Option<Exclusion> {
+        match &self.selection {
+            Selection::Excluded(causes) => Some(Exclusion {
+                credential: self.credential.entry(),
+                causes: causes.clone(),
+            }),
+            Selection::Takes(_) => None,
+        }
+    }
+}
+
 /// The `transaction_data` entries of a request, and the selection of each candidate of a
 /// query they target.
 pub(crate) struct Transactions<'a> {
@@ -156,7 +169,11 @@ impl<'a> Transactions<'a> {
                 }
             }
             if !known {
-                return Err(TransactionDataError::TypeUnknown(entry.position()));
+                let exclusions = targets.iter().filter_map(|c| c.exclusion()).collect();
+                return Err(TransactionDataError::TypeUnknown(
+                    entry.position(),
+                    exclusions,
+                ));
             }
         }
         Ok(Step::Done(()))
@@ -176,13 +193,7 @@ impl<'a> Transactions<'a> {
         Err(TransactionDataError::NoCompatibleCredential(
             self.candidacies
                 .iter()
-                .filter_map(|c| match &c.selection {
-                    Selection::Excluded(causes) => Some(Exclusion {
-                        credential: c.credential.entry(),
-                        causes: causes.clone(),
-                    }),
-                    Selection::Takes(_) => None,
-                })
+                .filter_map(Candidacy::exclusion)
                 .collect(),
         ))
     }
