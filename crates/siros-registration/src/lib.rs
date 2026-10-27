@@ -3,10 +3,10 @@
 //!
 //! | Requirement | API |
 //! | --- | --- |
-//! | K1: per credential the entry reference, format and type, holder-key presence, the typed claim tree without the nym_auth undisclosable attributes, the card and claim labels in the wallet's language, presentability without the UI, the issuer facts, and the projected transaction data definitions with their source and rulebook, each definition stored once; the nym_auth systems; the version | [`Registration::read`], [`write`] (feature `wallet`), [`RegisteredCredential`] |
+//! | K1: per credential the entry reference, format and type, holder-key presence, the typed claim tree without the nym_auth undisclosable attributes, the card and claim labels in the wallet's language, presentability without the UI, the issuer facts, and the projected transaction data definitions with their source and rulebook, each definition stored once; the nym_auth systems; the version | [`Registration::read`], [`write()`] (feature `wallet`), [`RegisteredCredential`] |
 //! | TR5: the issuer facts at registration time, and the picker's admission from them alone | [`RegisteredCredential::issuer`], the [`siros_presentation::MatchCredential`] of `&RegisteredCredential` |
 //! | K2: the picker's transaction data selection over the projected definitions, deferring ad-hoc metadata and remote images to the wallet | [`Unverified`] |
-//! | R-G6: no delivered or derived secret, no undisclosable attribute | [`write`] reads no auxiliary data and removes the undisclosable attributes |
+//! | R-G6: no delivered or derived secret, no undisclosable attribute | [`write()`] reads no auxiliary data and removes the undisclosable attributes |
 //!
 //! The format is CBOR, read strictly: a reader refuses every version but [`VERSION`], every
 //! member it does not define, and every reference outside its tables. The wallet registers the
