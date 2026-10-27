@@ -32,8 +32,8 @@ mod facts;
 
 pub use admission::{Admission, Ground, Issuer, Refusal, Unadmitted};
 pub use authority::{
-    AkiError, Authority, AuthorityError, KeyIdentifier, KeyIdentifierError, QueryAuthorities,
-    StoreAuthority, StoreType,
+    AkiError, Authority, AuthorityError, AuthorityKind, KeyIdentifier, KeyIdentifierError,
+    QueryAuthorities, StoreAuthority, StoreType,
 };
 pub use facts::{FactRefusal, IssuerFacts};
 

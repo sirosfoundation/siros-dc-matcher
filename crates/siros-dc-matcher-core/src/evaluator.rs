@@ -519,11 +519,12 @@ impl ProfilePolicy<'_> {
     /// that are the query's `source_format`. `None` without a `zkp_req` format rule.
     fn zkp_req_formats(&self, credential_type: &CredentialType) -> Option<Vec<&str>> {
         let rule = self.profile.format_rule(ZKP_REQ_FORMAT)?;
+        let source_format = credential_type.source_format();
         Some(
             rule.stored_formats
                 .iter()
                 .map(String::as_str)
-                .filter(|f| *f == credential_type.source_format())
+                .filter(|f| source_format == *f)
                 .collect(),
         )
     }
@@ -600,7 +601,7 @@ impl siros_dcql::Policy<BlobCredential<'_>> for ProfilePolicy<'_> {
         if *query.format() == ZKP_REQ_FORMAT {
             match self.zkp_req_selection(query) {
                 // The proof is made over the stored attestation itself.
-                Some(selection) if *stored == selection.query.credential_type().source_format() => {
+                Some(selection) if selection.query.credential_type().source_format() == *stored => {
                 }
                 _ => return false,
             }

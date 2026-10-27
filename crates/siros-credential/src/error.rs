@@ -90,7 +90,7 @@ pub enum CredentialError {
     /// Section 2).
     NumericDate(RegisteredClaim),
     /// An mdoc value holds this tag, other than 0 (`tdate`) and 1004 (`full-date`).
-    Tag(u64),
+    Tag(CborTag),
     /// An mdoc `tdate` is not tag 0 over text `YYYY-MM-DDThh:mm:ssZ` of a real UTC second
     /// (ISO/IEC 18013-5, 7.2.1).
     Tdate,
@@ -178,6 +178,24 @@ impl From<ChainError> for CredentialError {
 impl From<MdocError> for CredentialError {
     fn from(e: MdocError) -> Self {
         Self::Mdoc(e)
+    }
+}
+
+/// The number of a CBOR tag (RFC 8949, Section 3.4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CborTag(u64);
+
+impl CborTag {
+    /// The tag `number`.
+    #[must_use]
+    pub fn new(number: u64) -> Self {
+        Self(number)
+    }
+
+    /// The number.
+    #[must_use]
+    pub fn number(self) -> u64 {
+        self.0
     }
 }
 

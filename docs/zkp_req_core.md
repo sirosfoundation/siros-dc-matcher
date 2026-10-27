@@ -171,16 +171,16 @@ artifacts from their reference copies.
 `zkp_req_session` (→ `FfiSession`), `zkp_req_jwk_thumbprint`, `zkp_req_vp_token_json`,
 `zkp_req_vp_token_cbor`, and `zkp_req_verify` with a host-implemented `FfiProofVerifier` and the
 verifier's DER `trust_anchors`. `ZkpReqError` carries the request's `error_code`
-(`invalid_request`, `access_denied`) and a stable `code`. Indexes are `u64`. The facades expose
-the wallet's plan, which answers and proves `zkp_req` queries.
+(`invalid_request`, `access_denied`) and a stable `code`. Indexes are `u64`. No FFI function
+produces a nym_auth proof: the facades wave exposes the wallet's plan, which proves.
 
 ### Browser
 
-`wasm-pack build proving/siros-zkp-req-wasm --target web`, for a desktop browser. Exports
-`ZkpProvers` (`loadLongfellow(circuitsZst)`, `loadVega(shapesZst)`, `systems()`), a
-`NymAuthProver` over the loaded systems, and `vpTokenJson`. It proves on one thread: no Web
-Worker pool, no cross-origin isolation. Bytes are `Uint8Array`. A refusal throws `{error_code,
-kind, code}`. The browser facade exposes the wallet's plan with these provers.
+`wasm-pack build proving/siros-zkp-req-wasm --target web`, for a desktop browser. JavaScript
+receives `ZkpProvers` (its constructor, `loadLongfellow(circuitsZst)`, `loadVega(shapesZst)` and
+`systems()`) and `vpTokenJson`. Bytes are `Uint8Array`. A refusal throws `{error_code, kind,
+code}`. No export proves: the facades wave exposes the wallet's plan, which proves through the
+loaded systems on one thread, with no Web Worker pool and no cross-origin isolation.
 
 It links zk-cred-longfellow under MPL-2.0, part of it derived from Google's longfellow-zk under
 Apache-2.0; a page that serves it carries their notices.
@@ -191,8 +191,8 @@ Apache-2.0; a page that serves it carries their notices.
 `ZkpReq` runs `match`, the consent screen and `prove` across queries, and a host runs a
 `ZkpPresenter`. Its host contract hands the presenter DER anchors per query
 (`anchors(authorities)`). The core resolves `trusted_authorities` itself, against the trust
-store the host provisions (§4.18 of the architecture), and the browser facade exposes the plan
-in place of `matchQuery` and `prepare`.
+store the host provisions (§4.18 of the architecture). The browser facade has no `matchQuery`
+or `prepare`; the facades wave gives it the plan in their place.
 
 ## Acceptance gates
 

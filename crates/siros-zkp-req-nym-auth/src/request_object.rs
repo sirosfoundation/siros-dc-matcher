@@ -5,7 +5,7 @@
 use std::fmt;
 
 use serde_json::Value;
-use siros_oid4vp::{ec_jwk_thumbprint, Handover, JwkThumbprint, Origin};
+use siros_oid4vp::{ec_jwk_thumbprint, ClientId, Handover, JwkThumbprint, Nonce, Origin};
 
 use crate::policy::PolicyRule;
 
@@ -42,8 +42,8 @@ pub enum Signing {
 /// A Request Object that follows the policy, read for the values the session binds.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CheckedRequest {
-    client_id: String,
-    nonce: String,
+    client_id: ClientId,
+    nonce: Nonce,
     endpoint: Endpoint,
     encryption_keys: Vec<Value>,
 }
@@ -64,9 +64,9 @@ pub fn check_request(
     let request = request_object.as_object().ok_or(PolicyRule::NotObject)?;
     let text = |name: &str| request.get(name).and_then(Value::as_str);
     let client_id = text("client_id").ok_or(PolicyRule::ClientIdMissing)?;
-    let nonce = text("nonce")
-        .filter(|n| !n.is_empty())
-        .ok_or(PolicyRule::NonceMissing)?;
+    let client_id = ClientId::parse(client_id).map_err(PolicyRule::ClientId)?;
+    let nonce = text("nonce").ok_or(PolicyRule::NonceMissing)?;
+    let nonce = Nonce::parse(nonce).ok_or(PolicyRule::NonceMalformed)?;
     let endpoint = match channel {
         Channel::Redirect => {
             if !matches!(
@@ -100,8 +100,8 @@ pub fn check_request(
         .ok_or(PolicyRule::EncryptionKeyMissing)?
         .clone();
     Ok(CheckedRequest {
-        client_id: client_id.to_owned(),
-        nonce: nonce.to_owned(),
+        client_id,
+        nonce,
         endpoint,
         encryption_keys,
     })
@@ -122,13 +122,13 @@ impl std::error::Error for KeyNotInRequest {}
 impl CheckedRequest {
     /// `client_id`, with its Client Identifier Prefix.
     #[must_use]
-    pub fn client_id(&self) -> &str {
+    pub fn client_id(&self) -> &ClientId {
         &self.client_id
     }
 
-    /// `nonce`, at least one character.
+    /// `nonce`.
     #[must_use]
-    pub fn nonce(&self) -> &str {
+    pub fn nonce(&self) -> &Nonce {
         &self.nonce
     }
 
@@ -161,11 +161,14 @@ impl CheckedRequest {
         }
         Ok(match &self.endpoint {
             Endpoint::Origin(origin) => {
-                Handover::dc_api(origin.as_str(), &self.nonce, Some(jwk_thumbprint))
+                Handover::dc_api(origin.as_str(), self.nonce.as_str(), Some(jwk_thumbprint))
             }
-            Endpoint::ResponseUri(uri) => {
-                Handover::redirect(&self.client_id, &self.nonce, Some(jwk_thumbprint), uri)
-            }
+            Endpoint::ResponseUri(uri) => Handover::redirect(
+                self.client_id.as_str(),
+                self.nonce.as_str(),
+                Some(jwk_thumbprint),
+                uri,
+            ),
         })
     }
 }

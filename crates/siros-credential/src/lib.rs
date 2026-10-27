@@ -34,8 +34,8 @@ mod value;
 
 pub use credential::{Credential, CredentialType, EntryRef, Format, Parsed};
 pub use error::{
-    ClaimFault, Coordinate, CoordinateFault, CredentialError, HolderKeyError, RegisteredClaim,
-    ValidityError,
+    CborTag, ClaimFault, Coordinate, CoordinateFault, CredentialError, HolderKeyError,
+    RegisteredClaim, ValidityError,
 };
 pub use instance::{least_used, Instance};
 pub use usable::{UsableCredential, Validity};

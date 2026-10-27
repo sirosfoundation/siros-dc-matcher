@@ -93,12 +93,12 @@ pub enum CredentialType {
 impl CredentialType {
     /// `meta.source_format`.
     #[must_use]
-    pub fn source_format(&self) -> &str {
+    pub fn source_format(&self) -> CredentialFormat {
         match self {
-            Self::MsoMdoc { .. } => "mso_mdoc",
-            Self::SdJwt { .. } => "dc+sd-jwt",
+            Self::MsoMdoc { .. } => CredentialFormat::new("mso_mdoc"),
+            Self::SdJwt { .. } => CredentialFormat::new("dc+sd-jwt"),
             Self::W3c { source_format, .. } | Self::Profiled { source_format, .. } => {
-                source_format.as_str()
+                source_format.clone()
             }
         }
     }

@@ -3,6 +3,8 @@
 
 use std::fmt;
 
+use siros_oid4vp::ClientIdError;
+
 use crate::verifier_id::VerifierIdRule;
 
 /// A rule of the policy that a request breaks. Each makes the request invalid.
@@ -18,10 +20,15 @@ pub enum PolicyRule {
     Untrusted,
     /// The Request Object is not a JSON object.
     NotObject,
-    /// `client_id` is missing or not a string.
+    /// `client_id` is missing or no string.
     ClientIdMissing,
-    /// `nonce` is missing, empty or not a string.
+    /// `client_id` is no Client Identifier this wallet supports (OpenID4VP 1.0, Section 5.9).
+    ClientId(ClientIdError),
+    /// `nonce` is missing or no string.
     NonceMissing,
+    /// `nonce` is empty or holds a character outside the ASCII URL-safe ones (OpenID4VP 1.0,
+    /// Section 5.2).
+    NonceMalformed,
     /// The Response Mode is not one the channel allows: `direct_post.cwt` or
     /// `direct_post.jwt` over redirects, `dc_api.jwt` over the Digital Credentials API.
     ResponseMode,
@@ -43,7 +50,9 @@ impl PolicyRule {
             Self::Untrusted => "untrusted",
             Self::NotObject => "request_object_not_object",
             Self::ClientIdMissing => "client_id_missing",
+            Self::ClientId(error) => error.code(),
             Self::NonceMissing => "nonce_missing",
+            Self::NonceMalformed => "nonce_malformed",
             Self::ResponseMode => "response_mode",
             Self::ResponseUriMissing => "response_uri_missing",
             Self::OriginNotExpected => "origin_not_expected",

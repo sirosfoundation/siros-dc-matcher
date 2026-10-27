@@ -1,9 +1,10 @@
 //! The `zkp_req` parts of the browser presenter, with the Longfellow and Vega provers, built
 //! with `wasm-pack build --target web` and run in a Web Worker. It proves on one thread.
 //!
-//! `ZkpProvers` loads the circuit artifacts the host fetched and proves the jobs of a prepared
-//! presentation; `vpTokenJson` writes the `vp_token`. A refusal throws an object `{error_code,
-//! kind, code}`: `error_code` is what the wallet sends the verifier (`zkp_req`, Section 5).
+//! `ZkpProvers` loads the circuit artifacts the host fetched and names the loaded systems; Rust
+//! code proves through it as a `NymAuthProver`. `vpTokenJson` writes the `vp_token`. A refusal
+//! throws an object `{error_code, kind, code}`: `error_code` is what the wallet sends the
+//! verifier (`zkp_req`, Section 5).
 
 #![deny(missing_docs)]
 #![deny(unsafe_code)]

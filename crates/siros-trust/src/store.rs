@@ -7,7 +7,7 @@ use siros_codec::json::{Json, JsonTextError};
 use siros_codec::{base64, Base64Error};
 use siros_dcql::{AuthorityType, AuthorityValue};
 
-use crate::authority::{StoreAuthority, StoreType};
+use crate::authority::{AuthorityKind, StoreAuthority};
 use crate::certificate::{Certificate, CertificateError};
 use crate::position::{CertificateIndex, EntryIndex};
 
@@ -226,7 +226,10 @@ impl StoreEntry {
             return Err(EntryError::RepeatedMember(name.to_owned()));
         }
         let kind = AuthorityType::new(text(entry, "type").map_err(EntryError::Type)?);
-        let kind = StoreType::of(&kind).ok_or(EntryError::UnknownType(kind))?;
+        let kind = match AuthorityKind::of(&kind) {
+            Some(AuthorityKind::Store(store)) => store,
+            Some(AuthorityKind::Aki) | None => return Err(EntryError::UnknownType(kind)),
+        };
         let value = text(entry, "value").map_err(EntryError::Value)?;
         let certificates = match entry.member("certificates") {
             None => return Err(EntryError::Certificates(MemberFault::Absent)),

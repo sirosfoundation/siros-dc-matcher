@@ -59,6 +59,8 @@ against the 307,200-byte budget (303,914 before).
 - **BREAKING (Rust API):** `siros-dc-matcher-core`'s `request` module is `siros-oid4vp`'s
   `UnverifiedRequest` and `UnverifiedQuery`. An entry reads only under the three protocols of
   OpenID4VP 1.0, A.1; a profile label outside them reads as no protocol.
+  `UnverifiedQuery::matching_query` gives the query the DCQL engine matches, always; a query
+  DCQL represents in neither form does not read.
   `UnverifiedRequest::first_registered` and `diagnose` take the registration as a label
   predicate, and `ProfilePolicy::with_context` takes the query and `client_metadata`.
   `first_supported_request` and the entry predicate are removed.
@@ -74,12 +76,18 @@ against the 307,200-byte budget (303,914 before).
   `Prepared::job` builds a `ProofJob`, from a `UsableAttestation` and an `OpenedSeed`. The fields
   of `ProofJob`, `NymAuthQuery`, `NymAuthMdoc`, `SignedElement` and `Credential` are private;
   methods of the same names read them.
-- **BREAKING (Rust API):** `siros-dcql`'s query is constructed only by parsing: its fields are
-  private, read through accessors, and `DcqlQuery::validate` is gone. `trusted_authorities`
-  parses into `TrustedAuthorities` (a non-empty array of entries, each with a string `type` and
-  a non-empty array of string `values`, OpenID4VP 1.0, Section 6.1.1); a malformed one refuses
-  the query. Claims query ids are `ClaimId`s and `credential_sets` options name `QueryId`s;
-  `multiple`, `require_cryptographic_holder_binding` and `required` are enums. See
+- **BREAKING (Rust API):** `siros-dcql`'s query is constructed only by parsing, one pass over
+  its JSON value: its fields are private, read through accessors, and `DcqlQuery::validate` is
+  gone. `trusted_authorities` parses into `TrustedAuthorities` (a non-empty array of entries,
+  each with a string `type` and a non-empty array of string `values`, OpenID4VP 1.0, Section
+  6.1.1). The parse refuses a malformed member or `trusted_authorities`, an empty
+  `credentials`, a `claim_sets` or `credential_sets` option naming an unknown id, `claim_sets`
+  without claims, a claims path that is no claims path pointer, and an `mso_mdoc` claims path
+  other than two strings. A claims path is a `ClaimPath`, which replaces `siros-credential`'s
+  `ClaimPointer` and `PointerError`; a claims path processing error other than an empty
+  selection reaches the caller (`select_claims`, `QueryMatch::refusals`). Claims query ids are
+  `ClaimId`s and `credential_sets` options name `QueryId`s; `multiple`,
+  `require_cryptographic_holder_binding` and `required` are enums. See
   [its changelog](crates/siros-dcql/CHANGELOG.md).
 - **BREAKING (Rust API):** `siros-zkp-req` reads no `trusted_authorities`: `TrustedAuthority`,
   `AuthorityKind` and `RequestRule::TrustedAuthoritiesInvalid` are gone, and so is the request
@@ -89,17 +97,29 @@ against the 307,200-byte budget (303,914 before).
   Document Signer's first) and loses `P256Certificate`, `CertificateError` and `chains_to`;
   `P256Key::from_sec1` reads an uncompressed point. `siros-sdjwt` keeps the issuer JWT's `x5c`
   (`SdJwt::x5c`); a malformed one is `ParseError::X5c`.
-- **BREAKING (credential):** a credential parses with its issuer chain (TR2): the mdoc's
-  `x5chain`, or the SD-JWT VC issuer JWT's `x5c`. A chain that does not parse is
-  `CredentialError::IssuerChain`; `Credential::issuer_chain` gives it. `UsableCredential::time`
-  gives the time it is valid at.
+- **BREAKING (credential):** with the feature `chain`, a credential parses with its issuer chain
+  (TR2): the mdoc's `x5chain`, or the SD-JWT VC issuer JWT's `x5c`. A chain that does not parse
+  is `CredentialError::IssuerChain`; `Credential::issuer_chain` gives it. `siros-presentation`'s
+  `wallet` feature enables `chain`, so the picker build links no chain validation.
+  `UsableCredential::time` gives the time it is valid at. `Credential::claims` takes a
+  `ClaimPath`.
 - **BREAKING (presentation):** `PlanInput` takes the host's `TrustStore`. A credential whose
-  issuer the query's `trusted_authorities` do not admit matches nothing, in every format (A1),
-  and a malformed `aki` value refuses the request with `invalid_request`
-  (`QueryRefusal::Authorities`). A candidate carries its issuer's admission into the offers and
-  phase 2. `MatchCredential` gives the admission, with the trust context its implementor needs:
-  the store for the wallet, nothing for the picker's TR5 facts. `Unproven::Unlisted` is gone and
-  `Unproven::Issuer` names an admission of another certificate or query.
+  issuer the query's `trusted_authorities` admit not matches nothing, in every format (A1). A
+  candidate carries its issuer's admission into the offers and phase 2. `MatchCredential` gives
+  the admission, or why the authorities admit the issuer not (`MatchCredential::Unadmitted`),
+  with the trust context its implementor needs: the store for the wallet, nothing for the
+  picker's TR5 facts. `Unproven::Unlisted` is gone and `Unproven::Issuer` names an admission of
+  another certificate or query.
+- **BREAKING (presentation):** one Credential Query refused with `invalid_request` refuses the
+  whole request, whatever another option answers (`Answered::invalid_request`): a malformed
+  `aki` value (`QueryRefusal::Authorities`), and a `zkp_req` query that breaks a request rule,
+  the catalogue or the nym_auth policy. A plan used to offer the request's other options.
+- **BREAKING (presentation):** a query excludes each credential of its format and type that
+  answers it not, with its `Exclusion`: the authorities admit its issuer not, its claims path
+  processing gives an error, or it answers no option of a `zkp_req` query. `Answers::excluded`
+  gives them for every query, and `Failure::Excluded` names the first query without candidates
+  that excludes credentials (code `excluded`); it replaces `Failure::Unproven`.
+  `QueryRefusal::ClaimPath` is gone, and `Claims::pointers` gives `ClaimPath`s.
 - **BREAKING (nym_auth):** `TestedAttestation::of(mdoc, proof_time)` runs the credential tests;
   `UsableAttestation::new(tested, admitted, query)` takes the `AdmittedIssuer` of the same
   Document Signer for the same query (N3), and `Answer::new` refuses an attestation of another
@@ -109,11 +129,29 @@ against the 307,200-byte budget (303,914 before).
   `Prepared::new` (feature `request`); `match_query`, `prepare`, `present`, `Signer`,
   `StoredCredential` and the rest of the old presenter path are removed.
 - **BREAKING (FFI):** `zkp_req_match`, `zkp_req_prepare`, `FfiPrepared`, `FfiProofJob`,
-  `FfiStoredCredential`, `FfiCandidate`, `FfiZkpMatch` and their records are removed; the
-  facades expose the plan. `zkp_req_verify` refuses a trust anchor that does not parse.
-  Bindings are regenerated.
+  `FfiStoredCredential`, `FfiCandidate`, `FfiZkpMatch` and their records are removed. No FFI
+  function produces a nym_auth proof until the facades wave exposes the wallet's plan.
+  `zkp_req_verify` refuses a trust anchor that does not parse. Bindings are regenerated.
+- **BREAKING (FFI):** `match_dcql`, `match_dcql_with_context` and `match_dc_api_request` fail
+  with `MatchError::Request` for a query the DCQL parse refuses: a malformed
+  `trusted_authorities` (`[{"type": "aki"}]` or `[]`), an empty `credentials`, a `claim_sets`
+  or `credential_sets` option naming an unknown id, `claim_sets` without claims, a malformed
+  claims path, and an `mso_mdoc` claims path other than two strings. v0.11.0 matched such a
+  query: for the mDL fixture under a malformed `trusted_authorities`, its `match_dcql` gave `Ok`
+  with `satisfiable: true` and one combination.
+- **BREAKING (FFI):** `zkp_req_session` refuses, as `invalid_request`, a `client_id` that is no
+  supported Client Identifier (its `ClientIdError` code) and a `nonce` outside the ASCII
+  URL-safe characters (`nonce_malformed`), for both `verifier_id` forms; an absent or
+  non-string `nonce` stays `nonce_missing`.
+- **BREAKING (matcher):** `matcher.wasm` emits nothing for a request whose DCQL query the parse
+  refuses, the same queries as the FFI above. Observed with the test host on the mDL fixture:
+  under `trusted_authorities` `[{"type": "aki"}]` or `[]`, the matcher at `1b0fe3d` emitted the
+  one entry of set `siros-0`, and this build emits nothing. An `aki` value that is no base64url changes nothing:
+  the matcher resolves no `trusted_authorities`, and both emit the entry. A debug build names
+  the parse error in its one entry, in set `siros-debug-request`.
 - **BREAKING (browser):** `siros-zkp-req-wasm` keeps `ZkpProvers` and `vpTokenJson`;
-  `matchQuery`, `session` and `prepare` are removed.
+  `matchQuery`, `session` and `prepare` are removed. No browser export produces a nym_auth
+  proof until the facades wave.
 - **BREAKING (Rust API):** `siros-zkp-req` types every value it reads. `ZkpReqQuery`,
   `ReqItem`, `QueryOption` and `ZkpFormats` keep their fields private behind accessors; ids are
   `FnId`, `ReturnHandle`, `SystemId`, `ProofBackend`, `ResultKey`, `InputName` and `W3cType`,
@@ -134,8 +172,8 @@ against the 307,200-byte budget (303,914 before).
   its fault; its codes are unchanged.
 - **BREAKING (Rust API):** `siros-credential` gives `credential_type()` as a `CredentialType`
   (`Vct` or `DocType`), `issuer()` as an `IssuerIdentifier` and `configuration_id()` as a
-  `ConfigurationId`. `CredentialError` names the `RegisteredClaim` and the tag it refuses, and
-  `HolderKeyError` the coordinate and its fault.
+  `ConfigurationId`. `CredentialError` names the `RegisteredClaim` and the `CborTag` it
+  refuses, and `HolderKeyError` the coordinate and its fault.
 - **BREAKING (nym_auth):** the catalogue's `Item` is an enum whose `pseudonym` holds its
   `return`; `Pseudonym` and `AgeCheck` read through accessors and `verifier_context` is a
   `VerifierContext`. A `CatalogueRule` carries what breaks it (`ParamFault`, `ContextFault`,
@@ -146,24 +184,35 @@ against the 307,200-byte budget (303,914 before).
   `HostError::SignatureLength` is gone. `check_request` and the session values move to
   `request_object` (feature `credential`) and take `Signing`; `Channel::DcApi` holds an
   `Origin`. `Rejection` names its fault (`OwnQueryFault`, `ProofEncodingFault`,
-  `ResultsFault`, `IssuerKeySetError::Expired`), `VerifyInput::now` is a `DateTime`, and
+  `ResultsFault`, `IssuerKeySetError::Untrusted` with the `PathRefusal`), `VerifyInput::now`
+  is a `DateTime`, and
   `Tolerance::seconds(future, past)` replaces its public fields. `MAX_ZK_PROOF` moves to
-  `system`, with `NymAuthSystem::admits_zk_proof`.
+  `system`, with `NymAuthSystem::admits_zk_proof`. The Verifier admits the Document Signer
+  through `siros-trust`'s `TrustPath`, the TR3 path validation the wallet runs. `CheckedRequest`
+  gives the `client_id` as a `ClientId` and the `nonce` as a `Nonce`; `PolicyRule::ClientId`
+  and `PolicyRule::NonceMalformed` refuse the others. `siros-zkp-req`'s
+  `CredentialType::source_format` gives a `CredentialFormat`, and `ReturnHandle::parse` reads
+  the identifier alphabet through `QueryId`.
 - **BREAKING (Rust API):** `siros-sdjwt` gives every `ParseError` its cause:
   `IssuerJwtFault`, `DisclosureFault` with the disclosure's `DisclosureId`, `SdAlgFault`,
   `ReservedFault`, the repeated `Digest`, the misplaced disclosure with its `Placement`, the
   existing claim name, the unreferenced disclosure, and `X5cError` with the certificate's
-  `X5cIndex`. The JSON reader reports a `JsonFault`. `KeyBindingError` is `RequiredClaim` or
-  `RepeatedClaim` with the name. `Presentation::key_binding` takes a `NumericDate`, an
-  `Audience` and `siros-oid4vp`'s `Nonce`, and `KeyBinding::assemble` an `Es256Signature`.
-  Codes are unchanged.
+  `X5cIndex`. The JSON reader is `siros-codec`'s `Json`, which reports a `JsonTextError`.
+  `KeyBindingError` is `RequiredClaim` or `RepeatedClaim` with the name.
+  `Presentation::key_binding` takes a `NumericDate`, an `Audience` and a `KbNonce`, and
+  `KeyBinding::assemble` an `Es256Signature`; `siros-sdjwt` depends on neither `siros-oid4vp`
+  nor `serde`. `SdJwt::select` takes `ClaimPath`s. Codes are unchanged.
 - **BREAKING (Rust API):** `siros-trust` errors carry their causes: `CertificateError::Der`,
   `Name` and `BasicConstraints` hold the `der::Error`; `Validity` names the time, `PublicKey` a
   `PublicKeyFault`, `ExtensionRepeated` the extension's identifier, and
   `AuthorityKeyIdentifier` an `AuthorityKeyIdentifierFault`. `EntryError` names the unknown
   member and type and gives a `MemberFault`. `IssuanceRefusal` and `PathRefusal` gain
   `IssuerKey` and `SignatureEncoding`. Codes are unchanged; errors that hold a `der::Error`
-  lose `Hash`.
+  lose `Hash`. `TrustPath::new` replaces `StoreEntry::validates`; `Certificate::issued_by` and
+  `valid_at` are steps of it. A certificate's issuer and subject are `DistinguishedName`s.
+  `AuthorityKind::of` classifies a `type` (`aki`, or a `StoreType`); `StoreType::of` is gone.
+  A store entry that repeats a member is `EntryError::RepeatedMember`
+  (`trust_store_entry_member_repeated`), and `StoreError::Json` holds the `JsonTextError`.
 - **BREAKING (FFI):** `zkp_req_verify` refuses a clock outside the years 0000 to 9999 and a
   negative tolerance as host errors (`now_out_of_range`, `tolerance_out_of_range`), and
   `zkp_req_vp_token_json` and `zkp_req_vp_token_cbor` refuse a query id outside §6.1.
@@ -172,10 +221,9 @@ against the 307,200-byte budget (303,914 before).
 ### Fixed
 
 - `matcher.wasm` v0.8.0 to v0.11.0 imported `wasi_snapshot_preview1.random_get`,
-  which the host lacks, and trapped on `zkp_req` requests. `siros-dcql`'s
-  `DcqlQuery::validate` uses `rustc-hash`'s `FxHashSet` now; the `zkp_req`
-  crates use no seeded collection. `siros-dcql` gains the `rustc-hash`
-  dependency; its API is unchanged.
+  which the host lacks, and trapped on `zkp_req` requests. `siros-dcql` finds a
+  repeated id by comparing each id with the earlier ones, and the `zkp_req` crates
+  use no seeded collection.
 
 ### Added
 
@@ -184,9 +232,12 @@ against the 307,200-byte budget (303,914 before).
   credential's certificates with their AuthorityKeyIdentifier keyIdentifiers (TR2);
   `QueryAuthorities::of` and `AdmittedIssuer::resolve` admit a credential's issuer for one query
   at a time: no `trusted_authorities`, an `aki` value a certificate of the chain names, or the
-  store entry of an `etsi_tl` or `openid_federation` value whose certificates the chain
-  validates up to (TR3: names, validity, `cA` of every signer, ECDSA P-256/SHA-256 and
-  P-384/SHA-384). `IssuerFacts::at` gives the facts the wallet records for the picker, and
+  store entry of an `etsi_tl` or `openid_federation` value with a certificate that signs a
+  prefix of the chain, each certificate of the prefix signed by the next (TR3: names,
+  validity, `cA` of every signer, ECDSA P-256/SHA-256 and P-384/SHA-384 over the
+  `tbsCertificate` as written). `TrustPath` is the witness; the anchor whose
+  SubjectKeyIdentifier equals the AuthorityKeyIdentifier is tried first. The store refuses an
+  entry that repeats a member. `IssuerFacts::at` gives the facts the wallet records for the picker, and
   `Admission::of` admits from them alone with the same rule (TR5). Without the feature `chain`
   the crate holds the rule and the facts, on Rust 1.82.
 - `siros-presentation`, the presentation component of the wallet core. Phase 1 plans a
@@ -222,9 +273,9 @@ against the 307,200-byte budget (303,914 before).
   `AdditionIndex`, `EntryPosition`, `PlanDigest`, `SignId`, and DCQL's `QueryId`),
   and so are A9's facts. `Fetches` is the one store of the host's responses, and a second
   answer to a URL is refused. A request without an offer gives its `Failure`: the refused query and why,
-  the reasons each `zkp_req` candidate answers no option, or no combination. Without the
-  default feature `wallet` it holds the matching the picker runs, over `MatchCredential`, and
-  builds with Rust 1.82.
+  the credentials the first query without candidates excludes and why, or no combination.
+  Without the default feature `wallet` it holds the matching the picker runs, over
+  `MatchCredential`, links no chain validation or response crypto, and builds with Rust 1.82.
 - `siros-zkp-req-nym-auth`: `NymAuthRequest` (feature `request`), the nym_auth request of a
   verified request, with the session of its `Handover`. The request is signed by a Request
   Object or under `openid4vp-v1-signed`, trusted, encrypted, and carries no registration
@@ -278,6 +329,8 @@ against the 307,200-byte budget (303,914 before).
   `COSE_Encrypt` by ECDH-ES + HKDF-256 with `A128GCM`, `A192GCM` or `A256GCM`.
   Without `crypto` it holds the picker's request reading and builds with Rust 1.82.
 - `siros-codec`'s `base64`: padded base64 (RFC 4648, Section 4), as `x5c` carries certificates.
+  `siros-codec`'s `json`: the strict JSON reader, members in document order, which finds a
+  repeated member name (`Json::parse_unique`, `Json::repeated_member`).
 - `siros-zkp-req`, the `zkp_req` protocol layer, and `siros-zkp-req-nym-auth`, the nym_auth
   catalogue with the Longfellow and Vega systems, the session binding, the Wallet's credential
   tests, a presenter in phases and the Verifier's checks, behind `NymAuthProver` and
@@ -287,14 +340,13 @@ against the 307,200-byte budget (303,914 before).
   implement the prover and verifier of each system over zk-cred-longfellow and zk-cred-vega,
   and check the circuit artifact the host fetched against its pin. CI runs real proofs of both
   systems. The matcher compiles no prover.
-- FFI module `zkp_req`: `zkp_req_match`, `zkp_req_session`, `zkp_req_jwk_thumbprint`,
-  `zkp_req_prepare` with `FfiPrepared`, `zkp_req_vp_token_json`, `zkp_req_vp_token_cbor`, and
-  `zkp_req_verify` with a host-implemented `FfiProofVerifier`, whose `FfiProofCheck::Internal`
-  reports a verifier that failed on its own inputs.
-- `siros-zkp-req-wasm` (in `proving/`), the presenter for the browser with both provers on one
-  thread: `ZkpProvers` loads the artifacts, `ZkpPrepared.prove` returns the presentation. CI
-  lints and builds it for `wasm32-unknown-unknown` and checks its imports.
-- Vectors: 50 protocol request vectors (`crates/siros-zkp-req/tests/vectors/request`), 72
+- FFI module `zkp_req`: `zkp_req_session`, `zkp_req_jwk_thumbprint`, `zkp_req_vp_token_json`,
+  `zkp_req_vp_token_cbor`, and `zkp_req_verify` with a host-implemented `FfiProofVerifier`,
+  whose `FfiProofCheck::Internal` reports a verifier that failed on its own inputs.
+- `siros-zkp-req-wasm` (in `proving/`), the browser module with both provers on one thread:
+  `ZkpProvers` loads the artifacts and names the loaded systems, and `vpTokenJson` writes the
+  `vp_token`. CI lints and builds it for `wasm32-unknown-unknown` and checks its imports.
+- Vectors: 49 protocol request vectors (`crates/siros-zkp-req/tests/vectors/request`), 72
   catalogue request vectors and 149 presentation vectors
   (`crates/siros-zkp-req-nym-auth/tests/vectors/`, the latter from
   `scripts/gen_zkp_req_presentation_vectors.py`), the `proof_time` vectors, the session and
@@ -302,9 +354,8 @@ against the 307,200-byte budget (303,914 before).
   differential test. Each changed expectation carries a `v0_4` note.
 - Docs: `docs/zkp_req_core.md` (crates, flow, prover interface, API); `docs/zkp_req_request.md`
   and `docs/zkp_req_response.md` follow the draft.
-- Vector set digest (`scripts/vectors_digest.sh --digest`):
-  `4f0051624517ffb427af9c93de2d119f179304c6e218776f9a8e2b93a41b2a06`. The capability vectors
-  (`circuit_capabilities/match.json`) are unchanged.
+- `scripts/vectors_digest.sh --digest` gives the vector set digest stated under Changed. The
+  capability vectors (`circuit_capabilities/match.json`) are unchanged.
 - `scripts/check_matcher_abi.py` checks each import of `matcher.wasm`, with
   its signature, against the ABI table, and the `_start` and `memory`
   exports. CI and the release job run it.

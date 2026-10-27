@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 use siros_codec::cbor::{CborError, Unsupported as CborUnsupported, Value as Cbor};
 use siros_codec::date::DateTime;
 use siros_dcql::QueryIdError;
-use siros_oid4vp::{ClientId, Origin};
+use siros_oid4vp::{ClientId, ClientIdError, Origin};
 use siros_trust::Certificate;
 use siros_zkp_req::{
     ArrayIndex, EncodingError, IdentifierFault, InputName, ItemIndex, MemberFault, OptionFault,

@@ -10,7 +10,7 @@ use serde_json::Value;
 use siros_codec::cbor::Value as Cbor;
 use siros_codec::date::{Date, DateTime};
 use siros_dcql::QueryId;
-use siros_oid4vp::{ec_jwk_thumbprint, ClientId, JwkThumbprint, Origin, SemanticIdentifier};
+use siros_oid4vp::{ec_jwk_thumbprint, JwkThumbprint, Origin, SemanticIdentifier};
 use siros_trust::Certificate;
 use siros_zkp_req::{ErrorCode, ReqSetIndex, ResultKey, ZkProof, ZkpPresentation};
 use siros_zkp_req_nym_auth::catalogue::MDOC_DOCTYPE;
@@ -160,13 +160,13 @@ pub fn zkp_req_session(
         FfiVerifierIdForm::X509SanDns {
             registration_names_intermediary,
         } => {
-            let client_id = ClientId::parse(checked.client_id()).map_err(|e| invalid(e.code()))?;
+            let client_id = checked.client_id();
             let intermediary = if registration_names_intermediary {
                 Intermediary::Named
             } else {
                 Intermediary::Absent
             };
-            VerifierId::x509_san_dns(&client_id, intermediary).map_err(|r| invalid(r.code()))?
+            VerifierId::x509_san_dns(client_id, intermediary).map_err(|r| invalid(r.code()))?
         }
     };
     Ok(Arc::new(FfiSession(Session {

@@ -43,7 +43,7 @@ use siros_codec::base64url;
 use siros_codec::cbor::Value as Cbor;
 use siros_codec::date::DateTime;
 use siros_mdoc::Es256Signature;
-use siros_oid4vp::{ec_jwk_thumbprint, ClientId};
+use siros_oid4vp::ec_jwk_thumbprint;
 use siros_zkp_req::ZkProof;
 use x509_cert::builder::{Builder, CertificateBuilder, Profile};
 use x509_cert::name::Name;
@@ -325,11 +325,7 @@ pub fn session(query: &Value, nonce: &str) -> Session {
     let thumbprint = ec_jwk_thumbprint(&encryption_jwk()).unwrap();
     Session {
         handover: checked.handover(&thumbprint).unwrap(),
-        verifier_id: VerifierId::x509_san_dns(
-            &ClientId::parse(checked.client_id()).unwrap(),
-            Intermediary::Absent,
-        )
-        .unwrap(),
+        verifier_id: VerifierId::x509_san_dns(checked.client_id(), Intermediary::Absent).unwrap(),
     }
 }
 

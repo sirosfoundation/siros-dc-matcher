@@ -75,17 +75,30 @@ pub enum StoreType {
     OpenidFederation,
 }
 
-impl StoreType {
-    /// The store type of the `type` `kind`; `None` for another type.
+/// What a `trusted_authorities` `type` names (OpenID4VP 1.0, Section 6.1.1), among the types
+/// TR3 reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AuthorityKind {
+    /// `aki`: the keyIdentifier of a certificate of the issuer's chain.
+    Aki,
+    /// An authority whose certificates a trust store entry holds.
+    Store(StoreType),
+}
+
+impl AuthorityKind {
+    /// The kind of the `type` `kind`; `None` for another type.
     #[must_use]
     pub fn of(kind: &AuthorityType) -> Option<Self> {
         match kind.as_str() {
-            "etsi_tl" => Some(Self::EtsiTl),
-            "openid_federation" => Some(Self::OpenidFederation),
+            "aki" => Some(Self::Aki),
+            "etsi_tl" => Some(Self::Store(StoreType::EtsiTl)),
+            "openid_federation" => Some(Self::Store(StoreType::OpenidFederation)),
             _ => None,
         }
     }
+}
 
+impl StoreType {
     /// The `type` as OpenID4VP 1.0, Section 6.1.1 writes it.
     #[must_use]
     pub fn as_str(self) -> &'static str {
@@ -258,16 +271,16 @@ impl QueryAuthorities {
 impl Authority {
     /// The authority of the value `value` of an entry of type `kind`.
     fn read(kind: &AuthorityType, value: &AuthorityValue) -> Result<Self, AuthorityError> {
-        if kind.as_str() == "aki" {
-            return KeyIdentifier::from_aki(value)
+        Ok(match AuthorityKind::of(kind) {
+            Some(AuthorityKind::Aki) => KeyIdentifier::from_aki(value)
                 .map(Self::KeyIdentifier)
                 .map_err(|error| AuthorityError::Aki {
                     value: value.clone(),
                     error,
-                });
-        }
-        Ok(match StoreType::of(kind) {
-            Some(store) => Self::Store(StoreAuthority::new(store, value.clone())),
+                })?,
+            Some(AuthorityKind::Store(store)) => {
+                Self::Store(StoreAuthority::new(store, value.clone()))
+            }
             None => Self::Other(kind.clone()),
         })
     }

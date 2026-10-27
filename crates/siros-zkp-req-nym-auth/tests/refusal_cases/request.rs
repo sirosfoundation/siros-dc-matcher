@@ -259,13 +259,33 @@ pub fn cases() -> Vec<Case> {
             Got::Policy(PolicyRule::ClientIdMissing),
         ),
         (
+            "client_id_unprefixed",
+            policy(
+                |r| r["client_id"] = json!("verifier"),
+                Signing::Signed,
+                Channel::Redirect,
+            ),
+            Got::Policy(PolicyRule::ClientId(ClientIdError::Unprefixed)),
+        ),
+        (
             "nonce_missing",
+            policy(
+                |r| {
+                    r.as_object_mut().unwrap().remove("nonce");
+                },
+                Signing::Signed,
+                Channel::Redirect,
+            ),
+            Got::Policy(PolicyRule::NonceMissing),
+        ),
+        (
+            "nonce_malformed",
             policy(
                 |r| r["nonce"] = json!(""),
                 Signing::Signed,
                 Channel::Redirect,
             ),
-            Got::Policy(PolicyRule::NonceMissing),
+            Got::Policy(PolicyRule::NonceMalformed),
         ),
         (
             "response_mode",
