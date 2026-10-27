@@ -8,8 +8,8 @@
 //! This crate implements the same ABI over wasmtime, so the real `.wasm`
 //! binary runs against fixtures in ordinary `cargo test`. It also lets the
 //! same fixtures be replayed against another implementation for differential
-//! testing — see `CONTRIBUTING.md` on how that oracle is obtained, and why it
-//! is never vendored into this repository.
+//! testing — see `CONTRIBUTING.md` on why that oracle is never vendored into
+//! this repository.
 
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
