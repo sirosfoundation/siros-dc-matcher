@@ -9,11 +9,10 @@ ahead of time, and Play Services runs a **matcher** — a WebAssembly module —
 inside the credential-picker process to decide which credentials to offer. The
 wallet app is launched only after the user picks one.
 
-`matcher.wasm` is that module. Its rules come from a **match profile** carried
-in the registered blob rather than compiled in, so which formats and protocols
-a wallet answers is a re-registration rather than a release. The same matching
-code is also exposed over UniFFI, so a wallet can run in-process the decision
-the picker will make out-of-process.
+`matcher.wasm` is that module: the credential picker of the wallet core. It
+runs the presentation component's matching, the matching of the wallet's own
+plan, over the **registration** the wallet writes with `siros-registration`.
+Its rules are code, versioned with the binary.
 
 Released artifacts are on the
 [releases page](https://github.com/sirosfoundation/siros-dc-matcher/releases):
@@ -108,9 +107,9 @@ rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
 make xcframework                           # macOS only
 ```
 
-`make aar` bundles `matcher.wasm` as an asset alongside the native library, so
-a wallet gets the blob's writer and its reader from one dependency at one
-version.
+`make aar` bundles `matcher.wasm` as an asset alongside the native library.
+The picker reads the registration `siros-registration` writes; the FFI's
+`SirosBlobBuilder` writes the v1 blob of `siros-dc-matcher-core`.
 
 Two profile details are load-bearing and easy to undo:
 
@@ -127,9 +126,10 @@ Two profile details are load-bearing and easy to undo:
 | [`android-credman-sys`](crates/android-credman-sys) | `wasm32` | The Credential Manager host imports, one module per host level. [`ABI.md`](crates/android-credman-sys/ABI.md) is the contract and its evidence. |
 | [`android-credman`](crates/android-credman) | any | The host ABI as types: nullability, version gating, set shape. |
 | [`siros-dcql`](crates/siros-dcql) | any | OpenID4VP 1.0 DCQL: claims-path pointers (§7), credential and credential-set queries (§6.1–6.3), selection (§6.4). No I/O, no platform. Published to crates.io. |
-| [`siros-dc-matcher-core`](crates/siros-dc-matcher-core) | any | The credential blob and its CBOR codec, the match profile and its evaluator, protocol dispatch. |
-| [`siros-picker`](crates/siros-picker) | `wasm32-wasip1` | The matcher binary. Ships `matcher.wasm`. |
-| [`siros-dc-matcher-ffi`](crates/siros-dc-matcher-ffi) | UniFFI | Kotlin and Swift surface: build the registration blob, run the same match in-process, and present and verify `zkp_req`. |
+| [`siros-dc-matcher-core`](crates/siros-dc-matcher-core) | any | For the FFI: the v1 credential blob and its CBOR codec, the match profile and its evaluator. |
+| [`siros-registration`](crates/siros-registration) | any | The picker's registration: the projection of the wallet's credentials the wallet writes (feature `wallet`) and the picker reads. |
+| [`siros-picker`](crates/siros-picker) | `wasm32-wasip1` | The credential picker over the presentation component's matching. Ships `matcher.wasm`. |
+| [`siros-dc-matcher-ffi`](crates/siros-dc-matcher-ffi) | UniFFI | Kotlin and Swift surface: build the v1 blob, run the core's match in-process, and present and verify `zkp_req`. |
 | [`siros-picker-testhost`](crates/siros-picker-testhost) | native, dev | A wasmtime host implementing the Credential Manager ABI, so the shipping `.wasm` is testable off-device. |
 | [`siros-zkp-req`](crates/siros-zkp-req) | any | The `zkp_req` protocol layer: the query and its options, the usable pair, the presentation and the `vp_token`, the Verifier's structural checks. |
 | [`siros-zkp-req-nym-auth`](crates/siros-zkp-req-nym-auth) | any | The nym_auth catalogue and its Longfellow and Vega systems: session binding, credential checks, the presenter and verifier around a host's prover. |
@@ -141,21 +141,25 @@ Two profile details are load-bearing and easy to undo:
 [`docs/zkp_req_core.md`](docs/zkp_req_core.md) covers the `zkp_req` crates, their API and the
 prover interface.
 
-## The match profile
+## The registration
 
-Matching rules travel with the registered blob: which protocols to accept,
-which query formats map to which stored formats, how `meta` keys constrain a
-match, and what the wallet can actually produce.
-
-The profile is not a programming language. Its operators are fixed — `eq`,
-`in`, `prefix`, `exists`, `ignore` — with no arithmetic and no user-supplied
-expressions. Anything past that boundary is a matcher release, not a config
-change.
+The wallet registers the projection of its credentials together with
+`matcher.wasm`, and registers again when its credentials, trust store,
+language or transaction metadata change. Per credential it holds the typed
+claims, the card and claim labels in the wallet's language, the issuer facts
+the trust store gave at registration, and the transaction data definitions
+the credential is served by. The picker offers what the wallet's plan offers,
+except where the plan reads what the projection leaves out: the `zkp_req`
+credential tests and seed, the issuer certificates' validity at request time,
+ad-hoc transaction metadata and remote images. The wallet decides those after
+the pick.
 
 ## Privacy note
 
-The registered blob contains claim *values*, not only labels, because the
-matcher evaluates a verifier's DCQL query against them before any UI is shown.
+The registration contains claim *values*, not only labels, because the
+picker evaluates a verifier's DCQL query against them before any UI is shown.
+It holds no delivered or derived secret and no nym_auth undisclosable
+attribute.
 This is inherent to how the Credential Manager registry works and is equally
 true of the stock matcher. It is recorded here so that it is understood up
 front rather than rediscovered later as a finding.

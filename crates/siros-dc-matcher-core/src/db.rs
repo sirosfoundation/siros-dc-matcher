@@ -1,29 +1,18 @@
-//! The credential blob: what a wallet registers with the platform.
-//!
-//! This is one half of a contract with a moving other end. The wallet writes
-//! this blob today; a matcher binary that shipped months ago reads it inside
-//! the picker. The two update independently — a wallet updates when the user
-//! updates the app, the matcher when the wallet re-registers — so the format
-//! has to survive both directions of version skew.
-//!
-//! Three decisions follow from that:
+//! The v1 credential blob, which the FFI's `SirosBlobBuilder` writes and its in-process match
+//! reads. Its writer and its reader update independently, so the format survives version skew
+//! both ways:
 //!
 //! - **Everything is versioned.** [`CredentialDatabase::version`] is checked
 //!   before anything else is trusted.
-//! - **Unknown fields are ignored, never rejected.** A newer wallet must not
-//!   break an older matcher; the matcher simply does not act on what it cannot
-//!   see.
+//! - **Unknown fields are ignored, never rejected.** A newer writer must not
+//!   break an older reader, which does not act on what it cannot see.
 //! - **Text keys, not integer keys.** Integer keys would be smaller, but the
 //!   blob's size is dominated by claim values and icons, and being able to
 //!   `cbor-diag` a blob recovered from a device is worth more than the bytes.
 //!
 //! # Why claim values are in here
 //!
-//! The matcher has to evaluate a verifier's DCQL query — including its
-//! `values` filters — before any UI is shown, so the values have to be present
-//! before the user has agreed to anything. This is inherent to how the
-//! platform's registry works and is equally true of the stock matcher. It is
-//! stated plainly in the README rather than left to be rediscovered.
+//! The match evaluates a verifier's DCQL query, its `values` filters included.
 
 use serde::{Deserialize, Serialize};
 use siros_dcql::{CredentialFormat, CredentialRef};
@@ -193,8 +182,6 @@ impl CredentialDatabase {
     ///
     /// [`DecodeError`]: bytes that are no database, or a blob from a future wallet
     /// ([`DecodeError::UnsupportedVersion`]).
-    /// Both are ordinary conditions in the picker, not exceptional ones: the
-    /// matcher reports no entries and the user sees no wallet.
     pub fn from_cbor(bytes: &[u8]) -> Result<Self, DecodeError> {
         let db: Self = ciborium::from_reader(bytes).map_err(|error| match error {
             // The reader is the byte slice, whose only failure is its end.
@@ -212,9 +199,7 @@ impl CredentialDatabase {
     /// The icon bytes for a credential, if it has one and the reference is
     /// within bounds.
     ///
-    /// Returns `None` rather than panicking on a bad reference. A blob can
-    /// arrive truncated or hand-edited, and an out-of-range icon should cost
-    /// that credential its picture, not the whole picker its entries.
+    /// `None` for a reference outside the icon buffer: it costs that credential its picture.
     pub fn icon_bytes(&self, credential: &Credential) -> Option<&[u8]> {
         let r = credential.icon?;
         let start = r.start as usize;

@@ -1,10 +1,8 @@
 //! A canonical test wallet.
 //!
-//! Three test suites need "a wallet holding one mdoc driving licence, able to
-//! prove in ZK or not": the profile evaluator's, the FFI's, and the test
-//! host's, which drives the real `matcher.wasm`. Written three times they
-//! drift, and a fixture that drifts silently changes what its assertions mean
-//! — the same argument that put [`crate::evaluator::resolve`] in one place.
+//! Two test suites need "a wallet holding one mdoc driving licence, able to
+//! prove in ZK or not": the profile evaluator's and the FFI's. Written twice they
+//! drift, and a fixture that drifts silently changes what its assertions mean.
 //!
 //! Behind the `test-fixtures` feature so it is a dev-time facility, not part
 //! of the shipped surface.

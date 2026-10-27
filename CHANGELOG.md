@@ -24,6 +24,20 @@ against the 307,200-byte budget (303,418 at v0.11.0).
 - The matcher crate `siros-dc-matcher-wasm` is `siros-picker`, and its test host
   `siros-dc-matcher-testhost` is `siros-picker-testhost`. `make matcher` builds `matcher.wasm`
   as before.
+- **BREAKING (matcher):** `matcher.wasm` is the credential picker of the wallet core (K1 to
+  K4). It reads the registration siros-registration writes, parses the request into
+  `UnverifiedRequest`, and runs the presentation component's matching over it: the matching of
+  the wallet's plan, issuers admitted by the TR5 facts at the time of registration, and the
+  transaction data selection over the projected definitions, with the K2 exceptions. A wallet
+  registers the projection in place of the v1 blob, which the picker no longer reads. Each
+  offer is the set `siros-{offer}`, an entry's `cred_id` is the `credentialId`, and the
+  standard object's `data` is the pick `{"offer", "query", "credential"}` that
+  `Planned::picked` maps to the wallet's selection. An entry's fields are its claim rows, then
+  the displayed claims of the transaction it takes. A credential that takes an entry of a
+  payment rulebook (the EC TS12 v1.0.1 payment type, PaSO Payment) is a payment entry: payee,
+  amount, and at host level 3 the `additional_info`. At host level 7 each entry carries its
+  offer's delegation: `Full` for an offer that needs no wallet display (A9), else none. The
+  picker reads no calling app origin. `mso_mdoc_zk` matches nothing.
 - **BREAKING (request):** a query's options are its `_req_sets`, arrays of `_req` indexes;
   without `_req_sets`, `_req` is the one option (`zkp_req`, Section 2.1). `return` is optional
   except on `pseudonym`. `vp_formats_supported.zkp_req` requires both `proof_backend_values`
@@ -45,14 +59,14 @@ against the 307,200-byte budget (303,418 at v0.11.0).
 - The matcher calls the host through the new `android-credman-sys` and
   `android-credman` crates (MIT OR Apache-2.0, from
   APTITUDE-Consortium/dcapi-matcher). `crates/android-credman-sys/ABI.md`
-  documents the host ABI.
+  documents the host ABI. `Picked::parse` reads the standard object of the entry the host
+  returns, and `SetEntry::shown` whether the host shows an entry whole (`Shown`).
 - Below host level 2 the matcher emits nothing; it used to call the
   `credman_v2` functions regardless.
 - On level 2 and above, the matcher emits nothing when the host's inputs are
-  malformed: a calling-app origin without a terminating NUL or with invalid
-  UTF-8, a read that reports more bytes than it wrote, or a request or blob
-  size it cannot allocate. It used to emit entries from such inputs, or to
-  trap on the sizes. A debug build emits one entry that names the fault.
+  malformed: a read that reports more bytes than it wrote, or a request or
+  registration size it cannot allocate. It used to emit entries from such
+  inputs, or to trap on the sizes.
 - The registered blob is read until complete; a short
   `ReadCredentialsBuffer` read used to leave its tail zeroed.
 - `siros-dc-matcher-core`'s unused `sink` module is removed.
@@ -155,7 +169,11 @@ against the 307,200-byte budget (303,418 at v0.11.0).
   the `RegisteredClaim` and the `CborTag` it refuses. `least_used` chooses the instance of a
   batch (C5). With the feature `chain`, a credential parses with its issuer chain (TR2): the
   mdoc's `x5chain`, or the issuer JWT's `x5c`; a chain that does not parse is
-  `CredentialError::IssuerChain`, and `Credential::issuer_chain` gives it.
+  `CredentialError::IssuerChain`, and `Credential::issuer_chain` gives it. `ClaimTree` holds a
+  credential's typed claims without its signatures, minus named members, and reads and writes
+  them as CBOR: an mdoc full-date and date-time keep their tags, a JSON number its text, and a
+  withheld array element its position (`TreeError`). `ClaimSource` reads the claims of a
+  `Credential` or a `ClaimTree` by `ClaimPath`. `EntryRef::new` builds an entry reference.
 - `siros-wallet-state`, the decrypted wallet state `S` of the private data container
   (privatedata 3.1, Section 6): `WalletState::parse` reads versions 3 and 4 into its credential
   entries with their `metadata`, each value as its exact text, its presentation records and the
@@ -163,9 +181,9 @@ against the 307,200-byte budget (303,418 at v0.11.0).
   `wallet-frontend` does. A refusal is a `WalletStateError` with its cause: the `JsonTextError`
   of a member of another JSON type (`ArrayFault`, `MetadataFault`, `TypeFault`,
   `PresentationsFault`). `PresentationRecord::new` gives the record the host appends as a
-  `new_presentation` event (H5). `CredentialId::new` is public, for the ids picker entries
-  carry; `IssuerIdentifier::parse` and `ConfigurationId::parse` refuse the empty string
-  (`EmptyIdentifier`).
+  `new_presentation` event (H5). `CredentialId::new`, `BatchId::new` and `InstanceId::new` are
+  public, for the entry references the picker registration carries; `IssuerIdentifier::parse`
+  and `ConfigurationId::parse` refuse the empty string (`EmptyIdentifier`).
 - `siros-display`, display for the wallet core: display metadata, credential cards (`Card`, with
   its `Colour`s and `Logo`), claim rows, purpose lines, and proof statement rows
   (`proof::verified_rows`, each a `DisplayText` label and value held whole). One locale function,
@@ -177,12 +195,20 @@ against the 307,200-byte budget (303,418 at v0.11.0).
   `IssuerIdentifier` and `ConfigurationId`, and gives a credential's issuer metadata
   (`DisplayCache::issuer_metadata`). A `DisplayError` carries its cause: a colour that is no
   numerical colour value of CSS Color Module Level 3 holds its `ColourFault`. Without the default
-  feature `credential` it holds the purpose lines and proof statement rows the matcher links.
+  feature `credential` it holds what the picker links: purpose lines, proof statement rows,
+  `ClaimLabels`, the labels of a credential's claims that `DisplayCache::claim_labels` gives
+  and that give the rows of any `ClaimSource`, and `Field`, a picker field whose name and value
+  are fitted to `FIELD_MAX` (80) characters, its `Extent` known when it is made. Display text
+  refuses the characters of Unicode 16.0's general categories Cc, Cf, Zl, Zp, Co and Cn, from a
+  table of 736 ranges.
 - `siros-oid4vp`, OpenID4VP 1.0 for the wallet core. Without `crypto` it holds the picker's
   request reading (`UnverifiedRequest`, `diagnose`, `NoQuery`, whose `Malformed` holds the
   `QueryError`), `ClientId`, whose parse refuses with a `ClientIdError`, the `Fetch` effect, and
   what transaction data reads of a request (`RequestSignature`, `ResponseMode`,
-  `TransactionDataItem`), and builds with Rust 1.82. With `crypto`: sans-IO intake of redirect
+  `TransactionDataItem`), and builds with Rust 1.82. `UnverifiedRequest` carries the request's
+  `transaction_data` entries, read by the rule intake applies (`TransactionDataItem::list`,
+  `NoQuery::TransactionData`), whether it arrived signed, its Response Mode and the formats of
+  its `verifier_info`. With `crypto`: sans-IO intake of redirect
   requests (by value, `request`, `request_uri` with `get` or `post`) and DC API requests
   (unsigned, signed, multisigned) into a `VerifiedRequest`, with `Fetch` and `Trust` effects for
   the host (a `Fetch` states the most redirects it follows, `Fetch::redirects`); the Client
@@ -277,7 +303,17 @@ against the 307,200-byte budget (303,418 at v0.11.0).
     it loads nothing else. Under a TS12 rulebook an image that does not verify is left out
     (`TransactionView::absent_images`). Every reason an entry does not serve a credential is an
     `Incompatibility`. A PaSO-sourced definition needs a signed request; a TS12 type in an unsigned
-    request carries `UnsignedWarning::Required`.
+    request carries `UnsignedWarning::Required`. An SVG document's width and height are exact in
+    decimal.
+  - The picker's side, without `wallet`: `Selector::first_match_unverified` runs the first match
+    over the projected definitions, and gives `Selection::Deferred` with its `Deferral` for an
+    entry the credential could take only through an ad-hoc metadata JWT or a remote image (K2).
+    A `Selector` reads image bodies from its `Resources`: the wallet's `Fetched`, or `Unfetched`,
+    which has none and links no fetch, integrity check or SHA-2. `ServedTypes` records per
+    credential the definition each type is served by, or why it is not (`Unserved`).
+    `Taken::payment` gives the payee and amount of a payment rulebook's entry (`Payment`).
+    `grapheme_clusters` counts UAX #29 clusters over a table of 1,117 runs of Unicode 16.0;
+    unicode-segmentation is the oracle of a test.
   - `Binding::kb_jwt_claims` gives the KB-JWT claims of the entry a credential binds:
     `transaction_data_hashes` over the entry as received, `transaction_data_hashes_alg` when
     the entry carried it, and under a TS12 rulebook `jti`, `response_mode` and `amr`.
@@ -321,7 +357,8 @@ against the 307,200-byte budget (303,418 at v0.11.0).
     `Admission::of` admits from them alone, with the rule of TR3 (`QueryAuthorities::admit` over
     an `Issuer`).
   - Without the feature `chain` the crate holds the rule, the authorities and the facts, builds
-    with Rust 1.82, and links no X.509 or ECDSA code.
+    with Rust 1.82, and links no X.509 or ECDSA code. `StoreType::named` reads a store entry's
+    `type`.
 - `siros-zkp-req`, the `zkp_req` protocol layer. `ZkpReqQuery::parse` reads a DCQL
   `CredentialQuery`, its `format`, `meta` and the extension members `_req` and `_req_sets`, and
   takes `id`, `multiple` and `require_cryptographic_holder_binding` from it; a `RequestRule`
@@ -352,7 +389,9 @@ against the 307,200-byte budget (303,418 at v0.11.0).
     the device key signs, and proves with its `Es256Signature`; only `Prepared::job` builds a
     `ProofJob`. `NymAuthRequest` (feature `request`) is the nym_auth request of a verified
     request, with the session of its `Handover`: signed by a Request Object or under
-    `openid4vp-v1-signed`, trusted, encrypted, and without a registration certificate. Its
+    `openid4vp-v1-signed`, trusted, encrypted, and without a registration certificate:
+    `policy::signed_and_encrypted` checks these rules on a `PolicyRequest`, a `VerifiedRequest`
+    or, in the picker, an `UnverifiedRequest`, whose trust the wallet checks after the pick. Its
     `verifier_id` takes the `VerifierIdForm` of the trust framework: `semantic_id:` and the
     access certificate's semantics identifier, or `x509_san_dns:` and the Client Identifier
     (`VerifierId::semantic`, `VerifierId::x509_san_dns`); a certificate without one is refused
@@ -416,7 +455,11 @@ against the 307,200-byte budget (303,418 at v0.11.0).
     `QueryId`), and so are A9's facts. `Fetches` is the one store of the host's responses, and a
     second answer to a URL is refused. Without the default feature `wallet` it holds the
     matching the picker runs, over `MatchCredential`, links no chain validation or response
-    crypto, and builds with Rust 1.82.
+    crypto, and builds with Rust 1.82: `Asked::of` takes an `UnverifiedRequest` or a
+    `VerifiedRequest` (`MatchRequest`), `Transactions` selects transaction data over a
+    `TransactionSource` and gives the offers or why there are none (`NoOffer`), and `Pick` is
+    what a picker entry carries (K3). The feature `test-fixtures` holds the wallet, verifier,
+    host and PaSO fixtures (`testing`).
 - The `proving/` workspace: `siros-zkp-backend-longfellow` and `siros-zkp-backend-vega`
   implement the prover and verifier of each system over zk-cred-longfellow and zk-cred-vega,
   and check the circuit artifact the host fetched against its pin. CI runs real proofs of both
@@ -445,6 +488,21 @@ against the 307,200-byte budget (303,418 at v0.11.0).
   and `docs/zkp_req_response.md` follow the draft.
 - `scripts/vectors_digest.sh --digest` gives the vector set digest stated under Changed. The
   capability vectors (`circuit_capabilities/match.json`) are unchanged.
+- `siros-registration`, the registration the wallet writes for the picker (K1, TR5), format
+  version 2 in CBOR. Per credential it holds the entry reference, format and type, holder-key
+  presence, the typed claim tree without nym_auth's undisclosable attributes, the card and the
+  claim labels in the wallet's language, whether the wallet presents it without its UI, the
+  TR5 facts, the icon, and for each transaction data type the projected definition that serves
+  it or why none does; each definition and icon is stored once. It also holds the system ids
+  the wallet proves, the time of registration and the diagnostics flag. `Registration::read`
+  refuses another version and every unexpected member, with a `RegistrationError` or the
+  credential's `CredentialFault`. The writer (`write`, feature `wallet`) takes the parsed
+  credentials, the presentation records, the display cache and language, the held transaction
+  metadata and the configuration, the trust store, the systems, the credentials presented
+  without the wallet's UI, the icons and the time. `Unverified` is the picker's transaction
+  data source. It builds with Rust 1.82.
+- `scripts/gen_unicode_tables.py` writes the refused-character ranges of siros-display and the
+  grapheme break runs of siros-transaction-data from their oracles' tables.
 - `scripts/check_matcher_abi.py` checks each import of `matcher.wasm`, with
   its signature, against the ABI table, and the `_start` and `memory`
   exports. CI and the release job run it.

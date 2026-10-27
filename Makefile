@@ -129,10 +129,9 @@ aar: android
 	cp $(BUILD_DIR)/x86_64-linux-android/release/$(LIB_NAME).so $(AAR_DIR)/jni/x86_64/
 	@printf '%s' '<?xml version="1.0" encoding="utf-8"?><manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.siros.dcmatcher"/>' \
 		> $(AAR_DIR)/AndroidManifest.xml
-	# The matcher itself ships inside the AAR as an asset, so a wallet gets the
-	# binary and the blob encoder from one dependency at one version. Shipping
-	# them separately invites the pairing that silently matches nothing: a
-	# CBOR-writing encoder and a matcher that predates it.
+	# The matcher ships inside the AAR as an asset, so a wallet gets it and the
+	# native library from one dependency at one version. The picker reads the
+	# registration of siros-registration; the FFI writes the v1 blob.
 	@mkdir -p $(AAR_DIR)/assets
 	$(MAKE) matcher
 	cp $(BUILD_DIR)/wasm32-wasip1/wasm-release/matcher.wasm $(AAR_DIR)/assets/

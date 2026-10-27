@@ -462,12 +462,7 @@ pub fn credentials(db: &CredentialDatabase) -> Vec<BlobCredential<'_>> {
         .collect()
 }
 
-/// What a caller needs about one matched credential, beyond its identity.
-///
-/// Shared because two consumers derive it: the matcher binary, which puts it in
-/// picker metadata, and the FFI, which hands it to a wallet. Deriving it twice
-/// is how the two would come to disagree about which ZK system satisfied a
-/// query — the drift this crate exists to stop.
+/// What the FFI hands a wallet about one matched credential, beyond its identity.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Resolved<'a> {
     /// Exactly the claims to disclose, as path components.

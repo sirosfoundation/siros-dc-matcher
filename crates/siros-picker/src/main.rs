@@ -75,8 +75,7 @@ fn main() {
     run(&input, &mut sets);
 }
 
-/// Off the wasm target there is no host. The binary still builds there so
-/// that its decision path is unit tested through [`run`].
+/// Off the wasm target there is no host: the test host runs the built module.
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {}
 

@@ -156,11 +156,9 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      # The AAR carries both the native encoder and matcher.wasm, so a wallet
-      # gets the blob writer and the blob reader from one dependency at one
-      # version. Shipping them apart is how a CBOR-writing encoder ends up
-      # paired with a matcher that predates it, matching nothing and saying
-      # nothing.
+      # The AAR carries both the native library and matcher.wasm, at one
+      # version. The picker reads the registration of siros-registration; the
+      # FFI writes the v1 blob.
       - run: make aar pom
 
       - name: Publish to GitHub Packages

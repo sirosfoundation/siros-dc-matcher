@@ -209,13 +209,13 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
       # siros-dcql is on crates.io, so its `rust-version` is a promise to
-      # people outside this repository. -core and siros-picker inherit the same floor
-      # because they are what runs inside the credential picker, where the
+      # people outside this repository. siros-picker and siros-registration inherit the same
+      # floor because they are what runs inside the credential picker, where the
       # toolchain is whatever the wallet's build uses, not ours.
       #
       # The zkp_req crates are in the matcher, so they hold the same floor.
       # The wallet core crates hold it too: the picker links the presentation component and
-      # what it builds on.
+      # what it builds on. -core holds it for the FFI.
       #
       # siros-oid4vp holds it without `crypto`, the part the matcher links;
       # `crypto` builds with the pinned toolchain. siros-presentation holds it
@@ -233,7 +233,7 @@ jobs:
             -p android-credman-sys -p android-credman \
             -p siros-zkp-req -p siros-zkp-req-nym-auth -p siros-sdjwt -p siros-mdoc \
             -p siros-wallet-state -p siros-credential -p siros-display -p siros-transaction-data \
-            -p siros-trust
+            -p siros-trust -p siros-registration
           cargo check --locked -p siros-oid4vp
           cargo check --locked -p siros-trust
           cargo check --locked -p siros-presentation --no-default-features

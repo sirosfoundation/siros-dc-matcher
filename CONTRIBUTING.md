@@ -58,8 +58,7 @@ carried over line by line, or comments.
 Every non-obvious matching rule carries a doc comment naming the section it
 comes from — `OpenID4VP 1.0 §6.4.2`, `ISO/IEC 18013-7`, `W3C Digital
 Credentials API`. A rule you cannot cite is a rule you should not be writing
-yet: either it belongs to the configurable match profile rather than the engine,
-or you have not finished reading.
+yet: you have not finished reading.
 
 Reviewers: treat an uncited behavioural rule as a review comment, and a
 structural resemblance to the oracle as a blocker.
@@ -83,12 +82,18 @@ do not work around it.
 Two floors are checked separately, because they differ on purpose:
 
 ```sh
-# Everything that ships inside the credential picker holds Rust 1.82.
+# Everything that ships inside the credential picker holds Rust 1.82: the msrv job of
+# .github/workflows/ci.yml lists the crates.
 cargo +1.82 check --locked --all-features \
-  -p siros-dcql -p siros-dc-matcher-core -p siros-picker \
-  -p siros-zkp-req -p siros-zkp-req-nym-auth -p siros-trust
+  -p siros-codec -p siros-dcql -p siros-dc-matcher-core -p siros-picker \
+  -p android-credman-sys -p android-credman \
+  -p siros-zkp-req -p siros-zkp-req-nym-auth -p siros-sdjwt -p siros-mdoc \
+  -p siros-wallet-state -p siros-credential -p siros-display -p siros-transaction-data \
+  -p siros-trust -p siros-registration
 cargo +1.82 check --locked -p siros-oid4vp
 cargo +1.82 check --locked -p siros-trust
+cargo +1.82 check --locked -p siros-presentation --no-default-features
+cargo +1.82 check --locked -p siros-transaction-data --no-default-features
 
 # siros-dcql's public API against the version it declares.
 # Unlike fmt and clippy this is not part of the toolchain:

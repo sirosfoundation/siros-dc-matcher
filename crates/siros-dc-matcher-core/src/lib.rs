@@ -1,10 +1,6 @@
-//! The parts of the matcher that are not the DCQL engine and not the WASM
-//! binary: the credential blob we register with the platform, and the match
-//! profile that makes the rules configurable.
-//!
-//! # Status
-//!
-//! Phase 0 scaffolding. See the repository's `docs/plan.md`.
+//! The FFI's matching: the v1 credential blob, the match profile that configures its rules,
+//! and their evaluator. The credential picker, `matcher.wasm`, reads the registration of
+//! siros-registration and runs the presentation component's matching.
 
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
