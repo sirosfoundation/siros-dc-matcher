@@ -18,3 +18,6 @@ android-credman = { workspace = true }
 siros-dc-matcher-core = { workspace = true }
 siros-dcql = { workspace = true }
 serde_json = { workspace = true }
+
+[dev-dependencies]
+siros-dc-matcher-core = { workspace = true, features = ["test-fixtures"] }
