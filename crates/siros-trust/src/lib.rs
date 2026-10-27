@@ -53,7 +53,10 @@ mod store;
 #[cfg(feature = "chain")]
 pub use admitted::{AdmittedIssuer, ChainRefusal};
 #[cfg(feature = "chain")]
-pub use certificate::{Certificate, CertificateError, CertificateRole, IssuanceRefusal};
+pub use certificate::{
+    AuthorityKeyIdentifierFault, Certificate, CertificateError, CertificateRole, IssuanceRefusal,
+    NameField, PublicKeyFault, ValidityTime,
+};
 #[cfg(feature = "chain")]
 pub use chain::{ChainError, IssuerChain};
 #[cfg(feature = "chain")]
@@ -61,4 +64,4 @@ pub use path::{OnPath, PathRefusal};
 #[cfg(feature = "chain")]
 pub use position::{CertificateIndex, ChainIndex, EntryIndex};
 #[cfg(feature = "chain")]
-pub use store::{EntryError, StoreEntry, StoreError, TrustStore};
+pub use store::{EntryError, MemberFault, StoreEntry, StoreError, TrustStore};

@@ -2,6 +2,7 @@
 
 use siros_trust::CertificateError;
 use siros_zkp_req_nym_auth::attestation::DocumentSignerError;
+use x509_cert::der::Decode;
 
 use super::Case;
 use crate::*;
@@ -181,7 +182,9 @@ pub fn cases() -> Vec<Case> {
                 })
             }),
             Got::Verify(Rejection::IssuerKeySet(IssuerKeySetError::Certificate(
-                DocumentSignerError::Certificate(CertificateError::Der),
+                DocumentSignerError::Certificate(CertificateError::Der(
+                    x509_cert::Certificate::from_der(&[0x30, 0x00]).unwrap_err(),
+                )),
             ))),
         ),
         (

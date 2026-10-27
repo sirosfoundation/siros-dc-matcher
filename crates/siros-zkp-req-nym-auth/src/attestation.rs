@@ -33,7 +33,7 @@ pub enum KeyError {
 }
 
 /// Why bytes are no Document Signer certificate.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DocumentSignerError {
     /// The certificate does not parse.
     Certificate(CertificateError),
@@ -109,7 +109,7 @@ impl Credential {
 }
 
 /// Why a credential cannot be read in the nym_auth form: `credential_form`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Unreadable {
     /// The mdoc.
     Form(FormError),

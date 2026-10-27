@@ -16,7 +16,7 @@ pub struct IssuerChain {
 }
 
 /// Why certificates are no issuer chain.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChainError {
     /// The chain holds no certificate.
     Empty,
@@ -51,7 +51,14 @@ impl fmt::Display for ChainError {
     }
 }
 
-impl std::error::Error for ChainError {}
+impl std::error::Error for ChainError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Empty => None,
+            Self::Certificate { error, .. } => Some(error),
+        }
+    }
+}
 
 impl IssuerChain {
     /// The chain of the DER certificates `certificates`, the signer's first.

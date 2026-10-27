@@ -68,7 +68,7 @@ pub enum ClaimFault {
 }
 
 /// Why a wallet state entry is no credential the core reads.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CredentialError {
     /// `format` is none of `dc+sd-jwt`, `vc+sd-jwt` and `mso_mdoc`.
     UnsupportedFormat,

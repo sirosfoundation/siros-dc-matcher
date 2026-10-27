@@ -149,6 +149,21 @@ against the 307,200-byte budget (303,914 before).
   `ResultsFault`, `IssuerKeySetError::Expired`), `VerifyInput::now` is a `DateTime`, and
   `Tolerance::seconds(future, past)` replaces its public fields. `MAX_ZK_PROOF` moves to
   `system`, with `NymAuthSystem::admits_zk_proof`.
+- **BREAKING (Rust API):** `siros-sdjwt` gives every `ParseError` its cause:
+  `IssuerJwtFault`, `DisclosureFault` with the disclosure's `DisclosureId`, `SdAlgFault`,
+  `ReservedFault`, the repeated `Digest`, the misplaced disclosure with its `Placement`, the
+  existing claim name, the unreferenced disclosure, and `X5cError` with the certificate's
+  `X5cIndex`. The JSON reader reports a `JsonFault`. `KeyBindingError` is `RequiredClaim` or
+  `RepeatedClaim` with the name. `Presentation::key_binding` takes a `NumericDate`, an
+  `Audience` and `siros-oid4vp`'s `Nonce`, and `KeyBinding::assemble` an `Es256Signature`.
+  Codes are unchanged.
+- **BREAKING (Rust API):** `siros-trust` errors carry their causes: `CertificateError::Der`,
+  `Name` and `BasicConstraints` hold the `der::Error`; `Validity` names the time, `PublicKey` a
+  `PublicKeyFault`, `ExtensionRepeated` the extension's identifier, and
+  `AuthorityKeyIdentifier` an `AuthorityKeyIdentifierFault`. `EntryError` names the unknown
+  member and type and gives a `MemberFault`. `IssuanceRefusal` and `PathRefusal` gain
+  `IssuerKey` and `SignatureEncoding`. Codes are unchanged; errors that hold a `der::Error`
+  lose `Hash`.
 - **BREAKING (FFI):** `zkp_req_verify` refuses a clock outside the years 0000 to 9999 and a
   negative tolerance as host errors (`now_out_of_range`, `tolerance_out_of_range`), and
   `zkp_req_vp_token_json` and `zkp_req_vp_token_cbor` refuse a query id outside §6.1.

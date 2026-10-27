@@ -106,7 +106,7 @@ pub enum ResultsFault {
 }
 
 /// Why `issuer_key_set` is refused.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IssuerKeySetError {
     /// It holds this many certificates, where the systems take one.
     Count(usize),

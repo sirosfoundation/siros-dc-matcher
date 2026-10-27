@@ -2,7 +2,11 @@
 
 use serde_json::json;
 use siros_codec::Base64Error;
-use siros_trust::{CertificateError, CertificateIndex, EntryError, StoreError, TrustStore};
+use siros_dcql::AuthorityType;
+use siros_trust::{
+    CertificateError, CertificateIndex, EntryError, MemberFault, StoreError, TrustStore,
+};
+use x509_cert::der::Decode;
 
 use crate::support::{base64, record, Cert, Key};
 
@@ -56,27 +60,27 @@ fn each_rule_of_tr1() {
         (
             "an unknown member",
             entry(&|e| e["status"] = json!("granted")),
-            Verdict::Entry(0, EntryError::UnknownMember),
+            Verdict::Entry(0, EntryError::UnknownMember("status".to_owned())),
         ),
         (
             "no string type",
             entry(&|e| e["type"] = json!(1)),
-            Verdict::Entry(0, EntryError::Type),
+            Verdict::Entry(0, EntryError::Type(MemberFault::WrongType)),
         ),
         (
             "an unknown type",
             entry(&|e| e["type"] = json!("aki")),
-            Verdict::Entry(0, EntryError::UnknownType),
+            Verdict::Entry(0, EntryError::UnknownType(AuthorityType::new("aki"))),
         ),
         (
             "no string value",
             entry(&|e| e["value"] = json!(["https://tl.example/eu"])),
-            Verdict::Entry(0, EntryError::Value),
+            Verdict::Entry(0, EntryError::Value(MemberFault::WrongType)),
         ),
         (
             "no certificate",
             entry(&|e| e["certificates"] = json!([])),
-            Verdict::Entry(0, EntryError::Certificates),
+            Verdict::Entry(0, EntryError::Certificates(MemberFault::Empty)),
         ),
         (
             "a certificate that is not a string",
@@ -101,7 +105,9 @@ fn each_rule_of_tr1() {
                 0,
                 EntryError::Certificate {
                     certificate: first,
-                    error: CertificateError::Der,
+                    error: CertificateError::Der(
+                        x509_cert::Certificate::from_der(b"not a certificate").unwrap_err(),
+                    ),
                 },
             ),
         ),

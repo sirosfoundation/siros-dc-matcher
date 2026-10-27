@@ -11,7 +11,7 @@ use x509_cert::ext::pkix::{AuthorityKeyIdentifier, BasicConstraints};
 use x509_cert::spki::AlgorithmIdentifierOwned;
 use x509_cert::time::Time;
 
-use crate::authority::KeyIdentifier;
+use crate::authority::{KeyIdentifier, KeyIdentifierError};
 
 /// `id-ecPublicKey` (RFC 5480).
 const EC_PUBLIC_KEY: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.2.1");
@@ -76,28 +76,66 @@ pub enum CertificateRole {
     EndEntity,
 }
 
-/// Why bytes are no certificate issuer trust reads.
+/// A time of a certificate's validity period (RFC 5280, Section 4.1.2.5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ValidityTime {
+    /// `notBefore`.
+    NotBefore,
+    /// `notAfter`.
+    NotAfter,
+}
+
+/// A name of a certificate (RFC 5280, Section 4.1.2.4 and 4.1.2.6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum NameField {
+    /// `issuer`.
+    Issuer,
+    /// `subject`.
+    Subject,
+}
+
+/// Why a subject key declared on P-256 or P-384 is no key of its curve.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PublicKeyFault {
+    /// `subjectPublicKey` is a BIT STRING of a partial byte.
+    Bits,
+    /// The bytes are no SEC 1 point of P-256.
+    P256,
+    /// The bytes are no SEC 1 point of P-384.
+    P384,
+}
+
+/// Why the AuthorityKeyIdentifier extension gives no keyIdentifier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthorityKeyIdentifierFault {
+    /// The extension does not decode.
+    Der(der::Error),
+    /// The keyIdentifier is no keyIdentifier.
+    KeyIdentifier(KeyIdentifierError),
+}
+
+/// Why bytes are no certificate issuer trust reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CertificateError {
     /// The bytes are not one DER X.509 certificate.
-    Der,
+    Der(der::Error),
     /// `signatureAlgorithm` differs from the `signature` field of `tbsCertificate` (RFC 5280,
     /// Section 4.1.1.2).
     AlgorithmMismatch,
     /// The signature is not a BIT STRING of whole bytes.
     Signature,
-    /// The issuer or subject name does not encode.
-    Name,
-    /// A time of the validity period lies outside 0000 to 9999.
-    Validity,
-    /// The subject's key is declared P-256 or P-384 and is no point of that curve.
-    PublicKey,
-    /// The certificate holds an extension twice (RFC 5280, Section 4.2).
-    ExtensionRepeated,
+    /// This name does not encode.
+    Name(NameField, der::Error),
+    /// This time of the validity period lies outside 0000 to 9999.
+    Validity(ValidityTime),
+    /// The subject's key is declared P-256 or P-384 and is no key of that curve.
+    PublicKey(PublicKeyFault),
+    /// The certificate holds the extension of this identifier twice (RFC 5280, Section 4.2).
+    ExtensionRepeated(ObjectIdentifier),
     /// basicConstraints does not decode.
-    BasicConstraints,
-    /// The AuthorityKeyIdentifier does not decode, or its keyIdentifier is empty.
-    AuthorityKeyIdentifier,
+    BasicConstraints(der::Error),
+    /// The AuthorityKeyIdentifier extension gives no keyIdentifier.
+    AuthorityKeyIdentifier(AuthorityKeyIdentifierFault),
 }
 
 impl CertificateError {
@@ -105,15 +143,15 @@ impl CertificateError {
     #[must_use]
     pub fn code(self) -> &'static str {
         match self {
-            Self::Der => "certificate_der",
+            Self::Der(_) => "certificate_der",
             Self::AlgorithmMismatch => "certificate_algorithm_mismatch",
             Self::Signature => "certificate_signature",
-            Self::Name => "certificate_name",
-            Self::Validity => "certificate_validity",
-            Self::PublicKey => "certificate_public_key",
-            Self::ExtensionRepeated => "certificate_extension_repeated",
-            Self::BasicConstraints => "certificate_basic_constraints",
-            Self::AuthorityKeyIdentifier => "certificate_authority_key_identifier",
+            Self::Name(..) => "certificate_name",
+            Self::Validity(_) => "certificate_validity",
+            Self::PublicKey(_) => "certificate_public_key",
+            Self::ExtensionRepeated(_) => "certificate_extension_repeated",
+            Self::BasicConstraints(_) => "certificate_basic_constraints",
+            Self::AuthorityKeyIdentifier(_) => "certificate_authority_key_identifier",
         }
     }
 }
@@ -124,16 +162,36 @@ impl fmt::Display for CertificateError {
     }
 }
 
-impl std::error::Error for CertificateError {}
+impl std::error::Error for CertificateError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Der(e)
+            | Self::Name(_, e)
+            | Self::BasicConstraints(e)
+            | Self::AuthorityKeyIdentifier(AuthorityKeyIdentifierFault::Der(e)) => Some(e),
+            Self::AuthorityKeyIdentifier(AuthorityKeyIdentifierFault::KeyIdentifier(e)) => Some(e),
+            Self::AlgorithmMismatch
+            | Self::Signature
+            | Self::Validity(_)
+            | Self::PublicKey(_)
+            | Self::ExtensionRepeated(_) => None,
+        }
+    }
+}
 
 /// Why a certificate is not issued by another.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum IssuanceRefusal {
     /// The certificate names another issuer than the other's subject.
     IssuerName,
-    /// The signature algorithm with the issuer's key is neither ECDSA P-256 with SHA-256 nor
-    /// P-384 with SHA-384.
+    /// The certificate's signature algorithm is neither `ecdsa-with-SHA256` nor
+    /// `ecdsa-with-SHA384` without parameters.
     Algorithm,
+    /// The issuer's key is of another type or curve than the signature algorithm takes: P-256
+    /// for SHA-256, P-384 for SHA-384.
+    IssuerKey,
+    /// The signature is no DER `ECDSA-Sig-Value` of the issuer's curve.
+    SignatureEncoding,
     /// The signature does not verify under the issuer's key.
     Signature,
 }
@@ -145,6 +203,8 @@ impl IssuanceRefusal {
         match self {
             Self::IssuerName => "issuer_name",
             Self::Algorithm => "signature_algorithm",
+            Self::IssuerKey => "signature_issuer_key",
+            Self::SignatureEncoding => "signature_encoding",
             Self::Signature => "signature",
         }
     }
@@ -165,30 +225,35 @@ impl Certificate {
     ///
     /// [`CertificateError`]: the first rule the bytes break.
     pub fn parse(der: &[u8]) -> Result<Self, CertificateError> {
-        let certificate =
-            x509_cert::Certificate::from_der(der).map_err(|_| CertificateError::Der)?;
+        let certificate = x509_cert::Certificate::from_der(der).map_err(CertificateError::Der)?;
         let tbs_certificate = &certificate.tbs_certificate;
         if certificate.signature_algorithm != tbs_certificate.signature {
             return Err(CertificateError::AlgorithmMismatch);
         }
-        let extensions = Extensions::read(tbs_certificate.extensions.as_deref().unwrap_or(&[]))?;
-        let name = |name: &x509_cert::name::Name| name.to_der().map_err(|_| CertificateError::Name);
+        let extensions = match &tbs_certificate.extensions {
+            Some(extensions) => Extensions::read(extensions)?,
+            None => Extensions::NONE,
+        };
+        let name = |field: NameField, name: &x509_cert::name::Name| {
+            name.to_der()
+                .map_err(|error| CertificateError::Name(field, error))
+        };
+        let validity = &tbs_certificate.validity;
         Ok(Self {
             der: der.to_vec(),
-            tbs: tbs_certificate
-                .to_der()
-                .map_err(|_| CertificateError::Der)?,
+            tbs: tbs_certificate.to_der().map_err(CertificateError::Der)?,
             signature: certificate
                 .signature
                 .as_bytes()
                 .ok_or(CertificateError::Signature)?
                 .to_vec(),
             algorithm: SignatureAlgorithm::of(&certificate.signature_algorithm),
-            issuer: name(&tbs_certificate.issuer)?,
-            subject: name(&tbs_certificate.subject)?,
-            not_before: time(tbs_certificate.validity.not_before)?,
-            not_after: time(tbs_certificate.validity.not_after)?,
-            key: SubjectKey::read(&tbs_certificate.subject_public_key_info)?,
+            issuer: name(NameField::Issuer, &tbs_certificate.issuer)?,
+            subject: name(NameField::Subject, &tbs_certificate.subject)?,
+            not_before: time(validity.not_before, ValidityTime::NotBefore)?,
+            not_after: time(validity.not_after, ValidityTime::NotAfter)?,
+            key: SubjectKey::read(&tbs_certificate.subject_public_key_info)
+                .map_err(CertificateError::PublicKey)?,
             authority_key_identifier: extensions.authority_key_identifier,
             role: extensions.role,
         })
@@ -245,21 +310,24 @@ impl Certificate {
         if !self.names_as_issuer(issuer) {
             return Err(IssuanceRefusal::IssuerName);
         }
-        let verified = match (self.algorithm, &issuer.key) {
+        match (self.algorithm, &issuer.key) {
+            (SignatureAlgorithm::Other, _) => Err(IssuanceRefusal::Algorithm),
             (SignatureAlgorithm::EcdsaSha256, SubjectKey::P256(key, _)) => {
-                p256::ecdsa::DerSignature::from_bytes(&self.signature)
-                    .is_ok_and(|signature| key.verify(&self.tbs, &signature).is_ok())
+                let signature = p256::ecdsa::DerSignature::from_bytes(&self.signature)
+                    .map_err(|_| IssuanceRefusal::SignatureEncoding)?;
+                key.verify(&self.tbs, &signature)
+                    .map_err(|_| IssuanceRefusal::Signature)
             }
             (SignatureAlgorithm::EcdsaSha384, SubjectKey::P384(key)) => {
-                p384::ecdsa::DerSignature::from_bytes(&self.signature)
-                    .is_ok_and(|signature| key.verify(&self.tbs, &signature).is_ok())
+                let signature = p384::ecdsa::DerSignature::from_bytes(&self.signature)
+                    .map_err(|_| IssuanceRefusal::SignatureEncoding)?;
+                key.verify(&self.tbs, &signature)
+                    .map_err(|_| IssuanceRefusal::Signature)
             }
-            _ => return Err(IssuanceRefusal::Algorithm),
-        };
-        if verified {
-            Ok(())
-        } else {
-            Err(IssuanceRefusal::Signature)
+            (
+                SignatureAlgorithm::EcdsaSha256 | SignatureAlgorithm::EcdsaSha384,
+                SubjectKey::P256(..) | SubjectKey::P384(_) | SubjectKey::Other,
+            ) => Err(IssuanceRefusal::IssuerKey),
         }
     }
 }
@@ -284,7 +352,9 @@ impl SignatureAlgorithm {
 }
 
 impl SubjectKey {
-    fn read(spki: &x509_cert::spki::SubjectPublicKeyInfoOwned) -> Result<Self, CertificateError> {
+    /// The key of `spki`. An `id-ecPublicKey` whose parameters name another curve, or name none
+    /// that decodes, is a key of another type.
+    fn read(spki: &x509_cert::spki::SubjectPublicKeyInfoOwned) -> Result<Self, PublicKeyFault> {
         if spki.algorithm.oid != EC_PUBLIC_KEY {
             return Ok(Self::Other);
         }
@@ -292,20 +362,23 @@ impl SubjectKey {
             .algorithm
             .parameters
             .as_ref()
-            .and_then(|parameters| parameters.decode_as::<ObjectIdentifier>().ok());
-        let point = spki.subject_public_key.as_bytes();
+            .map(|parameters| parameters.decode_as::<ObjectIdentifier>());
+        let point = || {
+            spki.subject_public_key
+                .as_bytes()
+                .ok_or(PublicKeyFault::Bits)
+        };
         match curve {
-            Some(SECP256R1) => point
-                .and_then(|point| {
-                    let key = p256::ecdsa::VerifyingKey::from_sec1_bytes(point).ok()?;
-                    Some(Self::P256(key, point.to_vec()))
-                })
-                .ok_or(CertificateError::PublicKey),
-            Some(SECP384R1) => point
-                .and_then(|point| p384::ecdsa::VerifyingKey::from_sec1_bytes(point).ok())
+            Some(Ok(SECP256R1)) => {
+                let point = point()?;
+                let key = p256::ecdsa::VerifyingKey::from_sec1_bytes(point)
+                    .map_err(|_| PublicKeyFault::P256)?;
+                Ok(Self::P256(key, point.to_vec()))
+            }
+            Some(Ok(SECP384R1)) => p384::ecdsa::VerifyingKey::from_sec1_bytes(point()?)
                 .map(Self::P384)
-                .ok_or(CertificateError::PublicKey),
-            _ => Ok(Self::Other),
+                .map_err(|_| PublicKeyFault::P384),
+            Some(Ok(_) | Err(_)) | None => Ok(Self::Other),
         }
     }
 }
@@ -317,15 +390,21 @@ struct Extensions {
 }
 
 impl Extensions {
+    /// The extensions of a certificate that has none.
+    const NONE: Self = Self {
+        role: CertificateRole::EndEntity,
+        authority_key_identifier: None,
+    };
+
     fn read(extensions: &[x509_cert::ext::Extension]) -> Result<Self, CertificateError> {
-        let repeated = extensions.iter().enumerate().any(|(position, extension)| {
+        let repeated = extensions.iter().enumerate().find(|(position, extension)| {
             extensions
                 .iter()
-                .take(position)
+                .take(*position)
                 .any(|earlier| earlier.extn_id == extension.extn_id)
         });
-        if repeated {
-            return Err(CertificateError::ExtensionRepeated);
+        if let Some((_, extension)) = repeated {
+            return Err(CertificateError::ExtensionRepeated(extension.extn_id));
         }
         let value = |oid: ObjectIdentifier| {
             extensions
@@ -338,20 +417,13 @@ impl Extensions {
             Some(bytes) => match BasicConstraints::from_der(bytes) {
                 Ok(constraints) if constraints.ca => CertificateRole::Ca,
                 Ok(_) => CertificateRole::EndEntity,
-                Err(_) => return Err(CertificateError::BasicConstraints),
+                Err(error) => return Err(CertificateError::BasicConstraints(error)),
             },
         };
         let authority_key_identifier = value(AUTHORITY_KEY_IDENTIFIER)
-            .map(|bytes| {
-                let extension = AuthorityKeyIdentifier::from_der(bytes)
-                    .map_err(|_| CertificateError::AuthorityKeyIdentifier)?;
-                extension
-                    .key_identifier
-                    .map(|key_identifier| KeyIdentifier::new(key_identifier.as_bytes()))
-                    .transpose()
-                    .map_err(|_| CertificateError::AuthorityKeyIdentifier)
-            })
-            .transpose()?
+            .map(authority_key_identifier)
+            .transpose()
+            .map_err(CertificateError::AuthorityKeyIdentifier)?
             .flatten();
         Ok(Self {
             role,
@@ -360,10 +432,22 @@ impl Extensions {
     }
 }
 
-/// `time` as a UTC time.
-fn time(time: Time) -> Result<DateTime, CertificateError> {
-    i64::try_from(time.to_unix_duration().as_secs())
-        .ok()
-        .and_then(DateTime::from_unix)
-        .ok_or(CertificateError::Validity)
+/// The keyIdentifier of the AuthorityKeyIdentifier extension `bytes`; `None` without one.
+fn authority_key_identifier(
+    bytes: &[u8],
+) -> Result<Option<KeyIdentifier>, AuthorityKeyIdentifierFault> {
+    let extension =
+        AuthorityKeyIdentifier::from_der(bytes).map_err(AuthorityKeyIdentifierFault::Der)?;
+    extension
+        .key_identifier
+        .map(|key_identifier| KeyIdentifier::new(key_identifier.as_bytes()))
+        .transpose()
+        .map_err(AuthorityKeyIdentifierFault::KeyIdentifier)
+}
+
+/// `time`, the time `which` of the validity period, as a UTC time of the years 0000 to 9999.
+fn time(time: Time, which: ValidityTime) -> Result<DateTime, CertificateError> {
+    let seconds = i64::try_from(time.to_unix_duration().as_secs())
+        .map_err(|_| CertificateError::Validity(which))?;
+    DateTime::from_unix(seconds).ok_or(CertificateError::Validity(which))
 }

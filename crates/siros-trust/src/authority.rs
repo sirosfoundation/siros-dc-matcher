@@ -131,7 +131,7 @@ pub enum Authority {
     KeyIdentifier(KeyIdentifier),
     /// An `etsi_tl` or `openid_federation` value.
     Store(StoreAuthority),
-    /// A value of another type, which admits nothing (TR3).
+    /// A value of another type, which TR3 refuses for every issuer.
     Other(AuthorityType),
 }
 

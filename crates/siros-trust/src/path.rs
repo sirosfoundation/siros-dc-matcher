@@ -35,9 +35,14 @@ pub enum PathRefusal {
     IssuerName(ChainIndex),
     /// The signer is not a CA: its basicConstraints is absent or its `cA` is FALSE.
     NotCa(OnPath),
-    /// The chain's certificate is signed with another algorithm than ECDSA P-256 with SHA-256
-    /// or P-384 with SHA-384 under its signer's key.
+    /// The chain's certificate is signed with an algorithm other than `ecdsa-with-SHA256` and
+    /// `ecdsa-with-SHA384`.
     Algorithm(ChainIndex),
+    /// The signer's key of the chain's certificate is of another type or curve than its
+    /// signature algorithm takes.
+    IssuerKey(ChainIndex),
+    /// The chain's certificate's signature is no DER `ECDSA-Sig-Value` of its signer's curve.
+    SignatureEncoding(ChainIndex),
     /// The chain's certificate's signature does not verify under its signer's key.
     Signature(ChainIndex),
 }
@@ -51,6 +56,8 @@ impl PathRefusal {
             Self::IssuerName(_) => "path_issuer_name",
             Self::NotCa(_) => "path_signer_not_ca",
             Self::Algorithm(_) => "path_signature_algorithm",
+            Self::IssuerKey(_) => "path_issuer_key",
+            Self::SignatureEncoding(_) => "path_signature_encoding",
             Self::Signature(_) => "path_signature",
         }
     }
@@ -168,6 +175,8 @@ fn link(
         .map_err(|refusal| match refusal {
             IssuanceRefusal::IssuerName => PathRefusal::IssuerName(at),
             IssuanceRefusal::Algorithm => PathRefusal::Algorithm(at),
+            IssuanceRefusal::IssuerKey => PathRefusal::IssuerKey(at),
+            IssuanceRefusal::SignatureEncoding => PathRefusal::SignatureEncoding(at),
             IssuanceRefusal::Signature => PathRefusal::Signature(at),
         })
 }

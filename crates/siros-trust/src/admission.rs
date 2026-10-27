@@ -44,8 +44,7 @@ pub enum Ground {
 /// Why one authority of a query does not admit an issuer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Refusal<R> {
-    /// The authority's `type` is none of `aki`, `etsi_tl` and `openid_federation`: it admits
-    /// nothing.
+    /// The authority's `type` is none of `aki`, `etsi_tl` and `openid_federation`.
     Type(AuthorityType),
     /// The issuer's reason.
     Issuer(R),

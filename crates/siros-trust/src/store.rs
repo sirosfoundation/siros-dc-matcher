@@ -42,21 +42,32 @@ pub enum StoreError {
     Repeated(EntryIndex),
 }
 
-/// Why an entry of a trust store record is refused.
+/// What breaks the rule of a member of a trust store entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MemberFault {
+    /// It is absent.
+    Absent,
+    /// It has another JSON type than its rule gives it.
+    WrongType,
+    /// It is an empty array.
+    Empty,
+}
+
+/// Why an entry of a trust store record is refused.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EntryError {
     /// The entry is not a JSON object.
     NotObject,
-    /// The entry has a member other than `type`, `value` and `certificates`.
-    UnknownMember,
-    /// `type` is missing or not a string.
-    Type,
-    /// `type` is neither `etsi_tl` nor `openid_federation`.
-    UnknownType,
-    /// `value` is missing or not a string.
-    Value,
-    /// `certificates` is missing, not an array, or empty.
-    Certificates,
+    /// The entry has this member, other than `type`, `value` and `certificates`.
+    UnknownMember(String),
+    /// `type` is absent or not a string.
+    Type(MemberFault),
+    /// `type` names this type, other than `etsi_tl` and `openid_federation`.
+    UnknownType(AuthorityType),
+    /// `value` is absent or not a string.
+    Value(MemberFault),
+    /// `certificates` is absent, not an array, or empty.
+    Certificates(MemberFault),
     /// A certificate is not a string.
     CertificateNotString(CertificateIndex),
     /// A certificate is not base64 with padding (the `x5c` encoding, RFC 7515, Section 4.1.6).
@@ -113,14 +124,14 @@ impl std::error::Error for StoreError {
 impl EntryError {
     /// A stable identifier.
     #[must_use]
-    pub fn code(self) -> &'static str {
+    pub fn code(&self) -> &'static str {
         match self {
             Self::NotObject => "trust_store_entry_not_object",
-            Self::UnknownMember => "trust_store_entry_member_unknown",
-            Self::Type => "trust_store_entry_type",
-            Self::UnknownType => "trust_store_entry_type_unknown",
-            Self::Value => "trust_store_entry_value",
-            Self::Certificates => "trust_store_entry_certificates",
+            Self::UnknownMember(_) => "trust_store_entry_member_unknown",
+            Self::Type(_) => "trust_store_entry_type",
+            Self::UnknownType(_) => "trust_store_entry_type_unknown",
+            Self::Value(_) => "trust_store_entry_value",
+            Self::Certificates(_) => "trust_store_entry_certificates",
             Self::CertificateNotString(_) => "trust_store_certificate_not_string",
             Self::Encoding { .. } => "trust_store_certificate_encoding",
             Self::Certificate { error, .. } => error.code(),
@@ -134,7 +145,21 @@ impl fmt::Display for EntryError {
     }
 }
 
-impl std::error::Error for EntryError {}
+impl std::error::Error for EntryError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Encoding { error, .. } => Some(error),
+            Self::Certificate { error, .. } => Some(error),
+            Self::NotObject
+            | Self::UnknownMember(_)
+            | Self::Type(_)
+            | Self::UnknownType(_)
+            | Self::Value(_)
+            | Self::Certificates(_)
+            | Self::CertificateNotString(_) => None,
+        }
+    }
+}
 
 impl TrustStore {
     /// The trust store of the JSON record `record`: an array of entries `{type, value,
@@ -184,18 +209,22 @@ impl TrustStore {
 impl StoreEntry {
     fn parse(entry: &Value) -> Result<Self, EntryError> {
         let entry = entry.as_object().ok_or(EntryError::NotObject)?;
-        if entry
+        if let Some(name) = entry
             .keys()
-            .any(|name| !matches!(name.as_str(), "type" | "value" | "certificates"))
+            .find(|name| !matches!(name.as_str(), "type" | "value" | "certificates"))
         {
-            return Err(EntryError::UnknownMember);
+            return Err(EntryError::UnknownMember(name.clone()));
         }
-        let kind = text(entry, "type").ok_or(EntryError::Type)?;
-        let kind = StoreType::of(&AuthorityType::new(kind)).ok_or(EntryError::UnknownType)?;
-        let value = text(entry, "value").ok_or(EntryError::Value)?;
+        let kind = AuthorityType::new(text(entry, "type").map_err(EntryError::Type)?);
+        let kind = StoreType::of(&kind).ok_or(EntryError::UnknownType(kind))?;
+        let value = text(entry, "value").map_err(EntryError::Value)?;
         let certificates = match entry.get("certificates") {
-            Some(Value::Array(certificates)) if !certificates.is_empty() => certificates,
-            _ => return Err(EntryError::Certificates),
+            None => return Err(EntryError::Certificates(MemberFault::Absent)),
+            Some(Value::Array(certificates)) if certificates.is_empty() => {
+                return Err(EntryError::Certificates(MemberFault::Empty))
+            }
+            Some(Value::Array(certificates)) => certificates,
+            Some(_) => return Err(EntryError::Certificates(MemberFault::WrongType)),
         };
         Ok(Self {
             authority: StoreAuthority::new(kind, AuthorityValue::new(value)),
@@ -223,8 +252,12 @@ impl StoreEntry {
 }
 
 /// The string member `name` of `entry`.
-fn text<'e>(entry: &'e Map<String, Value>, name: &str) -> Option<&'e str> {
-    entry.get(name).and_then(Value::as_str)
+fn text<'e>(entry: &'e Map<String, Value>, name: &str) -> Result<&'e str, MemberFault> {
+    entry
+        .get(name)
+        .ok_or(MemberFault::Absent)?
+        .as_str()
+        .ok_or(MemberFault::WrongType)
 }
 
 /// The certificate at `position` of an entry's `certificates`: base64 with padding of a DER
