@@ -1,7 +1,5 @@
 //! Client Identifiers and their prefixes (OpenID4VP 1.0, Section 5.9).
 
-use std::fmt;
-
 /// A Client Identifier Prefix this wallet supports (OpenID4VP 1.0, Section 5.9.3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ClientIdPrefix {
@@ -49,7 +47,8 @@ impl ClientIdPrefix {
 }
 
 /// Why a `client_id` is not one this wallet supports (Section 5.9).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum ClientIdError {
     /// The `client_id` has no `:`: a pre-registered client.
     Unprefixed,
@@ -76,14 +75,6 @@ impl ClientIdError {
         }
     }
 }
-
-impl fmt::Display for ClientIdError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
-
-impl std::error::Error for ClientIdError {}
 
 /// A `client_id` with a supported prefix and a non-empty value.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
