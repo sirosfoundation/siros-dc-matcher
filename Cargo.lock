@@ -2325,6 +2325,9 @@ checksum = "38b58827f4464d87d377d175e90bf58eb00fd8716ff0a62f80356b5e61555d0d"
 [[package]]
 name = "siros-codec"
 version = "0.11.0"
+dependencies = [
+ "thiserror 2.0.20",
+]
 
 [[package]]
 name = "siros-credential"
@@ -2338,6 +2341,7 @@ dependencies = [
  "siros-mdoc",
  "siros-sdjwt",
  "siros-wallet-state",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -2431,6 +2435,7 @@ dependencies = [
  "rustc-hash",
  "sha2",
  "siros-codec",
+ "thiserror 2.0.20",
  "x509-cert",
 ]
 
@@ -2485,6 +2490,7 @@ dependencies = [
  "sha2",
  "siros-codec",
  "siros-dcql",
+ "thiserror 2.0.20",
 ]
 
 [[package]]

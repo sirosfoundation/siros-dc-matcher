@@ -18,5 +18,6 @@ siros-codec = { workspace = true }
 rustc-hash = { workspace = true }
 sha2 = "0.10.9"
 p256 = { version = "0.13.2", default-features = false, features = ["ecdsa", "alloc"], optional = true }
+thiserror = { workspace = true }
 x509-cert = { version = "0.2.5", default-features = false, features = ["std"], optional = true }
 der = { version = "0.7.10", optional = true }

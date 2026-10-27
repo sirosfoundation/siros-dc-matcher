@@ -9,25 +9,29 @@
 //! The writer emits the core deterministic encoding of RFC 8949, Section 4.2.1: shortest heads,
 //! definite lengths, and map keys sorted by their encoded bytes.
 
-use std::fmt;
-
 /// The deepest nesting the reader accepts.
 pub const MAX_DEPTH: usize = 32;
 
 /// Why bytes are not one CBOR item the reader accepts.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum CborError {
     /// The input ends inside an item.
+    #[error("CBOR item is truncated")]
     Truncated,
     /// Bytes follow the item.
+    #[error("bytes follow the CBOR item")]
     TrailingBytes,
     /// An encoding the reader refuses, named by [`Unsupported`].
+    #[error("unsupported CBOR encoding")]
     Unsupported(Unsupported),
     /// A text string is not UTF-8.
+    #[error("CBOR text is not UTF-8")]
     InvalidUtf8,
     /// A map has the same key twice.
+    #[error("CBOR map repeats a key")]
     DuplicateKey,
     /// Arrays, maps and tags nest deeper than [`MAX_DEPTH`].
+    #[error("CBOR nests too deeply")]
     TooDeep,
 }
 
@@ -58,21 +62,6 @@ impl CborError {
         }
     }
 }
-
-impl fmt::Display for CborError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Truncated => "CBOR item is truncated",
-            Self::TrailingBytes => "bytes follow the CBOR item",
-            Self::Unsupported(_) => "unsupported CBOR encoding",
-            Self::InvalidUtf8 => "CBOR text is not UTF-8",
-            Self::DuplicateKey => "CBOR map repeats a key",
-            Self::TooDeep => "CBOR nests too deeply",
-        })
-    }
-}
-
-impl std::error::Error for CborError {}
 
 /// One decoded item and the bytes it was encoded in.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -1,16 +1,16 @@
 //! The refusals of reading, each with a stable code.
 
-use std::fmt;
-
 use siros_codec::cbor::CborError;
 
 /// Why a stored credential is no mdoc [`Mdoc::parse`](crate::Mdoc::parse) reads.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("mso_mdoc: {}", self.code())]
 pub enum MdocError {
     /// The text is not base64url without padding.
     Encoding,
     /// The bytes are not one CBOR item the strict reader accepts.
-    Cbor(CborError),
+    #[error("mso_mdoc: cbor: {0}")]
+    Cbor(#[source] CborError),
     /// The top level is no `IssuerSigned`, `Document` or one-document `DeviceResponse`.
     Envelope,
     /// `issuerAuth` is not an untagged `COSE_Sign1` with a protected header, a payload and a
@@ -73,14 +73,3 @@ impl MdocError {
         }
     }
 }
-
-impl fmt::Display for MdocError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Cbor(e) => write!(f, "mso_mdoc: cbor: {e}"),
-            _ => write!(f, "mso_mdoc: {}", self.code()),
-        }
-    }
-}
-
-impl std::error::Error for MdocError {}

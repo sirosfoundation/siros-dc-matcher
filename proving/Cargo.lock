@@ -1175,6 +1175,9 @@ checksum = "3a219298ac11a56ea9a6d2120044824d6f01aeb034955e7af7bc16858527deea"
 [[package]]
 name = "siros-codec"
 version = "0.11.0"
+dependencies = [
+ "thiserror 2.0.21",
+]
 
 [[package]]
 name = "siros-dcql"
@@ -1183,6 +1186,7 @@ dependencies = [
  "rustc-hash",
  "serde",
  "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -1194,6 +1198,7 @@ dependencies = [
  "rustc-hash",
  "sha2",
  "siros-codec",
+ "thiserror 2.0.21",
  "x509-cert",
 ]
 
@@ -1206,6 +1211,7 @@ dependencies = [
  "sha2",
  "siros-codec",
  "siros-dcql",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
