@@ -87,7 +87,11 @@ impl Decimal {
             return None;
         }
         let point = i64::try_from(whole.len()).ok()?.saturating_add(exponent);
-        let all: Vec<u8> = whole.bytes().chain(fraction.bytes()).map(|b| b - b'0').collect();
+        let all: Vec<u8> = whole
+            .bytes()
+            .chain(fraction.bytes())
+            .map(|b| b - b'0')
+            .collect();
         let leading = all.iter().take_while(|&&d| d == 0).count();
         let digits: Vec<u8> = match all.iter().rposition(|&d| d != 0) {
             Some(last) => all.get(leading..=last)?.to_vec(),

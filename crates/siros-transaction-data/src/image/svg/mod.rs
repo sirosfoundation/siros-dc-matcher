@@ -275,4 +275,3 @@ fn attribute(
         (Some(_), _) => Err(refused()),
     }
 }
-
