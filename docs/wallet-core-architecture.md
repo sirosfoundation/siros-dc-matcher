@@ -393,7 +393,7 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
   - an `aki` value, base64url-decoded, equals the keyIdentifier of the AuthorityKeyIdentifier extension of a certificate in the chain;
   - for an `etsi_tl` or `openid_federation` value, the store has an entry of that type and value, and the chain's first certificate validates up to one of its certificates at the current time:
     - Each certificate on the path is signed by the next one or by the store certificate, names its signer as issuer, and is valid at that time.
-    - Every signer is a CA (basicConstraints) whose keyUsage includes keyCertSign. The intermediate certificates below it on the path that are not self-issued number at most its pathLenConstraint (RFC 5280 §6.1.4 (k) to (n)).
+    - Every signer is a CA (basicConstraints), and its keyUsage, when present, includes keyCertSign. The intermediate certificates below it on the path that are not self-issued number at most its pathLenConstraint (RFC 5280 §6.1.4 (k) to (n)).
     - A certificate with a critical extension the core does not process is refused (§6.1.4 (o)).
     - Signatures are ECDSA P-256 with SHA-256 or P-384 with SHA-384.
     - A store certificate byte-identical to the chain's first certificate admits it when it is valid at that time.
