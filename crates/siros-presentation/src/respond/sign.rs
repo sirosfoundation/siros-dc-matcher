@@ -1,7 +1,5 @@
 //! The `Sign` effects of a chosen offer, and the host's signatures parsed against them (A5).
 
-use std::fmt;
-
 use siros_credential::Credential;
 use siros_mdoc::{es256_verifies, P256Key};
 use siros_wallet_state::KeyId;
@@ -56,7 +54,8 @@ impl VerifiedSignature {
 }
 
 /// Why the host's signatures do not answer the `Sign` effects (A5).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum SignatureError {
     /// No signature answers this effect.
     Missing(SignId),
@@ -82,14 +81,6 @@ impl SignatureError {
         }
     }
 }
-
-impl fmt::Display for SignatureError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
-
-impl std::error::Error for SignatureError {}
 
 impl Sign {
     /// The effect `id`: `credential`'s key pair signs `input`, and the signature verifies under

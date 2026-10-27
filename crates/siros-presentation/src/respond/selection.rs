@@ -1,8 +1,6 @@
 //! The user's selection, parsed against the plan (A3, A4), and the refusal of a background
 //! fulfilment that needs the wallet's display (A9).
 
-use std::fmt;
-
 use siros_dcql::QueryId;
 use siros_wallet_state::CredentialId;
 
@@ -30,7 +28,8 @@ pub struct Subset {
 }
 
 /// Why the credentials a subset names are refused (A3).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum SubsetError {
     /// The subset names no credential.
     Empty,
@@ -50,14 +49,6 @@ impl SubsetError {
         }
     }
 }
-
-impl fmt::Display for SubsetError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
-
-impl std::error::Error for SubsetError {}
 
 impl Subset {
     /// The credentials `credentials` for the member of the query `query`.

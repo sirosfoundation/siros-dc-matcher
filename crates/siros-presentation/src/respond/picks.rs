@@ -1,7 +1,5 @@
 //! The selection the user makes by picking credential picker entries (K3).
 
-use std::fmt;
-
 use siros_dcql::QueryId;
 use siros_wallet_state::CredentialId;
 
@@ -32,7 +30,8 @@ impl Pick {
 }
 
 /// Why the picked entries make no selection (K3).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum PickError {
     /// The user picked no entry.
     Empty,
@@ -76,14 +75,6 @@ impl PickError {
         }
     }
 }
-
-impl fmt::Display for PickError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
-
-impl std::error::Error for PickError {}
 
 /// The credentials the picks name for one Credential Query, in the order of the picks.
 struct Picked {

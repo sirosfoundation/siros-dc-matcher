@@ -24,7 +24,8 @@ const DOMAIN: &str = "siros-presentation plan 2";
 pub struct PlanDigest([u8; 32]);
 
 /// Why a selection's plan digest does not read.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum DigestError {
     /// The text is not unpadded base64url.
     Encoding,
@@ -41,14 +42,6 @@ impl DigestError {
         }
     }
 }
-
-impl fmt::Display for DigestError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
-
-impl std::error::Error for DigestError {}
 
 impl PlanDigest {
     /// The digest of the text `text`, as the view gave it.
