@@ -1,7 +1,8 @@
 # siros-dc-matcher
 
-A credential matcher for the W3C Digital Credentials API on Android, plus the
-DCQL engine behind it, as a Rust workspace.
+A credential matcher for the W3C Digital Credentials API on Android, the DCQL
+engine behind it, and typed bindings of the Credential Manager host ABI, as a
+Rust workspace.
 
 On Android, a wallet does not answer a `navigator.credentials.get({digital: …})`
 call directly. It registers a snapshot of its credentials with Play Services
@@ -56,7 +57,16 @@ make matcher && python3 scripts/check_matcher_abi.py \
   target/wasm32-wasip1/wasm-release/matcher.wasm
 make check-bindings    # committed bindings match the current API
 cargo publish --locked --dry-run -p siros-dcql
+cargo +1.82 check --locked --all-features \
+  -p siros-dcql -p siros-dc-matcher-core -p siros-dc-matcher-wasm \
+  -p android-credman-sys -p android-credman
+cargo +1.82 check --locked --all-features --target wasm32-wasip1 \
+  -p siros-dc-matcher-wasm -p android-credman-sys -p android-credman
+cargo semver-checks --package siros-dcql
 ```
+
+The last three need `rustup toolchain install 1.82 --target wasm32-wasip1`
+and `cargo install cargo-semver-checks --locked`.
 
 CI also enforces two things a green build does not imply:
 
@@ -108,12 +118,15 @@ Two profile details are load-bearing and easy to undo:
 | [`android-credman-sys`](crates/android-credman-sys) | `wasm32` | The Credential Manager host imports, one module per host level. [`ABI.md`](crates/android-credman-sys/ABI.md) is the contract and its evidence. |
 | [`android-credman`](crates/android-credman) | any | The host ABI as types: nullability, version gating, set shape. |
 | [`siros-dcql`](crates/siros-dcql) | any | OpenID4VP 1.0 DCQL: claims-path pointers (§7), credential and credential-set queries (§6.1–6.3), selection (§6.4). No I/O, no platform. Published to crates.io. |
-| [`siros-dc-matcher-core`](crates/siros-dc-matcher-core) | any | The credential blob and its CBOR codec, the match profile and its evaluator, protocol dispatch. |
+| [`siros-dc-matcher-core`](crates/siros-dc-matcher-core) | any | The credential blob and its CBOR codec, the match profile and its evaluator, protocol dispatch, purpose lines, and the `zkp_req` planner and response check. |
 | [`siros-dc-matcher-wasm`](crates/siros-dc-matcher-wasm) | `wasm32-wasip1` | The matcher binary. Ships `matcher.wasm`. |
-| [`siros-dc-matcher-ffi`](crates/siros-dc-matcher-ffi) | UniFFI | Kotlin and Swift surface: build the registration blob, and run the same match in-process. |
+| [`siros-dc-matcher-ffi`](crates/siros-dc-matcher-ffi) | UniFFI | Kotlin and Swift surface: build the registration blob, run the same match in-process, and plan a `zkp_req` query. |
 | [`siros-dc-matcher-testhost`](crates/siros-dc-matcher-testhost) | native, dev | A wasmtime host implementing the Credential Manager ABI, so the shipping `.wasm` is testable off-device. |
 
-[`docs/plan.md`](docs/plan.md) covers the design and the reasoning behind it.
+[`docs/abi.md`](docs/abi.md) covers the host ABI as `matcher.wasm` uses it.
+[`docs/zkp_req_request.md`](docs/zkp_req_request.md) and
+[`docs/zkp_req_response.md`](docs/zkp_req_response.md) cover the `zkp_req` request and
+presentation.
 
 ## The match profile
 

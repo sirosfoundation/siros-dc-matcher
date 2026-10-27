@@ -48,10 +48,7 @@ carried over line by line, or comments.
   as copying, and considerably harder to catch in review.
 - Copy their comments, or adopt their identifier set wholesale.
 - Vendor their binaries into this repository. Redistributing an Apache-2.0
-  artifact from a BSD-2 tree drags in notice obligations for no benefit — the
-  differential tests fetch the oracle at test time from a pinned upstream
-  commit, or read it from a local checkout via `MULTIPAZ_MATCHER_WASM`, and skip
-  when it is absent.
+  artifact from a BSD-2 tree drags in notice obligations for no benefit.
 
 ### Cite the spec, not the implementation
 
@@ -66,31 +63,16 @@ structural resemblance to the oracle as a blocker.
 
 ## Development
 
-```sh
-cargo test                      # everything, host targets
-cargo clippy --all-targets -- -D warnings
-cargo fmt --all -- --check
-cargo build -p siros-dc-matcher-wasm --target wasm32-wasip1 --release
-```
+[README.md](README.md#build-and-test) gives the commands CI runs.
 
 `siros-dcql` is published to crates.io and therefore may not depend on any other
 crate in this workspace. CI enforces this with `cargo publish --dry-run`; please
 do not work around it.
 
-Two floors are checked separately, because they differ on purpose:
-
-```sh
-# Everything that ships inside the credential picker holds Rust 1.82.
-cargo +1.82 check --locked --all-features \
-  -p siros-dcql -p siros-dc-matcher-core -p siros-dc-matcher-wasm
-
-# siros-dcql's public API against the version it declares.
-# Unlike fmt and clippy this is not part of the toolchain:
-#   cargo install cargo-semver-checks --locked
-cargo semver-checks --package siros-dcql
-```
-
-`cargo +1.82` needs that toolchain present: `rustup toolchain install 1.82`.
+Everything that ships inside the credential picker holds Rust 1.82:
+`siros-dcql`, `siros-dc-matcher-core`, `siros-dc-matcher-wasm`,
+`android-credman-sys` and `android-credman`. The MSRV job checks them on 1.82,
+for the host and for `wasm32-wasip1`.
 
 `siros-dc-matcher-ffi` and `-testhost` declare 1.88 in their own manifests —
 uniffi's bindgen chain and wasmtime both need it — and neither ships in the
