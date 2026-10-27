@@ -1,8 +1,6 @@
 //! Why a request cannot be matched, why a Credential Query has no candidate, and why a request
 //! has no offer.
 
-use std::fmt;
-
 use siros_credential::PointerError;
 use siros_zkp_req::ErrorCode;
 
@@ -11,7 +9,8 @@ use siros_dcql::QueryId;
 
 /// Why a request cannot be matched: the query as sent lacks a Credential Query of the parsed
 /// one. The request is invalid (`invalid_request`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum AskedError {
     /// The query as sent lacks the Credential Query of this `id`.
     Unsent(QueryId),
@@ -26,21 +25,14 @@ impl AskedError {
     }
 }
 
-impl fmt::Display for AskedError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
-
-impl std::error::Error for AskedError {}
-
 /// Why a Credential Query has no candidate whatever the wallet holds.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum QueryRefusal {
     /// A claims path the query selects is no claims path pointer (OpenID4VP 1.0, Section 7).
-    ClaimPath(PointerError),
+    ClaimPath(#[source] PointerError),
     /// The `zkp_req` query is refused.
-    Zkp(ZkpRefusal),
+    Zkp(#[source] ZkpRefusal),
 }
 
 impl QueryRefusal {
@@ -61,22 +53,16 @@ impl QueryRefusal {
     }
 }
 
-impl fmt::Display for QueryRefusal {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
-
-impl std::error::Error for QueryRefusal {}
-
 /// Why a request has no offer. `R` is why a `zkp_req` candidate answers no option.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum Failure<R> {
     /// A Credential Query is refused.
     Refused {
         /// The query.
         query: QueryId,
         /// Why.
+        #[source]
         refusal: QueryRefusal,
     },
     /// Credentials matched a `zkp_req` query, and none answers an option.

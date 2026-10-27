@@ -2477,6 +2477,7 @@ dependencies = [
  "siros-wallet-state",
  "siros-zkp-req",
  "siros-zkp-req-nym-auth",
+ "thiserror 2.0.20",
  "x509-cert",
  "zeroize",
 ]
