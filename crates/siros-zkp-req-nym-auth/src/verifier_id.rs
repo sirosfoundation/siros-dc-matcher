@@ -1,8 +1,6 @@
 //! The Verifier's identity, and `verifier_input` and the `sha-256` pseudonym it selects
 //! (nym_auth catalogue, `pseudonym`: "Verifier identity" and "Configurations").
 
-use std::fmt;
-
 use sha2::{Digest, Sha256};
 use siros_oid4vp::{ClientId, ClientIdPrefix, SemanticIdError, SemanticIdentifier};
 
@@ -14,7 +12,8 @@ use crate::catalogue::{Config, Pseudonym};
 pub struct VerifierId(String);
 
 /// Why the `verifier_id` of the fixed form cannot be obtained. Each makes the query invalid.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum VerifierIdRule {
     /// The form is `semantic` and no semantic identifier comes from an authenticated source.
     SemanticIdMissing,
@@ -42,14 +41,6 @@ impl VerifierIdRule {
         }
     }
 }
-
-impl fmt::Display for VerifierIdRule {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
-
-impl std::error::Error for VerifierIdRule {}
 
 /// Whether the Verifier's registration certificate names an intermediary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

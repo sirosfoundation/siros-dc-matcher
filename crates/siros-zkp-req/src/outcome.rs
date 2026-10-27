@@ -33,7 +33,8 @@ impl fmt::Display for ErrorCode {
 
 /// A rule of `zkp_req` that a request breaks. Each one makes the request invalid
 /// ([`ErrorCode::InvalidRequest`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum RequestRule {
     /// The Credential Query is not a JSON object.
     QueryNotObject,
@@ -134,11 +135,3 @@ impl RequestRule {
         }
     }
 }
-
-impl fmt::Display for RequestRule {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
-
-impl std::error::Error for RequestRule {}

@@ -55,20 +55,21 @@ pub struct ProveInput<'a> {
 }
 
 /// Why `prove` made no presentation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum ProveError {
     /// The query breaks a rule (`invalid_request`).
-    Invalid(InvalidRequest),
+    Invalid(#[source] InvalidRequest),
     /// An input of the host.
-    Host(HostError),
+    Host(#[from] HostError),
     /// The candidate's pair is no longer usable for its option.
-    NotUsable(PairRefusal<Unsupported>),
+    NotUsable(#[source] PairRefusal<Unsupported>),
     /// The credential fails for the candidate's option.
     Rejected(Vec<ZkpError>),
     /// The device key did not sign.
-    Signer(SignFailure),
+    Signer(#[source] SignFailure),
     /// The prover made no proof.
-    Prover(ProverFailure),
+    Prover(#[source] ProverFailure),
     /// The prover's pseudonym differs from the catalogue's.
     PseudonymMismatch,
     /// The prover's `zk_proof` breaks the proof backend's length rules.
@@ -100,14 +101,6 @@ impl ProveError {
     }
 }
 
-impl fmt::Display for ProveError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
-
-impl std::error::Error for ProveError {}
-
 impl From<Unanswerable> for ProveError {
     fn from(e: Unanswerable) -> Self {
         match e {
@@ -117,14 +110,9 @@ impl From<Unanswerable> for ProveError {
     }
 }
 
-impl From<HostError> for ProveError {
-    fn from(e: HostError) -> Self {
-        Self::Host(e)
-    }
-}
-
 /// Why the device key did not sign.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum SignFailure {
     /// The User cancelled.
     Cancelled,

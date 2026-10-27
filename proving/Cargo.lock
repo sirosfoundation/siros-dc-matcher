@@ -1254,6 +1254,7 @@ dependencies = [
  "serde",
  "serde_json",
  "siros-codec",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -1268,6 +1269,7 @@ dependencies = [
  "siros-mdoc",
  "siros-oid4vp",
  "siros-zkp-req",
+ "thiserror 2.0.21",
  "x509-cert",
  "zeroize",
 ]

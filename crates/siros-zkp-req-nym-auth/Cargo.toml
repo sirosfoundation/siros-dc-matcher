@@ -36,6 +36,7 @@ siros-mdoc = { workspace = true, optional = true }
 serde_json = { workspace = true }
 sha2 = { version = "0.10.9", features = ["oid"] }
 p256 = { version = "0.13.2", default-features = false, features = ["ecdsa", "alloc", "pkcs8"], optional = true }
+thiserror = { workspace = true }
 x509-cert = { version = "0.2.5", default-features = false, features = ["std"], optional = true }
 der = { version = "0.7.10", optional = true }
 zeroize = { version = "1.8.1", optional = true }

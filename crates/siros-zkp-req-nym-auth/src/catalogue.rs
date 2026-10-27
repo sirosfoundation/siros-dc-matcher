@@ -2,8 +2,6 @@
 //! nym_auth Credential Query follows (nym_auth rulebook, "Presentation" and "Function
 //! catalogue").
 
-use std::fmt;
-
 use serde_json::{Map, Value};
 use siros_codec::date::Date;
 use siros_zkp_req::{CredentialType, QueryOption, ReturnHandle, ZkpReqQuery};
@@ -121,7 +119,8 @@ pub struct Item {
 }
 
 /// A rule of the catalogue that a query breaks. Each makes the query invalid.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum CatalogueRule {
     /// `meta` names the `bbs_cd` form without a string `schema_id_value`.
     SchemaIdInvalid,
@@ -205,14 +204,6 @@ impl CatalogueRule {
         }
     }
 }
-
-impl fmt::Display for CatalogueRule {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
-
-impl std::error::Error for CatalogueRule {}
 
 /// A nym_auth Credential Query: a `zkp_req` query that follows the catalogue's rules.
 #[derive(Debug, Clone, PartialEq)]

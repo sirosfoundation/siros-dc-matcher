@@ -1,8 +1,6 @@
 //! The answer of an option: a usable pair, a usable attestation and the seed that opens it, for
 //! which every item of the option holds (system rulebooks, Section 7, step 1).
 
-use std::fmt;
-
 use crate::attestation::{Credential, OpenedSeed, SecretSeed, SeedMismatch, UsableAttestation};
 use crate::outcome::{ItemCode, ZkpError};
 use crate::pair::{failed_assertions, UsablePair};
@@ -18,7 +16,8 @@ pub struct Answer<'q> {
 }
 
 /// Why an attestation does not answer an option.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum Unanswerable {
     /// The attestation was tested at another date than the pair's proof date.
     ProofDate,
@@ -36,14 +35,6 @@ impl Unanswerable {
         }
     }
 }
-
-impl fmt::Display for Unanswerable {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
-
-impl std::error::Error for Unanswerable {}
 
 impl<'q> Answer<'q> {
     /// The answer of `pair`'s option by `attestation`, whose `ssc` `secret_seed` opens. The
