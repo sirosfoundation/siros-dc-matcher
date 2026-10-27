@@ -4,12 +4,12 @@
 use rustc_hash::FxHashMap;
 use siros_codec::base64;
 use siros_codec::base64url::{self, Base64Url};
+use siros_codec::json::Json;
 
 use crate::alg::HashAlg;
 use crate::error::{
     DisclosureFault, EncodedJsonFault, IssuerJwtFault, ParseError, SdAlgFault, X5cError, X5cIndex,
 };
-use crate::json::Json;
 use crate::process::{self, Content, Pending};
 use crate::tree::{DisclosureId, Object};
 
@@ -173,7 +173,7 @@ fn issuer_header_and_payload(issuer_jwt: &str) -> Result<(Members, Members), Iss
 /// The JSON value the base64url `text` encodes.
 fn decoded(text: &str) -> Result<Json, EncodedJsonFault> {
     let bytes = base64url::decode(text).map_err(EncodedJsonFault::Base64)?;
-    Json::parse(&bytes).map_err(EncodedJsonFault::Json)
+    Json::parse_unique(&bytes).map_err(EncodedJsonFault::Json)
 }
 
 /// The algorithm `_sd_alg` names, `sha-256` when it is absent (Section 4.1.1).
@@ -191,7 +191,7 @@ fn sd_alg(payload: &[(String, Json)]) -> Result<HashAlg, SdAlgFault> {
 fn disclosure(text: &str) -> Result<(Base64Url, Content), DisclosureFault> {
     let encoded = Base64Url::parse(text)
         .map_err(|e| DisclosureFault::Encoding(EncodedJsonFault::Base64(e)))?;
-    let Json::Array(items) = Json::parse(encoded.bytes())
+    let Json::Array(items) = Json::parse_unique(encoded.bytes())
         .map_err(|e| DisclosureFault::Encoding(EncodedJsonFault::Json(e)))?
     else {
         return Err(DisclosureFault::NotArray);

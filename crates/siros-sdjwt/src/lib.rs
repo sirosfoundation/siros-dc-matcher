@@ -34,7 +34,6 @@
 
 mod alg;
 mod error;
-mod json;
 mod key_binding;
 mod node;
 mod process;
@@ -44,8 +43,8 @@ mod tree;
 
 pub use alg::Digest;
 pub use error::{
-    DisclosureFault, EncodedJsonFault, IssuerJwtFault, JsonFault, JsonTextFault, KeyBindingError,
-    ParseError, Placement, ReservedFault, SdAlgFault, X5cError, X5cIndex,
+    DisclosureFault, EncodedJsonFault, IssuerJwtFault, KeyBindingError, ParseError, Placement,
+    ReservedFault, SdAlgFault, X5cError, X5cIndex,
 };
 pub use key_binding::{Audience, BeforeEpoch, KeyBinding, NumericDate, Presentation};
 pub use node::{Children, Node, NodeValue};

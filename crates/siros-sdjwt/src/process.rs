@@ -3,10 +3,10 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use siros_codec::base64url::Base64Url;
+use siros_codec::json::Json;
 
 use crate::alg::Digest;
 use crate::error::{ParseError, Placement, ReservedFault};
-use crate::json::Json;
 use crate::tree::{Claim, ClaimValue, Disclosure, DisclosureId, Element, Object};
 
 /// The deepest nesting of claims, the payload's root object at depth 0, disclosures included.

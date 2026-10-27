@@ -1,9 +1,10 @@
 //! The refusals of S1: one fixture per rule and per place the rule is checked.
 
 use serde_json::json;
+use siros_codec::json::{JsonFault, JsonTextFault};
 use siros_sdjwt::{
-    Digest, DisclosureFault, DisclosureId, EncodedJsonFault, IssuerJwtFault, JsonFault,
-    JsonTextFault, ParseError, Placement, ReservedFault, SdAlgFault, SdJwt,
+    Digest, DisclosureFault, DisclosureId, EncodedJsonFault, IssuerJwtFault, ParseError, Placement,
+    ReservedFault, SdAlgFault, SdJwt,
 };
 
 use crate::common::{compact, decoy, disclosure};
@@ -43,19 +44,6 @@ fn s1_refusals() {
                 fault: DisclosureFault::Length(4),
             },
             compact("{}", &[&four]),
-        ),
-        (
-            "an empty disclosure",
-            "disclosure_malformed",
-            ParseError::Disclosure {
-                disclosure: first,
-                fault: DisclosureFault::Encoding(EncodedJsonFault::Json(JsonFault::Text {
-                    kind: JsonTextFault::Eof,
-                    line: 1,
-                    column: 0,
-                })),
-            },
-            compact("{}", &[""]),
         ),
         (
             "a truncated digest",
@@ -151,6 +139,17 @@ fn s1_refusals() {
             compact(&deep, &[]),
         ),
     ];
+    // An empty disclosure ends before its value: serde_json's position is its own.
+    match SdJwt::parse(&compact("{}", &[""])) {
+        Err(ParseError::Disclosure {
+            disclosure,
+            fault: DisclosureFault::Encoding(EncodedJsonFault::Json(JsonFault::Text(text))),
+        }) => {
+            assert_eq!(disclosure, first);
+            assert_eq!(text.kind(), JsonTextFault::Eof);
+        }
+        other => panic!("an empty disclosure: {:?}", other.err()),
+    }
     for (case, code, cause, sd_jwt) in rows {
         match SdJwt::parse(&sd_jwt) {
             Ok(_) => panic!("{case}: accepted"),

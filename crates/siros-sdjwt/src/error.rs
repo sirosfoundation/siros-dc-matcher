@@ -3,44 +3,18 @@
 
 use std::fmt;
 
+use siros_codec::json::JsonFault;
 use siros_codec::Base64Error;
 
 use crate::alg::Digest;
 use crate::tree::DisclosureId;
-
-/// Why bytes are no JSON value this crate reads.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum JsonFault {
-    /// The bytes are no UTF-8 JSON text: what serde_json found at this line and column.
-    Text {
-        /// What serde_json found.
-        kind: JsonTextFault,
-        /// The line, from 1.
-        line: usize,
-        /// The column, from 1.
-        column: usize,
-    },
-    /// An object repeats this member name (RFC 7519, Section 4).
-    RepeatedMember(String),
-}
-
-/// What serde_json found in text that is no JSON value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum JsonTextFault {
-    /// Text that breaks the JSON syntax.
-    Syntax,
-    /// A value this crate holds no form of: a number beyond a 64-bit float.
-    Value,
-    /// The text ends inside a value.
-    Eof,
-}
 
 /// Why a base64url segment encodes no JSON value.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum EncodedJsonFault {
     /// The segment is not base64url without padding.
     Base64(Base64Error),
-    /// The bytes are no JSON value.
+    /// The bytes are no JSON value, or an object repeats a member name (RFC 7519, Section 4).
     Json(JsonFault),
 }
 

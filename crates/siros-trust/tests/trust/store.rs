@@ -112,6 +112,13 @@ fn each_rule_of_tr1() {
             ),
         ),
         (
+            "a repeated member",
+            format!(
+                r#"[{{"type":"openid_federation","type":"etsi_tl","value":"https://tl.example/eu","certificates":["{certificate}"]}}]"#
+            ),
+            Verdict::Entry(0, EntryError::RepeatedMember("type".to_owned())),
+        ),
+        (
             "a repeated type and value",
             record(&[
                 ("etsi_tl", "https://tl.example/eu", &[&iaca]),

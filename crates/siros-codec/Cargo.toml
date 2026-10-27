@@ -1,10 +1,15 @@
 [package]
 name = "siros-codec"
 version = "0.11.0"
-description = "Strict CBOR and unpadded base64url for the SIROS wallet core"
+description = "Strict CBOR, strict JSON, base64 and dates for the SIROS wallet core"
 publish = false
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
+
+[dependencies]
+rustc-hash = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

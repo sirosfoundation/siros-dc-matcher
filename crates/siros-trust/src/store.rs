@@ -3,7 +3,7 @@
 
 use std::fmt;
 
-use serde_json::{Map, Value};
+use siros_codec::json::{Json, JsonTextError};
 use siros_codec::{base64, Base64Error};
 use siros_dcql::{AuthorityType, AuthorityValue};
 
@@ -25,10 +25,10 @@ pub struct StoreEntry {
 }
 
 /// Why a record is no trust store (TR1).
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StoreError {
     /// The record is not JSON.
-    Json(serde_json::Error),
+    Json(JsonTextError),
     /// The record is not a JSON array.
     NotArray,
     /// An entry breaks a rule.
@@ -60,6 +60,8 @@ pub enum EntryError {
     NotObject,
     /// The entry has this member, other than `type`, `value` and `certificates`.
     UnknownMember(String),
+    /// The entry names this member twice.
+    RepeatedMember(String),
     /// `type` is absent or not a string.
     Type(MemberFault),
     /// `type` names this type, other than `etsi_tl` and `openid_federation`.
@@ -128,6 +130,7 @@ impl EntryError {
         match self {
             Self::NotObject => "trust_store_entry_not_object",
             Self::UnknownMember(_) => "trust_store_entry_member_unknown",
+            Self::RepeatedMember(_) => "trust_store_entry_member_repeated",
             Self::Type(_) => "trust_store_entry_type",
             Self::UnknownType(_) => "trust_store_entry_type_unknown",
             Self::Value(_) => "trust_store_entry_value",
@@ -152,6 +155,7 @@ impl std::error::Error for EntryError {
             Self::Certificate { error, .. } => Some(error),
             Self::NotObject
             | Self::UnknownMember(_)
+            | Self::RepeatedMember(_)
             | Self::Type(_)
             | Self::UnknownType(_)
             | Self::Value(_)
@@ -171,8 +175,9 @@ impl TrustStore {
     ///
     /// [`StoreError`]: the first rule the record breaks.
     pub fn parse(record: &str) -> Result<Self, StoreError> {
-        let record: Value = serde_json::from_str(record).map_err(StoreError::Json)?;
-        let entries = record.as_array().ok_or(StoreError::NotArray)?;
+        let Json::Array(entries) = Json::parse(record.as_bytes()).map_err(StoreError::Json)? else {
+            return Err(StoreError::NotArray);
+        };
         let mut parsed: Vec<StoreEntry> = Vec::with_capacity(entries.len());
         for (position, entry) in entries.iter().enumerate() {
             let entry_index = EntryIndex::new(position);
@@ -207,23 +212,28 @@ impl TrustStore {
 }
 
 impl StoreEntry {
-    fn parse(entry: &Value) -> Result<Self, EntryError> {
-        let entry = entry.as_object().ok_or(EntryError::NotObject)?;
-        if let Some(name) = entry
-            .keys()
-            .find(|name| !matches!(name.as_str(), "type" | "value" | "certificates"))
+    fn parse(entry: &Json) -> Result<Self, EntryError> {
+        let Json::Object(members) = entry else {
+            return Err(EntryError::NotObject);
+        };
+        if let Some((name, _)) = members
+            .iter()
+            .find(|(name, _)| !matches!(name.as_str(), "type" | "value" | "certificates"))
         {
             return Err(EntryError::UnknownMember(name.clone()));
+        }
+        if let Some(name) = entry.repeated_member() {
+            return Err(EntryError::RepeatedMember(name.to_owned()));
         }
         let kind = AuthorityType::new(text(entry, "type").map_err(EntryError::Type)?);
         let kind = StoreType::of(&kind).ok_or(EntryError::UnknownType(kind))?;
         let value = text(entry, "value").map_err(EntryError::Value)?;
-        let certificates = match entry.get("certificates") {
+        let certificates = match entry.member("certificates") {
             None => return Err(EntryError::Certificates(MemberFault::Absent)),
-            Some(Value::Array(certificates)) if certificates.is_empty() => {
+            Some(Json::Array(certificates)) if certificates.is_empty() => {
                 return Err(EntryError::Certificates(MemberFault::Empty))
             }
-            Some(Value::Array(certificates)) => certificates,
+            Some(Json::Array(certificates)) => certificates,
             Some(_) => return Err(EntryError::Certificates(MemberFault::WrongType)),
         };
         Ok(Self {
@@ -252,20 +262,20 @@ impl StoreEntry {
 }
 
 /// The string member `name` of `entry`.
-fn text<'e>(entry: &'e Map<String, Value>, name: &str) -> Result<&'e str, MemberFault> {
-    entry
-        .get(name)
-        .ok_or(MemberFault::Absent)?
-        .as_str()
-        .ok_or(MemberFault::WrongType)
+fn text<'e>(entry: &'e Json, name: &str) -> Result<&'e str, MemberFault> {
+    match entry.member(name) {
+        None => Err(MemberFault::Absent),
+        Some(Json::String(text)) => Ok(text),
+        Some(_) => Err(MemberFault::WrongType),
+    }
 }
 
 /// The certificate at `position` of an entry's `certificates`: base64 with padding of a DER
 /// certificate.
-fn certificate_of(value: &Value, position: CertificateIndex) -> Result<Certificate, EntryError> {
-    let text = value
-        .as_str()
-        .ok_or(EntryError::CertificateNotString(position))?;
+fn certificate_of(value: &Json, position: CertificateIndex) -> Result<Certificate, EntryError> {
+    let Json::String(text) = value else {
+        return Err(EntryError::CertificateNotString(position));
+    };
     let der = base64::decode(text).map_err(|error| EntryError::Encoding {
         certificate: position,
         error,

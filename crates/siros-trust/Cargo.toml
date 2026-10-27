@@ -18,7 +18,6 @@ chain = ["dep:der", "dep:p256", "dep:p384", "dep:x509-cert"]
 [dependencies]
 siros-codec = { workspace = true }
 siros-dcql = { workspace = true }
-serde_json = { workspace = true }
 der = { version = "0.7.10", optional = true }
 p256 = { version = "0.13.2", default-features = false, features = ["ecdsa", "alloc"], optional = true }
 p384 = { version = "0.13.1", default-features = false, features = ["ecdsa", "alloc"], optional = true }
