@@ -129,8 +129,9 @@ refuses anything that is not the exact 20-byte form. The recommended defaults
 are **60 s** of skew into the future and **600 s** of age, exposed as
 `RECOMMENDED_SKEW_SECS` and `RECOMMENDED_MAX_AGE_SECS`. They are
 recommendations, not protocol constants: the tolerance is the verifier's.
-Vectors: `tests/vectors/zkp_req_response` (`ok_proof_time_*`,
-`err_proof_time_*`) for the form; `tests/proof_time.rs` for the tolerance.
+Vectors: `crates/siros-dc-matcher-core/tests/vectors/zkp_req_response`
+(`ok_proof_time_*`, `err_proof_time_*`) for the form;
+`crates/siros-dc-matcher-core/tests/proof_time.rs` for the tolerance.
 
 `proof_time::render(secs)` and `proof_time::parse(text)` convert between epoch
 seconds and the 20-byte form (0 to 253402300799, i.e. 1970-01-01T00:00:00Z to
