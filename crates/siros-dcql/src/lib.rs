@@ -15,8 +15,9 @@
 //!
 //! # Layout
 //!
-//! [`query`] is the wire model (§6.1–6.3), [`path`] resolves claims path
-//! pointers (§7), and [`eval`] performs selection (§6.4).
+//! [`query`] is the wire model (§6.1–6.3), [`id`] the Credential Query id
+//! (§6.1), [`path`] resolves claims path pointers over any claim tree (§7), and
+//! [`eval`] performs selection (§6.4).
 //!
 //! [oid4vp]: https://openid.net/specs/openid-4-verifiable-presentations-1_0.html
 
