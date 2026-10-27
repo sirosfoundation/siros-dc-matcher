@@ -16,9 +16,12 @@ env:
   CARGO_TERM_COLOR: always
   # The matcher runs in the credential picker with a hard time budget, and it
   # ships inside every wallet APK. Google's own matcher is ~139 KB and
-  # Multipaz's ~277 KB; 300 KB is the ceiling we hold ourselves to. Raise this
-  # deliberately, in the same PR as the change that needs it.
-  WASM_SIZE_BUDGET: 307200
+  # Multipaz's ~277 KB. 400 KiB is the ceiling we hold ourselves to: the picker
+  # runs the wallet's matching and transaction data selection over the
+  # registration (K2), and measures 359,635 bytes with images passed through and
+  # `wasm-opt -Oz`. Raise this deliberately, in the same PR as the change that
+  # needs it.
+  WASM_SIZE_BUDGET: 409600
 
 jobs:
   test:

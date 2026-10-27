@@ -111,8 +111,11 @@ CI also enforces three things a green build does not imply:
 - **Host ABI imports.** `scripts/check_matcher_abi.py` checks each import of
   `matcher.wasm`, with its signature, against the Credential Manager ABI
   table and the WASI functions the host provides.
-- **A 307,200-byte (300 KiB) size budget** for `matcher.wasm`, which runs in someone else's
-  process. Raising it takes a line in `.github/workflows/ci.yml` and a reason.
+- **A 409,600-byte (400 KiB) size budget** for `matcher.wasm`, which runs in someone else's
+  process. The picker runs the wallet's matching and transaction data selection over the
+  registration (K2): with images passed through and `wasm-opt -Oz` it measures 359,635 bytes,
+  and the measured alternatives that drop parts of K2 were declined. Raising the budget takes a
+  line in `.github/workflows/ci.yml` and a reason.
 - **Browser imports.** The browser presenter's module imports only wasm-bindgen's modules, the
   only ones a browser page provides.
 
