@@ -18,6 +18,12 @@ use crate::diagnostics::{Unshown, FALLBACK_ICON_PNG};
 use crate::fields::{PaymentShown, TransactionShown};
 use crate::matching::NoChoice;
 
+/// Prefix of the set ids: offer `n` is the set `siros-n`.
+///
+/// A set is a group of entries the picker selects together. Each set holds the members of one
+/// offer, which the user presents as a unit; the alternative offers are separate sets.
+const SET_PREFIX: &str = "siros";
+
 /// The matching the entries are made from.
 pub(crate) struct OfferEntries<'a, 'r> {
     registration: &'a Registration,
@@ -108,7 +114,7 @@ impl<'a, 'r> OfferEntries<'a, 'r> {
             .collect();
         let slots: Vec<Slot<'_, AnyEntry<'_>>> = entries.iter().map(Slot::one).collect();
         let (first, others) = slots.split_first().ok_or(Unshown::Empty(index))?;
-        let id = C8String::from_str_lossy(&format!("siros-{at}"));
+        let id = C8String::from_str_lossy(&format!("{SET_PREFIX}-{at}"));
         sets.add_entry_set(&EntrySet::new(&id, *first, others));
         Ok(())
     }
