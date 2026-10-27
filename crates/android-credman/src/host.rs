@@ -42,6 +42,10 @@ impl Host {
 
     /// The verifier's request: the Digital Credentials API request as JSON.
     /// A matcher reads it once.
+    ///
+    /// # Panics
+    ///
+    /// When the reported length cannot be allocated.
     pub fn request(&self) -> Vec<u8> {
         self.credman.request()
     }
@@ -112,8 +116,9 @@ impl Host {
     pub fn credentials(&self) -> Vec<u8> {
         let size = self.credentials_size();
         // The blob is the matcher's only input besides the request. A size
-        // the module cannot allocate leaves nothing to match against, and the
-        // allocation aborts.
+        // the module cannot allocate leaves nothing to match against: past
+        // `isize::MAX` the allocation panics, below it a failed allocation
+        // aborts.
         let mut blob = vec![0; size];
         let mut delivered = 0;
         while let Some(rest) = blob.get_mut(delivered..).filter(|rest| !rest.is_empty()) {
