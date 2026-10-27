@@ -52,7 +52,11 @@ pub(super) fn authenticate(
             attestation
                 .verify(chain.key())
                 .map_err(|_| IntakeError::AttestationSignatureInvalid)?;
-            trust::verdict(answers, issuer, KeyMaterial::X509Chain(chain.into_x509()))?
+            trust::verdict(
+                answers,
+                issuer,
+                KeyMaterial::X509Chain(chain.into_certificates()),
+            )?
         }
         None => {
             let resolved = trust::resolve(

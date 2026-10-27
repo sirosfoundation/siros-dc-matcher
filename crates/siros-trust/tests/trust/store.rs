@@ -1,11 +1,10 @@
 //! TR1: the trust store record, one refusal per rule, each by its reason.
 
 use serde_json::json;
+use siros_codec::member::MemberFault;
 use siros_codec::Base64Error;
 use siros_dcql::AuthorityType;
-use siros_trust::{
-    CertificateError, CertificateIndex, EntryError, MemberFault, StoreError, TrustStore,
-};
+use siros_trust::{CertificateError, CertificateIndex, EntryError, StoreError, TrustStore};
 use x509_cert::der::Decode;
 
 use crate::support::{base64, record, Cert, Key};

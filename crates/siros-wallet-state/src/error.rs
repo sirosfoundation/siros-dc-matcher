@@ -2,6 +2,8 @@
 
 use std::fmt;
 
+use siros_codec::member::MemberFault;
+
 /// Why text is not the `S` of a WalletStateContainer (privatedata 3.1, Section 6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WalletStateError {
@@ -73,15 +75,6 @@ impl Member {
             Self::CredentialConfigurationId => "credentialConfigurationId",
         }
     }
-}
-
-/// The rule a member of a credential entry breaks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum MemberFault {
-    /// The member is absent.
-    Absent,
-    /// The member has another JSON type, or a number outside 64 unsigned bits.
-    WrongType,
 }
 
 /// The rule `metadata` breaks.

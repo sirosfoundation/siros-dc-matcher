@@ -3,6 +3,8 @@
 
 use std::fmt;
 
+use siros_codec::chain::CertificateChain;
+
 use crate::authority::KeyIdentifier;
 use crate::certificate::{Certificate, CertificateError};
 use crate::position::ChainIndex;
@@ -15,66 +17,65 @@ pub struct IssuerChain {
     issuers: Vec<Certificate>,
 }
 
-/// Why certificates are no issuer chain.
+/// Why a certificate of an issuer chain does not parse.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ChainError {
-    /// The chain holds no certificate.
-    Empty,
-    /// A certificate does not parse.
-    Certificate {
-        /// Its position.
-        position: ChainIndex,
-        /// Why.
-        error: CertificateError,
-    },
+pub struct ChainError {
+    position: ChainIndex,
+    error: CertificateError,
 }
 
 impl ChainError {
-    /// A stable identifier: `issuer_chain_empty`, or the certificate's code.
+    /// The certificate's position.
+    #[must_use]
+    pub fn position(self) -> ChainIndex {
+        self.position
+    }
+
+    /// Why it does not parse.
+    #[must_use]
+    pub fn error(self) -> CertificateError {
+        self.error
+    }
+
+    /// A stable identifier: the certificate's code.
     #[must_use]
     pub fn code(self) -> &'static str {
-        match self {
-            Self::Empty => "issuer_chain_empty",
-            Self::Certificate { error, .. } => error.code(),
-        }
+        self.error.code()
     }
 }
 
 impl fmt::Display for ChainError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Empty => f.write_str(self.code()),
-            Self::Certificate { position, error } => {
-                write!(f, "{error} at {}", position.value())
-            }
-        }
+        write!(f, "{} at {}", self.error, self.position)
     }
 }
 
 impl std::error::Error for ChainError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Empty => None,
-            Self::Certificate { error, .. } => Some(error),
-        }
+        Some(&self.error)
     }
 }
 
 impl IssuerChain {
-    /// The chain of the DER certificates `certificates`, the signer's first.
+    /// The chain of the DER certificates `certificates`.
     ///
     /// # Errors
     ///
-    /// [`ChainError`]: no certificate, or the first that does not parse.
-    pub fn parse<'a>(certificates: impl IntoIterator<Item = &'a [u8]>) -> Result<Self, ChainError> {
-        let mut parsed = certificates.into_iter().enumerate().map(|(position, der)| {
-            Certificate::parse(der).map_err(|error| ChainError::Certificate {
+    /// [`ChainError`]: the first certificate that does not parse.
+    pub fn parse(certificates: &CertificateChain) -> Result<Self, ChainError> {
+        let parse = |position: usize, der: &[u8]| {
+            Certificate::parse(der).map_err(|error| ChainError {
                 position: ChainIndex::new(position),
                 error,
             })
-        });
-        let leaf = parsed.next().ok_or(ChainError::Empty)??;
-        let issuers = parsed.collect::<Result<_, _>>()?;
+        };
+        let leaf = parse(0, certificates.first())?;
+        let issuers = certificates
+            .certificates()
+            .enumerate()
+            .skip(1)
+            .map(|(position, der)| parse(position, der))
+            .collect::<Result<_, _>>()?;
         Ok(Self { leaf, issuers })
     }
 

@@ -4,6 +4,7 @@
 use rustc_hash::FxHashMap;
 use siros_codec::base64;
 use siros_codec::base64url::{self, Base64Url};
+use siros_codec::chain::CertificateChain;
 use siros_codec::json::Json;
 
 use crate::alg::HashAlg;
@@ -20,7 +21,7 @@ use crate::tree::{DisclosureId, Object};
 /// algorithm.
 pub struct SdJwt {
     issuer_jwt: IssuerJwt,
-    x5c: Option<X5c>,
+    x5c: Option<CertificateChain>,
     alg: HashAlg,
     claims: Object,
 }
@@ -35,38 +36,24 @@ impl IssuerJwt {
     }
 }
 
-/// The `x5c` header parameter of the issuer-signed JWT (RFC 7515, Section 4.1.6): the issuer's
-/// certificates, DER, the signer's first.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct X5c {
-    signer: Vec<u8>,
-    issuers: Vec<Vec<u8>>,
-}
-
-impl X5c {
-    /// `x5c`: a non-empty array of base64 strings with padding, each one DER certificate.
-    fn read(value: &Json) -> Result<Self, X5cError> {
-        let Json::Array(certificates) = value else {
-            return Err(X5cError::NotArray);
-        };
-        let mut ders = certificates.iter().enumerate().map(|(index, certificate)| {
-            let index = X5cIndex::new(index);
-            match certificate {
-                Json::String(text) => base64::decode(text).map_err(|e| X5cError::Base64(index, e)),
-                _ => Err(X5cError::NotString(index)),
-            }
-        });
-        let signer = ders.next().ok_or(X5cError::Empty)??;
-        Ok(Self {
-            signer,
-            issuers: ders.collect::<Result<_, _>>()?,
-        })
-    }
-
-    /// The certificates, the signer's first.
-    pub fn certificates(&self) -> impl Iterator<Item = &[u8]> {
-        std::iter::once(self.signer.as_slice()).chain(self.issuers.iter().map(Vec::as_slice))
-    }
+/// The `x5c` header parameter of the issuer-signed JWT (RFC 7515, Section 4.1.6): a non-empty
+/// array of base64 strings with padding, each one DER certificate, the signer's first.
+fn certificate_chain(value: &Json) -> Result<CertificateChain, X5cError> {
+    let Json::Array(certificates) = value else {
+        return Err(X5cError::NotArray);
+    };
+    let mut ders = certificates.iter().enumerate().map(|(index, certificate)| {
+        let index = X5cIndex::new(index);
+        match certificate {
+            Json::String(text) => base64::decode(text).map_err(|e| X5cError::Base64(index, e)),
+            _ => Err(X5cError::NotString(index)),
+        }
+    });
+    let signer = ders.next().ok_or(X5cError::Empty)??;
+    Ok(CertificateChain::new(
+        signer,
+        ders.collect::<Result<_, _>>()?,
+    ))
 }
 
 impl SdJwt {
@@ -83,7 +70,7 @@ impl SdJwt {
         let x5c = header
             .iter()
             .find(|(name, _)| name == "x5c")
-            .map(|(_, value)| X5c::read(value))
+            .map(|(_, value)| certificate_chain(value))
             .transpose()
             .map_err(ParseError::X5c)?;
         let alg = sd_alg(&payload).map_err(ParseError::UnsupportedSdAlg)?;
@@ -117,9 +104,10 @@ impl SdJwt {
         &self.claims
     }
 
-    /// The issuer-signed JWT's `x5c` header parameter; `None` when the issuer sent none.
+    /// The certificates of the issuer-signed JWT's `x5c` header parameter, the signer's first;
+    /// `None` when the issuer sent none.
     #[must_use]
-    pub fn x5c(&self) -> Option<&X5c> {
+    pub fn x5c(&self) -> Option<&CertificateChain> {
         self.x5c.as_ref()
     }
 

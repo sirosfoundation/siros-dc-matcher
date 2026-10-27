@@ -4,6 +4,7 @@
 use std::fmt;
 
 use siros_codec::json::{Json, JsonTextError};
+use siros_codec::member::MemberFault;
 use siros_codec::{base64, Base64Error};
 use siros_dcql::{AuthorityType, AuthorityValue};
 
@@ -40,17 +41,6 @@ pub enum StoreError {
     },
     /// An entry repeats the `type` and `value` of an earlier one.
     Repeated(EntryIndex),
-}
-
-/// What breaks the rule of a member of a trust store entry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum MemberFault {
-    /// It is absent.
-    Absent,
-    /// It has another JSON type than its rule gives it.
-    WrongType,
-    /// It is an empty array.
-    Empty,
 }
 
 /// Why an entry of a trust store record is refused.

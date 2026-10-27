@@ -1,9 +1,10 @@
 //! The display metadata a host holds, keyed for resolution.
 
 use rustc_hash::FxHashMap;
+use siros_dcql::Vct;
 
 use crate::error::DisplayError;
-use crate::ids::{ConfigurationId, IssuerIdentifier, Vct};
+use crate::ids::{ConfigurationId, IssuerIdentifier};
 use crate::issuer::IssuerMetadata;
 use crate::type_metadata::TypeMetadata;
 

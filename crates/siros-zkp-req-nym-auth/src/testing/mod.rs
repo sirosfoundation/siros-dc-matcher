@@ -42,7 +42,7 @@ use sha2::{Digest, Sha256};
 use siros_codec::base64url;
 use siros_codec::cbor::Value as Cbor;
 use siros_codec::date::DateTime;
-use siros_mdoc::Es256Signature;
+use siros_codec::signature::Es256Signature;
 use siros_oid4vp::ec_jwk_thumbprint;
 use siros_zkp_req::ZkProof;
 use x509_cert::builder::{Builder, CertificateBuilder, Profile};

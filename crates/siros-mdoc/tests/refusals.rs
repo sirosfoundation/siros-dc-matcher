@@ -4,12 +4,13 @@
 use sha2::{Digest, Sha256};
 use siros_codec::base64url;
 use siros_codec::cbor::{CborError, Unsupported, Value};
+use siros_codec::member::MemberFault;
 use siros_codec::Base64Error;
 use siros_mdoc::{
     AlgorithmFault, DeviceKeyFault, DeviceSignedElement, DigestId, DisclosureError, DocTypeFault,
     ElementId, ElementIdentifier, EnvelopeFault, IssuerAuthFault, ItemFault, ItemMember,
-    KeyAuthorizationsFault, Mdoc, MdocError, MemberFault, NameFault, NameSpace, NameSpacesFault,
-    PayloadFault, ValidityFault, ValueDigestsFault,
+    KeyAuthorizationsFault, Mdoc, MdocError, NameFault, NameSpace, NameSpacesFault, PayloadFault,
+    ValidityFault, ValueDigestsFault,
 };
 
 const DOC_TYPE: &str = "org.example.doc.1";

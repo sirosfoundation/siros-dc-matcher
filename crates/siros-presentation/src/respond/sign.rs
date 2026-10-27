@@ -2,27 +2,18 @@
 
 use std::fmt;
 
+use siros_codec::signature::Es256Signature;
 use siros_credential::Credential;
-use siros_mdoc::{es256_verifies, Es256Signature, P256Key};
+use siros_mdoc::{es256_verifies, P256Key};
 use siros_wallet_state::KeyId;
 
 use crate::error::PresentationError;
 
-/// The identifier of a [`Sign`] effect, which its signature names.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct SignId(usize);
-
-impl SignId {
-    /// The identifier `id`, as the host returns it.
-    pub fn new(id: usize) -> Self {
-        Self(id)
-    }
-
-    /// The number.
-    pub fn value(self) -> usize {
-        self.0
-    }
-}
+siros_codec::position!(
+    /// The identifier of a [`Sign`] effect, which its signature names: its position among the
+    /// effects.
+    pub SignId
+);
 
 /// The bytes a holder key signs for one presentation.
 #[derive(Debug, Clone, PartialEq, Eq)]

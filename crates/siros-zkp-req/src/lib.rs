@@ -44,10 +44,10 @@ pub mod vp_token;
 
 pub use formats::ZkpFormats;
 pub use ids::{
-    ArrayIndex, FnId, FnIdError, InputName, ItemIndex, PresentationIndex, ProofBackend,
-    ReqSetIndex, ResultKey, ReturnHandle, ReturnHandleError, SystemId, W3cType,
+    FnId, FnIdError, InputName, ItemIndex, PresentationIndex, ProofBackend, ReqSetIndex, ResultKey,
+    ReturnHandle, ReturnHandleError, SystemId, W3cType,
 };
-pub use outcome::{ErrorCode, IdentifierFault, MemberFault, OptionFault, RequestRule, ReturnFault};
+pub use outcome::{ErrorCode, IdentifierFault, OptionFault, RequestRule, ReturnFault};
 pub use presentation::{
     vp_token_cbor, vp_token_json, EncodingError, Member, ProofContent, ProofEnvelope, ZkProof,
     ZkpPresentation,

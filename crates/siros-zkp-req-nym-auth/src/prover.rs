@@ -6,7 +6,8 @@
 //! configuration and from the prover-supplied values of the presentation.
 
 use siros_codec::date::{Date, DateTime};
-use siros_mdoc::{Es256Signature, MessageDigest, SessionTranscript};
+use siros_codec::signature::Es256Signature;
+use siros_mdoc::{MessageDigest, SessionTranscript};
 use siros_zkp_req::{InputName, ProofBackend, ZkProof};
 
 use crate::attestation::{DocumentSigner, OpenedSeed, UsableAttestation};

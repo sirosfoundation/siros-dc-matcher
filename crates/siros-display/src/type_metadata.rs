@@ -2,12 +2,11 @@
 
 use rustc_hash::FxHashSet;
 use serde_json::{Map, Value};
-use siros_dcql::ClaimPath;
+use siros_dcql::{ClaimPath, Vct};
 
 use crate::claims::{self, Label};
 use crate::entry::DisplayEntry;
 use crate::error::{DisplayError, EntryFault};
-use crate::ids::Vct;
 use crate::json::{self, Entries};
 use crate::locale::{Locale, Localized};
 use crate::text::DisplayText;

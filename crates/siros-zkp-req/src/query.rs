@@ -1,11 +1,12 @@
 //! A `zkp_req` Credential Query (`zkp_req`, Sections 1.1, 2 and 2.1).
 
 use serde_json::{Map, Value};
+use siros_codec::member::{ArrayIndex, MemberFault};
 use siros_dcql::{CredentialFormat, DocType, HolderBinding, Multiplicity, QueryId, Vct};
 
-use crate::ids::{ArrayIndex, FnId, ItemIndex, ReqSetIndex, ReturnHandle, W3cType};
+use crate::ids::{FnId, ItemIndex, ReqSetIndex, ReturnHandle, W3cType};
 use crate::json::{identifier, non_empty_array, non_empty_strings};
-use crate::outcome::{MemberFault, OptionFault, RequestRule, ReturnFault};
+use crate::outcome::{OptionFault, RequestRule, ReturnFault};
 
 /// The Credential Format Identifier of a `zkp_req` query.
 pub const FORMAT: &str = "zkp_req";

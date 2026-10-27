@@ -4,7 +4,7 @@ use p256::ecdsa::signature::Verifier;
 use p256::ecdsa::{Signature, VerifyingKey};
 
 use crate::device_key::P256Key;
-use crate::signature::Es256Signature;
+use siros_codec::signature::Es256Signature;
 
 /// Whether `signature` is an ES256 signature of `message` under `key`. A key that is no curve
 /// point, and a signature whose `r` or `s` is zero or not below the group order, verify

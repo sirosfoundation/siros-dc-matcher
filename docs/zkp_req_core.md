@@ -46,7 +46,7 @@ AdmittedIssuer::resolve(trusted_authorities,     ←  trust store
 UsableAttestation::new(tested, admitted, query)
 Answer::new(pair, usable, secret_seed)
                     the wallet's one consent screen
-Prepared::new(answer, &NymAuthRequest, key_id)
+Prepared::new(answer, &NymAuthRequest)
   → data_to_sign                                 →  sign(kid, "ES256", data)
 job(device_signature) → ProofJob                 ─────────────────────────→  prove(job)
 assemble(ProofOutput)                            ←─────────────────────────  zk_proof, pseudonym
@@ -152,8 +152,8 @@ artifacts from their reference copies.
   Clauses 5.1.3 and 5.1.5; TS 119 411-8).
 * `presenter::Answer::new(pair, attestation, secret_seed)` (feature `request`) holds when the
   attestation is usable for the pair's query, the seed opens `ssc` and the option's assertions
-  hold; `Prepared::new(answer, &NymAuthRequest, key_id)` gives the `Prepared` of the answer in
-  the request's session: `data_to_sign`, `key_id`, `statement`, `job(device_signature)`,
+  hold; `Prepared::new(answer, &NymAuthRequest)` gives the `Prepared` of the answer in the
+  request's session: `data_to_sign`, `statement`, `job(device_signature)`,
   `assemble(&ProofOutput)`, and `prove(device_signature, prover)` for a linked prover.
 * `request_object::check_request(request_object, signing, channel)` and
   `CheckedRequest::handover(jwk_thumbprint)`, with `VerifierId::x509_san_dns(&ClientId, Intermediary)` or

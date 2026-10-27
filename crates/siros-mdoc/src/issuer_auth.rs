@@ -1,8 +1,10 @@
 //! `issuerAuth`: the issuer's `COSE_Sign1` over the MSO (ISO/IEC 18013-5, 9.1.2.4).
 
 use siros_codec::cbor::{self, Item, Kind};
+use siros_codec::chain::CertificateChain;
+use siros_codec::member::{ArrayIndex, MemberFault};
 
-use crate::error::{AlgorithmFault, IssuerAuthFault, MdocError, MemberFault};
+use crate::error::{AlgorithmFault, IssuerAuthFault, MdocError};
 use crate::signature::{CoseAlgorithm, SigStructure};
 
 /// The COSE label of `alg` (RFC 9052, Section 3.1).
@@ -15,17 +17,9 @@ const X5CHAIN: i64 = 33;
 pub struct IssuerAuth {
     encoded: Vec<u8>,
     algorithm: CoseAlgorithm,
-    x5chain: X5Chain,
+    x5chain: CertificateChain,
     sig_structure: SigStructure,
     signature: Vec<u8>,
-}
-
-/// `x5chain` (RFC 9360): the issuer's certificates as it wrote them, DER, the Document
-/// Signer's first.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct X5Chain {
-    document_signer: Vec<u8>,
-    issuers: Vec<Vec<u8>>,
 }
 
 impl IssuerAuth {
@@ -45,7 +39,7 @@ impl IssuerAuth {
             .and_then(Item::as_int)
             .map(CoseAlgorithm::new)
             .ok_or(MdocError::Algorithm(AlgorithmFault::Absent))?;
-        let x5chain = X5Chain::read(unprotected.get_int(X5CHAIN)).map_err(MdocError::X5chain)?;
+        let x5chain = x5chain(unprotected.get_int(X5CHAIN)).map_err(MdocError::X5chain)?;
         let payload_bytes = payload.as_bytes().ok_or(fault(IssuerAuthFault::Payload))?;
         let signature = signature
             .as_bytes()
@@ -82,9 +76,9 @@ impl IssuerAuth {
         self.algorithm
     }
 
-    /// `x5chain`.
+    /// `x5chain` (RFC 9360): the issuer's certificates, the Document Signer's first.
     #[must_use]
-    pub fn x5chain(&self) -> &X5Chain {
+    pub fn x5chain(&self) -> &CertificateChain {
         &self.x5chain
     }
 
@@ -101,40 +95,23 @@ impl IssuerAuth {
     }
 }
 
-impl X5Chain {
-    /// `x5chain`: one certificate, or a non-empty array of them, the signer's first (RFC 9360).
-    fn read(item: Option<&Item<'_>>) -> Result<Self, MemberFault> {
-        match item.ok_or(MemberFault::Absent)?.kind() {
-            Kind::Bytes(der) => Ok(Self {
-                document_signer: der.to_vec(),
-                issuers: Vec::new(),
-            }),
-            Kind::Array(certificates) => {
-                let mut ders = certificates.iter().map(|certificate| {
-                    certificate
-                        .as_bytes()
-                        .map(<[u8]>::to_vec)
-                        .ok_or(MemberFault::WrongType)
-                });
-                let document_signer = ders.next().ok_or(MemberFault::Empty)??;
-                Ok(Self {
-                    document_signer,
-                    issuers: ders.collect::<Result<_, _>>()?,
-                })
-            }
-            _ => Err(MemberFault::WrongType),
+/// `x5chain`: one certificate, or a non-empty array of them, the signer's first (RFC 9360).
+fn x5chain(item: Option<&Item<'_>>) -> Result<CertificateChain, MemberFault> {
+    match item.ok_or(MemberFault::Absent)?.kind() {
+        Kind::Bytes(der) => Ok(CertificateChain::new(der.to_vec(), Vec::new())),
+        Kind::Array(certificates) => {
+            let mut ders = certificates.iter().enumerate().map(|(index, certificate)| {
+                certificate
+                    .as_bytes()
+                    .map(<[u8]>::to_vec)
+                    .ok_or(MemberFault::Entry(ArrayIndex::new(index)))
+            });
+            let document_signer = ders.next().ok_or(MemberFault::Empty)??;
+            Ok(CertificateChain::new(
+                document_signer,
+                ders.collect::<Result<_, _>>()?,
+            ))
         }
-    }
-
-    /// The Document Signer certificate, DER: the first.
-    #[must_use]
-    pub fn document_signer(&self) -> &[u8] {
-        &self.document_signer
-    }
-
-    /// The certificates, DER, the Document Signer's first.
-    pub fn certificates(&self) -> impl Iterator<Item = &[u8]> {
-        std::iter::once(self.document_signer.as_slice())
-            .chain(self.issuers.iter().map(Vec::as_slice))
+        _ => Err(MemberFault::WrongType),
     }
 }

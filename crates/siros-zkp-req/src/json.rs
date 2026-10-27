@@ -1,9 +1,9 @@
 //! The member shapes the request rules share.
 
 use serde_json::Value;
+use siros_codec::member::{ArrayIndex, MemberFault};
 
-use crate::ids::ArrayIndex;
-use crate::outcome::{IdentifierFault, MemberFault};
+use crate::outcome::IdentifierFault;
 
 /// A non-empty array.
 pub(crate) fn non_empty_array(value: Option<&Value>) -> Result<&[Value], MemberFault> {

@@ -5,9 +5,10 @@ use std::fmt;
 
 use siros_codec::cbor::Value;
 use siros_codec::date::{Date, DateTime};
+use siros_codec::signature::{Es256Signature, SignatureLength};
 use siros_mdoc::{
-    CoseAlgorithm, DigestAlgorithm, ElementIdentifier, Es256Signature, IssuerSignedItem, Mdoc,
-    P256Key, SigStructure, SignatureLength,
+    CoseAlgorithm, DigestAlgorithm, ElementIdentifier, IssuerSignedItem, Mdoc, P256Key,
+    SigStructure,
 };
 
 use crate::catalogue::MDOC_DOCTYPE;

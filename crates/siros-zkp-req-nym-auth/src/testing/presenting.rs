@@ -21,7 +21,6 @@ use siros_oid4vp::{
 use siros_trust::{
     AdmittedIssuer, ChainRefusal, IssuerChain, QueryAuthorities, TrustStore, Unadmitted,
 };
-use siros_wallet_state::{KeyId, WalletState};
 use siros_zkp_req::{PairRefusal, ZkpFormats, ZkpPresentation, ZkpReqQuery};
 use x509_cert::builder::{Builder, CertificateBuilder, Profile};
 use x509_cert::ext::pkix::name::GeneralName;
@@ -157,21 +156,6 @@ pub fn verified_request(query: &Value, nonce: &str) -> VerifiedRequest {
 }
 
 /// The `kid` of the Holder's device key.
-fn key_id() -> KeyId {
-    let state = json!({
-        "schemaVersion": 4,
-        "credentials": [{"credentialId": 1, "format": "mso_mdoc", "data": "", "kid": "key-1",
-            "instanceId": 1, "batchId": 1, "credentialIssuerIdentifier": "https://issuer.example",
-            "credentialConfigurationId": "nym_auth"}],
-        "keypairs": [],
-        "presentations": [],
-        "settings": {"openidRefreshTokenMaxAgeInSeconds": "0"},
-        "credentialIssuanceSessions": []
-    });
-    let state = WalletState::parse(&state.to_string()).unwrap();
-    state.credentials()[0].key_id().unwrap().clone()
-}
-
 /// The admission of the Document Signer of `mdoc` by `query`'s `trusted_authorities`, against an
 /// empty trust store, at `now`.
 fn admitted(
@@ -181,7 +165,7 @@ fn admitted(
 ) -> Result<AdmittedIssuer, Unadmitted<ChainRefusal>> {
     let dcql = DcqlQuery::parse(&json!({"credentials": [query]})).unwrap();
     let authorities = QueryAuthorities::of(&dcql.credentials()[0]).unwrap();
-    let chain = IssuerChain::parse(mdoc.issuer_auth().x5chain().certificates()).unwrap();
+    let chain = IssuerChain::parse(mdoc.issuer_auth().x5chain()).unwrap();
     AdmittedIssuer::resolve(
         &authorities,
         Some(&chain),
@@ -243,7 +227,7 @@ pub fn prepared(
         .map_err(Presenting::Unanswerable)?;
     let request =
         NymAuthRequest::new(request, VerifierIdForm::X509SanDns).map_err(Presenting::Request)?;
-    Prepared::new(answer, &request, &key_id()).map_err(Presenting::Prove)
+    Prepared::new(answer, &request).map_err(Presenting::Prove)
 }
 
 /// The presentation of `prepared`, signed by the device key of scalar `device`, proved by

@@ -239,7 +239,7 @@ fn sets(
             if set.requirement() == SetRequirement::Required {
                 Either::Left(choices)
             } else {
-                let index = SetIndex::at(index);
+                let index = SetIndex::new(index);
                 Either::Right(OptionalSet { index, choices })
             }
         })

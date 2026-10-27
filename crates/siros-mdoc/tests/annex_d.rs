@@ -3,7 +3,8 @@
 
 use siros_codec::base64url;
 use siros_codec::cbor::Value;
-use siros_mdoc::{ElementId, Es256Signature, Mdoc};
+use siros_codec::signature::Es256Signature;
+use siros_mdoc::{ElementId, Mdoc};
 
 const DEVICE_RESPONSE: &str = include_str!("vectors/annex_d_device_response.hex");
 const NAME_SPACE: &str = "org.iso.18013.5.1";

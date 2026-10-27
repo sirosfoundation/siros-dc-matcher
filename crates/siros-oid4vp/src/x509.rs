@@ -9,6 +9,7 @@ use der::{Any, Decode};
 use p256::PublicKey;
 use serde_json::Value;
 use siros_codec::base64;
+use siros_codec::chain::CertificateChain;
 use x509_cert::ext::pkix::name::GeneralName;
 use x509_cert::ext::pkix::{CertificatePolicies, SubjectAltName};
 use x509_cert::name::Name;
@@ -39,22 +40,10 @@ const LEGAL_POLICIES: [ObjectIdentifier; 2] = [
     ObjectIdentifier::new_unwrap("0.4.0.194118.1.4"),
 ];
 
-/// The certificates of an `x5c` Header Parameter, DER, leaf first: at least one, the leaf an
-/// X.509 certificate with a P-256 key.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct X509Chain(Vec<Vec<u8>>);
-
-impl X509Chain {
-    /// The certificates, DER, leaf first.
-    pub fn certificates(&self) -> impl Iterator<Item = &[u8]> {
-        self.0.iter().map(Vec::as_slice)
-    }
-}
-
 /// An `x5c` chain and what the wallet reads from its leaf.
 #[derive(Debug, Clone)]
 pub(crate) struct Chain {
-    chain: X509Chain,
+    chain: CertificateChain,
     leaf: CertificateDer,
     key: PublicKey,
     dns_names: Vec<String>,
@@ -66,19 +55,18 @@ impl Chain {
     /// certificates, leaf first.
     pub(crate) fn parse(x5c: Option<&Value>) -> Result<Self, IntakeError> {
         let invalid = IntakeError::CertificateChainInvalid;
-        let der = x5c
+        let mut ders = x5c
             .and_then(Value::as_array)
-            .filter(|chain| !chain.is_empty())
             .ok_or(invalid(ChainFault::Absent))?
             .iter()
             .map(|c| {
                 let text = c.as_str().ok_or(invalid(ChainFault::NotString))?;
                 base64::decode(text).map_err(|e| invalid(ChainFault::Encoding(e)))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let leaf_der = der.first().ok_or(invalid(ChainFault::Absent))?;
-        let leaf =
-            Certificate::from_der(leaf_der).map_err(|_| invalid(ChainFault::LeafNotCertificate))?;
+            });
+        let leaf_der = ders.next().ok_or(invalid(ChainFault::Absent))??;
+        let chain = CertificateChain::new(leaf_der, ders.collect::<Result<_, _>>()?);
+        let leaf = Certificate::from_der(chain.first())
+            .map_err(|_| invalid(ChainFault::LeafNotCertificate))?;
         let tbs = &leaf.tbs_certificate;
         let key = p256_key(tbs).ok_or(invalid(ChainFault::LeafKey))?;
         let dns_names = match tbs.get::<SubjectAltName>() {
@@ -94,11 +82,11 @@ impl Chain {
             Err(_) => return Err(invalid(ChainFault::SubjectAltName)),
         };
         Ok(Self {
-            leaf: CertificateDer(leaf_der.clone()),
+            leaf: CertificateDer(chain.first().to_vec()),
             key,
             dns_names,
             semantic_identifier: semantic_identifier(tbs),
-            chain: X509Chain(der),
+            chain,
         })
     }
 
@@ -129,7 +117,7 @@ impl Chain {
     }
 
     /// The certificates.
-    pub(crate) fn into_x509(self) -> X509Chain {
+    pub(crate) fn into_certificates(self) -> CertificateChain {
         self.chain
     }
 }

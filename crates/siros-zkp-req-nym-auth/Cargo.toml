@@ -22,7 +22,7 @@ credential = [
     "dep:zeroize",
 ]
 # The nym_auth request of a verified request (N2), and the presentation of a usable answer.
-request = ["credential", "dep:siros-wallet-state", "siros-oid4vp/crypto"]
+request = ["credential", "siros-oid4vp/crypto"]
 # A test issuer, signed requests and host, for this crate's tests and those of the bindings.
 test-fixtures = [
     "request",
@@ -43,7 +43,6 @@ siros-oid4vp = { workspace = true }
 siros-zkp-req = { workspace = true }
 siros-mdoc = { workspace = true, optional = true }
 siros-trust = { workspace = true, optional = true }
-siros-wallet-state = { workspace = true, optional = true }
 serde_json = { workspace = true }
 sha2 = { version = "0.10.9", features = ["oid"] }
 p256 = { version = "0.13.2", default-features = false, features = ["ecdsa", "alloc", "pkcs8"], optional = true }

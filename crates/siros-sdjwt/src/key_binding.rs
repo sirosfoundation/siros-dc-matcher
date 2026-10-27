@@ -6,7 +6,7 @@ use rustc_hash::FxHashSet;
 use serde_json::Value;
 use siros_codec::base64url;
 use siros_codec::date::DateTime;
-use siros_mdoc::Es256Signature;
+use siros_codec::signature::Es256Signature;
 
 use crate::alg::HashAlg;
 use crate::error::KeyBindingError;

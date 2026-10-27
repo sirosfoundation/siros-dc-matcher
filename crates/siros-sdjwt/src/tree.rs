@@ -96,23 +96,11 @@ pub enum Element {
     Withheld,
 }
 
-/// A disclosure of the stored credential, named by its position in the compact form.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct DisclosureId(usize);
-
-impl DisclosureId {
-    /// The disclosure at `position` among the disclosures, from 0.
-    #[must_use]
-    pub fn new(position: usize) -> Self {
-        Self(position)
-    }
-
-    /// The position among the disclosures, from 0.
-    #[must_use]
-    pub fn value(self) -> usize {
-        self.0
-    }
-}
+siros_codec::position!(
+    /// A disclosure of the stored credential, named by its position among the disclosures of
+    /// the compact form.
+    pub DisclosureId
+);
 
 /// A disclosure as stored: its position and its base64url text.
 pub(crate) struct Disclosure {

@@ -64,4 +64,4 @@ pub use path::{OnPath, PathRefusal, TrustPath};
 #[cfg(feature = "chain")]
 pub use position::{CertificateIndex, ChainIndex, EntryIndex};
 #[cfg(feature = "chain")]
-pub use store::{EntryError, MemberFault, StoreEntry, StoreError, TrustStore};
+pub use store::{EntryError, StoreEntry, StoreError, TrustStore};

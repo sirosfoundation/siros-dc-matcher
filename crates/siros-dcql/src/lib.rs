@@ -19,6 +19,13 @@
 //! (§6.1.1), [`path`] resolves claims path pointers (§7), and [`eval`] performs selection
 //! (§6.4).
 //!
+//! # Shared vocabulary
+//!
+//! The request vocabulary the SIROS wallet core's components share is defined here, once:
+//! [`QueryId`], [`ClaimPath`], the credential type identifiers [`DocType`] and [`Vct`], and
+//! [`TrustedAuthorities`] with its [`AuthorityType`] and [`AuthorityValue`]. The crate depends
+//! on no other workspace crate, so that it publishes on its own.
+//!
 //! [oid4vp]: https://openid.net/specs/openid-4-verifiable-presentations-1_0.html
 
 #![deny(missing_docs)]

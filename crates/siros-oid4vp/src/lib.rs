@@ -78,5 +78,3 @@ pub use verified::{
     AccessCertificate, AttestationFormat, CertificateDer, ContentEncryption, Encryption,
     ResponseMode, VerifiedRequest, VerifierView,
 };
-#[cfg(feature = "crypto")]
-pub use x509::X509Chain;

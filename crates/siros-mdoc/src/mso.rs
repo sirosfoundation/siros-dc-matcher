@@ -4,12 +4,13 @@ use rustc_hash::FxHashMap;
 use sha2::{Digest as _, Sha256, Sha384, Sha512};
 use siros_codec::cbor::{self, Item, Kind};
 use siros_codec::date::DateTime;
+use siros_codec::member::MemberFault;
 use siros_dcql::DocType;
 
 use crate::device_key::P256Key;
 use crate::error::{
-    DeviceKeyFault, DocTypeFault, MdocError, MemberFault, NameFault, PayloadFault, ValidityFault,
-    ValidityTime, ValueDigestsFault,
+    DeviceKeyFault, DocTypeFault, MdocError, NameFault, PayloadFault, ValidityFault, ValidityTime,
+    ValueDigestsFault,
 };
 use crate::key_authorizations::KeyAuthorizations;
 use crate::names::{DigestId, NameSpace};

@@ -4,12 +4,12 @@
 use p256::PublicKey;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use siros_codec::chain::CertificateChain;
 
 use super::{Answers, Halt, IntakeError};
 use crate::client_id::ClientId;
 use crate::jose;
 use crate::values::{AttestationIssuer, Kid, Origin, TrustChain};
-use crate::x509::X509Chain;
 
 /// The name a [`Trust`] effect asks about.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,7 +29,7 @@ pub enum KeyMaterial {
     None,
     /// An `x5c` chain. The host validates the chain; the core has bound the leaf to the subject
     /// and verified the signature with its key.
-    X509Chain(X509Chain),
+    X509Chain(CertificateChain),
     /// A key the host resolves and returns in [`TrustAnswer`]: a DID's verification method,
     /// an OpenID Federation entity's key, or an attestation issuer's key.
     Resolve {

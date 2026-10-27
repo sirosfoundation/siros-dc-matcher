@@ -212,7 +212,7 @@ impl TestedAttestation {
     /// [`Unusable`]: another `docType`, a credential out of the nym_auth form, or the failed
     /// tests.
     pub fn of(mdoc: &Mdoc, proof_time: DateTime) -> Result<Self, Unusable> {
-        let document_signer = mdoc.issuer_auth().x5chain().document_signer();
+        let document_signer = mdoc.issuer_auth().x5chain().first();
         let mdoc = match mdoc::read_mdoc(mdoc) {
             Ok(Reading::NymAuth(mdoc)) => *mdoc,
             Ok(Reading::OtherDocType) => return Err(Unusable::OtherDocType),

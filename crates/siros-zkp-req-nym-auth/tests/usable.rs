@@ -6,6 +6,7 @@
 mod support;
 
 use serde_json::{json, Value};
+use siros_codec::chain::CertificateChain;
 use siros_codec::date::DateTime;
 use siros_dcql::DcqlQuery;
 use siros_mdoc::Mdoc;
@@ -17,7 +18,7 @@ use support::*;
 fn admitted(query: &Value, der: &[u8], now: DateTime) -> AdmittedIssuer {
     let dcql = DcqlQuery::parse(&json!({"credentials": [query]})).unwrap();
     let authorities = QueryAuthorities::of(&dcql.credentials()[0]).unwrap();
-    let chain = IssuerChain::parse([der]).unwrap();
+    let chain = IssuerChain::parse(&CertificateChain::new(der.to_vec(), Vec::new())).unwrap();
     let store = TrustStore::parse("[]").unwrap();
     AdmittedIssuer::resolve(&authorities, Some(&chain), &store, now).unwrap()
 }

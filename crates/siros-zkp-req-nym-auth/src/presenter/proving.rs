@@ -4,11 +4,10 @@
 use std::fmt;
 
 use siros_codec::cbor::Value as Cbor;
+use siros_codec::signature::Es256Signature;
 use siros_mdoc::{
-    device_signing_input, es256_verifies, DeviceNameSpaces, Es256Signature, SessionTranscript,
-    SigStructure,
+    device_signing_input, es256_verifies, DeviceNameSpaces, SessionTranscript, SigStructure,
 };
-use siros_wallet_state::KeyId;
 use siros_zkp_req::{
     PairRefusal, ProofEnvelope, QueryOption, ReqSetIndex, ResultKey, ZkpPresentation,
 };
@@ -123,7 +122,6 @@ pub struct Prepared {
     attestation: UsableAttestation,
     seed: OpenedSeed,
     data_to_sign: SigStructure,
-    key_id: KeyId,
     req_set: Option<ReqSetIndex>,
     results: Vec<(ResultKey, Cbor)>,
     pseudonym: PseudonymValue,
@@ -139,23 +137,18 @@ impl fmt::Debug for Prepared {
 }
 
 impl Prepared {
-    /// The statement of `answer` in the session of `request`, for the device key `key_id`
-    /// (system rulebooks, Section 7).
+    /// The statement of `answer` in the session of `request` (system rulebooks, Section 7).
     ///
     /// # Errors
     ///
     /// [`ProveError::NotUsable`] for an `age_check` bound the system does not encode.
-    pub fn new(
-        answer: Answer<'_>,
-        request: &NymAuthRequest<'_>,
-        key_id: &KeyId,
-    ) -> Result<Self, ProveError> {
-        build(answer, request.session(), key_id)
+    pub fn new(answer: Answer<'_>, request: &NymAuthRequest<'_>) -> Result<Self, ProveError> {
+        build(answer, request.session())
     }
 }
 
-/// The statement of `answer` in `session`, and the data the device key `key_id` signs.
-fn build(answer: Answer<'_>, session: &Session, key_id: &KeyId) -> Result<Prepared, ProveError> {
+/// The statement of `answer` in `session`, and the data the device key signs.
+fn build(answer: Answer<'_>, session: &Session) -> Result<Prepared, ProveError> {
     let (pair, attestation, seed) = answer.into_parts();
     let pseudonym_item = pair.pseudonym().pseudonym;
     let session_transcript = SessionTranscript::new(session.handover.session_transcript());
@@ -191,7 +184,6 @@ fn build(answer: Answer<'_>, session: &Session, key_id: &KeyId) -> Result<Prepar
         attestation,
         seed,
         data_to_sign,
-        key_id: key_id.clone(),
         req_set: option.option().req_set(),
         results,
         pseudonym,
@@ -222,12 +214,6 @@ impl Prepared {
     #[must_use]
     pub fn data_to_sign(&self) -> &SigStructure {
         &self.data_to_sign
-    }
-
-    /// The identifier of the device key.
-    #[must_use]
-    pub fn key_id(&self) -> &KeyId {
-        &self.key_id
     }
 
     /// The statement the proof establishes.

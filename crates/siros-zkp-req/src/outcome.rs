@@ -2,9 +2,10 @@
 
 use std::fmt;
 
+use siros_codec::member::{ArrayIndex, MemberFault};
 use siros_dcql::QueryIdError;
 
-use crate::ids::{ArrayIndex, FnIdError, ItemIndex, ReqSetIndex, ReturnHandleError};
+use crate::ids::{FnIdError, ItemIndex, ReqSetIndex, ReturnHandleError};
 
 /// The error code a Wallet sends for a Credential Query it cannot answer (Section 5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -34,19 +35,6 @@ impl fmt::Display for ErrorCode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
-}
-
-/// What breaks the rule of a JSON member of a request.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum MemberFault {
-    /// The member is absent.
-    Absent,
-    /// The member has another JSON type than the rule asks.
-    WrongType,
-    /// The member is an empty string or an empty array.
-    Empty,
-    /// The array entry at this position breaks the rule of the entries.
-    Entry(ArrayIndex),
 }
 
 /// Why a member does not hold an identifier.

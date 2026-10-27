@@ -1,10 +1,11 @@
 //! The `zkp_req` entry of `vp_formats_supported` (`zkp_req`, Section 1.2).
 
 use serde_json::Value;
+use siros_codec::member::MemberFault;
 
 use crate::ids::{ProofBackend, SystemId};
 use crate::json::non_empty_strings;
-use crate::outcome::{MemberFault, RequestRule};
+use crate::outcome::RequestRule;
 
 /// What the Verifier says it can verify.
 ///

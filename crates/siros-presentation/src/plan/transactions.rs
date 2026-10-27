@@ -15,13 +15,13 @@ use super::fetches::Fetches;
 use super::Unproven;
 use crate::credential::MatchCredential;
 use crate::error::{Inconsistency, PresentationError};
-use crate::ids::{position, CandidateIndex, QueryIndex};
+use crate::ids::{CandidateIndex, QueryIndex};
 use crate::matching::{Answered, Answers, Candidate};
 use crate::offers::{EntryCarriers, EntryQueries, Member};
 
-position!(
+siros_codec::position!(
     /// The position of an entry in the request's `transaction_data`.
-    EntryPosition
+    pub(crate) EntryPosition
 );
 
 /// The presented credential a transaction entry binds to (T4): the Credential Query it answers,
@@ -125,7 +125,7 @@ impl<'a> Transactions<'a> {
                 self.entries
                     .iter()
                     .position(|entry| std::ptr::eq(entry, *bound))
-                    .map(EntryPosition::at)
+                    .map(EntryPosition::new)
                     .ok_or(Inconsistency::Entry)
             })
             .collect()

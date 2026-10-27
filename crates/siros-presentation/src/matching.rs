@@ -491,7 +491,7 @@ impl<'r, C: MatchCredential, R> Answered<'r, C, R> {
         self.queries
             .iter()
             .enumerate()
-            .map(|(index, answers)| (QueryIndex::at(index), answers))
+            .map(|(index, answers)| (QueryIndex::new(index), answers))
     }
 
     /// The candidates of the Credential Query at `index`.

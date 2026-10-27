@@ -5,6 +5,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use p256::ecdsa::signature::{Keypair, Signer};
+use siros_codec::chain::CertificateChain;
 use siros_codec::date::DateTime;
 use siros_dcql::DcqlQuery;
 use siros_trust::{IssuerChain, QueryAuthorities, TrustStore};
@@ -316,8 +317,9 @@ fn explicit_false_critical(der: &[u8], signer: &Key) -> Vec<u8> {
 
 /// The chain of `certificates`, the signer's first.
 pub fn chain(certificates: &[&Cert]) -> IssuerChain {
-    let ders: Vec<Vec<u8>> = certificates.iter().map(|c| c.der()).collect();
-    IssuerChain::parse(ders.iter().map(Vec::as_slice)).unwrap()
+    let (first, rest) = certificates.split_first().unwrap();
+    let rest = rest.iter().map(|c| c.der()).collect();
+    IssuerChain::parse(&CertificateChain::new(first.der(), rest)).unwrap()
 }
 
 /// The authorities of a `mso_mdoc` query with `trusted_authorities` `authorities`.

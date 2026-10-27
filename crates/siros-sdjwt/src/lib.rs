@@ -49,5 +49,5 @@ pub use error::{
 pub use key_binding::{Audience, BeforeEpoch, KbNonce, KeyBinding, NumericDate, Presentation};
 pub use node::{Children, Node, NodeValue};
 pub use process::MAX_DEPTH;
-pub use sd_jwt::{SdJwt, X5c};
+pub use sd_jwt::SdJwt;
 pub use tree::{Claim, ClaimValue, DisclosureId, Element, Object};

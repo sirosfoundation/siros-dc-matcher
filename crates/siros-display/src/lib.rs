@@ -65,7 +65,7 @@ pub use card::Card;
 #[cfg(feature = "credential")]
 pub use colour::Colour;
 #[cfg(feature = "credential")]
-pub use ids::{ConfigurationId, IssuerIdentifier, Vct};
+pub use ids::{ConfigurationId, IssuerIdentifier};
 #[cfg(feature = "credential")]
 pub use issuer::IssuerMetadata;
 #[cfg(feature = "credential")]

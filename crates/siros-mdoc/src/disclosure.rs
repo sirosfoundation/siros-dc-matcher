@@ -7,7 +7,9 @@ use siros_codec::cbor::Value;
 use crate::device::{device_signing_input, DeviceNameSpaces, DeviceSignedElement, PROTECTED_ES256};
 use crate::error::DisclosureError;
 use crate::mdoc::{IssuerNameSpace, IssuerSignedItem, Mdoc};
-use crate::signature::{Es256Signature, SessionTranscript, SigStructure};
+use siros_codec::signature::Es256Signature;
+
+use crate::signature::{SessionTranscript, SigStructure};
 
 /// A data element to look up: its namespace and its identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

@@ -53,14 +53,8 @@ impl Body {
     #[cfg(feature = "chain")]
     fn issuer_chain(&self) -> Result<Option<IssuerChain>, ChainError> {
         match self {
-            Self::SdJwtVc(vc) => vc
-                .sd_jwt()
-                .x5c()
-                .map(|x5c| IssuerChain::parse(x5c.certificates()))
-                .transpose(),
-            Self::Mdoc(mdoc) => {
-                IssuerChain::parse(mdoc.issuer_auth().x5chain().certificates()).map(Some)
-            }
+            Self::SdJwtVc(vc) => vc.sd_jwt().x5c().map(IssuerChain::parse).transpose(),
+            Self::Mdoc(mdoc) => IssuerChain::parse(mdoc.issuer_auth().x5chain()).map(Some),
         }
     }
 }

@@ -2609,7 +2609,6 @@ dependencies = [
  "sha2",
  "siros-codec",
  "siros-dcql",
- "siros-mdoc",
 ]
 
 [[package]]
@@ -2679,7 +2678,6 @@ dependencies = [
  "siros-mdoc",
  "siros-oid4vp",
  "siros-trust",
- "siros-wallet-state",
  "siros-zkp-req",
  "siros-zkp-req-nym-auth",
  "x509-cert",

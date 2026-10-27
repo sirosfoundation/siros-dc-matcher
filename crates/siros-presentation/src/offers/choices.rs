@@ -40,8 +40,10 @@ impl Slot {
 
     fn member(self, way: usize) -> Member {
         let candidates = match self.multiplicity {
-            Multiplicity::One => vec![CandidateIndex::at(way)],
-            Multiplicity::Several => (0..self.candidates.get()).map(CandidateIndex::at).collect(),
+            Multiplicity::One => vec![CandidateIndex::new(way)],
+            Multiplicity::Several => (0..self.candidates.get())
+                .map(CandidateIndex::new)
+                .collect(),
         };
         Member {
             query: self.query,

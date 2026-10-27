@@ -65,7 +65,9 @@ impl EntryQueries {
                     .candidates()
                     .iter()
                     .enumerate()
-                    .map(move |(at, candidate)| (query, answers, CandidateIndex::at(at), candidate))
+                    .map(move |(at, candidate)| {
+                        (query, answers, CandidateIndex::new(at), candidate)
+                    })
             })
             .filter(|(_, answers, _, candidate)| carries(answers, candidate))
             .map(|(query, _, candidate, _)| Carrier { query, candidate })

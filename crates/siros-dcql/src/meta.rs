@@ -41,6 +41,13 @@ macro_rules! text_value {
             }
         }
 
+        /// Map lookups by the text.
+        impl ::core::borrow::Borrow<str> for $name {
+            fn borrow(&self) -> &str {
+                &self.0
+            }
+        }
+
         impl ::core::fmt::Display for $name {
             fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
                 f.write_str(&self.0)

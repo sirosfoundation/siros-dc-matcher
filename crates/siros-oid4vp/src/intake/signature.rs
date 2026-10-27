@@ -153,7 +153,7 @@ fn certified(
     let trusted = trust::verdict(
         answers,
         TrustSubject::Client(client_id.clone()),
-        KeyMaterial::X509Chain(chain.into_x509()),
+        KeyMaterial::X509Chain(chain.into_certificates()),
     )?;
     Ok((trusted, certificate))
 }

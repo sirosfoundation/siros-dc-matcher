@@ -130,21 +130,10 @@ pub enum ParseError {
     X5c(X5cError),
 }
 
-/// The position of a certificate in `x5c`, the signer's at 0.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct X5cIndex(usize);
-
-impl X5cIndex {
-    pub(crate) fn new(index: usize) -> Self {
-        Self(index)
-    }
-
-    /// The position.
-    #[must_use]
-    pub fn value(self) -> usize {
-        self.0
-    }
-}
+siros_codec::position!(
+    /// The position of a certificate in `x5c`, the signer's at 0.
+    pub(crate) X5cIndex
+);
 
 /// Why an `x5c` header parameter is no chain of certificates (RFC 7515, Section 4.1.6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

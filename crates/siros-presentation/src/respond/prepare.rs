@@ -259,7 +259,7 @@ impl<'p, 'a> Chosen<'p, 'a> {
             choice,
             self.planned.input.now,
         )?;
-        let prepared = NymPrepared::new(answer, nym_auth, &key_id(credential.credential())?)?;
+        let prepared = NymPrepared::new(answer, nym_auth)?;
         Ok(Form::unsigned(prepared, id))
     }
 }

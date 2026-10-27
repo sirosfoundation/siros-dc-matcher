@@ -3,6 +3,7 @@
 use std::fmt;
 
 use siros_codec::cbor::CborError;
+use siros_codec::member::MemberFault;
 use siros_codec::Base64Error;
 
 use crate::names::{DigestId, NameSpace};
@@ -50,17 +51,6 @@ pub enum MdocError {
     /// The digest of an `IssuerSignedItemBytes` is not the one `valueDigests` lists under its
     /// namespace and `digestID`.
     ItemDigest,
-}
-
-/// What breaks the CDDL of a member.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum MemberFault {
-    /// It is absent.
-    Absent,
-    /// It has another CBOR type than the CDDL gives it.
-    WrongType,
-    /// It is an empty array or map.
-    Empty,
 }
 
 /// Why the top level is no envelope [`Mdoc::parse`](crate::Mdoc::parse) reads.

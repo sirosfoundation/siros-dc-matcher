@@ -166,7 +166,7 @@ impl ZkpQuery {
             .options()
             .enumerate()
             .map(|(index, option)| {
-                first_pair(OptionIndex::at(index), option, &formats, systems, date)
+                first_pair(OptionIndex::new(index), option, &formats, systems, date)
             })
             .partition_result();
         if choices.is_empty() {
