@@ -34,3 +34,10 @@ siros-trust = { workspace = true }
 siros-wallet-state = { workspace = true }
 siros-zkp-req = { workspace = true }
 siros-zkp-req-nym-auth = { workspace = true }
+
+[dev-dependencies]
+siros-presentation = { workspace = true, features = ["test-fixtures"] }
+
+[[example]]
+name = "sample_registration"
+required-features = ["wallet"]

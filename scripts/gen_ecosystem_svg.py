@@ -30,11 +30,13 @@ BANDS = [
         [
             ("siros-dc-matcher-ffi", "UniFFI surface"),
             ("siros-dc-matcher-core", "v1 blob and profile, for the FFI"),
+            ("siros-picker-testhost", "the picker off-device"),
             ("siros-zkp-req-wasm", "browser presenter"),
         ],
         [
             ("siros-zkp-backend-longfellow", "Longfellow prover"),
             ("siros-zkp-backend-vega", "Vega prover"),
+            ("siros-zkp-proving-e2e", "real proofs end to end"),
         ],
     ]),
     ("l3", "L3", "presentation", [[

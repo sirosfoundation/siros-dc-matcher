@@ -11,9 +11,9 @@ language and of the Android Credential Manager matcher ABI. It is licensed
 BSD-2-Clause, except `crates/android-credman-sys` and `crates/android-credman`:
 MIT OR Apache-2.0, used here under MIT.
 
-The OpenWallet Foundation's [Multipaz](https://github.com/openwallet-foundation-labs/multipaz)
+The OpenWallet Foundation's [Multipaz](https://github.com/openwallet-foundation/multipaz)
 project ships an Apache-2.0 credential matcher that solves the same problem
-(`multipaz-dcapi/src/androidMain/matcher/`). We use it as a **conformance
+(`multipaz-dcapi-credman/src/androidMain/matcher/`). We use it as a **conformance
 oracle** and nothing else.
 
 This is not a formal clean-room procedure. Clean-room exists for
@@ -48,10 +48,7 @@ carried over line by line, or comments.
   as copying, and considerably harder to catch in review.
 - Copy their comments, or adopt their identifier set wholesale.
 - Vendor their binaries into this repository. Redistributing an Apache-2.0
-  artifact from a BSD-2 tree drags in notice obligations for no benefit — the
-  differential tests fetch the oracle at test time from a pinned upstream
-  commit, or read it from a local checkout via `MULTIPAZ_MATCHER_WASM`, and skip
-  when it is absent.
+  artifact from a BSD-2 tree drags in notice obligations for no benefit.
 
 ### Cite the spec, not the implementation
 
@@ -65,12 +62,7 @@ structural resemblance to the oracle as a blocker.
 
 ## Development
 
-```sh
-cargo test                      # everything, host targets
-cargo clippy --all-targets -- -D warnings
-cargo fmt --all -- --check
-cargo build -p siros-picker --target wasm32-wasip1 --release
-```
+The [README's build section](README.md#build-and-test) lists what CI checks, in both workspaces.
 
 `proving/` is a second workspace: the proof backends, which depend on edition-2024 crates that
 Cargo 1.82 cannot read, and the browser presenter that links them. Run its commands from there.
@@ -79,29 +71,8 @@ Cargo 1.82 cannot read, and the browser presenter that links them. Run its comma
 crate in this workspace. CI enforces this with `cargo publish --dry-run`; please
 do not work around it.
 
-Two floors are checked separately, because they differ on purpose:
-
-```sh
-# Everything that ships inside the credential picker holds Rust 1.82: the msrv job of
-# .github/workflows/ci.yml lists the crates.
-cargo +1.82 check --locked --all-features \
-  -p siros-codec -p siros-dcql -p siros-dc-matcher-core -p siros-picker \
-  -p android-credman-sys -p android-credman \
-  -p siros-zkp-req -p siros-zkp-req-nym-auth -p siros-sdjwt -p siros-mdoc \
-  -p siros-wallet-state -p siros-credential -p siros-display -p siros-transaction-data \
-  -p siros-trust -p siros-registration
-cargo +1.82 check --locked -p siros-oid4vp
-cargo +1.82 check --locked -p siros-trust
-cargo +1.82 check --locked -p siros-presentation --no-default-features
-cargo +1.82 check --locked -p siros-transaction-data --no-default-features
-
-# siros-dcql's public API against the version it declares.
-# Unlike fmt and clippy this is not part of the toolchain:
-#   cargo install cargo-semver-checks --locked
-cargo semver-checks --package siros-dcql
-```
-
-`cargo +1.82` needs that toolchain present: `rustup toolchain install 1.82`.
+Two floors are checked separately, because they differ on purpose. Everything that ships inside
+the credential picker holds Rust 1.82, and CI's `msrv` job checks those crates on it.
 
 `siros-dc-matcher-ffi` and `siros-picker-testhost` declare 1.88 in their own manifests —
 uniffi's bindgen chain and wasmtime need it — and neither ships in the picker.

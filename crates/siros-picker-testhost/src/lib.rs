@@ -6,10 +6,8 @@
 //! `claim_sets` edge case is wrong.
 //!
 //! This crate implements the same ABI over wasmtime, so the real `.wasm`
-//! binary runs against fixtures in ordinary `cargo test`. It also lets the
-//! same fixtures be replayed against another implementation for differential
-//! testing — see `CONTRIBUTING.md` on how that oracle is obtained, and why it
-//! is never vendored into this repository.
+//! binary runs in ordinary `cargo test`: `tests/matcher_wasm` compares the
+//! picker's offers with the wallet's own plan (K2).
 
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
@@ -23,16 +21,12 @@ use wasmtime::{Engine, Linker, Module, Store};
 use wasmtime_wasi::preview1::{self, WasiP1Ctx};
 use wasmtime_wasi::WasiCtxBuilder;
 
-/// Environment variable naming a local matcher binary to use as a
-/// differential-testing oracle. Tests skip when it is unset.
-pub const ORACLE_ENV: &str = "MULTIPAZ_MATCHER_WASM";
-
 /// What the host offers a matcher on one invocation.
 #[derive(Debug, Clone, Default)]
 pub struct Invocation {
     /// The DC API request JSON, shaped `{"requests":[{"protocol":…,"data":…}]}`.
     pub request: Vec<u8>,
-    /// The credential blob the wallet registered. Format is the wallet's own.
+    /// The registration the wallet registered.
     pub credentials: Vec<u8>,
     /// Package name of the calling app, as the platform verified it.
     pub calling_package: String,

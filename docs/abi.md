@@ -5,15 +5,17 @@ The full host ABI, with its evidence, is
 
 ## Imports
 
-`matcher.wasm` needs host level 2.
+`matcher.wasm` needs host level 2. A payment entry carries its `additional_info` from level 3,
+and an entry its delegation from level 7; a missing import traps only when called.
 
 | Function | Module | Purpose |
 |---|---|---|
 | `GetWasmVersion` | `credman` | Host ABI level. Below 2 the matcher emits nothing |
-| `GetCallingAppInfo` | `credman` | Writes `{package_name[256], origin[512]}` into guest memory — the platform-verified caller |
 | `GetRequestSize` / `GetRequestBuffer` | `credman` | The DC API request JSON, shaped `{"requests":[{"protocol":…,"data":…}]}` |
-| `GetCredentialsSize` / `ReadCredentialsBuffer` | `credman` | The blob the wallet registered, read at an offset until complete |
-| `AddEntrySet` / `AddEntryToSet` / `AddFieldToEntrySet` | `credman_v2` | Grouped entries. Required for DCQL `credential_sets`, and carries a free-form `metadata` string |
+| `GetCredentialsSize` / `ReadCredentialsBuffer` | `credman` | The registration the wallet registered (`siros-registration`), read at an offset until complete |
+| `AddEntrySet` / `AddEntryToSet` / `AddFieldToEntrySet` | `credman_v2` | Grouped entries: one set per offer. An entry's `metadata` string carries the pick (K3) |
+| `AddPaymentEntryToSet` / `AddPaymentEntryToSetV2` | `credman_v2` | The payment entry of a credential that takes a payment rulebook's transaction: payee, amount, and from level 3 `additional_info` |
+| `SetDelegationTypeForEntryInSet` | `credman_v7` | Whether the host completes the presentation without the wallet's UI (A9) |
 | `fd_write`, `proc_exit` | `wasi_snapshot_preview1` | The host provides `fd_write`, `fd_seek`, `fd_close`, `fd_fdstat_get` and `proc_exit`, and lacks `random_get`, which std's default hasher reads; `clippy.toml` forbids std's hash collections. The Makefile stubs out the two `environ_*` imports rustc's CRT adds |
 
 ## Exports
@@ -79,8 +81,9 @@ carries directly:
 **The matcher does not verify signatures, and must not be relied on as though
 it did.** It has no crypto, no randomness and a hard size budget, and it is not
 the trust boundary: the wallet verifies the JWS at selection time, before
-anything is disclosed. The matcher decodes an unverified payload for one
-reason — to find `dcql_query` and decide what to draw in the picker.
+anything is disclosed. The matcher decodes an unverified payload for what
+decides the offers: `dcql_query`, `transaction_data`, and the signature,
+`client_id`, Response Mode and `verifier_info` the nym_auth policy reads.
 
 A request shape this build cannot read declines *that protocol* rather than
 failing the call, so the verifier's negotiation still works: offer signed and
@@ -96,6 +99,7 @@ unsigned together and the readable one is answered.
   import traps only when called (`ABI.md` §3), so a runtime branch on
   `GetWasmVersion` could serve a level-1 host.
 - **`GetWasmVersion` goes into entry metadata** as `host_level`, so a field
-  report says which host ABI produced the behaviour.
+  report says which host ABI produced the behaviour, and the wallet reads from
+  `display_skipped` whether the host showed the entry whole.
 - **No network, no filesystem, hard time budget.** Everything the matcher needs
   arrives through the two buffers above.

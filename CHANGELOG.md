@@ -503,6 +503,8 @@ against the 307,200-byte budget (303,418 at v0.11.0).
   data source. It builds with Rust 1.82.
 - `scripts/gen_unicode_tables.py` writes the refused-character ranges of siros-display and the
   grapheme break runs of siros-transaction-data from their oracles' tables.
+- siros-registration's example `sample_registration` writes the registration of a sample
+  wallet; `scripts/run_matcher.mjs` runs `matcher.wasm` over it.
 - `scripts/check_matcher_abi.py` checks each import of `matcher.wasm`, with
   its signature, against the ABI table, and the `_start` and `memory`
   exports. CI and the release job run it.

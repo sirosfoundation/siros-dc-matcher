@@ -76,14 +76,20 @@
 <text class="name" x="537.0" y="279" text-anchor="middle">siros-dc-matcher-core</text>
 <text class="desc" x="537.0" y="296" text-anchor="middle">v1 blob and profile, for the FFI</text>
 <rect class="chip chip-l4" x="654.0" y="258" width="210.0" height="50" rx="9"/>
-<text class="name" x="759.0" y="279" text-anchor="middle">siros-zkp-req-wasm</text>
-<text class="desc" x="759.0" y="296" text-anchor="middle">browser presenter</text>
+<text class="name" x="759.0" y="279" text-anchor="middle">siros-picker-testhost</text>
+<text class="desc" x="759.0" y="296" text-anchor="middle">the picker off-device</text>
+<rect class="chip chip-l4" x="876.0" y="258" width="210.0" height="50" rx="9"/>
+<text class="name" x="981.0" y="279" text-anchor="middle">siros-zkp-req-wasm</text>
+<text class="desc" x="981.0" y="296" text-anchor="middle">browser presenter</text>
 <rect class="chip chip-l4" x="210.0" y="318" width="210.0" height="50" rx="9"/>
 <text class="name" x="315.0" y="339" text-anchor="middle">siros-zkp-backend-longfellow</text>
 <text class="desc" x="315.0" y="356" text-anchor="middle">Longfellow prover</text>
 <rect class="chip chip-l4" x="432.0" y="318" width="210.0" height="50" rx="9"/>
 <text class="name" x="537.0" y="339" text-anchor="middle">siros-zkp-backend-vega</text>
 <text class="desc" x="537.0" y="356" text-anchor="middle">Vega prover</text>
+<rect class="chip chip-l4" x="654.0" y="318" width="210.0" height="50" rx="9"/>
+<text class="name" x="759.0" y="339" text-anchor="middle">siros-zkp-proving-e2e</text>
+<text class="desc" x="759.0" y="356" text-anchor="middle">real proofs end to end</text>
 <rect class="band-l3" x="16" y="396" width="1084" height="78" rx="14"/>
 <text class="layer" x="32" y="433.0">L3</text>
 <text class="caption" x="32" y="453.0">presentation</text>

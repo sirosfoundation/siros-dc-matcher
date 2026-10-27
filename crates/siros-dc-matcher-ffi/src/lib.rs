@@ -1,19 +1,12 @@
-//! Kotlin and Swift access to the credential blob and the matching engine.
+//! Kotlin and Swift access to the v1 credential blob of `siros-dc-matcher-core`, its matching
+//! engine, and `zkp_req` presentation.
 //!
-//! Two callers need this. The Kotlin SDK builds the blob it registers, and
-//! matches again after the user has selected an entry. iOS has no WASM matcher
-//! concept at all — when its OS-level Digital Credentials API integration
-//! lands, matching happens in-process, and this is what it will call.
+//! The Kotlin SDK builds the blob it registers, and matches again after the user has selected
+//! an entry. The credential picker, `matcher.wasm`, reads the registration of
+//! `siros-registration`. iOS matches in-process.
 //!
-//! # Why the types are mirrored rather than shared
-//!
-//! The natural thing would be to put `#[derive(uniffi::Record)]` on
-//! [`siros_dc_matcher_core`]'s own types. It is not done, because UniFFI does
-//! not build for `wasm32-wasip1` and `core` is on the matcher's critical path.
-//! Deriving there would drag UniFFI into the binary that ships inside the
-//! picker. Mirroring a handful of records here is the cheaper half of that
-//! trade, and [`SirosBlobBuilder`] keeps the mirrored surface small by owning
-//! the profile itself.
+//! The records here mirror [`siros_dc_matcher_core`]'s types, and [`SirosBlobBuilder`] keeps
+//! the mirrored surface small by owning the profile itself.
 
 #![deny(missing_docs)]
 #![deny(unsafe_code)]

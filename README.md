@@ -1,7 +1,12 @@
 # siros-dc-matcher
 
-A credential matcher for the W3C Digital Credentials API on Android, plus the
-DCQL engine behind it, as a Rust workspace.
+The SIROS wallet core, a Rust workspace: the components a wallet presents
+credentials with over OpenID4VP 1.0 and the W3C Digital Credentials API, from
+request intake to the response — DCQL, SD-JWT VC and ISO mdoc, issuer trust,
+display, transaction data on the PaSO model, `zkp_req` proofs and the
+presentation component — together with the credential picker Android's
+Credential Manager runs (`matcher.wasm`), Kotlin and Swift bindings, and the
+`zkp_req` provers with their browser presenter.
 
 On Android, a wallet does not answer a `navigator.credentials.get({digital: …})`
 call directly. It registers a snapshot of its credentials with Play Services
@@ -42,7 +47,7 @@ make matcher                            # target/wasm32-wasip1/wasm-release/matc
 
 `cargo test` covers the matcher binary too, not just the libraries.
 `siros-picker-testhost` is a wasmtime host implementing the Credential
-Manager ABI, so its `tests/matcher_wasm/` drives the same `.wasm` a device
+Manager ABI, so `crates/siros-picker-testhost/tests/matcher_wasm/` drives the same `.wasm` a device
 would run. It builds the module on demand, so `make matcher` is not a
 prerequisite — but without the wasm target installed those tests **fail**,
 deliberately, rather than skipping and reporting a green run that checked
@@ -61,6 +66,25 @@ make matcher && python3 scripts/check_matcher_abi.py \
   target/wasm32-wasip1/wasm-release/matcher.wasm
 make check-bindings    # committed bindings match the current API
 cargo publish --locked --dry-run -p siros-dcql
+cargo semver-checks --package siros-dcql   # cargo install cargo-semver-checks --locked
+```
+
+What links into the picker holds Rust 1.82 (`rustup toolchain install 1.82`):
+
+```sh
+export RUSTUP_TOOLCHAIN=1.82
+cargo check --locked --all-features \
+  -p siros-codec -p siros-dcql -p siros-dc-matcher-core -p siros-picker \
+  -p android-credman-sys -p android-credman \
+  -p siros-zkp-req -p siros-zkp-req-nym-auth -p siros-sdjwt -p siros-mdoc \
+  -p siros-wallet-state -p siros-credential -p siros-display -p siros-transaction-data \
+  -p siros-trust -p siros-registration
+cargo check --locked -p siros-oid4vp
+cargo check --locked -p siros-trust
+cargo check --locked -p siros-presentation --no-default-features
+cargo check --locked -p siros-transaction-data --no-default-features
+cargo check --locked --all-features --target wasm32-wasip1 \
+  -p siros-picker -p android-credman-sys -p android-credman
 ```
 
 The proof backends and the browser presenter are in the `proving/` workspace; its CI runs from
@@ -123,21 +147,31 @@ Two profile details are load-bearing and easy to undo:
 
 | Crate | Target | Contents |
 |---|---|---|
-| [`android-credman-sys`](crates/android-credman-sys) | `wasm32` | The Credential Manager host imports, one module per host level. [`ABI.md`](crates/android-credman-sys/ABI.md) is the contract and its evidence. |
-| [`android-credman`](crates/android-credman) | any | The host ABI as types: nullability, version gating, set shape. |
+| [`siros-codec`](crates/siros-codec) | any | The encodings every crate shares: a strict CBOR reader and deterministic writer, strict JSON, base64 and base64url, dates. |
 | [`siros-dcql`](crates/siros-dcql) | any | OpenID4VP 1.0 DCQL: claims-path pointers (§7), credential and credential-set queries (§6.1–6.3), selection (§6.4). No I/O, no platform. Published to crates.io. |
-| [`siros-dc-matcher-core`](crates/siros-dc-matcher-core) | any | For the FFI: the v1 credential blob and its CBOR codec, the match profile and its evaluator. |
+| [`siros-oid4vp`](crates/siros-oid4vp) | any | OpenID4VP 1.0: the picker's request reading (`UnverifiedRequest`), and with `crypto` request intake, handovers, the `vp_token` and its submission. |
+| [`siros-sdjwt`](crates/siros-sdjwt) | any | SD-JWT VC: the stored credential, disclosure selection, and the presentation with its KB-JWT signing input. |
+| [`siros-mdoc`](crates/siros-mdoc) | any | ISO/IEC 18013-5 mdocs: the stored credential, element selection, `DeviceResponse` and the device signature's signing input. |
+| [`siros-zkp-req`](crates/siros-zkp-req) | any | The `zkp_req` protocol layer: the query and its options, the usable pair, the presentation and the `vp_token`, the Verifier's structural checks. |
+| [`siros-zkp-req-nym-auth`](crates/siros-zkp-req-nym-auth) | any | The nym_auth catalogue and its Longfellow and Vega systems: session binding, credential checks, the request policy, the presenter and verifier around a host's prover. |
+| [`siros-trust`](crates/siros-trust) | any | Issuer trust: the trust store, issuer chains and their path validation, DCQL `trusted_authorities`, and the issuer facts the picker admits by. |
+| [`siros-wallet-state`](crates/siros-wallet-state) | any | The decrypted wallet state of the private data container: credentials, presentation records, key ids. |
+| [`siros-credential`](crates/siros-credential) | any | The format-independent credential: typed claims read by claims path, validity, instance choice, and the claim tree the registration carries. |
+| [`siros-display`](crates/siros-display) | any | Display in the wallet's one language: cards, claim labels and rows, purpose lines, proof statement rows, picker fields. |
+| [`siros-transaction-data`](crates/siros-transaction-data) | any | OpenID4VP transaction data on the PaSO model: definitions and their sources, projection, payload conformance, images, rendering, selection and the KB-JWT binding. |
+| [`siros-presentation`](crates/siros-presentation) | any | The presentation component: the plan of a request over the wallet's credentials, the consent view and the response; without `wallet`, the matching the picker runs. |
 | [`siros-registration`](crates/siros-registration) | any | The picker's registration: the projection of the wallet's credentials the wallet writes (feature `wallet`) and the picker reads. |
 | [`siros-picker`](crates/siros-picker) | `wasm32-wasip1` | The credential picker over the presentation component's matching. Ships `matcher.wasm`. |
-| [`siros-dc-matcher-ffi`](crates/siros-dc-matcher-ffi) | UniFFI | Kotlin and Swift surface: build the v1 blob, run the core's match in-process, and present and verify `zkp_req`. |
+| [`android-credman-sys`](crates/android-credman-sys) | `wasm32` | The Credential Manager host imports, one module per host level. [`ABI.md`](crates/android-credman-sys/ABI.md) is the contract and its evidence. |
+| [`android-credman`](crates/android-credman) | any | The host ABI as types: nullability, version gating, set shape, the picked entry. |
 | [`siros-picker-testhost`](crates/siros-picker-testhost) | native, dev | A wasmtime host implementing the Credential Manager ABI, so the shipping `.wasm` is testable off-device. |
-| [`siros-zkp-req`](crates/siros-zkp-req) | any | The `zkp_req` protocol layer: the query and its options, the usable pair, the presentation and the `vp_token`, the Verifier's structural checks. |
-| [`siros-zkp-req-nym-auth`](crates/siros-zkp-req-nym-auth) | any | The nym_auth catalogue and its Longfellow and Vega systems: session binding, credential checks, the presenter and verifier around a host's prover. |
+| [`siros-dc-matcher-core`](crates/siros-dc-matcher-core) | any | For the FFI: the v1 credential blob and its CBOR codec, the match profile and its evaluator. |
+| [`siros-dc-matcher-ffi`](crates/siros-dc-matcher-ffi) | UniFFI | Kotlin and Swift surface: build the v1 blob, run the core's match in-process, and present and verify `zkp_req`. |
 | [`siros-zkp-backend-longfellow`](proving/siros-zkp-backend-longfellow) | any | The Longfellow nym_auth system on `longfellow-libzk-v1`: zk-cred-longfellow behind the rulebook's artifact pins. In `proving/`. |
 | [`siros-zkp-backend-vega`](proving/siros-zkp-backend-vega) | any | The Vega nym_auth system on `vega-v1`: zk-cred-vega behind the rulebook's artifact pins. In `proving/`. |
 | [`siros-zkp-req-wasm`](proving/siros-zkp-req-wasm) | `wasm32-unknown-unknown` | The `zkp_req` presenter for the browser, with both provers, built with `wasm-pack`. In `proving/`. |
+| [`siros-zkp-proving-e2e`](proving/e2e) | native, dev | Real proofs of both nym_auth systems through the presenter and the Verifier. In `proving/`. |
 
-[`docs/plan.md`](docs/plan.md) covers the design and the reasoning behind it.
 [`docs/zkp_req_core.md`](docs/zkp_req_core.md) covers the `zkp_req` crates, their API and the
 prover interface.
 
@@ -166,9 +200,9 @@ front rather than rediscovered later as a finding.
 
 ## Acknowledgements
 
-Multipaz's [C++ matcher](https://github.com/openwallet-foundation-labs/multipaz)
+Multipaz's [C++ matcher](https://github.com/openwallet-foundation/multipaz)
 (Apache-2.0) showed that a wallet-supplied matcher is practical, and serves as
-this project's differential-testing oracle. An oracle, not a source — see
+this project's conformance oracle. An oracle, not a source — see
 [CONTRIBUTING.md](CONTRIBUTING.md#provenance).
 
 ## Licence
