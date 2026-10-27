@@ -84,12 +84,7 @@ pub(crate) fn check(entries: &[Entry], query: &DcqlQuery) -> Result<(), SetsFaul
         .options()
         .iter()
         .filter(|option| option.iter().any(|named| targeted.contains(&named)))
-        .map(|option| {
-            let mut ids: Vec<&str> = option.iter().map(QueryId::as_str).collect();
-            ids.sort_unstable();
-            ids.dedup();
-            ids
-        })
+        .map(|option| sorted_set(option.iter().map(QueryId::as_str)))
         .collect();
     if transposable(alternatives) {
         Ok(())
@@ -105,12 +100,9 @@ pub(crate) fn check(entries: &[Entry], query: &DcqlQuery) -> Result<(), SetsFaul
 /// some alternative. So the slots are the classes of "never together", which must be an
 /// equivalence; a slot is optional when an alternative names none of its ids; and the distinct
 /// alternatives number the product of each slot's choices.
-fn transposable(mut alternatives: Vec<Vec<&str>>) -> bool {
-    alternatives.sort_unstable();
-    alternatives.dedup();
-    let mut ids: Vec<&str> = alternatives.iter().flatten().copied().collect();
-    ids.sort_unstable();
-    ids.dedup();
+fn transposable(alternatives: Vec<Vec<&str>>) -> bool {
+    let alternatives = sorted_set(alternatives);
+    let ids = sorted_set(alternatives.iter().flatten().copied());
     let together = |a: &str, b: &str| {
         alternatives
             .iter()
@@ -141,4 +133,15 @@ fn transposable(mut alternatives: Vec<Vec<&str>>) -> bool {
         product.checked_mul(slot.len() + usize::from(optional))
     });
     product == Some(alternatives.len())
+}
+
+/// `items` in order, each once.
+fn sorted_set<T: Ord>(items: impl IntoIterator<Item = T>) -> Vec<T> {
+    let mut set = Vec::new();
+    for item in items {
+        if let Err(at) = set.binary_search(&item) {
+            set.insert(at, item);
+        }
+    }
+    set
 }
