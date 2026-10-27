@@ -200,6 +200,7 @@ against the 307,200-byte budget (303,418 at v0.11.0).
 - From `siros-dc-matcher-core`: the v0.4 planner (`zkp_req`), the response validator
   (`zkp_req_response`), `proof_time`, their vectors (`zkp_req`, `zkp_req_response`,
   `zkp_req_unsat`, `proof_time`) and `scripts/gen_zkp_req_response_vectors.py`.
+- `docs/plan.md`, the plan of the first release.
 
 ## v0.11.0 — 2026-10-20
 

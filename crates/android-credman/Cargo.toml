@@ -3,6 +3,8 @@ name = "android-credman"
 version = "0.1.0"
 description = "Typed, version-gated access to the Android Credential Manager matcher host ABI"
 license = "MIT OR Apache-2.0"
+repository.workspace = true
+publish = false
 # Edition 2024 needs Rust 1.85; matcher.wasm's crates hold 1.82.
 edition = "2021"
 rust-version = "1.82"
