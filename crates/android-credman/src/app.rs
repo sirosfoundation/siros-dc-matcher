@@ -15,19 +15,18 @@ pub struct CallingApp {
 }
 
 impl CallingApp {
-    /// Reads each field up to its first NUL inside the field. An empty
-    /// origin is `None`.
+    /// Reads each field up to its first NUL, or to the end of a field the
+    /// host filled to the brim. An empty origin is `None`.
     ///
     /// # Panics
     ///
-    /// When a field holds no NUL, or bytes before it that are not UTF-8.
+    /// When a field's text is not UTF-8.
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     pub(crate) fn from_host(info: &CallingAppInfo) -> Self {
-        let package_name = host_field(&info.package_name, "package name");
         let origin = host_field(&info.origin, "origin");
         Self {
-            package_name: package_name.into(),
-            origin: (!origin.is_empty()).then(|| origin.into()),
+            package_name: host_field(&info.package_name, "package name"),
+            origin: (!origin.is_empty()).then_some(origin),
         }
     }
 
@@ -42,23 +41,30 @@ impl CallingApp {
     }
 }
 
-/// One field of the host's report, up to its NUL.
+/// One field of the host's report: its bytes up to the first NUL, or all of
+/// them when the host filled the field to the brim.
 ///
 /// # Panics
 ///
-/// When `field` holds no NUL, or bytes before it that are not UTF-8.
+/// When those bytes are not UTF-8.
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 #[expect(
     clippy::panic,
-    reason = "GetCallingAppInfo fills each fixed-size field with NUL-terminated text; \
-              a field without it names no caller the matcher can trust"
+    reason = "GetCallingAppInfo fills each field with UTF-8 text; other bytes name no caller \
+              the matcher can trust"
 )]
-fn host_field<'a>(field: &'a [u8], name: &str) -> &'a C8Str {
-    match C8Str::from_bytes_until_nul(field) {
+fn host_field(field: &[u8], name: &str) -> C8String {
+    let text = match field.iter().position(|&byte| byte == 0) {
+        // `nul` is an index into `field`, so the split cannot panic.
+        Some(nul) => field.split_at(nul).0,
+        None => field,
+    };
+    match C8String::from_vec(text.to_vec()) {
         Ok(text) => text,
-        // The host broke the GetCallingAppInfo contract. The caller is
-        // the one value every entry must carry verified, so the matcher
-        // has nothing it may offer.
+        // `text` holds no NUL, so the error is bytes that are not UTF-8:
+        // the host broke the GetCallingAppInfo contract. The caller is the
+        // one value every entry must carry verified, so the matcher has
+        // nothing it may offer.
         Err(error) => panic!("calling app {name}: {error}"),
     }
 }
