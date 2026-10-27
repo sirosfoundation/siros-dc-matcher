@@ -12,10 +12,6 @@
 # working tree against a fresh generation — which only means anything if the
 # files are tracked.
 
-# Differential-testing oracle, fetched at test time — never vendored.
-# See CONTRIBUTING.md § Provenance.
-/tests/oracle/
-
 # IDE
 .idea/
 .vscode/

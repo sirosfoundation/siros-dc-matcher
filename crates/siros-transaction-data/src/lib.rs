@@ -18,8 +18,8 @@
 //! Every refusal of a request is a [`TransactionDataError`]; every reason an entry does not
 //! serve a credential is an [`Incompatibility`].
 //!
-//! Without the default feature `wallet` the crate holds what the credential picker runs over a
-//! registration (K2): definitions, the projection reader, payload conformance, selection over
+//! Without the default feature `wallet` the crate holds the selection over a registration for the
+//! credential picker (K2): definitions, the projection reader, payload conformance, selection over
 //! [`Definitions`], and rendering. It links no X.509, ECDSA or trust code. The picker cannot
 //! verify two things the wallet verifies at consent: an image at a remote URL, which needs a
 //! fetch, and an entry's ad-hoc metadata JWT, which needs the trust store.

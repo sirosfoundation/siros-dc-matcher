@@ -15,9 +15,10 @@
 //!
 //! # Layout
 //!
-//! [`query`] is the wire model (§6.1–6.3), [`authority`] its `trusted_authorities`
-//! (§6.1.1), [`path`] resolves claims path pointers (§7), and [`eval`] performs selection
-//! (§6.4).
+//! [`query`] is the wire model (§6.1–6.3), [`id`] its identifiers (§6.1, §6.3), [`meta`] the
+//! text values of `format` and `meta`, [`authority`] its `trusted_authorities` (§6.1.1),
+//! [`path`] resolves claims path pointers over any claim tree (§7), and [`eval`] performs
+//! selection (§6.4).
 //!
 //! # Shared vocabulary
 //!

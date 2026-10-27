@@ -5,10 +5,10 @@ Run from the repository root: python3 scripts/gen_ecosystem_svg.py docs/ecosyste
 import sys
 from html import escape
 
-W = 1360
-LABEL_X, CONTENT_X, CONTENT_W = 32, 210, 876
-BAND_RIGHT = 1100
-HOST_X, HOST_W = 1148, 196
+W = 1440
+LABEL_X, CONTENT_X, CONTENT_W = 32, 210, 956
+BAND_RIGHT = 1180
+HOST_X, HOST_W = 1228, 196
 GAP = 12
 CHIP_H = 50
 
@@ -23,15 +23,19 @@ BANDS = [
     ("l4", "L4", "facades · picker · provers", [
         [
             ("siros-dc-matcher-wasm", "the picker binary"),
+            ("siros-dc-matcher-core", "registration blob, profile"),
             ("android-credman", "host ABI as types"),
             ("android-credman-sys", "Credential Manager imports"),
-            ("siros-dc-matcher-ffi", "UniFFI surface"),
         ],
         [
-            ("siros-dc-matcher-core", "registration blob, profile"),
+            ("siros-dc-matcher-testhost", "wasmtime host for tests"),
+            ("siros-dc-matcher-ffi", "UniFFI surface"),
             ("siros-zkp-req-wasm", "browser presenter"),
+        ],
+        [
             ("siros-zkp-backend-longfellow", "Longfellow prover"),
             ("siros-zkp-backend-vega", "Vega prover"),
+            ("siros-zkp-proving-e2e", "real-proof tests"),
         ],
     ]),
     ("l3", "L3", "presentation", [[

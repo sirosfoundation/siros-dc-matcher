@@ -1,7 +1,7 @@
 [package]
 name = "siros-codec"
 version = "0.11.0"
-description = "Strict CBOR, strict JSON, base64 and dates for the SIROS wallet core"
+description = "Strict CBOR and JSON, base64url, the padded base64 of x5c, CBOR dates and shared types for the SIROS wallet core"
 publish = false
 edition.workspace = true
 license.workspace = true

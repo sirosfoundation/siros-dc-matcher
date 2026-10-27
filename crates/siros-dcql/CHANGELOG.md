@@ -111,7 +111,12 @@ this file.
   `QueryError::Form`, `ClaimPath`, `UnknownClaimId`, `UnknownCredentialId`,
   `ClaimSetsWithoutClaims` and `MdocPath`.
 - `resolve`, the §7.1.1 processing over any claim tree that implements `ClaimNode` (with
-  `Lookup`), which `resolve_json` runs on, and `PathError::code`.
+  `Lookup`); `resolve_json` runs on it. `PathError::code`.
+
+### Fixed
+
+- The crate hashes with `rustc-hash`, whose hasher takes no seed: a `wasm32-wasip1` build runs on
+  a host that lacks WASI `random_get`.
 
 ## 0.11.0 — 2026-10-20
 

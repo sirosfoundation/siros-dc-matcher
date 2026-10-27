@@ -3,8 +3,8 @@
 
 The vectors of a ZkpPresentation in a JSON vp_token, at the nym_auth rulebook draft (commit
 e65861c): zkp_req, Sections 4, 4.1 and 6.1, the backends' `Proof`, and the Section 3 `inputs`
-and Section 9 codes of the Longfellow system. They port the v0.4 set of
-`scripts/gen_zkp_req_response_vectors.py`; `v0_4` says what changed for a case.
+and Section 9 codes of the Longfellow system. They port v0.11.0's v0.4 response vectors;
+`v0_4` says what changed for a case.
 
 Deterministic: running it twice yields byte-identical files. The CBOR is encoded here by hand
 (shortest form, definite lengths) so the vectors do not depend on a CBOR library.

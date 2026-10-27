@@ -13,8 +13,8 @@ rust-version.workspace = true
 default = ["wallet"]
 # The wallet's selection: signed and ad-hoc metadata JWTs verified against the trust store,
 # Type Metadata and key sets the host holds, and the credentials' own chains. Without it the
-# crate holds what the credential picker runs over a registration, and links no X.509, ECDSA or
-# trust code.
+# crate holds the selection over a registration for the credential picker, and links no X.509,
+# ECDSA or trust code.
 wallet = [
     "dep:p256",
     "dep:p384",
