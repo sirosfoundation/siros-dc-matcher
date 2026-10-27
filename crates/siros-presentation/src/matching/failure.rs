@@ -70,7 +70,7 @@ impl fmt::Display for QueryRefusal {
 
 impl std::error::Error for QueryRefusal {}
 
-/// Why a request has no offer. `U` is why a query's authorities admit an issuer not, `R` why a
+/// Why a request has no offer. `U` is why a query's authorities refuse an issuer, `R` why a
 /// `zkp_req` candidate answers no option.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Failure<U, R> {

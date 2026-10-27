@@ -27,7 +27,7 @@ macro_rules! identifier {
         pub enum $error {
             /// The text is empty.
             Empty,
-            /// The text holds this character, which is not an ASCII letter, a digit, `_` or `-`.
+            /// The text holds this character, outside ASCII letters, digits, `_` and `-`.
             Character(char),
         }
 

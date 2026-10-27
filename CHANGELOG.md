@@ -104,9 +104,9 @@ against the 307,200-byte budget (303,914 before).
   `UsableCredential::time` gives the time it is valid at. `Credential::claims` takes a
   `ClaimPath`.
 - **BREAKING (presentation):** `PlanInput` takes the host's `TrustStore`. A credential whose
-  issuer the query's `trusted_authorities` admit not matches nothing, in every format (A1). A
+  issuer the query's `trusted_authorities` refuse matches nothing, in every format (A1). A
   candidate carries its issuer's admission into the offers and phase 2. `MatchCredential` gives
-  the admission, or why the authorities admit the issuer not (`MatchCredential::Unadmitted`),
+  the admission, or why the authorities refuse the issuer (`MatchCredential::Unadmitted`),
   with the trust context its implementor needs: the store for the wallet, nothing for the
   picker's TR5 facts. `Unproven::Unlisted` is gone and `Unproven::Issuer` names an admission of
   another certificate or query.
@@ -114,12 +114,12 @@ against the 307,200-byte budget (303,914 before).
   whole request, whatever another option answers (`Answered::invalid_request`): a malformed
   `aki` value (`QueryRefusal::Authorities`), and a `zkp_req` query that breaks a request rule,
   the catalogue or the nym_auth policy. A plan used to offer the request's other options.
-- **BREAKING (presentation):** a query excludes each credential of its format and type that
-  answers it not, with its `Exclusion`: the authorities admit its issuer not, its claims path
-  processing gives an error, or it answers no option of a `zkp_req` query. `Answers::excluded`
-  gives them for every query, and `Failure::Excluded` names the first query without candidates
-  that excludes credentials (code `excluded`); it replaces `Failure::Unproven`.
-  `QueryRefusal::ClaimPath` is gone, and `Claims::pointers` gives `ClaimPath`s.
+- **BREAKING (presentation):** a query excludes a credential of its format and type, with its
+  `Exclusion`, when the authorities refuse its issuer, its claims path processing gives an
+  error, or it answers no option of a `zkp_req` query. `Answers::excluded` gives them for every
+  query, and `Failure::Excluded` names the first query without candidates that excludes
+  credentials (code `excluded`); it replaces `Failure::Unproven`. `QueryRefusal::ClaimPath` is
+  gone, and `Claims::pointers` gives `ClaimPath`s.
 - **BREAKING (nym_auth):** `TestedAttestation::of(mdoc, proof_time)` runs the credential tests;
   `UsableAttestation::new(tested, admitted, query)` takes the `AdmittedIssuer` of the same
   Document Signer for the same query (N3), and `Answer::new` refuses an attestation of another
@@ -146,9 +146,9 @@ against the 307,200-byte budget (303,914 before).
 - **BREAKING (matcher):** `matcher.wasm` emits nothing for a request whose DCQL query the parse
   refuses, the same queries as the FFI above. Observed with the test host on the mDL fixture:
   under `trusted_authorities` `[{"type": "aki"}]` or `[]`, the matcher at `1b0fe3d` emitted the
-  one entry of set `siros-0`, and this build emits nothing. An `aki` value that is no base64url changes nothing:
-  the matcher resolves no `trusted_authorities`, and both emit the entry. A debug build names
-  the parse error in its one entry, in set `siros-debug-request`.
+  one entry of set `siros-0`, and this build emits nothing. An `aki` value that is no
+  base64url changes nothing: the matcher resolves no `trusted_authorities`, and both emit the
+  entry. A debug build names the parse error in its one entry, in set `siros-debug-request`.
 - **BREAKING (browser):** `siros-zkp-req-wasm` keeps `ZkpProvers` and `vpTokenJson`;
   `matchQuery`, `session` and `prepare` are removed. No browser export produces a nym_auth
   proof until the facades wave.
@@ -237,9 +237,9 @@ against the 307,200-byte budget (303,914 before).
   validity, `cA` of every signer, ECDSA P-256/SHA-256 and P-384/SHA-384 over the
   `tbsCertificate` as written). `TrustPath` is the witness; the anchor whose
   SubjectKeyIdentifier equals the AuthorityKeyIdentifier is tried first. The store refuses an
-  entry that repeats a member. `IssuerFacts::at` gives the facts the wallet records for the picker, and
-  `Admission::of` admits from them alone with the same rule (TR5). Without the feature `chain`
-  the crate holds the rule and the facts, on Rust 1.82.
+  entry that repeats a member. `IssuerFacts::at` gives the facts the wallet records for the
+  picker, and `Admission::of` admits from them alone with the same rule (TR5). Without the
+  feature `chain` the crate holds the rule and the facts, on Rust 1.82.
 - `siros-presentation`, the presentation component of the wallet core. Phase 1 plans a
   verified request over the wallet's credentials usable at the plan's time: the format table,
   `meta`, holder binding and no query but `zkp_req` on a nym_auth attestation (A1); `zkp_req` as

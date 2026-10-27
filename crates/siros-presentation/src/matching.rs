@@ -191,7 +191,7 @@ impl<'r, C: MatchCredential + Clone> Matching<'r, C> {
     /// whether the request meets the nym_auth policy; a nym_auth query of a request that does
     /// not is refused.
     ///
-    /// A credential whose issuer the query's `trusted_authorities` admit not through `trust` is
+    /// A credential whose issuer the query's `trusted_authorities` refuse through `trust` is
     /// excluded with the refusal (TR3); a query with a malformed `aki` value is refused.
     pub fn new(
         asked: Asked<'r>,
@@ -448,17 +448,17 @@ pub struct Candidate<C: MatchCredential> {
     admission: C::Admission,
 }
 
-/// A credential of a query's format and type that answers it not, and why.
+/// A credential of a query's format and type that the query excludes, and why.
 pub struct Excluded<C: MatchCredential, R> {
     credential: C,
     reason: Exclusion<C::Unadmitted, R>,
 }
 
-/// Why a credential of a query's format and type answers it not. `U` is why the query's
-/// authorities admit its issuer not, `R` why it answers no option of a `zkp_req` query.
+/// Why a query excludes a credential of its format and type. `U` is why the query's
+/// authorities refuse its issuer, `R` why it answers no option of a `zkp_req` query.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Exclusion<U, R> {
-    /// The query's `trusted_authorities` admit its issuer not (TR3).
+    /// The query's `trusted_authorities` refuse its issuer (TR3).
     Unadmitted(U),
     /// Its claims path processing gives an error (OpenID4VP 1.0, Sections 7.1.1 and 7.2.1).
     ClaimPath(PathError),
@@ -554,7 +554,7 @@ impl<'r, C: MatchCredential, R> Answers<'r, C, R> {
         }
     }
 
-    /// The credentials of the query's format and type that answer it not, and why.
+    /// The credentials of the query's format and type that it excludes, and why.
     pub fn excluded(&self) -> &[Excluded<C, R>] {
         match &self.outcome {
             QueryOutcome::Claims { excluded, .. } | QueryOutcome::Proof { excluded, .. } => {
@@ -588,7 +588,7 @@ impl<C: MatchCredential, R> Excluded<C, R> {
         &self.credential
     }
 
-    /// Why it answers the query not.
+    /// Why the query excludes it.
     pub fn reason(&self) -> &Exclusion<C::Unadmitted, R> {
         &self.reason
     }

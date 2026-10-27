@@ -1,5 +1,5 @@
-//! A1's trust rule: a credential whose issuer the query's `trusted_authorities` admit not
-//! matches nothing, and a malformed `aki` value makes the request invalid (TR3).
+//! A1's trust rule: a credential whose issuer the query's `trusted_authorities` refuse matches
+//! nothing, and a malformed `aki` value makes the request invalid (TR3).
 
 use serde_json::json;
 use siros_codec::base64url;

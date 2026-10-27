@@ -214,7 +214,7 @@ pub trait ClaimNode: Sized {
 
 /// The nodes `path` selects in the claim tree under `root` (§7.1.1).
 ///
-/// A component of the wrong *type* aborts, and a key or index that is not there drops that
+/// A component of the wrong *type* aborts, and an absent key or index drops that
 /// element from the selection. An index on a withheld position selects nothing, and `null`
 /// selects the present elements.
 ///

@@ -41,8 +41,8 @@ pub struct QueryMatch {
 pub enum Satisfaction {
     /// Every required credential set, or every query without sets, has a candidate.
     Satisfiable,
-    /// The wallet "MUST NOT return any Credential(s)" (§6.4): nothing is offered, not even
-    /// the part that did match.
+    /// The wallet "MUST NOT return any Credential(s)" (§6.4): the part that matched is
+    /// withheld too.
     Unsatisfiable,
 }
 

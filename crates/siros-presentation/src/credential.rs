@@ -16,7 +16,7 @@ pub trait MatchCredential: Instance {
     /// `AdmittedIssuer`, or the picker's [`siros_trust::Admission`] from the TR5 facts.
     type Admission: Clone;
 
-    /// Why a query's authorities admit the credential's issuer not.
+    /// Why a query's authorities refuse the credential's issuer.
     type Unadmitted: Clone;
 
     /// What resolves a query's `trusted_authorities` beside the credential: the wallet's trust
@@ -27,7 +27,7 @@ pub trait MatchCredential: Instance {
     ///
     /// # Errors
     ///
-    /// [`Self::Unadmitted`] when they admit it not, and the credential matches nothing (A1).
+    /// [`Self::Unadmitted`] when they refuse it, and the credential matches nothing (A1).
     fn admission(
         &self,
         authorities: &QueryAuthorities,
