@@ -111,10 +111,18 @@ pub trait V1: sealed::Sealed {
     /// The Digital Credentials API request as JSON, read with
     /// [`GetRequestSize`](credman::GetRequestSize) and
     /// [`GetRequestBuffer`](credman::GetRequestBuffer).
+    ///
+    /// # Panics
+    ///
+    /// When the reported length cannot be allocated.
     fn request(&self) -> Vec<u8> {
         let mut size = 0u32;
         // SAFETY: `size` is a live u32 the host writes once.
         unsafe { credman::GetRequestSize(&mut size) };
+        // The request is what the matcher answers, and the host writes all
+        // `size` bytes at once. A length the module cannot allocate leaves
+        // no request to read: past `isize::MAX` the allocation panics, below
+        // it a failed allocation aborts.
         let mut request = vec![0; size as usize];
         // SAFETY: the buffer holds the `size` bytes the host writes.
         unsafe { credman::GetRequestBuffer(request.as_mut_ptr().cast::<c_void>()) };

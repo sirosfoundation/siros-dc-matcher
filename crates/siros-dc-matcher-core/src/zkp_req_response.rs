@@ -366,10 +366,7 @@ struct Reader<'a> {
 
 impl<'a> Reader<'a> {
     fn take(&mut self, n: usize) -> Result<&'a [u8], CborError> {
-        if n > self.rest.len() {
-            return Err(CborError::Malformed);
-        }
-        let (head, tail) = self.rest.split_at(n);
+        let (head, tail) = self.rest.split_at_checked(n).ok_or(CborError::Malformed)?;
         self.rest = tail;
         Ok(head)
     }
