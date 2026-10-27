@@ -47,9 +47,9 @@ impl Card {
     }
 }
 
-/// The title and issuer line the host shows, in the wallet's language, for a credential whose
-/// display metadata names none: a card never shows a credential type or an identifier. The
-/// owner's wallet passes its `displayTitleFallback` and `displaySubtitleFallback`.
+/// The title and issuer line the host passes, in the wallet's language, for a card whose display
+/// metadata names none. The owner's wallet passes its `displayTitleFallback` and
+/// `displaySubtitleFallback`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CardFallback {
     /// The title of a card without a named display entry.

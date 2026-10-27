@@ -14,8 +14,7 @@ pub const LABEL_MAX: usize = 500;
 /// The most characters of a value. The TS12 mandate text holds at most 1000.
 pub const VALUE_MAX: usize = 2_000;
 
-/// A card's title or issuer line: a label with a character other than a space, so that an
-/// entry never shows an empty line.
+/// A card's title or issuer line: a label with a character other than white space.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CardText(DisplayText);
 
@@ -24,18 +23,17 @@ impl CardText {
     ///
     /// # Errors
     ///
-    /// [`TextError::Empty`] for text of spaces alone; the rule of [`DisplayText::label`] it
-    /// breaks.
+    /// [`TextError::Empty`] for white space alone; the rule of [`DisplayText::label`] it breaks.
     pub fn new(text: &str) -> Result<Self, TextError> {
-        if text.trim().is_empty() {
+        if text.chars().all(char::is_whitespace) {
             return Err(TextError::Empty);
         }
         DisplayText::label(text).map(Self)
     }
 
-    /// The line `text`, when it has a character other than a space.
+    /// The line `text`, when it has a character other than white space.
     pub fn of(text: &DisplayText) -> Option<Self> {
-        (!text.as_str().trim().is_empty()).then(|| Self(text.clone()))
+        (!text.as_str().chars().all(char::is_whitespace)).then(|| Self(text.clone()))
     }
 
     /// The text.
@@ -119,7 +117,7 @@ pub enum TextError {
     Unsafe,
     /// The text has more characters than its kind allows.
     TooLong,
-    /// The text of a card's title or issuer line has no character but spaces.
+    /// The text of a card's title or issuer line is white space alone.
     Empty,
 }
 

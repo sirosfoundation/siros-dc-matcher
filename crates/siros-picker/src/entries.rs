@@ -220,6 +220,7 @@ impl<'a, 'r> OfferEntries<'a, 'r> {
 /// or the proof statement rows of the `zkp_req` option it answers.
 #[expect(
     clippy::expect_used,
+    clippy::panic,
     reason = "a proof answer without its query's `zkp_req` option is a bug of the presentation \
               component, and no proof rows the picker could show for it are right"
 )]
@@ -241,9 +242,10 @@ fn fields(
             let zkp = answers
                 .zkp()
                 .expect("a proof answer's query is a zkp_req query");
-            let option = zkp
-                .option(choice)
-                .expect("a proof answer's choice is an option of its query");
+            // `let … else` keeps the error's `Debug` formatting out of the module.
+            let Ok(option) = zkp.option(choice) else {
+                panic!("a proof answer's choice is an option of its query");
+            };
             siros_display::proof::rows(zkp.query().query(), option)
                 .map_err(|error| Unshown::Display(index, error.code()))
         }

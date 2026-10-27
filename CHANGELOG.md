@@ -52,9 +52,9 @@ the 307,200-byte budget (303,418 at v0.11.0), sha256
   each set id is declared once per invocation. A diagnostic entry shows the wallet's default
   icon. An offer that breaks the presentation component's guarantees (a member without a
   candidate, a query or candidate its matching lacks, a proof answer without its option)
-  panics: the picker emits nothing. At host level 7 each entry carries its offer's delegation: `Full` for an offer that
-  needs no wallet display (A9), else none. The picker reads no calling app origin.
-  `mso_mdoc_zk` matches nothing.
+  panics: the picker emits nothing. At host level 7 each entry carries its offer's
+  delegation: `Full` for an offer that needs no wallet display (A9), else none. The picker
+  reads no calling app origin. `mso_mdoc_zk` matches nothing.
 - **BREAKING (request):** a query's options are its `_req_sets`, arrays of `_req` indexes;
   without `_req_sets`, `_req` is the one option (`zkp_req`, Section 2.1). `return` is optional
   except on `pseudonym`. `vp_formats_supported.zkp_req` requires both `proof_backend_values`
@@ -207,15 +207,15 @@ the 307,200-byte budget (303,418 at v0.11.0), sha256
   host gives: RFC 4647 Lookup, then the entry without `locale` (PaSO View, Section 4). A card's
   title and a claim's label come from the Type Metadata, else, for a language it has no entry for,
   from the configuration's `credential_metadata` (OpenID4VCI 1.0, Section 12.2.4). A card's title
-  and issuer line are `CardText`, labels with a character other than a space: the display
+  and issuer line are `CardText`, labels with a character other than white space: the display
   entry's name and the Credential Issuer's display name, else the host's `CardFallback` in the
-  wallet's language (the owner's wallet's `displayTitleFallback` and `displaySubtitleFallback`). `DisplayCache`
-  keys Type Metadata by siros-dcql's `Vct` and issuer metadata by siros-wallet-state's
-  `IssuerIdentifier` and `ConfigurationId`, and gives a credential's issuer metadata
-  (`DisplayCache::issuer_metadata`). A `DisplayError` carries its cause: a colour that is no
-  numerical colour value of CSS Color Module Level 3 holds its `ColourFault`. Without the default
-  feature `credential` it holds what the picker links: purpose lines, proof statement rows,
-  `ClaimLabels`, the labels of a credential's claims that `DisplayCache::claim_labels` gives
+  wallet's language (the owner's wallet's `displayTitleFallback` and `displaySubtitleFallback`).
+  `DisplayCache` keys Type Metadata by siros-dcql's `Vct` and issuer metadata by
+  siros-wallet-state's `IssuerIdentifier` and `ConfigurationId`, and gives a credential's issuer
+  metadata (`DisplayCache::issuer_metadata`). A `DisplayError` carries its cause: a colour that is
+  no numerical colour value of CSS Color Module Level 3 holds its `ColourFault`. Without the
+  default feature `credential` it holds what the picker links: purpose lines, proof statement
+  rows, `ClaimLabels`, the labels of a credential's claims that `DisplayCache::claim_labels` gives
   and that give the rows of any `ClaimSource`, and `Field`, a picker field whose name and value
   are fitted to `FIELD_MAX` (80) characters, its `Extent` known when it is made. Display text
   refuses the characters of Unicode 16.0's general categories Cc, Cf, Zl, Zp, Co and Cn, from a
