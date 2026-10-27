@@ -26,11 +26,12 @@ edition = "2021"
 license = "BSD-2-Clause"
 repository = "https://github.com/sirosfoundation/siros-dc-matcher"
 authors = ["SIROS Foundation"]
-# Held by everything that ships inside the credential picker — siros-dcql,
-# siros-oid4vp without `crypto`, -core, -wasm, the two zkp_req crates and the
-# two android-credman crates — and by siros-mdoc and siros-sdjwt, and checked
-# on 1.82 in CI. The -ffi and -testhost crates override this upward: uniffi's
-# bindgen chain and wasmtime both need more.
+# Held by every crate of this workspace but -ffi and -testhost, and checked on 1.82
+# in CI. matcher.wasm links siros-codec, siros-dcql, siros-oid4vp without `crypto`,
+# siros-display without `credential`, the two zkp_req crates, -core and the two
+# android-credman crates; the wallet core crates hold it for the picker too. The
+# -ffi and -testhost crates override this upward: uniffi's bindgen chain and
+# wasmtime both need more.
 rust-version = "1.82"
 
 [workspace.dependencies]
