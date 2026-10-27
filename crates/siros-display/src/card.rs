@@ -107,8 +107,7 @@ impl DisplayCache {
 
     /// The OpenID4VCI display metadata of `credential`'s configuration.
     pub(crate) fn issued(&self, credential: &Credential) -> Option<&IssuerMetadata> {
-        let issuer = credential.issuer()?;
-        self.issuer(issuer.as_str(), credential.configuration_id()?.as_str())
+        self.issuer(credential.issuer()?, credential.configuration_id()?)
     }
 
     /// The Type Metadata of an SD-JWT VC's `vct` and of the types it extends.

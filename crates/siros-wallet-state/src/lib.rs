@@ -33,8 +33,8 @@ mod state;
 pub use entry::{CredentialData, CredentialEntry, MetadataEntry, MetadataType, MetadataValue};
 pub use error::{FoundVersion, Member, MetadataFault, PresentationsFault, WalletStateError};
 pub use ids::{
-    BatchId, ConfigurationId, CredentialId, FormatIdentifier, InstanceId, IssuerIdentifier, KeyId,
-    PresentationId, TransactionId,
+    BatchId, ConfigurationId, CredentialId, EmptyIdentifier, FormatIdentifier, InstanceId,
+    IssuerIdentifier, KeyId, PresentationId, TransactionId,
 };
 pub use presentation::PresentationRecord;
 pub use state::WalletState;

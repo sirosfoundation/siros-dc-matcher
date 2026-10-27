@@ -46,8 +46,6 @@ mod colour;
 #[cfg(feature = "credential")]
 mod entry;
 #[cfg(feature = "credential")]
-mod ids;
-#[cfg(feature = "credential")]
 mod issuer;
 #[cfg(feature = "credential")]
 mod json;
@@ -65,7 +63,6 @@ pub use card::Card;
 #[cfg(feature = "credential")]
 pub use colour::Colour;
 #[cfg(feature = "credential")]
-pub use ids::{ConfigurationId, IssuerIdentifier};
 #[cfg(feature = "credential")]
 pub use issuer::IssuerMetadata;
 #[cfg(feature = "credential")]

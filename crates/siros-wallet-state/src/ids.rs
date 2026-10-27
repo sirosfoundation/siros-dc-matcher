@@ -79,6 +79,15 @@ impl IssuerIdentifier {
         known(text).map(Self)
     }
 
+    /// The identifier `text`, as issuer metadata writes it.
+    ///
+    /// # Errors
+    ///
+    /// [`EmptyIdentifier`] for the empty string.
+    pub fn parse(text: &str) -> Result<Self, EmptyIdentifier> {
+        Self::known(text.to_owned()).ok_or(EmptyIdentifier)
+    }
+
     /// The identifier as the wallet state writes it.
     pub fn as_str(&self) -> &str {
         &self.0
@@ -94,6 +103,15 @@ impl ConfigurationId {
     /// The identifier `text`; `None` for the empty string of an unknown one.
     pub(crate) fn known(text: String) -> Option<Self> {
         known(text).map(Self)
+    }
+
+    /// The identifier `text`, as issuer metadata writes it.
+    ///
+    /// # Errors
+    ///
+    /// [`EmptyIdentifier`] for the empty string.
+    pub fn parse(text: &str) -> Result<Self, EmptyIdentifier> {
+        Self::known(text.to_owned()).ok_or(EmptyIdentifier)
     }
 
     /// The identifier as the wallet state writes it.
@@ -142,6 +160,18 @@ impl TransactionId {
         Self(id)
     }
 }
+
+/// The empty string, where an identifier is never empty.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct EmptyIdentifier;
+
+impl fmt::Display for EmptyIdentifier {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("identifier_empty")
+    }
+}
+
+impl std::error::Error for EmptyIdentifier {}
 
 /// `text`, or `None` for the empty string the wallet writes when it does not know a value.
 pub(crate) fn known(text: String) -> Option<String> {

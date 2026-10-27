@@ -18,11 +18,11 @@ pub enum DisplayError {
     OptionItemUnknown(usize),
     /// A metadata document, or one of its members, is no JSON object.
     NotObject,
-    /// `credential_issuer` is absent or no string.
+    /// `credential_issuer` is absent, no string, or empty.
     IssuerIdentifier,
     /// The Credential Issuer Metadata offers no configuration of that identifier.
     ConfigurationUnknown,
-    /// `credential_configuration_id` is absent or no string.
+    /// `credential_configuration_id` is absent, no string, or empty.
     ConfigurationId,
     /// Issuer metadata carries `auxiliary_data`, which only a Credential Response may carry
     /// (privatedata 3.1, Section 5A.3).

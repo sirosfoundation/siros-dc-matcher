@@ -2,9 +2,9 @@
 
 use rustc_hash::FxHashMap;
 use siros_dcql::Vct;
+use siros_wallet_state::{ConfigurationId, IssuerIdentifier};
 
 use crate::error::DisplayError;
-use crate::ids::{ConfigurationId, IssuerIdentifier};
 use crate::issuer::IssuerMetadata;
 use crate::type_metadata::TypeMetadata;
 
@@ -82,7 +82,11 @@ impl DisplayCache {
     }
 
     /// The OpenID4VCI display metadata of configuration `configuration_id` of `issuer`.
-    pub(crate) fn issuer(&self, issuer: &str, configuration_id: &str) -> Option<&IssuerMetadata> {
+    pub(crate) fn issuer(
+        &self,
+        issuer: &IssuerIdentifier,
+        configuration_id: &ConfigurationId,
+    ) -> Option<&IssuerMetadata> {
         self.issuers.get(issuer)?.get(configuration_id)
     }
 
