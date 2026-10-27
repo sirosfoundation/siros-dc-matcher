@@ -79,7 +79,7 @@ impl Fetched {
 /// Why the response to a fetch holds no document.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FetchFault {
-    /// The response has this status, not 200.
+    /// The response has this status; only 200 delivers a document.
     Status(HttpStatus),
     /// The body has this many bytes, more than the fetch allowed.
     TooLarge(usize),

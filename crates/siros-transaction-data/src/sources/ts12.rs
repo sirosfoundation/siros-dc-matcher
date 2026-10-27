@@ -76,8 +76,8 @@ pub enum Ts12Fault {
     OneOf(Ts12Member),
     /// A referenced document's URL is no `https` URL.
     DocumentNotHttps(String),
-    /// `schema` is an embedded JSON Schema, which the wallet does not validate payloads
-    /// against.
+    /// `schema` embeds a JSON Schema; the wallet validates payloads against the schemas of
+    /// Section 4.3.
     SchemaEmbedded,
     /// `schema` names no schema of Section 4.3.
     SchemaUnknown(String),
@@ -138,7 +138,7 @@ enum Document {
 impl TypeMetadata {
     /// The type metadata of `credential`, an SD-JWT VC: the document at its `vct` (SD-JWT VC,
     /// Section 6.3.1); the fetch while the host has not given it. A `vct` that is no `https` URL
-    /// locates no document, and a document the host does not find is none, unless
+    /// locates no document, and a response other than 200 leaves it absent, unless
     /// `vct#integrity` pins one.
     pub(crate) fn load(
         credential: &Credential,
