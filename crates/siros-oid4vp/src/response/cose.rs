@@ -8,7 +8,7 @@ use sha2::Sha256;
 use siros_codec::cbor::Value as Cbor;
 
 use super::aead::{self, ContentKey};
-use super::{EncryptionFault, ResponseError};
+use super::ResponseError;
 use crate::verified::{ContentEncryption, Encryption};
 
 /// The CBOR tag of `COSE_Encrypt` (RFC 9052, Section 2).
@@ -39,10 +39,16 @@ fn recipient_protected() -> Vec<u8> {
 /// `COSE_KDF_Context` (RFC 9053, Section 5.2) of `enc`, nil PartyU and PartyV, and the
 /// recipient's protected header `{1: -25}`.
 ///
-/// # Errors
+/// # Panics
 ///
-/// [`ResponseError::EncryptionFailed`] when HKDF refuses the length.
-pub fn cose_kdf(shared_secret: &[u8], enc: ContentEncryption) -> Result<ContentKey, ResponseError> {
+/// When HKDF refuses `enc`'s key length. HKDF-SHA256 gives up to 8160 bytes, and a key has at
+/// most 32.
+#[expect(
+    clippy::expect_used,
+    reason = "HKDF-SHA256 gives every key length of `ContentEncryption`; a refusal is a bug of \
+              the library, and no key can be derived"
+)]
+pub fn cose_kdf(shared_secret: &[u8], enc: ContentEncryption) -> ContentKey {
     let party = || Cbor::Array(vec![Cbor::Null, Cbor::Null, Cbor::Null]);
     let context = Cbor::Array(vec![
         Cbor::Unsigned(enc.cose_alg()),
@@ -56,7 +62,7 @@ pub fn cose_kdf(shared_secret: &[u8], enc: ContentEncryption) -> Result<ContentK
     let mut key = vec![0u8; enc.key_len()];
     Hkdf::<Sha256>::new(None, shared_secret)
         .expand(&context.encode(), &mut key)
-        .map_err(|_| ResponseError::EncryptionFailed(EncryptionFault::KdfLength))?;
+        .expect("HKDF-SHA256 gives a key of every enc's length");
     ContentKey::of(enc, &key)
 }
 
@@ -67,8 +73,8 @@ pub(super) fn encrypt(
     plaintext: &[u8],
     rng: &mut impl CryptoRngCore,
 ) -> Result<Vec<u8>, ResponseError> {
-    let agreement = aead::agree(encryption, rng)?;
-    let cek = cose_kdf(agreement.shared.raw_secret_bytes(), encryption.enc)?;
+    let agreement = aead::agree(encryption, rng);
+    let cek = cose_kdf(agreement.shared.raw_secret_bytes(), encryption.enc);
     let protected = Cbor::Map(vec![(
         Cbor::Unsigned(ALG),
         Cbor::Unsigned(encryption.enc.cose_alg()),

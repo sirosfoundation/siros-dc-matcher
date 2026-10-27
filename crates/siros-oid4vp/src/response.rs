@@ -94,17 +94,11 @@ impl ResponseError {
 /// The step of an encryption that failed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum EncryptionFault {
-    /// The ephemeral public key has no affine coordinates.
-    #[error("the ephemeral public key has no affine coordinates")]
-    EphemeralKey,
     /// A Concat KDF input is longer than a 32-bit length allows.
     #[error("a Concat KDF input is longer than a 32-bit length allows")]
     KdfInput,
-    /// The KDF cannot give a key of the length of `enc`.
-    #[error("the KDF cannot give a key of the length of `enc`")]
-    KdfLength,
-    /// The cipher refused the key or the plaintext.
-    #[error("the cipher refused the key or the plaintext")]
+    /// AES GCM refused the plaintext or the additional data as too long.
+    #[error("AES GCM refused the plaintext or the additional data as too long")]
     Seal,
 }
 
