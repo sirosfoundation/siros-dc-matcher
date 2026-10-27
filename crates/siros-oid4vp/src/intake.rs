@@ -145,8 +145,18 @@ impl IntakeState {
     ///
     /// # Errors
     ///
-    /// [`IntakeError`]: the first rule the request breaks, or a result that does not answer
-    /// the effect it stands for.
+    /// [`IntakeError`]: the first rule the request breaks.
+    ///
+    /// # Panics
+    ///
+    /// When the results do not answer the effects: a result of the other kind than its effect,
+    /// a trust answer with a key or Verifier metadata its effect did not ask for, or a result
+    /// beyond the effects intake returned.
+    #[expect(
+        clippy::panic,
+        reason = "the host answers the effects step returns, one result each; another result is \
+                  a bug of the host, and no request verified on it can be trusted"
+    )]
     pub fn step(&self) -> Result<Step, IntakeError> {
         let mut answers = Answers {
             rest: self.answers.iter(),
@@ -168,10 +178,12 @@ impl IntakeState {
             }
         };
         match outcome {
-            Ok(_) if answers.rest.next().is_some() => Err(IntakeError::UnusedAnswer),
+            Ok(_) if answers.rest.next().is_some() => {
+                panic!("the host gave more results than intake returned effects")
+            }
             Ok(verified) => Ok(Step::Verified(Box::new(verified))),
             Err(Halt::Pending(effect)) => Ok(Step::Effect(effect)),
-            Err(Halt::Failed(error) | Halt::HostFault(error)) => Err(error),
+            Err(Halt::Failed(error)) => Err(error),
         }
     }
 }
@@ -182,8 +194,6 @@ pub(crate) enum Halt {
     Pending(Effect),
     /// The request breaks a rule.
     Failed(IntakeError),
-    /// A result does not fit its effect.
-    HostFault(IntakeError),
 }
 
 impl From<IntakeError> for Halt {
@@ -204,19 +214,43 @@ pub(crate) struct Answers<'a> {
 }
 
 impl<'a> Answers<'a> {
+    /// The response to `fetch`, or the fetch as the pending effect.
+    ///
+    /// # Panics
+    ///
+    /// When the host answered the fetch with a trust answer.
+    #[expect(
+        clippy::panic,
+        reason = "the host answers a fetch with its response; a trust answer is a bug of the \
+                  host, and no request verified on it can be trusted"
+    )]
     fn fetch(&mut self, fetch: Fetch) -> Result<&'a FetchResponse, Halt> {
         match self.rest.next() {
             None => Err(Halt::Pending(Effect::Fetch(fetch))),
             Some(EffectResult::Fetched(response)) => Ok(response),
-            Some(EffectResult::Trusted(_)) => Err(Halt::HostFault(IntakeError::AnswerMismatch)),
+            Some(EffectResult::Trusted(_)) => {
+                panic!("the host answered a fetch with a trust answer")
+            }
         }
     }
 
+    /// The answer to `trust`, or the lookup as the pending effect.
+    ///
+    /// # Panics
+    ///
+    /// When the host answered the lookup with a fetch response.
+    #[expect(
+        clippy::panic,
+        reason = "the host answers a trust lookup with its verdict; a fetch response is a bug of \
+                  the host, and no request verified on it can be trusted"
+    )]
     fn trust(&mut self, trust: Trust) -> Result<&'a TrustAnswer, Halt> {
         match self.rest.next() {
             None => Err(Halt::Pending(Effect::Trust(trust))),
             Some(EffectResult::Trusted(answer)) => Ok(answer),
-            Some(EffectResult::Fetched(_)) => Err(Halt::HostFault(IntakeError::AnswerMismatch)),
+            Some(EffectResult::Fetched(_)) => {
+                panic!("the host answered a trust lookup with a fetch response")
+            }
         }
     }
 }
