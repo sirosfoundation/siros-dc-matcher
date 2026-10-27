@@ -6,6 +6,7 @@
 use siros_codec::base64url::encode as b64;
 use siros_codec::json::JsonTextError;
 use siros_codec::Base64Error;
+use siros_dcql::{CredentialMember, FormFault, Member, Position, QueryError};
 use siros_oid4vp::{diagnose, CompactFault, NoQuery, PayloadFault, UnverifiedRequest};
 
 /// The protocols SIROS wallets register: the three of OpenID4VP 1.0, A.1.
@@ -27,10 +28,7 @@ fn first_supported_request(
     registered: &dyn Fn(&str) -> bool,
 ) -> Option<(String, siros_dcql::DcqlQuery)> {
     let found = first(request, registered)?;
-    Some((
-        found.protocol().label().to_owned(),
-        found.query().typed()?.clone(),
-    ))
+    Some((found.protocol().label().to_owned(), found.query().clone()))
 }
 
 /// The authorization request object all three protocols ultimately carry.
@@ -307,10 +305,13 @@ fn an_unsecured_token_has_an_empty_signature_not_a_missing_one() {
 #[test]
 fn a_malformed_dcql_query_reports_the_parse_error() {
     let data = serde_json::json!({"dcql_query": {"credentials": "not an array"}});
-    match UnverifiedRequest::read("openid4vp-v1-unsigned", &data) {
-        Err(NoQuery::Malformed(e)) => assert!(!e.is_empty()),
-        other => panic!("expected a parse error, got {other:?}"),
-    }
+    assert_eq!(
+        UnverifiedRequest::read("openid4vp-v1-unsigned", &data),
+        Err(NoQuery::Malformed(QueryError::Form {
+            member: Member::Credentials,
+            fault: FormFault::WrongType,
+        }))
+    );
 }
 
 /// ISO 18013-7 carries a CBOR DeviceRequest, not DCQL. Declining is what lets
@@ -483,11 +484,7 @@ fn an_unsigned_request_yields_its_full_context() {
         ctx.client_metadata(),
         Some(&serde_json::json!({"jwks": {"keys": []}}))
     );
-    assert_eq!(ctx.query().raw()["credentials"][0]["id"], "pid");
-    assert_eq!(
-        ctx.query().typed().expect("typed").credentials()[0].id(),
-        "pid"
-    );
+    assert_eq!(ctx.query().credentials()[0].id(), "pid");
 }
 
 #[test]
@@ -505,7 +502,7 @@ fn a_signed_request_yields_its_full_context() {
         Some(vec!["https://verifier.example"])
     );
     assert!(ctx.client_metadata().is_some());
-    assert!(ctx.query().typed().is_some());
+    assert_eq!(ctx.query().credentials()[0].id(), "pid");
 }
 
 #[test]
@@ -521,51 +518,30 @@ fn origins_client_id_and_metadata_are_none_when_absent() {
     assert_eq!(ctx.client_metadata(), None);
 }
 
-/// The rulebook example puts an object under `claims`, which the typed DCQL
-/// parser rejects. It must still reach the planner.
-fn zkp_req_object_claims_data() -> serde_json::Value {
-    serde_json::json!({
-        "client_id": "x509_san_dns:rp.example.com",
-        "dcql_query": {"credentials": [{
-            "id": "nym", "format": "zkp_req",
+/// The rulebook example puts an object under `claims`: DCQL refuses the request, a `zkp_req`
+/// query's among them.
+#[test]
+fn object_claims_are_malformed_in_every_format() {
+    for format in ["zkp_req", "mso_mdoc"] {
+        let data = serde_json::json!({"dcql_query": {"credentials": [{
+            "id": "nym", "format": format,
             "meta": {"doctype_value": "eu.europa.ec.eudi.nym_auth.1"},
-            "claims": {"_req": [{"fn_id": "age_check", "id": "a", "params": {"ge": "2008-10-10"}}]}
-        }]}
-    })
-}
-
-#[test]
-fn a_zkp_req_request_with_object_claims_yields_a_context() {
-    let ctx = first(
-        &envelope("openid4vp-v1-unsigned", zkp_req_object_claims_data()),
-        &siros_default,
-    )
-    .expect("a context, not Malformed");
-    assert!(ctx.query().typed().is_none());
-    assert!(ctx.query().raw()["credentials"][0]["claims"]["_req"].is_array());
-}
-
-/// ... but only for zkp_req. Other formats keep failing as before, and so
-/// does a malformed credential sitting next to a zkp_req one.
-#[test]
-fn object_claims_on_any_other_format_is_still_malformed() {
-    let data = serde_json::json!({"dcql_query": {"credentials": [{
-        "id": "pid", "format": "mso_mdoc",
-        "meta": {"doctype_value": "d"}, "claims": {"_req": []}
-    }]}});
-    let profile = siros_default;
-    assert!(first(&envelope("openid4vp-v1-unsigned", data.clone()), &profile).is_none());
-    assert!(matches!(
-        UnverifiedRequest::read("openid4vp-v1-unsigned", &data),
-        Err(NoQuery::Malformed(_))
-    ));
-
-    let mut mixed = zkp_req_object_claims_data();
-    mixed["dcql_query"]["credentials"]
-        .as_array_mut()
-        .expect("array")
-        .push(data["dcql_query"]["credentials"][0].clone());
-    assert!(first(&envelope("openid4vp-v1-unsigned", mixed), &profile).is_none());
+            "claims": {"_req": [{"fn_id": "age_check", "params": {"ge": "2008-10-10"}}]}
+        }]}});
+        assert!(first(
+            &envelope("openid4vp-v1-unsigned", data.clone()),
+            &siros_default
+        )
+        .is_none());
+        assert_eq!(
+            UnverifiedRequest::read("openid4vp-v1-unsigned", &data),
+            Err(NoQuery::Malformed(QueryError::Form {
+                member: Member::CredentialMember(Position::new(0), CredentialMember::Claims),
+                fault: FormFault::WrongType,
+            })),
+            "{format}"
+        );
+    }
 }
 
 #[test]

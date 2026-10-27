@@ -2,7 +2,9 @@
 
 use serde_json::{Map, Value};
 use siros_codec::member::{ArrayIndex, MemberFault};
-use siros_dcql::{CredentialFormat, DocType, HolderBinding, Multiplicity, QueryId, Vct};
+use siros_dcql::{
+    CredentialFormat, CredentialQuery, DocType, HolderBinding, Multiplicity, QueryId, Vct,
+};
 
 use crate::ids::{FnId, ItemIndex, ReqSetIndex, ReturnHandle, W3cType};
 use crate::json::{identifier, non_empty_array, non_empty_strings};
@@ -114,66 +116,52 @@ pub enum ReqSets {
     Present,
 }
 
-/// A parsed `zkp_req` Credential Query.
+/// A `zkp_req` Credential Query: the DCQL Credential Query and what `zkp_req` reads from it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ZkpReqQuery {
-    id: QueryId,
+    query: CredentialQuery,
     credential_type: CredentialType,
     items: Vec<ReqItem>,
     options: Vec<QueryOption>,
     req_sets: ReqSets,
-    holder_binding: HolderBinding,
-    multiplicity: Multiplicity,
 }
 
 impl ZkpReqQuery {
-    /// Parses one Credential Query (one element of `dcql_query.credentials`).
+    /// The `zkp_req` reading of the Credential Query `query`, which DCQL parsed: its `format`,
+    /// `meta`, `_req` and `_req_sets`.
     ///
     /// # Errors
     ///
     /// [`RequestRule`]: the first rule of Sections 1.1, 2 and 2.1 the query breaks.
-    pub fn parse(query: &Value) -> Result<Self, RequestRule> {
-        let query = query.as_object().ok_or(RequestRule::QueryNotObject)?;
-        let id =
-            identifier(query.get("id"), QueryId::parse).map_err(RequestRule::QueryIdInvalid)?;
-        if query.get("format").and_then(Value::as_str) != Some(FORMAT) {
+    pub fn parse(query: &CredentialQuery) -> Result<Self, RequestRule> {
+        if *query.format() != FORMAT {
             return Err(RequestRule::FormatNotZkpReq);
         }
-        if query.contains_key("claims") {
+        if !query.claims().is_empty() {
             return Err(RequestRule::ClaimsPresent);
         }
-        if query.contains_key("claim_sets") {
-            return Err(RequestRule::ClaimSetsPresent);
-        }
-        let credential_type = read_meta(query.get("meta"))?;
-        let items = read_items(query.get("_req"))?;
-        let (options, req_sets) = read_options(query.get("_req_sets"), items.len())?;
-        let holder_binding = match read_bool(
-            query.get("require_cryptographic_holder_binding"),
-            RequestRule::HolderBindingInvalid,
-        )? {
-            Some(false) => HolderBinding::Optional,
-            Some(true) | None => HolderBinding::Required,
-        };
-        let multiplicity = match read_bool(query.get("multiple"), RequestRule::MultipleInvalid)? {
-            Some(true) => Multiplicity::Several,
-            Some(false) | None => Multiplicity::One,
-        };
+        let credential_type = read_meta(query.meta())?;
+        let items = read_items(query.extension("_req"))?;
+        let (options, req_sets) = read_options(query.extension("_req_sets"), items.len())?;
         Ok(Self {
-            id,
+            query: query.clone(),
             credential_type,
             items,
             options,
             req_sets,
-            holder_binding,
-            multiplicity,
         })
+    }
+
+    /// The DCQL Credential Query.
+    #[must_use]
+    pub fn credential_query(&self) -> &CredentialQuery {
+        &self.query
     }
 
     /// `id`.
     #[must_use]
     pub fn id(&self) -> &QueryId {
-        &self.id
+        self.query.id()
     }
 
     /// `meta`, read for its source format.
@@ -210,14 +198,14 @@ impl ZkpReqQuery {
     /// 6.1).
     #[must_use]
     pub fn holder_binding(&self) -> HolderBinding {
-        self.holder_binding
+        self.query.holder_binding()
     }
 
     /// `multiple`: whether several presentations may answer; one when absent (OpenID4VP 1.0,
     /// Section 6.1).
     #[must_use]
     pub fn multiplicity(&self) -> Multiplicity {
-        self.multiplicity
+        self.query.multiplicity()
     }
 
     /// The option with index `req_set` of `_req_sets`, or the one option without them.
@@ -227,12 +215,7 @@ impl ZkpReqQuery {
     }
 }
 
-fn read_meta(meta: Option<&Value>) -> Result<CredentialType, RequestRule> {
-    let meta = match meta {
-        None => return Err(RequestRule::MetaInvalid(MemberFault::Absent)),
-        Some(Value::Object(meta)) => meta,
-        Some(_) => return Err(RequestRule::MetaInvalid(MemberFault::WrongType)),
-    };
+fn read_meta(meta: &Map<String, Value>) -> Result<CredentialType, RequestRule> {
     let source_format = match meta.get("source_format") {
         None => Err(MemberFault::Absent),
         Some(Value::String(text)) if text.is_empty() => Err(MemberFault::Empty),
@@ -375,13 +358,4 @@ fn read_option(set: &Value, items: usize) -> Result<Vec<ItemIndex>, OptionFault>
         out.push(item);
     }
     Ok(out)
-}
-
-/// A boolean member: `None` when absent.
-fn read_bool(value: Option<&Value>, invalid: RequestRule) -> Result<Option<bool>, RequestRule> {
-    match value {
-        None => Ok(None),
-        Some(Value::Bool(b)) => Ok(Some(*b)),
-        Some(_) => Err(invalid),
-    }
 }

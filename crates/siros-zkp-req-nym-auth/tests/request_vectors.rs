@@ -12,6 +12,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use serde_json::{json, Value};
+use siros_dcql::CredentialQuery;
 use siros_zkp_req::{ZkpFormats, ZkpReqQuery};
 use siros_zkp_req_nym_auth::catalogue::{CatalogueRule, Catalogued, NymAuthQuery};
 
@@ -48,6 +49,10 @@ fn rule_json(rule: CatalogueRule) -> Value {
 fn verdict(vector: &Value) -> Value {
     let query = member(vector, "query", "query_text");
     let metadata = member(vector, "client_metadata", "client_metadata_text");
+    let query = match CredentialQuery::parse(&query) {
+        Ok(query) => query,
+        Err(error) => return json!({"error": error.code()}),
+    };
     let parsed = match ZkpReqQuery::parse(&query) {
         Ok(parsed) => parsed,
         Err(rule) => return json!({"error": rule.code()}),

@@ -29,7 +29,7 @@ use std::collections::HashMap;
 use siros_dc_matcher_core::db::CredentialDatabase;
 use siros_dc_matcher_core::evaluator::{credentials, resolve, ProfilePolicy};
 use siros_dcql::{execute, DcqlQuery, Satisfaction};
-use siros_oid4vp::{UnverifiedQuery, UnverifiedRequest};
+use siros_oid4vp::UnverifiedRequest;
 
 use crate::FfiCapability;
 
@@ -212,7 +212,7 @@ pub fn match_dc_api_request(
     // declined. One reader, or they drift again.
     let registered = |label: &str| db.profile.parser_for(label).is_some();
     let found = UnverifiedRequest::first_registered(request_json.as_bytes(), &registered)
-        .map(|unverified| (unverified.query().matching_query().clone(), unverified));
+        .map(|unverified| (unverified.query().clone(), unverified));
     let (query, unverified) = match found {
         Some(found) => found,
         None => {
@@ -235,12 +235,7 @@ pub fn match_dc_api_request(
         }
     };
 
-    Ok(evaluate(
-        &db,
-        &query,
-        unverified.query(),
-        unverified.client_metadata(),
-    ))
+    Ok(evaluate(&db, &query, unverified.client_metadata()))
 }
 
 /// Match a bare DCQL query.
@@ -281,13 +276,8 @@ pub fn match_dcql_with_context(
         .map(|text| serde_json::from_str::<serde_json::Value>(&text).map_err(request_err))
         .transpose()?;
 
-    let unverified = UnverifiedQuery::parse(raw).map_err(|e| request_err(e.reason()))?;
-    Ok(evaluate(
-        &db,
-        unverified.matching_query(),
-        &unverified,
-        client_metadata.as_ref(),
-    ))
+    let query = DcqlQuery::parse(&raw).map_err(request_err)?;
+    Ok(evaluate(&db, &query, client_metadata.as_ref()))
 }
 
 fn decode(blob: &[u8]) -> Result<CredentialDatabase, MatchError> {
@@ -308,11 +298,10 @@ fn request_err(e: impl core::fmt::Display) -> MatchError {
 fn evaluate(
     db: &CredentialDatabase,
     query: &DcqlQuery,
-    unverified: &UnverifiedQuery,
     client_metadata: Option<&serde_json::Value>,
 ) -> FfiMatchOutcome {
     let held = credentials(db);
-    let policy = ProfilePolicy::new(&db.profile).with_context(unverified, client_metadata);
+    let policy = ProfilePolicy::new(&db.profile).with_client_metadata(client_metadata);
     let result = execute(query, &held, &policy);
     let enumerated = result.combinations(MAX_COMBINATIONS);
     let dropped_count = u32::try_from(enumerated.dropped().count()).unwrap_or(u32::MAX);

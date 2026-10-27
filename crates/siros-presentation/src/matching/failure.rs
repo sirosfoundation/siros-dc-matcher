@@ -10,31 +10,6 @@ use siros_zkp_req::ErrorCode;
 use super::{Answered, Exclusion, ZkpRefusal};
 use crate::credential::MatchCredential;
 
-/// Why a request cannot be matched: the query as sent lacks a Credential Query of the parsed
-/// one. The request is invalid (`invalid_request`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AskedError {
-    /// The query as sent lacks the Credential Query of this `id`.
-    Unsent(QueryId),
-}
-
-impl AskedError {
-    /// A stable identifier.
-    pub fn code(&self) -> &'static str {
-        match self {
-            Self::Unsent(_) => "query_unsent",
-        }
-    }
-}
-
-impl fmt::Display for AskedError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
-
-impl std::error::Error for AskedError {}
-
 /// Why a Credential Query has no candidate whatever the wallet holds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QueryRefusal {

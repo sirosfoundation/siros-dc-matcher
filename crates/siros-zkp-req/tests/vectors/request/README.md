@@ -17,8 +17,9 @@ have their own set in `crates/siros-zkp-req-nym-auth/tests/vectors/request/`. Sp
 ```
 
 Text that is not JSON reads as `null`. `options` lists each option's `_req` indexes in the
-Verifier's order; `req_sets` says whether the query has `_req_sets`. Error codes are those of
-`siros_zkp_req::RequestRule::code`.
+Verifier's order; `req_sets` says whether the query has `_req_sets`. DCQL parses the query
+first: a rule of OpenID4VP 1.0, Section 6 has the code of `siros_dcql::QueryError::code`, and a
+rule of `zkp_req` that of `siros_zkp_req::RequestRule::code`.
 
 ## Provenance
 

@@ -9,36 +9,14 @@ pub fn cases() -> Vec<Case> {
     vec![
         // zkp_req, Sections 1.1, 1.2, 2 and 2.1: invalid_request.
         (
-            "query_not_object",
-            match_query_edit(|q| *q = json!([1])),
-            protocol(RequestRule::QueryNotObject),
-        ),
-        (
-            "query_id_invalid",
-            match_query_edit(|q| q["id"] = json!("")),
-            protocol(RequestRule::QueryIdInvalid(IdentifierFault::Syntax(
-                QueryIdError::Empty,
-            ))),
-        ),
-        (
             "format_not_zkp_req",
             match_query_edit(|q| q["format"] = json!("mso_mdoc")),
             protocol(RequestRule::FormatNotZkpReq),
         ),
         (
             "claims_present",
-            match_query_edit(|q| q["claims"] = json!([])),
+            match_query_edit(|q| q["claims"] = json!([{"path": ["birth_date"]}])),
             protocol(RequestRule::ClaimsPresent),
-        ),
-        (
-            "claim_sets_present",
-            match_query_edit(|q| q["claim_sets"] = json!([])),
-            protocol(RequestRule::ClaimSetsPresent),
-        ),
-        (
-            "meta_invalid",
-            match_query_edit(|q| q["meta"] = json!("mso_mdoc")),
-            protocol(RequestRule::MetaInvalid(MemberFault::WrongType)),
         ),
         (
             "source_format_invalid",
@@ -113,11 +91,6 @@ pub fn cases() -> Vec<Case> {
                 option: ReqSetIndex::new(1),
                 fault: OptionFault::Repeated(ItemIndex::new(0)),
             }),
-        ),
-        (
-            "holder_binding_invalid",
-            match_query_edit(|q| q["require_cryptographic_holder_binding"] = json!("yes")),
-            protocol(RequestRule::HolderBindingInvalid),
         ),
         (
             "formats_missing",

@@ -364,7 +364,7 @@ pub fn chain(certificates: &[&Cert]) -> IssuerChain {
 /// The authorities of a `mso_mdoc` query with `trusted_authorities` `authorities`.
 pub fn authorities(authorities: serde_json::Value) -> QueryAuthorities {
     let query = DcqlQuery::parse(&serde_json::json!({"credentials": [{
-        "id": "pid", "format": "mso_mdoc", "trusted_authorities": authorities
+        "id": "pid", "format": "mso_mdoc", "meta": {}, "trusted_authorities": authorities
     }]}))
     .unwrap();
     QueryAuthorities::of(&query.credentials()[0]).unwrap()

@@ -16,7 +16,7 @@ use siros_zkp_req_nym_auth::policy::RequestRefusal;
 use siros_zkp_req_nym_auth::presenter::{ProveError, Unanswerable};
 
 use crate::ids::{AdditionIndex, CandidateIndex, OfferIndex, QueryIndex, SetIndex};
-use crate::matching::{AskedError, ChoiceError, Failure};
+use crate::matching::{ChoiceError, Failure};
 use crate::plan::{DigestError, EntryPosition, Unproven};
 use crate::respond::{PickError, SignatureError, SubsetError};
 use siros_dcql::QueryId;
@@ -24,8 +24,6 @@ use siros_dcql::QueryId;
 /// Why the core gives no plan, no chosen offer or no response.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PresentationError {
-    /// A Credential Query of the request breaks a rule (`invalid_request`).
-    Asked(AskedError),
     /// The wallet has no offer for the request, and why.
     NoOffer(Failure<Unadmitted<ChainRefusal>, Unproven>),
     /// An entry of `transaction_data`, or its binding to an offer, breaks a rule. The code is
@@ -135,7 +133,6 @@ impl PresentationError {
     /// A stable identifier.
     pub fn code(&self) -> &'static str {
         match self {
-            Self::Asked(e) => e.code(),
             Self::NoOffer(failure) => failure.code(),
             Self::TransactionData(e) => e.code(),
             Self::Display(e) => e.code(),
@@ -177,7 +174,6 @@ impl PresentationError {
     /// of the wallet, as `zkp_req.md`, Section 5 sends one.
     pub fn error_code(&self) -> ErrorCode {
         match self {
-            Self::Asked(_) => ErrorCode::InvalidRequest,
             Self::NoOffer(failure) => oid4vp_code(failure.error_code()),
             Self::TransactionData(e) => e.error_code(),
             Self::Prove(e) => oid4vp_code(e.error_code()),
@@ -245,7 +241,6 @@ macro_rules! causes {
 }
 
 causes! {
-    AskedError => Asked,
     Failure<Unadmitted<ChainRefusal>, Unproven> => NoOffer,
     TransactionDataError => TransactionData,
     DisplayError => Display,

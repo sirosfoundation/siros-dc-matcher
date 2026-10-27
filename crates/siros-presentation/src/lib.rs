@@ -46,8 +46,8 @@ pub use credential::{KeyHolding, MatchCredential};
 pub use display_rule::{Choice, DisplayFacts, Presentability, TransactionData, WalletDisplay};
 pub use ids::{AdditionIndex, CandidateIndex, OfferIndex, OptionIndex, QueryIndex, SetIndex};
 pub use matching::{
-    Answer, Answered, Answers, Asked, AskedError, Candidate, ChoiceError, Claims, Excluded,
-    Exclusion, Failure, Matching, ProofChoice, QueryRefusal, ZkpQuery, ZkpRefusal,
+    Answer, Answered, Answers, Asked, Candidate, ChoiceError, Claims, Excluded, Exclusion, Failure,
+    Matching, ProofChoice, QueryRefusal, ZkpQuery, ZkpRefusal,
 };
 pub use offers::{
     Addition, EntryCarriers, EntryQueries, Member, Offer, Offers, Refusal, MAX_ADDITIONS,

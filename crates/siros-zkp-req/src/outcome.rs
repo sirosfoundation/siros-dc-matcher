@@ -3,7 +3,6 @@
 use std::fmt;
 
 use siros_codec::member::{ArrayIndex, MemberFault};
-use siros_dcql::QueryIdError;
 
 use crate::ids::{FnIdError, ItemIndex, ReqSetIndex, ReturnHandleError};
 
@@ -83,21 +82,14 @@ pub enum OptionFault {
 }
 
 /// A rule of `zkp_req` that a request breaks, with what breaks it. Each one makes the request
-/// invalid ([`ErrorCode::InvalidRequest`]).
+/// invalid ([`ErrorCode::InvalidRequest`]). The rules of OpenID4VP 1.0, Section 6 are DCQL's,
+/// which parses the query first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RequestRule {
-    /// The Credential Query is not a JSON object.
-    QueryNotObject,
-    /// `id` breaks OpenID4VP 1.0, Section 6.1.
-    QueryIdInvalid(IdentifierFault<QueryIdError>),
     /// `format` is not `zkp_req`.
     FormatNotZkpReq,
-    /// `claims` is present (Section 1.1).
+    /// `claims` is present (Section 1.1). DCQL refuses `claim_sets` without `claims`.
     ClaimsPresent,
-    /// `claim_sets` is present (Section 1.1).
-    ClaimSetsPresent,
-    /// `meta` is absent or not an object (Section 1.1).
-    MetaInvalid(MemberFault),
     /// `meta.source_format` is absent, not a string or empty (Section 1.1).
     SourceFormatInvalid(MemberFault),
     /// The `meta` member the source format defines breaks its rule (Section 1.1).
@@ -147,10 +139,6 @@ pub enum RequestRule {
         /// What breaks the rule.
         fault: OptionFault,
     },
-    /// `require_cryptographic_holder_binding` is not a boolean (OpenID4VP 1.0, Section 6.1).
-    HolderBindingInvalid,
-    /// `multiple` is not a boolean (OpenID4VP 1.0, Section 6.1).
-    MultipleInvalid,
     /// `client_metadata` has no `vp_formats_supported.zkp_req` object (Section 1.2).
     FormatsMissing(MemberFault),
     /// `proof_backend_values` is not a non-empty array of strings (Section 1.2).
@@ -164,12 +152,8 @@ impl RequestRule {
     #[must_use]
     pub fn code(&self) -> &'static str {
         match self {
-            Self::QueryNotObject => "query_not_object",
-            Self::QueryIdInvalid(_) => "query_id_invalid",
             Self::FormatNotZkpReq => "format_not_zkp_req",
             Self::ClaimsPresent => "claims_present",
-            Self::ClaimSetsPresent => "claim_sets_present",
-            Self::MetaInvalid(_) => "meta_invalid",
             Self::SourceFormatInvalid(_) => "source_format_invalid",
             Self::TypeValueInvalid(_) => "type_value_invalid",
             Self::ReqInvalid(_) => "req_invalid",
@@ -181,8 +165,6 @@ impl RequestRule {
             Self::ReturnRepeated { .. } => "return_repeated",
             Self::ReqSetsInvalid(_) => "req_sets_invalid",
             Self::OptionInvalid { .. } => "option_invalid",
-            Self::HolderBindingInvalid => "holder_binding_invalid",
-            Self::MultipleInvalid => "multiple_invalid",
             Self::FormatsMissing(_) => "formats_missing",
             Self::ProofBackendValuesInvalid(_) => "proof_backend_values_invalid",
             Self::SystemIdValuesInvalid(_) => "system_id_values_invalid",

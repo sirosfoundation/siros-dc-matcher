@@ -167,18 +167,13 @@ fn planned<'a>(input: &PlanInput<'a>) -> Result<Step<Planned<'a>>, PresentationE
 ///
 /// # Errors
 ///
-/// [`PresentationError::NoOffer`] when a Credential Query makes the request invalid, and the
-/// error of a request whose query as sent lacks a parsed Credential Query.
+/// [`PresentationError::NoOffer`] when a Credential Query makes the request invalid.
 fn answered<'a>(
     input: &PlanInput<'a>,
     policy: Result<(), RequestRefusal>,
 ) -> Result<Wallet<'a>, PresentationError> {
     let request = input.request;
-    let asked = Asked::new(
-        request.dcql_query(),
-        request.dcql_query_json(),
-        request.client_metadata(),
-    )?;
+    let asked = Asked::new(request.dcql_query(), request.client_metadata());
     let usable: Vec<UsableCredential<'a>> = input
         .credentials
         .iter()

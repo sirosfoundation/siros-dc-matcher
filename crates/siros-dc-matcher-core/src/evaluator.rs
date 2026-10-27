@@ -35,7 +35,6 @@ use crate::profile::{
     FUNCTIONS_PARAM, SYSTEM_ID_PARAM, ZKP_REQ_CAPABILITY, ZKP_REQ_FORMAT,
 };
 use siros_dcql::Vct;
-use siros_oid4vp::UnverifiedQuery;
 use siros_zkp_req::{
     usable_backend, CredentialType, ProofBackend, QueryOption, SystemId, W3cType, ZkpFormats,
     ZkpReqQuery,
@@ -160,13 +159,6 @@ fn claim_value(claim: &Claim) -> Value {
 /// Evaluates a [`MatchProfile`] as a DCQL [`siros_dcql::Policy`].
 pub struct ProfilePolicy<'a> {
     profile: &'a MatchProfile,
-    context: Option<Context<'a>>,
-}
-
-/// What a `zkp_req` query is matched against besides the profile.
-#[derive(Clone, Copy)]
-struct Context<'a> {
-    query: &'a UnverifiedQuery,
     client_metadata: Option<&'a Value>,
 }
 
@@ -228,31 +220,19 @@ impl siros_zkp_req::System for Circuit<'_, '_> {
 impl<'a> ProfilePolicy<'a> {
     /// Evaluate against this profile.
     ///
-    /// Without a request context a `zkp_req` query matches nothing: what it
-    /// asks for is not in the typed DCQL query, so there is nothing to plan.
-    /// See [`Self::with_context`].
+    /// Without the verifier's `client_metadata` a `zkp_req` query matches nothing: `zkp_req`,
+    /// Section 1.2 matches it against the lists there. See [`Self::with_client_metadata`].
     pub fn new(profile: &'a MatchProfile) -> Self {
         Self {
             profile,
-            context: None,
+            client_metadata: None,
         }
     }
 
-    /// Evaluate with the request the query came from: its `dcql_query` and the
-    /// verifier's `client_metadata`.
-    ///
-    /// `zkp_req` is matched against its planned request and the verifier's
-    /// `client_metadata`, neither of which the typed query carries.
+    /// Evaluate with the request's `client_metadata`, when it has one.
     #[must_use]
-    pub fn with_context(
-        mut self,
-        query: &'a UnverifiedQuery,
-        client_metadata: Option<&'a Value>,
-    ) -> Self {
-        self.context = Some(Context {
-            query,
-            client_metadata,
-        });
+    pub fn with_client_metadata(mut self, client_metadata: Option<&'a Value>) -> Self {
+        self.client_metadata = client_metadata;
         self
     }
 
@@ -263,17 +243,9 @@ impl<'a> ProfilePolicy<'a> {
     /// matching: an invalid `zkp_req` request asks for nothing the matcher understands, and
     /// answering it with what the claims would select discloses data nobody asked for.
     pub fn zkp_req_selection(&self, query: &CredentialQuery) -> Option<ZkpReqSelection<'a>> {
-        let context = self.context?;
-        let raw = context
-            .query
-            .raw()
-            .get("credentials")?
-            .as_array()?
-            .iter()
-            .find(|c| c.get("id").and_then(Value::as_str) == Some(query.id().as_str()))?;
-        let parsed = ZkpReqQuery::parse(raw).ok()?;
+        let parsed = ZkpReqQuery::parse(query).ok()?;
         // zkp_req, Section 1.2: the Verifier MUST send both lists.
-        let formats = ZkpFormats::from_client_metadata(context.client_metadata?).ok()?;
+        let formats = ZkpFormats::from_client_metadata(self.client_metadata?).ok()?;
         // The nym_auth catalogue's rules, for a query of its credential type.
         let parsed = NymAuthQuery::from_query(parsed).ok()?.into_query();
         let held = self.profile.capabilities.get(ZKP_REQ_CAPABILITY)?;

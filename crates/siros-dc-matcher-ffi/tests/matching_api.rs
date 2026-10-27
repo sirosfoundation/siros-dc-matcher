@@ -624,17 +624,23 @@ fn unparseable_client_metadata_is_a_request_error() {
     assert!(matches!(result, Err(MatchError::Request { .. })));
 }
 
-/// `claims` is not part of `zkp_req` in any form. An object there, which DCQL
-/// cannot represent, must reach the protocol crate through both entry points,
-/// be refused as a request for nothing, and not be an error.
+/// DCQL refuses an object under `claims` in every format, `zkp_req` included: both entry points
+/// answer with a request error.
 #[test]
-fn a_zkp_req_query_with_object_claims_is_not_satisfiable() {
+fn a_zkp_req_query_with_object_claims_is_a_request_error() {
     let blob = nym_blob(&[("longfellow-libzk-v1", "urn:circuit:1", None)]);
     let query = json!({"id": "nym", "format": "zkp_req",
         "meta": {"source_format": "mso_mdoc", "doctype_value": NYM},
         "claims": {"_req": [{"fn_id": "age_check", "return": "age", "params": {"range": "18+"}}]}});
 
-    assert!(!match_accepted(blob.clone(), query.clone()).satisfiable);
+    assert!(matches!(
+        match_dcql_with_context(
+            blob.clone(),
+            dcql_of(query.clone()),
+            lists(&["longfellow-libzk-v1"], &["urn:circuit:1"]),
+        ),
+        Err(MatchError::Request { .. })
+    ));
 
     let envelope = json!({"requests": [{"protocol": "openid4vp-v1-unsigned",
         "data": {"dcql_query": {"credentials": [query]},
@@ -642,8 +648,10 @@ fn a_zkp_req_query_with_object_claims_is_not_satisfiable() {
                      "proof_backend_values": ["longfellow-libzk-v1"],
                      "system_id_values": ["urn:circuit:1"]}}}}}]})
     .to_string();
-    let out = match_dc_api_request(blob, envelope).expect("matched");
-    assert!(!out.satisfiable);
+    assert!(matches!(
+        match_dc_api_request(blob, envelope),
+        Err(MatchError::Request { .. })
+    ));
 }
 
 /// `match_dc_api_request` already has the whole request, so `client_metadata`

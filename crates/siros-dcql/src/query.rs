@@ -1,16 +1,27 @@
 //! The DCQL query model — OpenID4VP 1.0 §6.
 //!
 //! A query is constructed only by parsing ([`DcqlQuery::from_json`], [`DcqlQuery::parse`] or
-//! its `Deserialize`). The parse reads each member once and refuses what §6.1, §6.1.1, §6.2,
-//! §6.3 and §7 forbid: a malformed member, an identifier of the wrong syntax or repeated, an
-//! empty `credentials`, a `claim_sets` or `credential_sets` option naming an unknown id, a
-//! malformed claims path, and an `mso_mdoc` claims path other than a namespace and an element.
-//! "Implementations MUST ignore any unknown properties" (§6), and so does the parse.
+//! its `Deserialize`, and [`CredentialQuery::parse`] for one Credential Query). The parse reads
+//! each member once and refuses what §6.1, §6.1.1, §6.2, §6.3 and §7 forbid:
+//!
+//! - a member of the wrong JSON type, and an absent REQUIRED member, `meta` among them;
+//! - an empty `credentials`, `claims`, `claim_sets`, `credential_sets`, `options`,
+//!   `trusted_authorities` or `values` array;
+//! - a `values` element other than a string, an integer or a boolean;
+//! - an identifier of the wrong syntax or repeated;
+//! - a claims query without `id` in a Credential Query with `claim_sets`;
+//! - `claim_sets` without `claims`;
+//! - a `claim_sets` or `credential_sets` option naming an unknown id;
+//! - a malformed claims path, and an `mso_mdoc` claims path other than a namespace and an
+//!   element.
+//!
+//! "Implementations MUST ignore any unknown properties" (§6): a Credential Query keeps them as
+//! its extension members, for the profile of its format to read.
 
 mod error;
 mod read;
 
-use serde::ser::SerializeStruct;
+use serde::ser::SerializeMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 
@@ -42,12 +53,13 @@ pub struct CredentialQuery {
     trusted_authorities: Option<TrustedAuthorities>,
     holder_binding: HolderBinding,
     claims: ClaimRequest,
+    extensions: Vec<(String, Value)>,
 }
 
 /// The claims a Credential Query requests (§6.4.1).
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum ClaimRequest {
-    /// `claims` is absent or empty: no selectively disclosable claim is requested.
+    /// `claims` is absent: no selectively disclosable claim is requested.
     Nothing,
     /// `claims` without `claim_sets`: every claim is requested.
     All(Vec<ClaimsQuery>),
@@ -138,26 +150,30 @@ impl Serialize for ClaimOption {
     }
 }
 
+/// The members as the query holds them, its extension members last.
 impl Serialize for CredentialQuery {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut query = serializer.serialize_struct("CredentialQuery", 8)?;
-        query.serialize_field("id", &self.id)?;
-        query.serialize_field("format", &self.format)?;
-        query.serialize_field("multiple", &self.multiple)?;
-        query.serialize_field("meta", &self.meta)?;
+        let mut query = serializer.serialize_map(None)?;
+        query.serialize_entry("id", &self.id)?;
+        query.serialize_entry("format", &self.format)?;
+        query.serialize_entry("multiple", &self.multiple)?;
+        query.serialize_entry("meta", &self.meta)?;
         if let Some(authorities) = &self.trusted_authorities {
-            query.serialize_field("trusted_authorities", authorities)?;
+            query.serialize_entry("trusted_authorities", authorities)?;
         }
         if self.holder_binding == HolderBinding::Optional {
-            query.serialize_field("require_cryptographic_holder_binding", &self.holder_binding)?;
+            query.serialize_entry("require_cryptographic_holder_binding", &self.holder_binding)?;
         }
         match &self.claims {
             ClaimRequest::Nothing => {}
-            ClaimRequest::All(claims) => query.serialize_field("claims", claims)?,
+            ClaimRequest::All(claims) => query.serialize_entry("claims", claims)?,
             ClaimRequest::Sets { claims, options } => {
-                query.serialize_field("claims", claims)?;
-                query.serialize_field("claim_sets", options)?;
+                query.serialize_entry("claims", claims)?;
+                query.serialize_entry("claim_sets", options)?;
             }
+        }
+        for (name, value) in &self.extensions {
+            query.serialize_entry(name, value)?;
         }
         query.end()
     }
@@ -213,6 +229,15 @@ impl DcqlQuery {
 }
 
 impl CredentialQuery {
+    /// The Credential Query `value` alone (§6.1). Its errors name it at position 0.
+    ///
+    /// # Errors
+    ///
+    /// [`QueryError`]: the first rule of §6.1, §6.1.1, §6.3 or §7 the query breaks.
+    pub fn parse(value: &Value) -> Result<Self, QueryError> {
+        read::credential_query(Position::new(0), value)
+    }
+
     /// Identifies this query in the response and in `credential_sets`.
     #[must_use]
     pub fn id(&self) -> &QueryId {
@@ -231,13 +256,21 @@ impl CredentialQuery {
         self.multiple
     }
 
-    /// Format-specific constraints on metadata and validity.
-    ///
-    /// The spec marks `meta` REQUIRED, but "If empty, no specific constraints are placed"
-    /// (§6.1), so a missing `meta` reads as an empty one.
+    /// Format-specific constraints on metadata and validity. "If empty, no specific
+    /// constraints are placed" (§6.1).
     #[must_use]
     pub fn meta(&self) -> &Map<String, Value> {
         &self.meta
+    }
+
+    /// The extension member `name`: a member §6.1 leaves undefined, as the Verifier sent it. A
+    /// profile of the format defines its own, such as `zkp_req`'s `_req`.
+    #[must_use]
+    pub fn extension(&self, name: &str) -> Option<&Value> {
+        self.extensions
+            .iter()
+            .find(|(member, _)| member == name)
+            .map(|(_, value)| value)
     }
 
     /// Authorities whose issuance the Verifier accepts (§6.1.1), when it names any.

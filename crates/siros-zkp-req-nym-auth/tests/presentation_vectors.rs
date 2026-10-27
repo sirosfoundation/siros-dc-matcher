@@ -13,6 +13,7 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 use siros_codec::cbor::CborError;
+use siros_dcql::CredentialQuery;
 use siros_zkp_req::{presentations_of, EncodingError, StructureRejection, ZkpReqQuery};
 use siros_zkp_req_nym_auth::prover::ProofFailure;
 use siros_zkp_req_nym_auth::verify::{check_presentation, Rejection};
@@ -65,7 +66,10 @@ fn rejection_code(r: &Rejection) -> &'static str {
 fn verdict(vector: &Value) -> Option<&'static str> {
     let query = &vector["query"];
     let metadata = &vector["client_metadata"];
-    let Ok(parsed) = ZkpReqQuery::parse(query) else {
+    let Ok(parsed) = CredentialQuery::parse(query).map(|query| ZkpReqQuery::parse(&query)) else {
+        return Some("request");
+    };
+    let Ok(parsed) = parsed else {
         return Some("request");
     };
     let text = match (vector.get("vp_token"), vector.get("vp_token_text")) {

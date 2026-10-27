@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 use siros_codec::cbor::{CborError, Unsupported as CborUnsupported, Value as Cbor};
 use siros_codec::date::DateTime;
 use siros_codec::member::{ArrayIndex, MemberFault};
-use siros_dcql::QueryIdError;
+use siros_dcql::{CredentialQuery, QueryError};
 use siros_oid4vp::{ClientId, ClientIdError, Origin};
 use siros_trust::Certificate;
 use siros_zkp_req::{
@@ -44,6 +44,7 @@ use zeroize::Zeroizing;
 /// What a fixture gives.
 #[derive(Debug, PartialEq)]
 enum Got {
+    Dcql(QueryError),
     Invalid(InvalidRequest),
     Unsupported(PairRefusal<Unsupported>),
     Credential(Vec<CredentialCode>),
@@ -70,7 +71,8 @@ fn ds() -> Issuer {
 /// The nym_auth query of `query` and the Verifier's formats of `metadata`.
 fn parsed(query: &Value, metadata: &Value) -> Result<(NymAuthQuery, ZkpFormats), Got> {
     let invalid = |rule: InvalidRequest| Got::Invalid(rule);
-    let parsed = ZkpReqQuery::parse(query).map_err(|r| invalid(r.into()))?;
+    let query = CredentialQuery::parse(query).map_err(Got::Dcql)?;
+    let parsed = ZkpReqQuery::parse(&query).map_err(|r| invalid(r.into()))?;
     let formats = ZkpFormats::from_client_metadata(metadata).map_err(|r| invalid(r.into()))?;
     let nym = NymAuthQuery::from_query(parsed)
         .map_err(|r| invalid(r.into()))?

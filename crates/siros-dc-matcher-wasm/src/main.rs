@@ -151,11 +151,10 @@ fn run(input: &Input<'_>, sets: &mut impl SetSink) {
         return;
     };
     let protocol = unverified.protocol().label();
-    let query = unverified.query().matching_query();
+    let query = unverified.query();
 
     let held = credentials(&db);
-    let policy = ProfilePolicy::new(&db.profile)
-        .with_context(unverified.query(), unverified.client_metadata());
+    let policy = ProfilePolicy::new(&db.profile).with_client_metadata(unverified.client_metadata());
     let result = execute(query, &held, &policy);
 
     // "If the Wallet cannot deliver all non-optional Credentials requested by

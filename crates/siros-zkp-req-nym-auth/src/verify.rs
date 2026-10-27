@@ -8,6 +8,7 @@ use std::fmt;
 use serde_json::Value;
 use siros_codec::cbor::Value as Cbor;
 use siros_codec::date::DateTime;
+use siros_dcql::{CredentialQuery, QueryError};
 use siros_mdoc::{device_signing_input, DeviceNameSpaces, SessionTranscript};
 use siros_trust::{Certificate, IssuerChain, PathRefusal};
 use siros_zkp_req::{
@@ -68,9 +69,11 @@ pub struct Verified {
 }
 
 /// Why the Verifier's own query is unusable: `request`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum OwnQueryFault {
-    /// It breaks a rule.
+    /// DCQL refuses it (OpenID4VP 1.0, Section 6).
+    Dcql(QueryError),
+    /// It breaks a rule of `zkp_req` or of the catalogue.
     Invalid(InvalidRequest),
     /// It asks for another credential type than the nym_auth attestation.
     OtherType,
@@ -326,7 +329,9 @@ fn own_query(
     client_metadata: &Value,
 ) -> Result<(NymAuthQuery, ZkpFormats), Rejection> {
     let invalid = |rule: InvalidRequest| Rejection::Request(OwnQueryFault::Invalid(rule));
-    let parsed = ZkpReqQuery::parse(query).map_err(|r| invalid(r.into()))?;
+    let query = CredentialQuery::parse(query)
+        .map_err(|error| Rejection::Request(OwnQueryFault::Dcql(error)))?;
+    let parsed = ZkpReqQuery::parse(&query).map_err(|r| invalid(r.into()))?;
     let formats =
         ZkpFormats::from_client_metadata(client_metadata).map_err(|r| invalid(r.into()))?;
     let query = NymAuthQuery::from_query(parsed)

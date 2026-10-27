@@ -54,9 +54,7 @@ pub use error_code::ErrorCode;
 pub use handover::{ec_jwk_thumbprint, Handover, HandoverInvalid, JwkThumbprint};
 pub use protocol::Protocol;
 pub use semantic::{Person, SemanticIdError, SemanticIdentifier};
-pub use unverified::{
-    diagnose, CompactFault, NoQuery, PayloadFault, UnverifiedQuery, UnverifiedRequest,
-};
+pub use unverified::{diagnose, CompactFault, NoQuery, PayloadFault, UnverifiedRequest};
 
 #[cfg(feature = "crypto")]
 pub use fetch::{BodyLimit, Fetch, FetchResponse, HttpStatus, HttpsUrl, MediaType, Method};

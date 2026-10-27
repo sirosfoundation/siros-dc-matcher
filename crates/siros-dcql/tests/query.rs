@@ -7,8 +7,9 @@
 
 use serde_json::{json, Value};
 use siros_dcql::{
-    ClaimPathError, DcqlQuery, FormFault, HolderBinding, Member, Multiplicity, Position,
-    QueryError, QueryId, QueryIdError, SetRequirement, TrustedAuthorityError,
+    ClaimId, ClaimMember, ClaimPathError, CredentialMember, DcqlQuery, FormFault, HolderBinding,
+    Member, Multiplicity, Position, QueryError, QueryId, QueryIdError, SetMember, SetRequirement,
+    TrustedAuthorityError,
 };
 
 /// The query of the JSON text `json`.
@@ -37,7 +38,8 @@ fn omitted_fields_take_their_specified_defaults() {
 }
 
 /// "Implementations MUST ignore any unknown properties" (§6). A wallet
-/// that rejects tomorrow's extension is worse than one that ignores it.
+/// that rejects tomorrow's extension is worse than one that ignores it. A Credential Query keeps
+/// its own for the profile of its format, which `zkp_req`'s `_req` relies on.
 #[test]
 fn unknown_properties_are_ignored() {
     let q = parsed(
@@ -47,15 +49,10 @@ fn unknown_properties_are_ignored() {
     )
     .unwrap();
     assert_eq!(q.credentials().len(), 1);
-}
-
-/// `meta` is REQUIRED by the letter of §6.1, but an empty one means "no
-/// constraints" — so a missing one asks for the same thing and is not
-/// worth failing a request over.
-#[test]
-fn missing_meta_is_treated_as_no_constraints() {
-    let q = parsed(r#"{"credentials":[{"id":"pid","format":"mso_mdoc"}]}"#).unwrap();
-    assert!(q.credentials()[0].meta().is_empty());
+    assert_eq!(
+        q.credentials()[0].extension("some_future_field"),
+        Some(&json!({"a": 1}))
+    );
 }
 
 /// §6.1: an `id` "MUST be unique across all Credential Query objects".
@@ -64,8 +61,8 @@ fn missing_meta_is_treated_as_no_constraints() {
 #[test]
 fn duplicate_credential_ids_are_rejected() {
     let err = parsed(
-        r#"{"credentials":[{"id":"pid","format":"mso_mdoc"},
-                           {"id":"pid","format":"dc+sd-jwt"}]}"#,
+        r#"{"credentials":[{"id":"pid","format":"mso_mdoc","meta":{}},
+                           {"id":"pid","format":"dc+sd-jwt","meta":{}}]}"#,
     )
     .expect_err("a duplicated credential id is not usable");
     assert!(
@@ -80,7 +77,7 @@ fn duplicate_credential_ids_are_rejected() {
 #[test]
 fn duplicate_claim_ids_are_rejected() {
     let err = parsed(
-        r#"{"credentials":[{"id":"pid","format":"mso_mdoc","claims":[
+        r#"{"credentials":[{"id":"pid","format":"mso_mdoc","meta":{},"claims":[
              {"id":"a","path":["ns","given_name"]},
              {"id":"a","path":["ns","family_name"]}],
              "claim_sets":[["a"]]}]}"#,
@@ -102,7 +99,7 @@ fn duplicate_claim_ids_are_rejected() {
 #[test]
 fn claims_without_ids_do_not_collide() {
     let q = parsed(
-        r#"{"credentials":[{"id":"pid","format":"mso_mdoc","claims":[
+        r#"{"credentials":[{"id":"pid","format":"mso_mdoc","meta":{},"claims":[
              {"path":["ns","given_name"]},
              {"path":["ns","family_name"]}]}]}"#,
     )
@@ -122,7 +119,8 @@ fn credential_ids_follow_section_6_1() {
     ];
     for (id, outcome) in cases {
         assert_eq!(QueryId::parse(id).map(drop), outcome, "{id:?}");
-        let json = format!(r#"{{"credentials":[{{"id":"{id}","format":"mso_mdoc"}}]}}"#);
+        let json =
+            format!(r#"{{"credentials":[{{"id":"{id}","format":"mso_mdoc","meta":{{}}}}]}}"#);
         let parsed = parsed(&json).map(drop).map_err(|e| match e {
             QueryError::Id(e) => Some(e),
             _ => None,
@@ -131,58 +129,101 @@ fn credential_ids_follow_section_6_1() {
     }
 }
 
-/// Whether an error is the one a row expects.
-type Expected = fn(&QueryError) -> bool;
+/// A `Form` refusal of `member` for `fault`.
+fn form(member: Member, fault: FormFault) -> QueryError {
+    QueryError::Form { member, fault }
+}
 
-/// The structural rules of §6.1, §6.2, §6.4.1, §7 and §7.2.1. One rule per row.
+/// The structural rules of §6, §6.1, §6.2, §6.3, §6.4.1, §7 and §7.2.1. One rule per row.
 #[test]
 fn the_parse_refuses_what_section_6_forbids() {
-    let cases: [(&str, Expected); 6] = [
-        (r#"{"credentials":[]}"#, |e| {
-            matches!(
-                e,
-                QueryError::Form {
-                    member: Member::Credentials,
-                    fault: FormFault::Empty
-                }
-            )
-        }),
+    let first = Position::new(0);
+    let credential = |field| Member::CredentialMember(first, field);
+    let claim = |field| Member::ClaimMember(first, first, field);
+    let cases: [(&str, QueryError); 14] = [
         (
-            r#"{"credentials":[{"id":"pid","format":"dc+sd-jwt",
+            r#"{"credentials":[]}"#,
+            form(Member::Credentials, FormFault::Empty),
+        ),
+        (
+            r#"{"credentials":[{"id":"pid","format":"mso_mdoc"}]}"#,
+            form(credential(CredentialMember::Meta), FormFault::Absent),
+        ),
+        (
+            r#"{"credentials":[{"id":"pid","format":"dc+sd-jwt","meta":{},"claims":[]}]}"#,
+            form(credential(CredentialMember::Claims), FormFault::Empty),
+        ),
+        (
+            r#"{"credentials":[{"id":"pid","format":"dc+sd-jwt","meta":{},
+                "claims":[{"id":"a","path":["given_name"]}],"claim_sets":[]}]}"#,
+            form(credential(CredentialMember::ClaimSets), FormFault::Empty),
+        ),
+        (
+            r#"{"credentials":[{"id":"pid","format":"dc+sd-jwt","meta":{},
+                "claims":[{"path":["given_name"]}],"claim_sets":[["a"]]}]}"#,
+            form(claim(ClaimMember::Id), FormFault::Absent),
+        ),
+        (
+            r#"{"credentials":[{"id":"pid","format":"dc+sd-jwt","meta":{},
+                "claims":[{"path":["given_name"],"values":[]}]}]}"#,
+            form(claim(ClaimMember::Values), FormFault::Empty),
+        ),
+        (
+            r#"{"credentials":[{"id":"pid","format":"dc+sd-jwt","meta":{},
+                "claims":[{"path":["age"],"values":[18,1.5]}]}]}"#,
+            form(
+                claim(ClaimMember::Values),
+                FormFault::Entry(Position::new(1)),
+            ),
+        ),
+        (
+            r#"{"credentials":[{"id":"pid","format":"mso_mdoc","meta":{}}],"credential_sets":[]}"#,
+            form(Member::CredentialSets, FormFault::Empty),
+        ),
+        (
+            r#"{"credentials":[{"id":"pid","format":"mso_mdoc","meta":{}}],
+                "credential_sets":[{"options":[]}]}"#,
+            form(
+                Member::CredentialSetMember(first, SetMember::Options),
+                FormFault::Empty,
+            ),
+        ),
+        (
+            r#"{"credentials":[{"id":"pid","format":"dc+sd-jwt","meta":{},
                 "claims":[{"id":"a","path":["given_name"]}],"claim_sets":[["a"],["b"]]}]}"#,
-            |e| {
-                matches!(e, QueryError::UnknownClaimId { credential, claim }
-                    if credential == "pid" && claim == "b")
+            QueryError::UnknownClaimId {
+                credential: QueryId::parse("pid").unwrap(),
+                claim: ClaimId::parse("b").unwrap(),
             },
         ),
         (
-            r#"{"credentials":[{"id":"pid","format":"mso_mdoc"}],
+            r#"{"credentials":[{"id":"pid","format":"mso_mdoc","meta":{}}],
                 "credential_sets":[{"options":[["pid"],["nonexistent"]]}]}"#,
-            |e| matches!(e, QueryError::UnknownCredentialId(id) if id == "nonexistent"),
+            QueryError::UnknownCredentialId(QueryId::parse("nonexistent").unwrap()),
         ),
         (
-            r#"{"credentials":[{"id":"pid","format":"dc+sd-jwt","claim_sets":[[]]}]}"#,
-            |e| matches!(e, QueryError::ClaimSetsWithoutClaims(id) if id == "pid"),
+            r#"{"credentials":[{"id":"pid","format":"dc+sd-jwt","meta":{},"claim_sets":[[]]}]}"#,
+            QueryError::ClaimSetsWithoutClaims(QueryId::parse("pid").unwrap()),
         ),
         (
-            r#"{"credentials":[{"id":"pid","format":"dc+sd-jwt","claims":[{"path":[]}]}]}"#,
-            |e| {
-                matches!(e, QueryError::ClaimPath { credential, claim, error: ClaimPathError::Empty }
-                    if credential == "pid" && *claim == Position::new(0))
+            r#"{"credentials":[{"id":"pid","format":"dc+sd-jwt","meta":{},"claims":[{"path":[]}]}]}"#,
+            QueryError::ClaimPath {
+                credential: QueryId::parse("pid").unwrap(),
+                claim: first,
+                error: ClaimPathError::Empty,
             },
         ),
         (
-            r#"{"credentials":[{"id":"mdl","format":"mso_mdoc",
+            r#"{"credentials":[{"id":"mdl","format":"mso_mdoc","meta":{},
                 "claims":[{"path":["org.iso.18013.5.1","given_name"]},{"path":["org.iso.18013.5.1.given_name"]}]}]}"#,
-            |e| {
-                matches!(e, QueryError::MdocPath { credential, claim }
-                    if credential == "mdl" && *claim == Position::new(1))
+            QueryError::MdocPath {
+                credential: QueryId::parse("mdl").unwrap(),
+                claim: Position::new(1),
             },
         ),
     ];
     for (json, refused) in cases {
-        let error = parsed(json).expect_err(json);
-        assert!(refused(&error), "{json}: {error:?}");
+        assert_eq!(parsed(json).expect_err(json), refused, "{json}");
     }
 }
 
@@ -192,7 +233,7 @@ fn the_parse_refuses_what_section_6_forbids() {
 #[test]
 fn purpose_is_kept_in_all_three_shapes() {
     let q = parsed(
-        r#"{"credentials":[{"id":"pid","format":"mso_mdoc"}],
+        r#"{"credentials":[{"id":"pid","format":"mso_mdoc","meta":{}}],
             "credential_sets":[
               {"options":[["pid"]],"purpose":"Proving your age"},
               {"options":[["pid"]],"purpose":1},
@@ -222,7 +263,7 @@ fn purpose_is_kept_in_all_three_shapes() {
 #[test]
 fn an_absent_purpose_is_not_serialised() {
     let q = parsed(
-        r#"{"credentials":[{"id":"pid","format":"mso_mdoc"}],
+        r#"{"credentials":[{"id":"pid","format":"mso_mdoc","meta":{}}],
             "credential_sets":[{"options":[["pid"]]}]}"#,
     )
     .expect("valid DCQL");
@@ -240,7 +281,7 @@ fn realistic_query_round_trips() {
     let json = r#"{"credentials":[{"id":"mdl","format":"mso_mdoc",
         "meta":{"doctype_value":"org.iso.18013.5.1.mDL"},
         "claims":[{"id":"a","path":["org.iso.18013.5.1","age_over_18"],"values":[true]}],
-        "claim_sets":[["a"]]}]}"#;
+        "claim_sets":[["a"]],"_profile":{"a":[1]}}]}"#;
     let q = parsed(json).unwrap();
     let c = &q.credentials()[0];
     assert_eq!(c.claims()[0].values().unwrap()[0], Value::Bool(true));
@@ -296,7 +337,7 @@ fn trusted_authorities_follow_section_6_1_1() {
         ),
     ];
     for (authorities, expected) in cases {
-        let query = json!({"credentials": [{"id": "pid", "format": "mso_mdoc",
+        let query = json!({"credentials": [{"id": "pid", "format": "mso_mdoc", "meta": {},
             "trusted_authorities": authorities}]});
         let got = DcqlQuery::parse(&query).map(drop).map_err(|e| match e {
             QueryError::TrustedAuthorities { credential, error } if credential == "pid" => {

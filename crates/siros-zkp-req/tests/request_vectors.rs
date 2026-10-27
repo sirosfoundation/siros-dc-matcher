@@ -1,5 +1,6 @@
 //! Runs the request vectors in `tests/vectors/request/` (format in its README): each case is
-//! one rule of `zkp_req`, Sections 1.1, 1.2, 2 and 2.1, or a query that follows them all.
+//! one rule of `zkp_req`, Sections 1.1, 1.2, 2 and 2.1, or of DCQL, which parses the query
+//! first, or a query that follows them all.
 
 #![allow(
     clippy::unwrap_used,
@@ -12,6 +13,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use serde_json::{json, Value};
+use siros_dcql::CredentialQuery;
 use siros_zkp_req::{ReqSets, RequestRule, ZkpFormats, ZkpReqQuery};
 
 /// A JSON member, or the JSON a text member holds; text that is not JSON reads as `null`.
@@ -41,6 +43,10 @@ fn rule_json(rule: RequestRule) -> Value {
 fn verdict(vector: &Value) -> Value {
     let query = member(vector, "query", "query_text");
     let metadata = member(vector, "client_metadata", "client_metadata_text");
+    let query = match CredentialQuery::parse(&query) {
+        Ok(query) => query,
+        Err(error) => return json!({"error": error.code()}),
+    };
     let parsed = match ZkpReqQuery::parse(&query) {
         Ok(parsed) => parsed,
         Err(rule) => return rule_json(rule),

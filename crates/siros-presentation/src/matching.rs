@@ -24,14 +24,14 @@ use siros_zkp_req_nym_auth::system::NymAuthSystem;
 use crate::credential::{KeyHolding, MatchCredential};
 use crate::ids::{CandidateIndex, QueryIndex};
 
-pub use failure::{AskedError, Failure, QueryRefusal};
+pub use failure::{Failure, QueryRefusal};
 pub use zkp::{ChoiceError, ProofChoice, ZkpQuery, ZkpRefusal};
 
 /// The types of the nym_auth attestations, whose attributes no query but `zkp_req` discloses.
 const NYM_AUTH_TYPES: [&str; 2] = [MDOC_DOCTYPE, BBS_SCHEMA_ID];
 
-/// The request as the matching reads it: its Credential Queries, each with its `id` and the
-/// query as sent, its credential sets, and the Verifier metadata.
+/// The request as the matching reads it: its Credential Queries, each with its `id`, its
+/// credential sets, and the Verifier metadata.
 #[derive(Debug, Clone)]
 pub struct Asked<'r> {
     queries: Vec<AskedQuery<'r>>,
@@ -39,50 +39,28 @@ pub struct Asked<'r> {
     client_metadata: Option<&'r Value>,
 }
 
-/// A Credential Query of a request, with its `id` and the query as the Verifier sent it.
+/// A Credential Query of a request, with its `id`.
 #[derive(Debug, Clone)]
 struct AskedQuery<'r> {
     id: QueryId,
     query: &'r CredentialQuery,
-    sent: &'r Value,
 }
 
 impl<'r> Asked<'r> {
-    /// The request of `query`, which the Verifier sent as `sent`, with its `client_metadata`.
-    ///
-    /// # Errors
-    ///
-    /// [`AskedError`]: a Credential Query `id` that breaks Section 6.1, or one `sent` lacks.
-    pub fn new(
-        query: &'r DcqlQuery,
-        sent: &'r Value,
-        client_metadata: Option<&'r Value>,
-    ) -> Result<Self, AskedError> {
-        let sent_queries: &[Value] = sent
-            .get("credentials")
-            .and_then(Value::as_array)
-            .map_or(&[], Vec::as_slice);
-        let queries = query
-            .credentials()
-            .iter()
-            .map(|credential| {
-                let id = credential.id().clone();
-                let sent = sent_queries
-                    .iter()
-                    .find(|c| c.get("id").and_then(Value::as_str) == Some(id.as_str()))
-                    .ok_or_else(|| AskedError::Unsent(id.clone()))?;
-                Ok(AskedQuery {
-                    id,
+    /// The request of `query`, with its `client_metadata`.
+    pub fn new(query: &'r DcqlQuery, client_metadata: Option<&'r Value>) -> Self {
+        Self {
+            queries: query
+                .credentials()
+                .iter()
+                .map(|credential| AskedQuery {
+                    id: credential.id().clone(),
                     query: credential,
-                    sent,
                 })
-            })
-            .try_collect()?;
-        Ok(Self {
-            queries,
+                .collect(),
             credential_sets: query.credential_sets(),
             client_metadata,
-        })
+        }
     }
 }
 
@@ -216,7 +194,7 @@ impl<'r, C: MatchCredential + Clone> Matching<'r, C> {
                 };
                 let outcome = match asked.query.format().as_str() {
                     "zkp_req" => {
-                        match ZkpQuery::read(asked.sent, client_metadata, policy, systems, date) {
+                        match ZkpQuery::read(asked.query, client_metadata, policy, systems, date) {
                             Ok(zkp) => {
                                 let mut matched = Matched::new();
                                 for credential in zkp.provable(&instances) {

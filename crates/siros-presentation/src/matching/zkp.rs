@@ -7,6 +7,7 @@ use itertools::Itertools;
 use serde_json::Value;
 use siros_codec::date::Date;
 use siros_credential::Format;
+use siros_dcql::CredentialQuery;
 use siros_zkp_req::{
     CredentialType, ErrorCode, PairRefusal, ProofBackend, QueryOption, RequestRule, ZkpFormats,
     ZkpReqQuery,
@@ -136,7 +137,7 @@ impl ProofChoice {
 }
 
 impl ZkpQuery {
-    /// The nym_auth query of the Credential Query `sent`, at the proof date `date`.
+    /// The nym_auth query of the Credential Query `query`, at the proof date `date`.
     ///
     /// The query follows `zkp_req` and the catalogue, `client_metadata` lists the Verifier's
     /// systems and proof backends (`zkp_req.md`, Section 1.2), and `policy` holds. Each option,
@@ -147,13 +148,13 @@ impl ZkpQuery {
     /// [`ZkpRefusal`]: the first rule the query, its metadata or the request breaks, another
     /// credential type, or no option with a usable pair.
     pub(crate) fn read(
-        sent: &Value,
+        query: &CredentialQuery,
         client_metadata: Option<&Value>,
         policy: Result<(), RequestRefusal>,
         systems: &[NymAuthSystem],
         date: Date,
     ) -> Result<Self, ZkpRefusal> {
-        let parsed = ZkpReqQuery::parse(sent).map_err(ZkpRefusal::Query)?;
+        let parsed = ZkpReqQuery::parse(query).map_err(ZkpRefusal::Query)?;
         let metadata = client_metadata.ok_or(ZkpRefusal::ClientMetadataMissing)?;
         let formats =
             ZkpFormats::from_client_metadata(metadata).map_err(ZkpRefusal::ClientMetadata)?;

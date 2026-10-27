@@ -1,5 +1,5 @@
 {
-  "description": "claims present even as an empty array: zkp_req has no claims.",
+  "description": "claims present as an empty array: DCQL refuses it (OpenID4VP 1.0, Section 6.1).",
   "query": {
     "id": "nym_attestation",
     "format": "zkp_req",
@@ -31,6 +31,6 @@
     }
   },
   "expect": {
-    "error": "claims_present"
+    "error": "dcql_malformed"
   }
 }

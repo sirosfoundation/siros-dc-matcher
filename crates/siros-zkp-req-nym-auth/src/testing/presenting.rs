@@ -13,7 +13,7 @@ use rand_core::{CryptoRng, RngCore};
 use serde_json::{json, Map, Value};
 use siros_codec::base64url;
 use siros_codec::date::DateTime;
-use siros_dcql::DcqlQuery;
+use siros_dcql::CredentialQuery;
 use siros_mdoc::{Mdoc, MdocError};
 use siros_oid4vp::{
     Effect, EffectResult, IntakeState, Step, TrustAnswer, Verdict, VerifiedRequest,
@@ -163,8 +163,7 @@ fn admitted(
     mdoc: &Mdoc,
     now: DateTime,
 ) -> Result<AdmittedIssuer, Unadmitted<ChainRefusal>> {
-    let dcql = DcqlQuery::parse(&json!({"credentials": [query]})).unwrap();
-    let authorities = QueryAuthorities::of(&dcql.credentials()[0]).unwrap();
+    let authorities = QueryAuthorities::of(&CredentialQuery::parse(query).unwrap()).unwrap();
     let chain = IssuerChain::parse(mdoc.issuer_auth().x5chain()).unwrap();
     AdmittedIssuer::resolve(
         &authorities,
@@ -176,7 +175,7 @@ fn admitted(
 
 /// The nym_auth query of the Credential Query `query`.
 pub fn nym_query(query: &Value) -> NymAuthQuery {
-    NymAuthQuery::from_query(ZkpReqQuery::parse(query).unwrap())
+    NymAuthQuery::from_query(ZkpReqQuery::parse(&CredentialQuery::parse(query).unwrap()).unwrap())
         .unwrap()
         .nym_auth()
         .unwrap()
