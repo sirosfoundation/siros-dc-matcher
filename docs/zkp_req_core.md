@@ -185,10 +185,10 @@ receives `ZkpProvers` (its constructor, `loadLongfellow(circuits_zst)`, `loadVeg
 code}`. Rust code proves through `ZkpProvers` as a `NymAuthProver`, on one thread, with no Web
 Worker pool and no cross-origin isolation.
 
-Built with wasm-pack 0.15.0 and wasm-opt 116, the module is 2,581,497 bytes (684,141 with brotli
-at quality 11) and its JavaScript glue 22,697 (4,779). It links zk-cred-longfellow under MPL-2.0,
-part of it derived from Google's longfellow-zk under Apache-2.0; a page that serves it carries
-their notices.
+Built with wasm-pack 0.15.0 and wasm-opt 116, the module is about 2.6 MB (0.68 MB with brotli at
+quality 11) and its JavaScript glue 23 KB (5 KB); the exact sizes vary with the source paths the
+module embeds. It links zk-cred-longfellow under MPL-2.0, part of it derived from Google's
+longfellow-zk under Apache-2.0; a page that serves it carries their notices.
 
 ## The frontend package
 
