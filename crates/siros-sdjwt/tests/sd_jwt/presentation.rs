@@ -4,8 +4,7 @@ use serde_json::{json, Value};
 use siros_codec::base64url;
 use siros_codec::date::DateTime;
 use siros_dcql::PathComponent;
-use siros_oid4vp::Nonce;
-use siros_sdjwt::{Audience, ClaimValue, Element, KeyBindingError, NumericDate, SdJwt};
+use siros_sdjwt::{Audience, ClaimValue, Element, KbNonce, KeyBindingError, NumericDate, SdJwt};
 
 use crate::common::{compact, decoy, disclosure, issued};
 
@@ -140,7 +139,7 @@ fn key_binding_claims() {
     ];
     let iat = NumericDate::of(DateTime::from_unix(1709838604).unwrap()).unwrap();
     let aud = Audience::new("x509_san_dns:client.example.org");
-    let nonce = Nonce::parse("n-0S6_WzA2Mj").unwrap();
+    let nonce = KbNonce::new("n-0S6_WzA2Mj");
     for (extra, expected) in rows {
         let presentation = a3.select::<Vec<PathComponent>>(&[]).unwrap();
         let binding = presentation.key_binding(iat, &aud, &nonce, &extra);

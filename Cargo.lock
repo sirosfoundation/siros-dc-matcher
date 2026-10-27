@@ -2452,6 +2452,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "siros-codec",
+ "siros-credential",
  "siros-dcql",
  "siros-mdoc",
  "siros-sdjwt",
@@ -2610,7 +2611,6 @@ dependencies = [
  "siros-codec",
  "siros-dcql",
  "siros-mdoc",
- "siros-oid4vp",
 ]
 
 [[package]]

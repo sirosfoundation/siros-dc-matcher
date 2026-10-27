@@ -3,7 +3,8 @@
 use siros_dcql::{CredentialFormat, CredentialRef, DocType, Vct};
 use siros_mdoc::{Mdoc, P256Key};
 use siros_sdjwt::SdJwt;
-use siros_trust::IssuerChain;
+#[cfg(feature = "chain")]
+use siros_trust::{ChainError, IssuerChain};
 use siros_wallet_state::{
     BatchId, ConfigurationId, CredentialEntry, CredentialId, InstanceId, IssuerIdentifier, KeyId,
     MetadataValue,
@@ -28,6 +29,7 @@ pub struct Credential {
     key_id: Option<KeyId>,
     auxiliary_data: Vec<MetadataValue>,
     validity: Validity,
+    #[cfg(feature = "chain")]
     issuer_chain: Option<IssuerChain>,
     pub(crate) body: Body,
 }
@@ -43,6 +45,22 @@ impl Body {
         match self {
             Self::SdJwtVc(_) => Format::SdJwtVc,
             Self::Mdoc(_) => Format::Mdoc,
+        }
+    }
+
+    /// The issuer chain: the mdoc's `x5chain`, or the SD-JWT VC issuer JWT's `x5c` when it has
+    /// one.
+    #[cfg(feature = "chain")]
+    fn issuer_chain(&self) -> Result<Option<IssuerChain>, ChainError> {
+        match self {
+            Self::SdJwtVc(vc) => vc
+                .sd_jwt()
+                .x5c()
+                .map(|x5c| IssuerChain::parse(x5c.certificates()))
+                .transpose(),
+            Self::Mdoc(mdoc) => {
+                IssuerChain::parse(mdoc.issuer_auth().x5chain().certificates()).map(Some)
+            }
         }
     }
 }
@@ -130,31 +148,25 @@ impl Credential {
     /// is a JSON object; `nbf` and `exp` are NumericDates. Every mdoc element value, at every
     /// depth, has one of the ten types of [`TypedValue`](crate::TypedValue): its tags are 0
     /// over a `tdate` and 1004 over a `full-date`, its map keys are text, and it holds no
-    /// `undefined`. The issuer chain (TR2), the mdoc's `x5chain` or the SD-JWT VC issuer JWT's
-    /// `x5c`, parses.
+    /// `undefined`. With the feature `chain`, the issuer chain (TR2), the mdoc's `x5chain` or
+    /// the SD-JWT VC issuer JWT's `x5c`, parses.
     ///
     /// # Errors
     ///
     /// [`CredentialError`]: the first rule `entry` breaks.
     pub fn parse(entry: &CredentialEntry) -> Result<Self, CredentialError> {
-        let (body, validity, issuer_chain) = match entry.format().as_str() {
+        let (body, validity) = match entry.format().as_str() {
             "dc+sd-jwt" | "vc+sd-jwt" => {
                 let vc = SdJwtVc::read(entry.data().as_str())?;
                 let validity = vc.validity();
-                let chain = vc
-                    .sd_jwt()
-                    .x5c()
-                    .map(|x5c| IssuerChain::parse(x5c.certificates()))
-                    .transpose()?;
-                (Body::SdJwtVc(Box::new(vc)), validity, chain)
+                (Body::SdJwtVc(Box::new(vc)), validity)
             }
             "mso_mdoc" => {
                 let mdoc = Box::new(Mdoc::parse(entry.data().as_str())?);
                 value::typed(&mdoc)?;
                 let mso = mdoc.mso().validity();
                 let validity = Validity::new(Some(mso.valid_from()), Some(mso.valid_until()));
-                let chain = IssuerChain::parse(mdoc.issuer_auth().x5chain().certificates())?;
-                (Body::Mdoc(mdoc), validity, Some(chain))
+                (Body::Mdoc(mdoc), validity)
             }
             _ => return Err(CredentialError::UnsupportedFormat),
         };
@@ -176,7 +188,8 @@ impl Credential {
                 .map(|m| m.value().clone())
                 .collect(),
             validity,
-            issuer_chain,
+            #[cfg(feature = "chain")]
+            issuer_chain: body.issuer_chain()?,
             body,
         })
     }
@@ -239,6 +252,7 @@ impl Credential {
 
     /// The issuer chain (TR2): the mdoc's `x5chain`, or the SD-JWT VC issuer JWT's `x5c`. `None`
     /// for an SD-JWT VC without `x5c`.
+    #[cfg(feature = "chain")]
     pub fn issuer_chain(&self) -> Option<&IssuerChain> {
         self.issuer_chain.as_ref()
     }

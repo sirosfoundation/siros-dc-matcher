@@ -5,6 +5,7 @@ use std::fmt;
 use siros_codec::Base64Error;
 use siros_mdoc::MdocError;
 use siros_sdjwt::ParseError;
+#[cfg(feature = "chain")]
 use siros_trust::ChainError;
 
 /// A registered claim of SD-JWT VC that is never selectively disclosed, with its
@@ -99,6 +100,7 @@ pub enum CredentialError {
     MapKey,
     /// An mdoc value holds `undefined`.
     Undefined,
+    #[cfg(feature = "chain")]
     /// The issuer chain does not parse (TR2). The code is its own.
     IssuerChain(ChainError),
 }
@@ -121,6 +123,7 @@ impl CredentialError {
             Self::FullDate => "full_date_malformed",
             Self::MapKey => "map_key_not_text",
             Self::Undefined => "claim_undefined",
+            #[cfg(feature = "chain")]
             Self::IssuerChain(e) => e.code(),
         }
     }
@@ -143,6 +146,7 @@ impl std::error::Error for CredentialError {
             Self::SdJwt(e) => Some(e),
             Self::Mdoc(e) => Some(e),
             Self::HolderKey(e) => Some(e),
+            #[cfg(feature = "chain")]
             Self::IssuerChain(e) => Some(e),
             Self::UnsupportedFormat
             | Self::Vct(_)
@@ -164,6 +168,7 @@ impl From<ParseError> for CredentialError {
     }
 }
 
+#[cfg(feature = "chain")]
 impl From<ChainError> for CredentialError {
     fn from(e: ChainError) -> Self {
         Self::IssuerChain(e)

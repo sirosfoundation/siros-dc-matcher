@@ -7,7 +7,6 @@ use serde_json::Value;
 use siros_codec::base64url;
 use siros_codec::date::DateTime;
 use siros_mdoc::Es256Signature;
-use siros_oid4vp::Nonce;
 
 use crate::alg::HashAlg;
 use crate::error::KeyBindingError;
@@ -72,6 +71,24 @@ impl Audience {
     }
 }
 
+/// `nonce` of a KB-JWT: the value the verifier's request gives for freshness (Section 4.3).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct KbNonce(String);
+
+impl KbNonce {
+    /// The nonce `text`.
+    #[must_use]
+    pub fn new(text: &str) -> Self {
+        Self(text.to_owned())
+    }
+
+    /// The nonce.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 /// An SD-JWT as sent to a verifier: the issuer JWT, then the selected disclosures, each
 /// followed by `~` (Section 4).
 pub struct Presentation {
@@ -102,7 +119,7 @@ impl Presentation {
         self,
         iat: NumericDate,
         aud: &Audience,
-        nonce: &Nonce,
+        nonce: &KbNonce,
         extra: &[(String, Value)],
     ) -> Result<KeyBinding, KeyBindingError> {
         let mut names = FxHashSet::default();

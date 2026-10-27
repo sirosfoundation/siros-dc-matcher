@@ -13,8 +13,7 @@ use serde_json::Value;
 use siros_codec::base64url;
 use siros_codec::date::DateTime;
 use siros_dcql::PathComponent;
-use siros_oid4vp::Nonce;
-use siros_sdjwt::{Audience, NumericDate, SdJwt};
+use siros_sdjwt::{Audience, KbNonce, NumericDate, SdJwt};
 
 use crate::common::{compact_fixture, issued, json_fixture, processed};
 
@@ -80,7 +79,7 @@ fn rfc9901_examples() {
                 NumericDate::of(DateTime::from_unix(payload["iat"].as_i64().unwrap()).unwrap())
                     .unwrap(),
                 &Audience::new(payload["aud"].as_str().unwrap()),
-                &Nonce::parse(payload["nonce"].as_str().unwrap()).unwrap(),
+                &KbNonce::new(payload["nonce"].as_str().unwrap()),
                 &[],
             )
             .unwrap();

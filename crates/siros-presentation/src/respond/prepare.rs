@@ -8,7 +8,7 @@ use siros_credential::{Credential, Parsed, UsableCredential};
 use siros_dcql::mdoc_components;
 use siros_mdoc::{ElementId, Mdoc, SessionTranscript};
 use siros_oid4vp::{Presentation, VerifiedRequest};
-use siros_sdjwt::{Audience, BeforeEpoch, NumericDate, SdJwt};
+use siros_sdjwt::{Audience, BeforeEpoch, KbNonce, NumericDate, SdJwt};
 use siros_transaction_data::{Amr, Jti, KbJwtInputs, MemberBinding};
 use siros_wallet_state::{CredentialId, KeyId};
 use siros_zkp_req_nym_auth::presenter::Prepared as NymPrepared;
@@ -201,7 +201,7 @@ impl<'p, 'a> Chosen<'p, 'a> {
         let binding = presentation.key_binding(
             iat,
             &audience(input.request)?,
-            input.request.nonce(),
+            &KbNonce::new(input.request.nonce().as_str()),
             extra,
         )?;
         Ok(Form::unsigned(binding, id))

@@ -24,6 +24,7 @@ wallet = [
     "dep:siros-sdjwt",
     "dep:siros-transaction-data",
     "dep:zeroize",
+    "siros-credential/chain",
     "siros-display/credential",
     "siros-mdoc/crypto",
     "siros-oid4vp/crypto",

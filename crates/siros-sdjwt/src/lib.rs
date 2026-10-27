@@ -46,7 +46,7 @@ pub use error::{
     DisclosureFault, EncodedJsonFault, IssuerJwtFault, KeyBindingError, ParseError, Placement,
     ReservedFault, SdAlgFault, X5cError, X5cIndex,
 };
-pub use key_binding::{Audience, BeforeEpoch, KeyBinding, NumericDate, Presentation};
+pub use key_binding::{Audience, BeforeEpoch, KbNonce, KeyBinding, NumericDate, Presentation};
 pub use node::{Children, Node, NodeValue};
 pub use process::MAX_DEPTH;
 pub use sd_jwt::{SdJwt, X5c};
