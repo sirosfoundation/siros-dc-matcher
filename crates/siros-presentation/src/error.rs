@@ -2,7 +2,7 @@
 //! verifier receives.
 
 use siros_display::DisplayError;
-use siros_oid4vp::{ErrorCode, HttpsUrl};
+use siros_oid4vp::ErrorCode;
 use siros_transaction_data::TransactionDataError;
 
 use crate::matching::{AskedError, ChoiceError, Failure};
@@ -21,8 +21,6 @@ pub enum PresentationError {
     TransactionData(#[from] TransactionDataError),
     /// The consent view cannot show a credential. The code is the display's.
     Display(#[from] DisplayError),
-    /// The host answered a fetch of this URL twice.
-    FetchRepeated(HttpsUrl),
     /// A proof choice gives no option or usable pair of its query.
     Choice(#[from] ChoiceError),
 }
@@ -35,7 +33,6 @@ impl PresentationError {
             Self::NoOffer(failure) => failure.code(),
             Self::TransactionData(e) => e.code(),
             Self::Display(e) => e.code(),
-            Self::FetchRepeated(_) => "fetch_repeated",
             Self::Choice(e) => e.code(),
         }
     }
@@ -49,7 +46,7 @@ impl PresentationError {
             Self::Asked(_) => ErrorCode::InvalidRequest,
             Self::NoOffer(failure) => oid4vp_code(failure.error_code()),
             Self::TransactionData(e) => e.error_code(),
-            Self::Display(_) | Self::FetchRepeated(_) | Self::Choice(_) => ErrorCode::AccessDenied,
+            Self::Display(_) | Self::Choice(_) => ErrorCode::AccessDenied,
         }
     }
 }
