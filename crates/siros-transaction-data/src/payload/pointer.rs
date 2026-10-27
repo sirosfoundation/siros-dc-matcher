@@ -20,6 +20,12 @@ pub enum Step {
 pub struct Location(Vec<Step>);
 
 impl Location {
+    /// The location of `steps` from the payload object.
+    #[must_use]
+    pub fn new(steps: Vec<Step>) -> Self {
+        Self(steps)
+    }
+
     /// The steps.
     #[must_use]
     pub fn steps(&self) -> &[Step] {
@@ -52,6 +58,18 @@ impl Location {
     /// equals its step, `null` standing for any position.
     pub(crate) fn covered_by(&self, components: &[PathComponent]) -> bool {
         components.len() <= self.0.len()
+            && components.iter().zip(&self.0).all(|(c, s)| match (c, s) {
+                (PathComponent::Key(key), Step::Key(step)) => key == step,
+                (PathComponent::Index(index), Step::Index(step)) => index == step,
+                (PathComponent::Null, Step::Index(_)) => true,
+                (PathComponent::Key(_) | PathComponent::Index(_) | PathComponent::Null, _) => false,
+            })
+    }
+
+    /// Whether this location lies on the way to what `components` addresses: a strict prefix of
+    /// it, `null` standing for any position.
+    pub(crate) fn leads_to(&self, components: &[PathComponent]) -> bool {
+        self.0.len() < components.len()
             && components.iter().zip(&self.0).all(|(c, s)| match (c, s) {
                 (PathComponent::Key(key), Step::Key(step)) => key == step,
                 (PathComponent::Index(index), Step::Index(step)) => index == step,

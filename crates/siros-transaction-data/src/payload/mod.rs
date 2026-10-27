@@ -122,7 +122,13 @@ pub(crate) fn conform(payload: &Json, definition: &Definition) -> Result<Values,
         .iter()
         .map(|claim| claim.path().components())
         .collect();
-    let covered = |location: &Location| paths.iter().any(|path| location.covered_by(path));
+    // A field is covered by a claim that addresses it or what contains it, and an empty object
+    // or array by a claim that addresses what it would contain.
+    let covered = |location: &Location| {
+        paths
+            .iter()
+            .any(|path| location.covered_by(path) || location.leads_to(path))
+    };
     if let Some(uncovered) = fields.iter().find(|location| {
         !covered(location) && !integrity_companion(location).is_some_and(|of| covered(&of))
     }) {

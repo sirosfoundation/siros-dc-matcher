@@ -34,4 +34,6 @@ unicode-segmentation = "~1.12.0"
 # references, no TLS.
 jsonschema = { version = "0.42.0", default-features = false }
 p256 = { version = "0.13.2", default-features = false, features = ["ecdsa", "alloc", "pem"] }
-x509-cert = { version = "0.2.5", default-features = false, features = ["std", "builder"] }
+sha2 = { version = "0.10.9", features = ["oid"] }
+siros-wallet-state = { workspace = true }
+x509-cert = { version = "0.2.5", default-features = false, features = ["std", "builder", "hazmat"] }

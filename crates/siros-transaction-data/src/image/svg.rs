@@ -4,7 +4,7 @@
 
 use siros_oid4vp::{BodyLimit, HttpsUrl, MediaType};
 
-use super::{strip_prefix_ignore_case, Resource, MAX_IMAGE_BYTES};
+use super::{strip_prefix_ignore_case, Dimensions, Resource, MAX_IMAGE_BYTES};
 use crate::fetched::{FetchFault, Fetched, Step};
 use crate::integrity::{Integrity, IntegrityFault};
 
@@ -50,12 +50,15 @@ siros_codec::display_code!(SvgFault);
 
 impl std::error::Error for SvgFault {}
 
-/// The SVG document `bytes`: its size in pixels when its root states one, and each resource it
-/// references, verified; the fetch of a resource while the host has not given it.
-pub(super) fn read(
-    bytes: &[u8],
-    fetched: &Fetched,
-) -> Result<Step<(Option<(u32, u32)>, Vec<Resource>)>, SvgFault> {
+/// An SVG document read: its size when its root states one, and each resource it references,
+/// verified.
+pub(super) struct Document {
+    pub(super) size: Option<Dimensions>,
+    pub(super) resources: Vec<Resource>,
+}
+
+/// The SVG document `bytes`; the fetch of a resource while the host has not given it.
+pub(super) fn read(bytes: &[u8], fetched: &Fetched) -> Result<Step<Document>, SvgFault> {
     let text = std::str::from_utf8(bytes).map_err(|_| SvgFault::NotUtf8)?;
     let document = roxmltree::Document::parse(text).map_err(|_| SvgFault::Xml)?;
     let root = document.root_element();
@@ -67,7 +70,10 @@ pub(super) fn read(
         length(root.attribute("height")),
     ) {
         (None, None) => None,
-        (width, height) => Some((width.unwrap_or(0), height.unwrap_or(0))),
+        (width, height) => Some(Dimensions {
+            width: width.unwrap_or(0),
+            height: height.unwrap_or(0),
+        }),
     };
     let mut resources = Vec::new();
     for reference in references(&document) {
@@ -87,7 +93,7 @@ pub(super) fn read(
             bytes: body.to_vec(),
         });
     }
-    Ok(Step::Done((size, resources)))
+    Ok(Step::Done(Document { size, resources }))
 }
 
 /// The URLs `document` references outside itself, in document order, each once: each `href`

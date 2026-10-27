@@ -1,6 +1,8 @@
 //! The pixel dimensions of a PNG image, from its IHDR chunk (PNG, Section 11.2.2), and of a
 //! JPEG image, from its start-of-frame segment (ITU-T T.81, Annex B.2.2).
 
+use super::Dimensions;
+
 /// The PNG signature (PNG, Section 5.2).
 pub(super) const PNG_SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
 
@@ -32,16 +34,19 @@ siros_codec::display_code!(RasterFault);
 impl std::error::Error for RasterFault {}
 
 /// The width and height of the PNG `bytes`.
-pub(super) fn png(bytes: &[u8]) -> Result<Option<(u32, u32)>, RasterFault> {
+pub(super) fn png(bytes: &[u8]) -> Result<Option<Dimensions>, RasterFault> {
     let part = |range: std::ops::Range<usize>| bytes.get(range).ok_or(RasterFault::PngHeader);
     if part(8..12)? != [0, 0, 0, 13] || part(12..16)? != b"IHDR" {
         return Err(RasterFault::PngHeader);
     }
-    Ok(Some((u32_be(part(16..20)?), u32_be(part(20..24)?))))
+    Ok(Some(Dimensions {
+        width: u32_be(part(16..20)?),
+        height: u32_be(part(20..24)?),
+    }))
 }
 
 /// The width and height of the JPEG `bytes`: those of its first start-of-frame segment.
-pub(super) fn jpeg(bytes: &[u8]) -> Result<Option<(u32, u32)>, RasterFault> {
+pub(super) fn jpeg(bytes: &[u8]) -> Result<Option<Dimensions>, RasterFault> {
     let mut at = 2;
     loop {
         // Fill bytes precede a marker (Annex B.1.1.2).
@@ -63,7 +68,10 @@ pub(super) fn jpeg(bytes: &[u8]) -> Result<Option<(u32, u32)>, RasterFault> {
         if is_start_of_frame(marker) {
             let part = |from: usize| bytes.get(from..from + 2).ok_or(RasterFault::JpegFrame);
             let (height, width) = (u16_be(part(at + 3)?), u16_be(part(at + 5)?));
-            return Ok(Some((u32::from(width), u32::from(height))));
+            return Ok(Some(Dimensions {
+                width: u32::from(width),
+                height: u32::from(height),
+            }));
         }
         // Start of scan: the frame header comes before it (Annex B.2.1).
         if marker == 0xda || length < 2 {

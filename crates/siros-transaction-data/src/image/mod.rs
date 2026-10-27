@@ -24,6 +24,22 @@ pub const MAX_IMAGE_PIXELS: u32 = 2048;
 /// The limit of an image fetch.
 const IMAGE_LIMIT: BodyLimit = BodyLimit::bytes(MAX_IMAGE_BYTES);
 
+/// The pixels of an image in each direction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Dimensions {
+    /// The width.
+    pub width: u32,
+    /// The height.
+    pub height: u32,
+}
+
+impl Dimensions {
+    /// Whether the image is over [`MAX_IMAGE_PIXELS`] in a direction.
+    fn over(self) -> bool {
+        self.width > MAX_IMAGE_PIXELS || self.height > MAX_IMAGE_PIXELS
+    }
+}
+
 /// An image format the wallet shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ImageFormat {
@@ -131,8 +147,8 @@ pub enum ImageFault {
     Raster(RasterFault),
     /// The SVG document does not read, or a resource it references is refused.
     Svg(SvgFault),
-    /// The image is this many pixels wide and high, over 2048 in a direction.
-    Dimensions(u32, u32),
+    /// The image is over 2048 pixels in a direction.
+    TooManyPixels(Dimensions),
 }
 
 impl ImageFault {
@@ -151,7 +167,7 @@ impl ImageFault {
             Self::FormatMismatch(_) => "image_format_mismatch",
             Self::Raster(fault) => fault.code(),
             Self::Svg(fault) => fault.code(),
-            Self::Dimensions(..) => "image_dimensions",
+            Self::TooManyPixels(_) => "image_too_many_pixels",
         }
     }
 }
@@ -208,13 +224,11 @@ impl ImageRef {
             ),
             ImageFormat::Svg => match svg::read(&bytes, fetched).map_err(ImageFault::Svg)? {
                 Step::Fetch(fetch) => return Ok(Step::Fetch(fetch)),
-                Step::Done(document) => document,
+                Step::Done(document) => (document.size, document.resources),
             },
         };
-        if let Some((width, height)) = dimensions {
-            if width > MAX_IMAGE_PIXELS || height > MAX_IMAGE_PIXELS {
-                return Err(ImageFault::Dimensions(width, height));
-            }
+        if let Some(dimensions) = dimensions.filter(|d| d.over()) {
+            return Err(ImageFault::TooManyPixels(dimensions));
         }
         Ok(Step::Done(VerifiedImage {
             format,
@@ -254,7 +268,7 @@ fn data_url(rest: &str) -> Result<ImageRef, ImageFault> {
         .and_then(ImageFormat::of_media_type)
         .ok_or(ImageFault::DataUrl)?;
     if !parts
-        .last()
+        .next_back()
         .is_some_and(|last| last.eq_ignore_ascii_case("base64"))
     {
         return Err(ImageFault::DataUrl);

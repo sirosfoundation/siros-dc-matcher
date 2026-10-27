@@ -64,7 +64,7 @@ pub use error::{EntryMember, EntryPosition, EntryRefusal, TransactionDataError};
 pub use fetched::{FetchFault, Fetched, Step};
 pub use hash::{AlgClaim, HashAlg, HashesAlgFault};
 pub use image::{
-    ImageFault, ImageFormat, ImageRef, RasterFault, Resource, SvgFault, VerifiedImage,
+    Dimensions, ImageFault, ImageFormat, ImageRef, RasterFault, Resource, SvgFault, VerifiedImage,
     MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS,
 };
 pub use integrity::{Integrity, IntegrityFault};
