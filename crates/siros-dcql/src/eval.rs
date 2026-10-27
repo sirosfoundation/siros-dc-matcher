@@ -315,11 +315,6 @@ impl QueryResult {
     /// about what to ask the user for, not a matching decision, and folding
     /// them in here would multiply the combination count for choices the
     /// verifier said it can do without.
-    ///
-    /// # Panics
-    ///
-    /// When `limit` combinations, capped at the number that exist, cannot be
-    /// allocated.
     pub fn combinations(&self, limit: usize) -> Combinations {
         if !self.satisfiable {
             return Combinations {
@@ -451,9 +446,7 @@ fn candidate_products(
     }
 
     let take = total.min(budget);
-    // `take` is at most the caller's `limit`. A capacity the caller asks for
-    // and memory cannot hold panics past `isize::MAX` bytes and aborts below.
-    let mut products: Vec<Vec<(String, Candidate)>> = Vec::with_capacity(take);
+    let mut products: Vec<Vec<(String, Candidate)>> = Vec::new();
 
     // How many members each combination will hold: one per query, except a
     // `multiple` query which contributes all of its candidates. Constant
@@ -493,8 +486,7 @@ fn candidate_products(
                 );
                 continue;
             }
-            // At least 1: a query without candidates made `total` 0, which
-            // returned before this loop, so neither division divides by 0.
+            // Not 0: a query without candidates made `total` 0 and returned above.
             let width = query_match.candidates.len();
             let Some(candidate) = query_match.candidates.get(remainder % width) else {
                 return (Vec::new(), Dropped::Exact(0));
