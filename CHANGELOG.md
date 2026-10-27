@@ -11,7 +11,7 @@ existed.
 
 ## Unreleased
 
-`matcher.wasm` is 305,573 bytes against the 307,200-byte budget (303,418 at v0.11.0). The vector
+`matcher.wasm` is 304,415 bytes against the 307,200-byte budget (303,418 at v0.11.0). The vector
 set digest is unchanged: `9f482d7a3fb87cb1381d0dfb7a2fc396b6cd3c1eba07c5d76f44e47142b751ac`.
 
 ### Changed
@@ -24,9 +24,9 @@ set digest is unchanged: `9f482d7a3fb87cb1381d0dfb7a2fc396b6cd3c1eba07c5d76f44e4
   `credman_v2` functions regardless.
 - On level 2 and above, the matcher emits nothing when the host's inputs are
   malformed: a calling-app origin without a terminating NUL or with invalid
-  UTF-8, a read that reports more bytes than it wrote, or a request or blob
-  size it cannot allocate. It used to emit entries from such inputs, or to
-  trap on the sizes. A debug build emits one entry that names the fault.
+  UTF-8, or a read that reports more bytes than it wrote. It used to emit
+  entries from such inputs. A debug build emits one entry that names the
+  fault.
 - The registered blob is read until complete; a short
   `ReadCredentialsBuffer` read used to leave its tail zeroed.
 - `siros-dc-matcher-core`'s unused `sink` module is removed.

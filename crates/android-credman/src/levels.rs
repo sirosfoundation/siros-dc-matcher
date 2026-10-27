@@ -16,13 +16,17 @@ use android_credman_sys::{credman, v2, v3, v4, v5, v6, v7, CallingAppInfo};
 use c8str::C8Str;
 use core::ffi::c_void;
 use core::ptr;
-use std::collections::TryReserveError;
 
 mod sealed {
     pub trait Sealed {}
 
+    /// The level `GetWasmVersion` reported. Only `Credman::connect` builds
+    /// one, so a level singleton exists only for a level the host reported.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct Reported(pub(in crate::levels) u32);
+
     pub trait View {
-        fn view(level: u32) -> Option<&'static Self>;
+        fn view(level: Reported) -> Option<&'static Self>;
     }
 }
 
@@ -30,7 +34,7 @@ mod sealed {
 /// reported.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Credman {
-    level: u32,
+    level: sealed::Reported,
 }
 
 impl Credman {
@@ -39,12 +43,14 @@ impl Credman {
         let mut level = 0u32;
         // SAFETY: `level` is a live u32 the host writes once.
         unsafe { credman::GetWasmVersion(&mut level) };
-        Self { level }
+        Self {
+            level: sealed::Reported(level),
+        }
     }
 
     /// The level `GetWasmVersion` reported.
     pub const fn level(&self) -> u32 {
-        self.level
+        self.level.0
     }
 
     /// The host at level `L`, when the reported level reaches it.
@@ -57,7 +63,7 @@ impl sealed::Sealed for Credman {}
 impl V1 for Credman {}
 
 /// A level's singleton, [`Credman2`] to [`Credman7`], which
-/// [`Credman::version`] grants.
+/// [`Credman::version`] grants, for the level the host reported only.
 pub trait Level: sealed::View {}
 
 macro_rules! level {
@@ -69,8 +75,8 @@ macro_rules! level {
         static $instance: $singleton = $singleton(());
 
         impl sealed::View for $singleton {
-            fn view(level: u32) -> Option<&'static Self> {
-                (level >= $level).then_some(&$instance)
+            fn view(level: sealed::Reported) -> Option<&'static Self> {
+                (level.0 >= $level).then_some(&$instance)
             }
         }
 
@@ -105,20 +111,14 @@ pub trait V1: sealed::Sealed {
     /// The Digital Credentials API request as JSON, read with
     /// [`GetRequestSize`](credman::GetRequestSize) and
     /// [`GetRequestBuffer`](credman::GetRequestBuffer).
-    ///
-    /// # Errors
-    ///
-    /// [`TryReserveError`] when the reported length cannot be allocated.
-    fn request(&self) -> Result<Vec<u8>, TryReserveError> {
+    fn request(&self) -> Vec<u8> {
         let mut size = 0u32;
         // SAFETY: `size` is a live u32 the host writes once.
         unsafe { credman::GetRequestSize(&mut size) };
-        let mut request = Vec::new();
-        request.try_reserve_exact(size as usize)?;
-        request.resize(size as usize, 0);
+        let mut request = vec![0; size as usize];
         // SAFETY: the buffer holds the `size` bytes the host writes.
         unsafe { credman::GetRequestBuffer(request.as_mut_ptr().cast::<c_void>()) };
-        Ok(request)
+        request
     }
 
     /// The length in bytes of the credential blob the wallet registered, from
