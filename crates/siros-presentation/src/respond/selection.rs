@@ -95,6 +95,8 @@ pub struct Chosen<'p, 'a> {
     pub(crate) planned: &'p Planned<'a>,
     /// The plan's offer: its entries bind as the view showed them.
     pub(crate) offer: &'p Offer,
+    /// The chosen additions: their entries bind as the view showed them.
+    pub(crate) additions: Vec<&'p Addition>,
     /// The offer's members, in its order, each with the chosen candidates.
     pub(crate) members: Vec<Member>,
     /// The members of the chosen additions.
@@ -149,13 +151,17 @@ impl<'a> Planned<'a> {
             let held = self.held(member)?;
             *member = chosen(member, &held, &subset.credentials)?;
         }
-        self.keeps_bound_credentials(offer, &members)?;
+        self.keeps_bound_credentials(offer.members(), &members)?;
+        for addition in &additions {
+            self.keeps_bound_credentials(addition.members(), &added)?;
+        }
         if fulfilment == Fulfilment::Background && view.wallet_display() == WalletDisplay::Needed {
             return Err(PresentationError::WalletDisplayNeeded);
         }
         Ok(Chosen {
             planned: self,
             offer,
+            additions,
             members,
             added,
         })
@@ -227,27 +233,26 @@ impl<'a> Planned<'a> {
             .collect()
     }
 
-    /// Checks that `members` keep every credential a transaction entry of `offer` binds to, so
-    /// the binding of the chosen credentials is the plan's (T4).
+    /// Checks that `chosen` keep every credential a transaction entry binds to among `planned`,
+    /// the members of the offer or of an addition as the view showed them, so the binding of the
+    /// chosen credentials is the plan's (T4).
     fn keeps_bound_credentials(
         &self,
-        offer: &Offer,
-        members: &[Member],
+        planned: &[Member],
+        chosen: &[Member],
     ) -> Result<(), PresentationError> {
-        let chosen = crate::plan::offered(&self.answered, members)?;
-        for (bound, binding) in self.transactions.bind(&self.answered, offer.members())? {
+        let chosen = crate::plan::offered(&self.answered, chosen)?;
+        for binding in self.transactions.bind(&self.answered, planned)? {
             let kept = chosen.iter().any(|member| {
                 member
                     .candidates
                     .iter()
-                    .any(|&(_, candidate)| member.carries(&bound, candidate))
+                    .any(|&(_, candidate)| member.carries(&binding.bound, candidate))
             });
             if !kept {
-                let entries = self.transactions.positions(&binding)?;
-                let entry = entries.first().copied().ok_or(Inconsistency::Entry)?;
                 return Err(PresentationError::BoundCredentialOmitted {
-                    entry,
-                    credential: bound.credential,
+                    entry: binding.entry.position(),
+                    credential: binding.bound.credential,
                 });
             }
         }

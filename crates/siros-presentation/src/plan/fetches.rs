@@ -32,11 +32,6 @@ impl Fetches {
             .map_err(|_| PresentationError::FetchRepeated(fetch.url().clone()))
     }
 
-    /// The response to a fetch of the URL `fetch` names.
-    pub(crate) fn response(&self, fetch: &Fetch) -> Option<&FetchResponse> {
-        self.0.response(fetch)
-    }
-
     /// The responses, as the transaction data's documents read them.
     pub(crate) fn fetched(&self) -> &Fetched {
         &self.0

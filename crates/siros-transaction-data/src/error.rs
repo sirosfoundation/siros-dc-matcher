@@ -116,6 +116,9 @@ pub enum TransactionDataError {
     /// The request arrived unsigned, and the entry at this position is PaSO-targeted or a
     /// credential takes it under a definition of PaSO metadata (PaSO Core, Section 3).
     Unsigned(EntryPosition),
+    /// No Credential Query an entry targets has a candidate, and no offer remains: the
+    /// referenced credentials are not available in the wallet (OpenID4VP 1.0, Section 8.5).
+    CredentialUnavailable,
     /// The first match excluded every credential targeted by an entry, and no offer remains:
     /// each credential with why it takes no entry (PaSO Core, Section 7.4.2, step 4).
     NoCompatibleCredential(Vec<Exclusion>),
@@ -130,6 +133,7 @@ impl TransactionDataError {
             Self::CredentialSets(fault) => fault.code(),
             Self::TypeUnknown(_) => "transaction_data_type_unknown",
             Self::Unsigned(_) => "transaction_data_request_unsigned",
+            Self::CredentialUnavailable => "transaction_data_credential_unavailable",
             Self::NoCompatibleCredential(_) => "transaction_data_no_compatible_credential",
         }
     }
@@ -143,6 +147,7 @@ impl TransactionDataError {
             Self::Entry(..)
             | Self::CredentialSets(_)
             | Self::TypeUnknown(_)
+            | Self::CredentialUnavailable
             | Self::NoCompatibleCredential(_) => ErrorCode::InvalidTransactionData,
         }
     }

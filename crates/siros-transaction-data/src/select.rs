@@ -23,7 +23,6 @@ use crate::sources::{
 };
 use crate::ts12::read::Ts12PayloadFault;
 use crate::ts12::Ts12Payload;
-use crate::type_id::TypeFamily;
 use crate::view::TransactionView;
 
 /// Why an entry is not compatible with a credential (PaSO Core, Section 7.4.2).
@@ -212,16 +211,12 @@ impl Context<'_> {
         if credential.format() != Format::SdJwtVc {
             return Ok(Step::Done(Err(Incompatibility::Format)));
         }
-        let unsigned = self.signature == RequestSignature::Unsigned;
-        if unsigned && entry.type_id().family() == TypeFamily::Paso {
-            return Err(TransactionDataError::Unsigned(entry.position()));
-        }
         let served = match self.sources().serve(entry, credential) {
             Ok(Step::Fetch(fetch)) => return Ok(Step::Fetch(fetch)),
             Ok(Step::Done(served)) => served,
             Err(cause) => return Ok(Step::Done(Err(cause))),
         };
-        if unsigned && served.source.is_paso() {
+        if self.signature == RequestSignature::Unsigned && served.source.is_paso() {
             return Err(TransactionDataError::Unsigned(entry.position()));
         }
         Ok(self.view(entry, &served))

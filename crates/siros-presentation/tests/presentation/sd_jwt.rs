@@ -8,6 +8,7 @@ use siros_codec::base64url;
 use siros_dcql::QueryId;
 use siros_oid4vp::{FetchResponse, HttpStatus};
 use siros_presentation::{plan, OfferIndex, Pick, PlanStep, PresentationError, WalletDisplay};
+use siros_transaction_data::{RowValue, UnsignedWarning};
 use siros_wallet_state::CredentialId;
 
 use crate::verifier::{
@@ -63,6 +64,7 @@ pub fn type_metadata_of(vct: &str) -> FetchResponse {
         "name": "Pay Card",
         "category": "urn:eu:europa:ec:eudi:sua:sca",
         "transaction_data_types": {PAYMENT: {
+            "schema_uri": PAYMENT,
             "claims": [
                 claim(&["transaction_id"], "Transaction ID"),
                 claim(&["payee", "name"], "Payee"),
@@ -117,11 +119,32 @@ fn sd_jwt_over_redirect_direct_post_jwt() {
     let planned = ready(&input).unwrap();
     let offer = &planned.view().offers()[0];
     let card = &offer.members()[0].credentials()[0];
+    let transaction = card.transaction().unwrap();
+    assert_eq!(transaction.entry().value(), 0);
+    let rows: Vec<(&str, String)> = transaction
+        .view()
+        .rows()
+        .iter()
+        .map(|row| match row.value() {
+            RowValue::Value(value) => (row.label().text(), value.text()),
+            other => panic!("{other:?}"),
+        })
+        .collect();
     assert_eq!(
-        card.entries().iter().map(|e| e.value()).collect::<Vec<_>>(),
-        [0]
+        rows,
+        [
+            ("Transaction ID", "tx-0001".to_owned()),
+            ("Payee", "Shop AB".to_owned()),
+            ("Payee ID", "SE1234567890".to_owned()),
+            ("Currency", "EUR".to_owned()),
+            ("Amount", "49.99".to_owned()),
+        ]
     );
-    assert_eq!(card.transactions().len(), 1);
+    // An unsigned request of a TS12 type: the UI warns and asks for explicit confirmation.
+    assert_eq!(
+        transaction.view().unsigned_warning(),
+        UnsignedWarning::Required
+    );
     assert_eq!(offer.wallet_display(), WalletDisplay::Needed);
 
     let response = respond(&input);
@@ -226,18 +249,18 @@ fn a_subset_keeps_the_plans_binding() {
     let input = wallet.input(&request, &fetches);
     let planned = ready(&input).unwrap();
     let credentials = planned.view().offers()[0].members()[0].credentials();
-    let shown: Vec<(CredentialId, Vec<usize>)> = credentials
+    let shown: Vec<(CredentialId, Option<usize>)> = credentials
         .iter()
         .map(|c| {
-            let entries = c.entries().iter().map(|e| e.value()).collect();
-            (c.entry().credential_id(), entries)
+            let entry = c.transaction().map(|t| t.entry().value());
+            (c.entry().credential_id(), entry)
         })
         .collect();
     assert_eq!(
         shown,
         [
-            (CredentialId::new(1), vec![0]),
-            (CredentialId::new(2), vec![])
+            (CredentialId::new(1), Some(0)),
+            (CredentialId::new(2), None)
         ],
         "the view binds the payment to One"
     );
@@ -278,7 +301,7 @@ fn a_subset_keeps_the_plans_binding() {
     assert_eq!(
         respond_to(&input, 0, Vec::new(), ids(&[2])).err(),
         Some(PresentationError::BoundCredentialOmitted {
-            entry: one.entries()[0],
+            entry: one.transaction().unwrap().entry(),
             credential: one.entry(),
         })
     );

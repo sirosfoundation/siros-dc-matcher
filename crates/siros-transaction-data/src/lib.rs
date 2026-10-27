@@ -7,7 +7,7 @@
 //! | Sources, each a parser into it: the signed credential metadata JWT (Sections 4 and 7), TS12 v1.0.1 type metadata (`lang` → `locale`, `label` → `name`, `visualisation` as [`Prominence`]), the host's [`Configuration`], and the entry's ad-hoc metadata JWT (Section 5); ad-hoc first, then the credential's own metadata, then the configuration | [`SourceKind`], [`Configuration::parse`] |
 //! | The projection to the wallet's language: one entry per array, made only by the locale function (View, Section 4), serialised deterministically | [`Definition::project`], [`Projected::to_json`] |
 //! | T1: entries: base64url JSON without repeated names, `type`, `credential_ids` of DCQL query ids, `payload`, ad-hoc `metadata`, `transaction_data_hashes_alg` as an array or CS-12's string | [`Entry::parse`] |
-//! | Credential sets: the targeted queries in one set, its alternatives transposable (Core, Section 7.4.1) | [`TransactionDataError::CredentialSets`] |
+//! | The request's rules: PaSO-targeted entries only in a signed request (Core, Section 3); the targeted queries in one credential set, its alternatives transposable (Core, Section 7.4.1) | [`check_request`] |
 //! | Payload conformance: coverage, mandatory claims, value types (Core, Section 7.4.2; View, Section 3) | [`PayloadFault`], [`Scalar`] |
 //! | Images: Data URLs of PNG, JPEG and SVG, `https` URLs with `#integrity`, 512 KiB and 2048 px, SVG references pinned (View, Section 3) | [`VerifiedImage`], [`ImageFault`] |
 //! | Generic rendering: rows in claims order, `null` paths, `template:`, label limits after interpolation, at most 200 items, `security_hint` as given (View, Section 2) | [`TransactionView`], [`RenderFault`] |
@@ -86,15 +86,25 @@ pub use ts12::read::{MemberPath, Ts12PayloadFault};
 pub use type_id::{EmptyTypeId, Ts12Type, TypeFamily, TypeId};
 pub use view::{Row, RowValue, ShownLabel, TransactionView, UnsignedWarning};
 
-/// Checks the credential sets of `query` against the queries `entries` target (PaSO Core,
-/// Section 7.4.1).
+/// Checks the request's rules on its `entries` as a whole: an unsigned request carries no
+/// PaSO-targeted entry (PaSO Core, Section 3), and the credential sets of `query` hold the
+/// queries the entries target as Section 7.4.1 says.
 ///
 /// # Errors
 ///
-/// [`TransactionDataError::CredentialSets`].
-pub fn check_sets(
+/// [`TransactionDataError::Unsigned`] and [`TransactionDataError::CredentialSets`].
+pub fn check_request(
     entries: &[Entry],
     query: &siros_dcql::DcqlQuery,
+    signature: siros_oid4vp::RequestSignature,
 ) -> Result<(), TransactionDataError> {
+    if signature == siros_oid4vp::RequestSignature::Unsigned {
+        if let Some(entry) = entries
+            .iter()
+            .find(|e| e.type_id().family() == TypeFamily::Paso)
+        {
+            return Err(TransactionDataError::Unsigned(entry.position()));
+        }
+    }
     sets::check(entries, query).map_err(TransactionDataError::CredentialSets)
 }

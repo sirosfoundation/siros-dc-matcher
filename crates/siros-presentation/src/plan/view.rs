@@ -6,11 +6,11 @@ use siros_dcql::Dropped;
 use siros_display::proof::{verified_rows, ProofRow};
 use siros_display::{purpose, Card, ClaimRow, DisplayCache, Locale};
 use siros_oid4vp::VerifierView;
-use siros_transaction_data::{Fetched, MemberBinding, Step, TransactionView};
+use siros_transaction_data::{EntryPosition, TransactionView};
 use siros_wallet_state::CredentialId;
 
 use super::digest::PlanDigest;
-use super::transactions::{offered, Bound, EntryPosition, Offered, Transactions, Wallet};
+use super::transactions::{offered, Bound, BoundEntry, Offered, Transactions, Wallet};
 use crate::display_rule::{Choice, DisplayFacts, Presentability, TransactionData, WalletDisplay};
 use crate::error::{Inconsistency, PresentationError};
 use crate::ids::SetIndex;
@@ -56,8 +56,26 @@ pub struct CredentialView {
     answer: Answer,
     card: Card,
     shown: Shown,
-    entries: Vec<EntryPosition>,
-    transactions: Vec<TransactionView>,
+    transaction: Option<BoundTransaction>,
+}
+
+/// The transaction entry bound to a credential (T4): its position in the request's
+/// `transaction_data`, and its display.
+pub struct BoundTransaction {
+    entry: EntryPosition,
+    view: TransactionView,
+}
+
+impl BoundTransaction {
+    /// The entry's position in the request's `transaction_data`.
+    pub fn entry(&self) -> EntryPosition {
+        self.entry
+    }
+
+    /// The entry's display.
+    pub fn view(&self) -> &TransactionView {
+        &self.view
+    }
 }
 
 /// What a member shows of its credential.
@@ -190,15 +208,9 @@ impl CredentialView {
         &self.shown
     }
 
-    /// The positions in the request's `transaction_data` of the entries bound to the credential
-    /// (T4), in the order of the request.
-    pub fn entries(&self) -> &[EntryPosition] {
-        &self.entries
-    }
-
-    /// The transactions the credential authorizes: the display of each of its entries.
-    pub fn transactions(&self) -> &[TransactionView] {
-        &self.transactions
+    /// The transaction the credential authorizes: the entry bound to it (T4).
+    pub fn transaction(&self) -> Option<&BoundTransaction> {
+        self.transaction.as_ref()
     }
 }
 
@@ -207,37 +219,30 @@ pub(crate) struct Sources<'s, 'a> {
     pub(crate) answered: &'s Wallet<'a>,
     pub(crate) transactions: &'s Transactions<'a>,
     pub(crate) display: &'s DisplayCache,
-    pub(crate) locales: &'s [Locale],
+    pub(crate) language: &'s Locale,
     pub(crate) background: &'s [CredentialId],
-    pub(crate) fetched: &'s Fetched,
     pub(crate) transaction_data: TransactionData,
 }
 
-/// The view of each of `offers`. The step is a fetch while a transaction's display references
-/// a document the host has not given.
+/// The view of each of `offers`.
 pub(crate) fn offer_views(
     offers: &Offers,
     sources: &Sources<'_, '_>,
-) -> Result<Step<Vec<OfferView>>, PresentationError> {
-    let mut views = Vec::with_capacity(offers.offers().len());
-    for offer in offers.offers() {
-        views.push(fetched!(offer_view(offer, sources)?));
-    }
-    Ok(Step::Done(views))
+) -> Result<Vec<OfferView>, PresentationError> {
+    offers
+        .offers()
+        .iter()
+        .map(|offer| offer_view(offer, sources))
+        .collect()
 }
 
-fn offer_view(
-    offer: &Offer,
-    sources: &Sources<'_, '_>,
-) -> Result<Step<OfferView>, PresentationError> {
-    let bindings = sources
-        .transactions
-        .bind(sources.answered, offer.members())?;
-    let members = fetched!(member_views(offer.members(), &bindings, sources)?);
-    let mut additions = Vec::with_capacity(offer.additions().len());
-    for addition in offer.additions() {
-        additions.push(fetched!(addition_view(addition, sources)?));
-    }
+fn offer_view(offer: &Offer, sources: &Sources<'_, '_>) -> Result<OfferView, PresentationError> {
+    let members = member_views(offer.members(), sources)?;
+    let additions = offer
+        .additions()
+        .iter()
+        .map(|addition| addition_view(addition, sources))
+        .collect::<Result<Vec<_>, _>>()?;
     let facts = DisplayFacts {
         presentability: presentability(&members, sources.background),
         transaction_data: sources.transaction_data,
@@ -252,28 +257,27 @@ fn offer_view(
             Choice::Settled
         },
     };
-    Ok(Step::Done(OfferView {
+    Ok(OfferView {
         offer: offer.clone(),
         purpose: purpose::line(offer.purposes()),
         members,
         additions,
         unexamined: offer.unexamined(),
         wallet_display: WalletDisplay::of(&facts),
-    }))
+    })
 }
 
 fn addition_view(
     addition: &Addition,
     sources: &Sources<'_, '_>,
-) -> Result<Step<AdditionView>, PresentationError> {
-    let members = fetched!(member_views(addition.members(), &[], sources)?);
-    Ok(Step::Done(AdditionView {
+) -> Result<AdditionView, PresentationError> {
+    Ok(AdditionView {
         set: addition.set(),
         purpose: addition
             .purpose()
             .and_then(|p| purpose::line(std::slice::from_ref(p))),
-        members,
-    }))
+        members: member_views(addition.members(), sources)?,
+    })
 }
 
 /// Whether the wallet presents each credential of `members` from its background service.
@@ -289,67 +293,59 @@ fn presentability(members: &[MemberView], background: &[CredentialId]) -> Presen
     }
 }
 
-/// The views of `members`, with the entries `bindings` bind to each of their credentials.
+/// The views of `members`, one group of presented credentials, each with the entry it binds
+/// (T4).
 fn member_views(
     members: &[Member],
-    bindings: &[(Bound, MemberBinding<'_, '_>)],
     sources: &Sources<'_, '_>,
-) -> Result<Step<Vec<MemberView>>, PresentationError> {
-    let mut views = Vec::with_capacity(members.len());
-    for member in offered(sources.answered, members)? {
-        let mut credentials = Vec::with_capacity(member.candidates.len());
-        for &(_, candidate) in &member.candidates {
-            let bound = Bound::of(member.answers, candidate);
-            let bound = fetched!(bound_entries(bindings, &bound, sources)?);
-            credentials.push(credential_view(&member, candidate, bound, sources)?);
+) -> Result<Vec<MemberView>, PresentationError> {
+    let bindings = sources.transactions.bind(sources.answered, members)?;
+    offered(sources.answered, members)?
+        .iter()
+        .map(|member| {
+            let credentials = member
+                .candidates
+                .iter()
+                .map(|&(_, candidate)| {
+                    let bound = Bound::of(member.answers, candidate);
+                    let transaction = bindings
+                        .iter()
+                        .find(|binding| binding.bound == bound)
+                        .map(BoundTransaction::of);
+                    credential_view(member, candidate, transaction, sources)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(MemberView {
+                query_id: member.answers.id().clone(),
+                credentials,
+            })
+        })
+        .collect()
+}
+
+impl BoundTransaction {
+    fn of(binding: &BoundEntry<'_>) -> Self {
+        Self {
+            entry: binding.entry.position(),
+            view: binding.taken.view().clone(),
         }
-        views.push(MemberView {
-            query_id: member.answers.id().clone(),
-            credentials,
-        });
     }
-    Ok(Step::Done(views))
 }
 
-/// The entries bound to one credential: their positions, and their displays.
-struct BoundEntries {
-    entries: Vec<EntryPosition>,
-    transactions: Vec<TransactionView>,
-}
-
-/// The entries `bindings` bind to the credential `bound`.
-fn bound_entries(
-    bindings: &[(Bound, MemberBinding<'_, '_>)],
-    bound: &Bound,
-    sources: &Sources<'_, '_>,
-) -> Result<Step<BoundEntries>, PresentationError> {
-    let mut entries = Vec::new();
-    let mut transactions = Vec::new();
-    for (_, binding) in bindings.iter().filter(|(key, _)| key == bound) {
-        transactions.extend(fetched!(binding.views(sources.fetched, sources.locales)?));
-        entries.extend(sources.transactions.positions(binding)?);
-    }
-    Ok(Step::Done(BoundEntries {
-        entries,
-        transactions,
-    }))
-}
-
-/// The view of `candidate`, a candidate of `member`, with the entries bound to it.
+/// The view of `candidate`, a candidate of `member`, with the transaction bound to it.
 fn credential_view(
     member: &Offered<'_, '_>,
     candidate: &Candidate<siros_credential::UsableCredential<'_>>,
-    bound: BoundEntries,
+    transaction: Option<BoundTransaction>,
     sources: &Sources<'_, '_>,
 ) -> Result<CredentialView, PresentationError> {
     let credential = candidate.credential().credential();
     Ok(CredentialView {
         entry: credential.entry(),
         answer: candidate.answer().clone(),
-        card: sources.display.card(credential, sources.locales)?,
+        card: sources.display.card(credential, sources.language)?,
         shown: shown(member, candidate, sources)?,
-        entries: bound.entries,
-        transactions: bound.transactions,
+        transaction,
     })
 }
 
@@ -364,7 +360,7 @@ fn shown(
         Answer::Claims(claims) => Shown::Claims(sources.display.claim_rows(
             candidate.credential().credential(),
             claims.pointers(),
-            sources.locales,
+            sources.language,
         )?),
         Answer::Proof(choice) => {
             let zkp = member

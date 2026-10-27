@@ -9,7 +9,7 @@ use siros_dcql::mdoc_components;
 use siros_mdoc::{ElementId, Mdoc, SessionTranscript};
 use siros_oid4vp::{Presentation, VerifiedRequest};
 use siros_sdjwt::{Audience, BeforeEpoch, KbNonce, NumericDate, SdJwt};
-use siros_transaction_data::{Amr, Jti, KbJwtInputs, MemberBinding};
+use siros_transaction_data::{Amr, Binding, Jti, KbJwtInputs};
 use siros_wallet_state::{CredentialId, KeyId};
 use siros_zkp_req_nym_auth::presenter::Prepared as NymPrepared;
 
@@ -20,7 +20,7 @@ use crate::error::{Inconsistency, PresentationError};
 use siros_dcql::HolderBinding;
 
 use crate::matching::{Answer, Candidate, Claims, ProofChoice};
-use crate::plan::{nym_answer, Bound, Offered};
+use crate::plan::{nym_answer, BoundEntry, Offered};
 use siros_dcql::QueryId;
 
 /// A chosen offer whose presentations wait for their signatures.
@@ -64,7 +64,7 @@ impl<'p, 'a> Chosen<'p, 'a> {
     /// - A nym_auth proof's device key signs the data nym_auth gives for the request's session
     ///   (N2), from a usable attestation and a seed opened again for this use (N3, N4).
     ///
-    /// The entries bind to the offer's chosen credentials (T4).
+    /// The entries bind to the chosen credentials as the view showed them (T4).
     ///
     /// # Errors
     ///
@@ -78,13 +78,19 @@ impl<'p, 'a> Chosen<'p, 'a> {
         let planned = self.planned;
         // The plan's bindings, which the view showed and the digest covers: the chosen members
         // keep every candidate an entry is bound to.
-        let bindings = planned
+        let mut bindings = planned
             .transactions
             .bind(&planned.answered, self.offer.members())?;
+        for addition in &self.additions {
+            bindings.extend(
+                planned
+                    .transactions
+                    .bind(&planned.answered, addition.members())?,
+            );
+        }
         let offer = crate::plan::offered(&planned.answered, &self.members)?;
         let added = crate::plan::offered(&planned.answered, &self.added)?;
         let mut signs = Vec::new();
-        // The bindings name credentials of the offer's members; the additions' carry none.
         let members = offer
             .iter()
             .chain(added.iter())
@@ -102,7 +108,7 @@ impl<'p, 'a> Chosen<'p, 'a> {
     fn pending(
         &self,
         member: &Offered<'p, 'a>,
-        bindings: &[(Bound, MemberBinding<'_, '_>)],
+        bindings: &[BoundEntry<'_>],
         signs: &mut Vec<Sign>,
         rng: &mut impl CryptoRngCore,
     ) -> Result<PendingMember<'p>, PresentationError> {
@@ -114,8 +120,7 @@ impl<'p, 'a> Chosen<'p, 'a> {
                 let id = SignId::new(signs.len());
                 let binding = bindings
                     .iter()
-                    .find(|(bound, _)| member.carries(bound, candidate))
-                    .map(|(_, binding)| binding);
+                    .find(|binding| member.carries(&binding.bound, candidate));
                 let form = match candidate.answer() {
                     Answer::Claims(claims) => {
                         let extra = self.transaction_claims(credential, binding, rng)?;
@@ -135,25 +140,26 @@ impl<'p, 'a> Chosen<'p, 'a> {
         })
     }
 
-    /// The KB-JWT claims of the entries `binding` binds to `credential` (T3), with `jti` drawn
-    /// from `rng`; none without entries.
+    /// The KB-JWT claims of the entry `binding` binds to `credential` (T3): `jti` drawn from
+    /// `rng` under a TS12 rulebook; none without an entry.
     fn transaction_claims(
         &self,
         credential: &Credential,
-        binding: Option<&MemberBinding<'_, '_>>,
+        binding: Option<&BoundEntry<'_>>,
         rng: &mut impl CryptoRngCore,
     ) -> Result<Vec<(String, Value)>, PresentationError> {
         let Some(binding) = binding else {
             return Ok(Vec::new());
         };
-        let mut jti = [0u8; 16];
-        rng.fill_bytes(&mut jti);
-        let inputs = KbJwtInputs::new(
-            Jti::new(jti),
-            self.planned.input.request.response_mode(),
-            self.amr(&key_id(credential)?)?,
-        );
-        Ok(binding.kb_jwt_claims(&inputs))
+        Binding::new(binding.entry, binding.taken.view().rulebook()).kb_jwt_claims(|| {
+            let mut jti = [0u8; 16];
+            rng.fill_bytes(&mut jti);
+            Ok(KbJwtInputs::new(
+                Jti::new(jti),
+                self.planned.input.request.response_mode(),
+                self.amr(&key_id(credential)?)?,
+            ))
+        })
     }
 
     /// The factors the host reported for the key `kid`.
