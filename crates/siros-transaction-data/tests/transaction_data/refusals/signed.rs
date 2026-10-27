@@ -1,6 +1,6 @@
 //! The verification of an ad-hoc metadata JWT (PaSO Proof Metadata, Section 5.3) and of a
-//! signed credential metadata JWT (Section 7): a row per step, the honest JWTs accepted, and no
-//! other source after a failed one.
+//! signed credential metadata JWT (Sections 7 and 8): a row per step, the honest JWTs accepted,
+//! and no other source after a failed one.
 
 use serde_json::{json, Value};
 use siros_oid4vp::RequestSignature;
@@ -279,22 +279,23 @@ fn a_kid_names_a_key_of_the_issuers_key_set() {
 }
 
 /// The signed credential metadata JWT, fetched from the configuration's
-/// `credential_metadata_uri`: honest, it serves the type; invalid or absent, it excludes the
-/// credential, the configuration notwithstanding (Section 7).
+/// `credential_metadata_uri`: honest, it serves the type; invalid, served from another URL
+/// than it names, or absent, it excludes the credential, the configuration notwithstanding
+/// (Sections 7 and 8).
 #[test]
 fn signed_credential_metadata_serves_or_excludes() {
     let pki = pki();
-    let claims = |exp: i64| {
+    let claims = |exp: i64, uri: &str| {
         json!({
             "iss": ISSUER, "sub": CARD, "format": "dc+sd-jwt", "iat": 1_790_000_000, "exp": exp,
-            "credential_metadata_uri": METADATA_URI,
+            "credential_metadata_uri": uri,
             "credential_metadata": {"transaction_data_types": {TYPE: definition()}}
         })
     };
-    let token = |exp: i64| {
+    let token = |exp: i64, uri: &str| {
         jwt(
             &header("credential-metadata+jwt", &[&pki.signer]),
-            &claims(exp),
+            &claims(exp, uri),
             &pki.signer.key,
         )
     };
@@ -310,7 +311,7 @@ fn signed_credential_metadata_serves_or_excludes() {
     };
     let honest = outcome(vec![(
         METADATA_URI.to_owned(),
-        ok(token(1_820_000_000).as_bytes()),
+        ok(token(1_820_000_000, METADATA_URI).as_bytes()),
     )]);
     let Selection::Takes(taken) = honest else {
         panic!("the honest JWT")
@@ -319,9 +320,20 @@ fn signed_credential_metadata_serves_or_excludes() {
     assert_eq!(
         cause(outcome(vec![(
             METADATA_URI.to_owned(),
-            ok(token(1_700_000_000).as_bytes())
+            ok(token(1_700_000_000, METADATA_URI).as_bytes())
         )])),
         Incompatibility::CredentialMetadata(CredentialMetadataFault::Invalid(SignedFault::Expired))
+    );
+    // Section 8: the JWT names the URL it was served from.
+    let elsewhere = "https://issuer.bank.example/metadata/moved";
+    assert_eq!(
+        cause(outcome(vec![(
+            METADATA_URI.to_owned(),
+            ok(token(1_820_000_000, elsewhere).as_bytes())
+        )])),
+        Incompatibility::CredentialMetadata(CredentialMetadataFault::UriMismatch(
+            elsewhere.to_owned()
+        ))
     );
     assert_eq!(
         cause(outcome(Vec::new())),

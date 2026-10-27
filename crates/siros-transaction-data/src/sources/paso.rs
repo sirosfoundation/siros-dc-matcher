@@ -1,6 +1,7 @@
 //! The signed credential metadata JWT of a PaSO Credential (PaSO Proof Metadata, Sections 4 and
 //! 7): fetched through the host from the configuration's `credential_metadata_uri`, verified each
-//! time it is loaded (Section 6), and read into a definition per transaction data type.
+//! time it is loaded (Section 6), its `credential_metadata_uri` claim the URL fetched (Section 8),
+//! and read into a definition per transaction data type.
 
 use std::str::Utf8Error;
 
@@ -29,6 +30,9 @@ pub enum CredentialMetadataFault {
     NotUtf8(Utf8Error),
     /// The JWT is invalid (Section 7).
     Invalid(SignedFault),
+    /// The JWT's `credential_metadata_uri` claim holds this text, which differs from the URL
+    /// the JWT was fetched from (Section 8).
+    UriMismatch(String),
 }
 
 impl CredentialMetadataFault {
@@ -39,6 +43,7 @@ impl CredentialMetadataFault {
             Self::Fetch(fault) => fault.code(),
             Self::NotUtf8(_) => "credential_metadata_not_utf8",
             Self::Invalid(fault) => fault.code(),
+            Self::UriMismatch(_) => "credential_metadata_uri_mismatch",
         }
     }
 }
@@ -75,9 +80,11 @@ impl CredentialMetadata {
                 Step::Fetch(fetch) => return Ok(Step::Fetch(fetch)),
                 Step::Done(claims) => claims,
             };
-        signed::text_claim(&mut claims, MetadataClaim::CredentialMetadataUri)
-            .map(drop)
+        let served_from = signed::text_claim(&mut claims, MetadataClaim::CredentialMetadataUri)
             .map_err(invalid)?;
+        if served_from != uri.as_str() {
+            return Err(CredentialMetadataFault::UriMismatch(served_from));
+        }
         let member = |claim: MetadataClaim| {
             move |fault| CredentialMetadataFault::Invalid(SignedFault::Claim(claim, fault))
         };

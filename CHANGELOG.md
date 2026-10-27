@@ -213,7 +213,8 @@ against the 307,200-byte budget (303,418 at v0.11.0).
     entry's ad-hoc metadata JWT (Section 5.3), the credential's signed credential metadata JWT
     from its issuer metadata's `credential_metadata_uri` (Sections 4 and 7: ES256 or ES384, an
     `x5c` chain to the credential's root with its leaf's Subject, or a `kid` of the issuer's JWT
-    VC issuer metadata), TS12 v1.0.1 type metadata, and the host's `Configuration`. A failed
+    VC issuer metadata; its `credential_metadata_uri` claim the URL fetched), TS12 v1.0.1 type
+    metadata, and the host's `Configuration`. A failed
     ad-hoc JWT or signed metadata excludes the credential.
   - `Definition::project` keeps the entry of each array the locale function takes; a type
     with an array it leaves empty is unsupported in that language. `Projected::to_json` writes
