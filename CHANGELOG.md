@@ -15,7 +15,7 @@ Adopts the `zkp_req` draft 0.1 and the nym_auth catalogue 0.5 (nym_auth rulebook
 commit `e65861c`). **Breaking**: requests and presentations follow the draft, the FFI loses
 `zkp_req_plan`, and the vectors move to the crates that own their rules. Consumers that keep a
 copy of the vectors (siros-sdk-kotlin, siros-sdk-swift) must re-copy them from the new
-directories; the vector set digest below identifies them. `matcher.wasm` is 297,244 bytes
+directories; the vector set digest below identifies them. `matcher.wasm` is 301,872 bytes
 against the 307,200-byte budget (303,914 before).
 
 ### Changed
@@ -74,7 +74,6 @@ against the 307,200-byte budget (303,914 before).
   `Prepared::job` builds a `ProofJob`, from a `UsableAttestation` and an `OpenedSeed`. The fields
   of `ProofJob`, `NymAuthQuery`, `NymAuthMdoc`, `SignedElement` and `Credential` are private;
   methods of the same names read them.
-- `matcher.wasm` is 300,478 bytes (304,452 before).
 
 ### Fixed
 
