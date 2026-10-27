@@ -62,7 +62,7 @@ pub fn match_query(input: &MatchInput<'_>) -> Result<NymAuthMatch, HostError> {
     if plans.iter().all(|p| p.pair.is_none()) {
         return Ok(Match::Unsupported(unsupported(plans)));
     }
-    let anchors = anchors_for(&parsed.query, input.anchors)?;
+    let anchors = anchors_for(&parsed.query, input.anchors);
     let tested: Vec<Tested<'_>> = input
         .credentials
         .iter()

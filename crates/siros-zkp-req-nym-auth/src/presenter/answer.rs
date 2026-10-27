@@ -19,18 +19,14 @@ pub struct Answer<'q> {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{}", self.code())]
 pub enum Unanswerable {
-    /// The attestation was tested at another date than the pair's proof date.
-    ProofDate,
     /// Items of the option fail for the attestation: an assertion, or the `pseudonym`'s seed.
     Failed(Vec<ZkpError>),
 }
 
 impl Unanswerable {
-    /// A stable identifier: `proof_date`, or `credential` for failed items, with their codes in
-    /// the variant.
+    /// A stable identifier: `credential`, with the codes of the failed items in the variant.
     pub fn code(&self) -> &'static str {
         match self {
-            Self::ProofDate => "proof_date",
             Self::Failed(_) => "credential",
         }
     }
@@ -42,17 +38,23 @@ impl<'q> Answer<'q> {
     ///
     /// # Errors
     ///
-    /// [`Unanswerable::ProofDate`] for an attestation tested at another date than the pair's,
-    /// and [`Unanswerable::Failed`] with the `age_check` that fails and `seed_mismatch` for a
-    /// seed that does not open `ssc`.
+    /// [`Unanswerable::Failed`] with the `age_check` that fails and `seed_mismatch` for a seed
+    /// that does not open `ssc`.
+    ///
+    /// # Panics
+    ///
+    /// When `attestation` was tested at another date than `pair`'s proof date.
     pub fn new(
         pair: UsablePair<'q>,
         attestation: UsableAttestation,
         secret_seed: &SecretSeed,
     ) -> Result<Self, Unanswerable> {
-        if attestation.proof_time().date() != pair.date() {
-            return Err(Unanswerable::ProofDate);
-        }
+        // The caller tests the attestation at the proof time whose date the pair was made for.
+        // Another date is a bug of the caller, and the proof would bind dates that disagree.
+        assert!(
+            attestation.proof_time().date() == pair.date(),
+            "the attestation was tested at another date than the pair's proof date"
+        );
         let seed = opened_seed(&pair, attestation.credential(), secret_seed)
             .map_err(Unanswerable::Failed)?;
         Ok(Self {

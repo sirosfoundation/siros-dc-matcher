@@ -1071,13 +1071,13 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_jwk_thumbprint() != 44324.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_match() != 50997.toShort()) {
+    if (lib.uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_match() != 30181.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_prepare() != 12649.toShort()) {
+    if (lib.uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_prepare() != 63902.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_session() != 31277.toShort()) {
+    if (lib.uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_session() != 479.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_verify() != 17520.toShort()) {
@@ -1095,7 +1095,7 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_siros_dc_matcher_ffi_checksum_method_ffiprepared_data_to_sign() != 20262.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_siros_dc_matcher_ffi_checksum_method_ffiprepared_job() != 17581.toShort()) {
+    if (lib.uniffi_siros_dc_matcher_ffi_checksum_method_ffiprepared_job() != 16846.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_siros_dc_matcher_ffi_checksum_method_ffiprepared_key_id() != 33064.toShort()) {
@@ -1536,7 +1536,11 @@ public interface FfiPreparedInterface {
      *
      * # Errors
      *
-     * `device_binding`, or [`ZkpReqError::Host`] for a signature that is not 64 bytes.
+     * `device_binding` for a signature that does not verify.
+     *
+     * # Panics
+     *
+     * When `device_signature` is not 64 bytes.
      */
     fun `job`(`deviceSignature`: kotlin.ByteArray): FfiProofJob
     
@@ -1679,7 +1683,11 @@ open class FfiPrepared: Disposable, AutoCloseable, FfiPreparedInterface {
      *
      * # Errors
      *
-     * `device_binding`, or [`ZkpReqError::Host`] for a signature that is not 64 bytes.
+     * `device_binding` for a signature that does not verify.
+     *
+     * # Panics
+     *
+     * When `device_signature` is not 64 bytes.
      */
     @Throws(ZkpReqException::class)override fun `job`(`deviceSignature`: kotlin.ByteArray): FfiProofJob {
             return FfiConverterTypeFfiProofJob.lift(
@@ -5387,6 +5395,10 @@ public object FfiConverterMapStringString: FfiConverterRustBuffer<Map<kotlin.Str
          * # Errors
          *
          * [`ZkpReqError::Host`] for an input the presenter cannot use.
+         *
+         * # Panics
+         *
+         * When the query has `trusted_authorities` and `anchors` is `None`.
          */
     @Throws(ZkpReqException::class) fun `zkpReqMatch`(`queryJson`: kotlin.String, `clientMetadataJson`: kotlin.String, `credentials`: List<FfiStoredCredential>, `anchors`: List<kotlin.ByteArray>?, `systems`: List<kotlin.String>, `now`: kotlin.Long): FfiZkpMatch {
             return FfiConverterTypeFfiZkpMatch.lift(
@@ -5406,6 +5418,11 @@ public object FfiConverterMapStringString: FfiConverterRustBuffer<Map<kotlin.Str
          * # Errors
          *
          * [`ZkpReqError`]: what fails, with the Section 9 codes.
+         *
+         * # Panics
+         *
+         * When `secret_seed` is not 16 bytes, `credential` is not the candidate's, or the query has
+         * `trusted_authorities` and `anchors` is `None`.
          */
     @Throws(ZkpReqException::class) fun `zkpReqPrepare`(`candidate`: FfiCandidate, `queryJson`: kotlin.String, `clientMetadataJson`: kotlin.String, `session`: FfiSession, `credential`: FfiStoredCredential, `secretSeed`: kotlin.ByteArray, `anchors`: List<kotlin.ByteArray>?, `now`: kotlin.Long): FfiPrepared {
             return FfiConverterTypeFfiPrepared.lift(
@@ -5425,7 +5442,11 @@ public object FfiConverterMapStringString: FfiConverterRustBuffer<Map<kotlin.Str
          * # Errors
          *
          * [`ZkpReqError::InvalidRequest`] for a rule of the policy or of the verifier identity, and
-         * [`ZkpReqError::Host`] for a thumbprint of no key in the request.
+         * [`ZkpReqError::Host`] for a thumbprint that is not 32 bytes.
+         *
+         * # Panics
+         *
+         * When the thumbprint is of no key in the request.
          */
     @Throws(ZkpReqException::class) fun `zkpReqSession`(`requestObjectJson`: kotlin.String, `signed`: kotlin.Boolean, `channel`: FfiChannel, `jwkThumbprint`: kotlin.ByteArray, `verifierId`: FfiVerifierIdForm): FfiSession {
             return FfiConverterTypeFfiSession.lift(
