@@ -11,7 +11,7 @@ existed.
 
 ## Unreleased
 
-`matcher.wasm` is 304,645 bytes against the 307,200-byte budget (303,418 at v0.11.0). The vector
+`matcher.wasm` is 304,616 bytes against the 307,200-byte budget (303,418 at v0.11.0). The vector
 set digest is unchanged: `9f482d7a3fb87cb1381d0dfb7a2fc396b6cd3c1eba07c5d76f44e47142b751ac`.
 
 ### Changed
