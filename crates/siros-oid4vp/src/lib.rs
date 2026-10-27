@@ -54,17 +54,15 @@ pub use error_code::ErrorCode;
 pub use handover::{ec_jwk_thumbprint, Handover, HandoverInvalid, JwkThumbprint};
 pub use protocol::Protocol;
 pub use semantic::{Person, SemanticIdError, SemanticIdentifier};
-pub use unverified::{
-    diagnose, CompactFault, NoQuery, PayloadFault, UnverifiedQuery, UnverifiedRequest,
-};
+pub use unverified::{diagnose, CompactFault, NoQuery, PayloadFault, UnverifiedRequest};
 
 #[cfg(feature = "crypto")]
 pub use fetch::{BodyLimit, Fetch, FetchResponse, HttpStatus, HttpsUrl, MediaType, Method};
 #[cfg(feature = "crypto")]
 pub use intake::{
-    AttestationFault, ChainFault, Effect, EffectResult, FormFault, IntakeError, IntakeState,
-    JwsError, JwsFault, KeyMaterial, Step, Trust, TrustAnswer, TrustSubject, Verdict,
-    VerifierInfoRule,
+    AttestationClaim, AttestationFault, ChainFault, ClaimsFault, Coordinate, Effect, EffectResult,
+    FormFault, IntakeError, IntakeState, JsonParameter, JwkFault, JwsError, JwsFault, KeyMaterial,
+    LeafKeyFault, Step, Trust, TrustAnswer, TrustSubject, Verdict, VerifierInfoRule,
 };
 #[cfg(feature = "crypto")]
 pub use response::{
@@ -78,5 +76,3 @@ pub use verified::{
     AccessCertificate, AttestationFormat, CertificateDer, ContentEncryption, Encryption,
     ResponseMode, VerifiedRequest, VerifierView,
 };
-#[cfg(feature = "crypto")]
-pub use x509::X509Chain;

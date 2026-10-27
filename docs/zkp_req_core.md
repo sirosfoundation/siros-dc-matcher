@@ -14,46 +14,51 @@ behind the nym_auth prover interface and the rulebooks' artifact pins.
 
 | Crate | Holds | Rust |
 | :-- | :-- | :-- |
-| `siros-zkp-req` | The protocol: the Credential Query with `_req` and `_req_sets`, `vp_formats_supported.zkp_req`, the usable pair of Section 1.3, the consent model, `ZkpPresentation`, the backends' `Proof`, the `vp_token`, the Verifier's steps 1 to 5 of Section 4.1. Depends on `serde` and `serde_json` only. | 1.82 |
-| `siros-zkp-req-nym-auth` | The catalogue (`pseudonym`, `age_check` with E and C), `verifier_id`, the Longfellow and Vega systems, the `Handover`, the request policy. With the default feature `credential`: the nym_auth form of an mdoc, the Wallet's credential tests, the presenter, the prover interface and the verifier (`siros-mdoc` with `crypto`, `zeroize`). With `request`: the nym_auth request of `siros-oid4vp`'s verified request. With `test-fixtures`: a test issuer, requests and a test host. | 1.82 |
+| `siros-zkp-req` | The protocol: the Credential Query with `_req` and `_req_sets`, `vp_formats_supported.zkp_req`, the usable pair of Section 1.3, `ZkpPresentation`, the backends' `Proof`, the `vp_token`, the Verifier's steps 1 to 5 of Section 4.1. Depends on `serde_json`, `siros-codec` and `siros-dcql`, which parses the Credential Query: `ZkpReqQuery::parse` reads the `CredentialQuery` it gives. | 1.82 |
+| `siros-zkp-req-nym-auth` | The catalogue (`pseudonym`, `age_check` with E and C), `verifier_id`, the Longfellow and Vega systems, the `Handover`, the request policy. With the default feature `credential`: the nym_auth form of an mdoc, the Wallet's credential tests, the prover interface and the verifier (`siros-mdoc` with `crypto`, `siros-trust` with `chain`, `zeroize`). With `request`: the nym_auth request of `siros-oid4vp`'s verified request, the answer of an option and its presentation. With `test-fixtures`: a test issuer, signed requests and a test host. | 1.82 |
 | `siros-dc-matcher-core` | The matcher. It plans `zkp_req` with the two crates above, without `credential`. | 1.82 |
-| `siros-dc-matcher-ffi` | Module `zkp_req`: the presenter and the verifier for Kotlin and Swift (UniFFI), around a host's prover. | 1.88 |
+| `siros-dc-matcher-ffi` | Module `zkp_req`: the session, the `vp_token` and the verifier for Kotlin and Swift (UniFFI), around a host's proof verifier. | 1.88 |
 | `siros-zkp-backend-longfellow` | `urn:circuits:longfellow:nym_auth:v1` on `longfellow-libzk-v1`: `LongfellowProver` and `LongfellowVerifier` over zk-cred-longfellow. | 1.95 |
 | `siros-zkp-backend-vega` | `urn:circuits:vega:nym_auth:v1` on `vega-v1`: `VegaNymAuth` over zk-cred-vega. | 1.95 |
-| `siros-zkp-req-wasm` | The presenter for the browser, with both backends (`wasm-bindgen`). | 1.95 |
+| `siros-zkp-req-wasm` | The browser's provers over both backends and the `vp_token` (`wasm-bindgen`). | 1.95 |
 
 The last three form the `proving/` workspace. zk-cred-longfellow and zk-cred-vega are edition
 2024, which Cargo 1.82 cannot read; in the root workspace they would stop every 1.82 build,
 the matcher's included. The matcher plans with the nym_auth catalogue and compiles no prover.
 
 The matcher decides which credentials can serve a query. Signing and proving follow the user's
-consent. Every `zkp_req` rule has one owner: the matcher, the FFI and the browser module call the
-same functions.
+consent. Every `zkp_req` rule has one owner: the matcher, the wallet's plan, the FFI and the
+browser module call the same functions.
 
 ## Flow
 
+The wallet's plan (`siros-presentation`) runs the Holder's side; `testing::prepared` runs it in
+the tests.
+
 ```
-Wallet presenter                          host (WalletContext)          prover (a backend)
-──────────────────────────────────────    ──────────────────────────    ──────────────────
-match_query(query, client_metadata,   ←   credentials, anchors, now
-            credentials, systems)
-  → candidates, or the refusals
+Wallet (the plan)                                   host                  prover (a backend)
+──────────────────────────────────────────────      ───────────────────   ──────────────────
+intake → VerifiedRequest → NymAuthRequest (N2)
+NymAuthQuery, ZkpFormats, NymAuthOption::pair
+TestedAttestation::of(mdoc, proof_time)          ←  wallet state, now
+AdmittedIssuer::resolve(trusted_authorities,     ←  trust store
+                        issuer chain, store, now)
+UsableAttestation::new(tested, admitted, query)
+Answer::new(pair, usable, secret_seed)
                     the wallet's one consent screen
-policy::check_request(request object) →   Session (Handover, verifier_id)
-prepare(candidate, …, session, seed)
-  → data_to_sign, key_id              →   sign(kid, "ES256", data)
-job(device_signature) → ProofJob      ─────────────────────────────→    prove(job)
-assemble(ProofOutput)                 ←─────────────────────────────    zk_proof, pseudonym
-  → ZkpPresentation
-vp_token_json / vp_token_cbor
+Prepared::new(answer, &NymAuthRequest)
+  → data_to_sign                                 →  sign(kid, "ES256", data)
+job(device_signature) → ProofJob                 ─────────────────────────→  prove(job)
+assemble(ProofOutput)                            ←─────────────────────────  zk_proof, pseudonym
+  → ZkpPresentation, vp_token
 
 Verifier: verify(query, client_metadata, session, presentation, now, tolerance,
-                 trust anchors, NymAuthProofVerifier) → system, results
+                 trust_anchors, NymAuthProofVerifier) → system, results
 ```
 
-Each phase checks its inputs again: `prepare` repeats `match` for the candidate, `job` verifies
-the device signature under the MSO's device key, and `assemble` accepts only the catalogue's
-pseudonym and a `zk_proof` of the backend's length.
+`Answer::new` refuses an attestation usable for another query, `job` verifies the device
+signature under the MSO's device key, and `assemble` accepts only the catalogue's pseudonym and
+a `zk_proof` of the backend's length.
 
 ## The prover interface
 
@@ -82,8 +87,7 @@ build it independently; equal statements are the binding.
 | Field | Value | Longfellow (Section 4) | Vega (Section 4) |
 | :-- | :-- | :-- | :-- |
 | `system`, `proof_backend` | the pair of the candidate | selects the circuits | selects the circuits |
-| `doc_type` | `eu.europa.ec.eudi.nym_auth.1` | a circuit constant | values 7 to 12 |
-| `issuer_certificate`, `issuer_key` | `inputs.issuer_key_set[0]` and its P-256 key Q | signature slots 1, 2 | values 0, 1 |
+| `issuer` | `inputs.issuer_key_set[0]` and its P-256 key Q | signature slots 1, 2 | values 0, 1 |
 | `proof_time` | T, `inputs.proof_time` | hash slots 1–160, 20 ASCII bytes | value 4, YYYYMMDDhhmmss |
 | `earliest` | E, or `None` | hash slots 161–240, `YYYY-MM-DD`; `0000-00-00` for `None` | value 2, YYYYMMDD; 0 for `None` |
 | `cutoff` | C, or `None` | hash slots 241–320, `YYYY-MM-DD`; `9999-12-31` for `None` | value 3, YYYYMMDD; 99991231 for `None` |
@@ -126,18 +130,19 @@ artifacts from their reference copies.
 
 ### Rust
 
-* `presenter::match_query(&MatchInput)`: `Match::Candidates`, `Rejected` (per credential, with
-  the Section 9 codes), `Unsupported` (per option and system) or `Invalid` (the request rule).
 * `catalogue::NymAuthQuery::from_query(ZkpReqQuery)` gives `Catalogued::NymAuth` for a query
   that follows the catalogue, `Catalogued::OtherType` for another credential type, or the
   `CatalogueRule` it breaks.
-* `attestation::UsableAttestation::new(data, anchors, proof_time)` reads a stored credential and
-  runs the tests of system rulebooks Section 7, step 1. `Unusable` carries the Section 9 codes of
-  the failed tests. `attestation::OpenedSeed::open(credential, &SecretSeed)` requires
-  `SHA-256(secret_seed) = ssc`; `prepare` opens it again for each presentation.
-* `policy::check_request(request_object, signed, channel)` and `CheckedRequest::handover(jwk
-  thumbprint)`, with `VerifierId::x509_san_dns(&ClientId, Intermediary)` or
-  `VerifierId::semantic(&SemanticIdentifier)`, give the `Session`.
+* `NymAuthQuery::options()` gives each option; `NymAuthOption::pair(formats, system, date)` gives
+  its `UsablePair` or the `PairRefusal` of Section 1.3.
+* `attestation::TestedAttestation::of(mdoc, proof_time)` runs the tests of system rulebooks
+  Section 7, step 1, on an mdoc `siros-mdoc` parsed: the nym_auth form, the issuer signature
+  under the Document Signer's key, and the validity; a parsed mdoc lists the digest of every
+  item. `Unusable` carries the Section 9 codes of the failed tests.
+* `attestation::UsableAttestation::new(tested, admitted, query)` takes the `AdmittedIssuer`
+  (`siros-trust`) of the same Document Signer for the same query (N3), or gives `OtherIssuer`.
+* `attestation::OpenedSeed::open(credential, &SecretSeed)` requires `SHA-256(secret_seed) = ssc`;
+  `Answer::new` opens it again for each answer.
 * `request::NymAuthRequest::new(&VerifiedRequest, VerifierIdForm)` (feature `request`) gives the
   `Session` of a verified request that is signed (`openid4vp-v1-signed` over the DC API),
   trusted, asks for an encrypted response and carries no registration certificate, or the
@@ -145,76 +150,61 @@ artifacts from their reference copies.
   access certificate's semantics identifier: under a WRPAC natural-person policy its
   `serialNumber`, under a legal-person policy its `organizationIdentifier` (ETSI TS 119 475,
   Clauses 5.1.3 and 5.1.5; TS 119 411-8).
-* `NymAuthQuery::options()` gives each option; `NymAuthOption::pair(formats, system, date)` gives
-  its `UsablePair` or the `PairRefusal` of Section 1.3.
-* `attestation::UsableAttestation::of(mdoc, anchors, proof_time)` tests an mdoc `siros-mdoc`
-  parsed.
-* `presenter::Answer::new(pair, attestation, secret_seed)` holds when the seed opens `ssc` and the
-  option's assertions hold; `Prepared::new(answer, &NymAuthRequest, key_id)` gives the `Prepared`
-  of the answer in the request's session.
-* `presenter::prepare(&ProveInput)` gives `Prepared`: `data_to_sign`, `key_id`, `statement`,
-  `job(device_signature)`, `assemble(&ProofOutput)`, and `prove(device_signature, prover)` for
-  a linked prover. `presenter::present` runs the phases with a `Signer` and a `NymAuthProver`.
+* `presenter::Answer::new(pair, attestation, secret_seed)` (feature `request`) holds when the
+  attestation is usable for the pair's query, the seed opens `ssc` and the option's assertions
+  hold; `Prepared::new(answer, &NymAuthRequest)` gives the `Prepared` of the answer in the
+  request's session: `data_to_sign`, `statement`, `job(device_signature)`,
+  `assemble(&ProofOutput)`, and `prove(device_signature, prover)` for a linked prover.
+* `request_object::check_request(request_object, signing, channel)` and
+  `CheckedRequest::handover(jwk_thumbprint)`, with `VerifierId::x509_san_dns(&ClientId, Intermediary)` or
+  `VerifierId::semantic(&SemanticIdentifier)`, give the Verifier's `Session`.
 * `LongfellowProver::load(circuits_zst)`, `LongfellowVerifier::load(circuits_zst)` and
   `VegaNymAuth::load(shapes_zst)` are the backends.
 * `siros_zkp_req::vp_token_json` and `vp_token_cbor` build the `vp_token`.
 * `verify::verify(&VerifyInput, &dyn NymAuthProofVerifier)` gives `Verified` or a `Rejection`
-  with its Section 9 code. `verify::check_presentation` runs the structural checks alone.
+  with its Section 9 code. Its `trust_anchors` are the Verifier's own certificates: the
+  Document Signer is one, or one of them signs it under TR3's path rules
+  (`IssuerChain::validate_path`): both certificates valid at the Verifier's clock, the anchor a
+  CA whose keyUsage, when present, allows keyCertSign, no critical extension TR3 does not
+  process, and ECDSA P-256 with SHA-256 or P-384 with SHA-384. `verify::check_presentation` runs
+  the structural checks alone.
 
 ### FFI (Kotlin, Swift)
 
-`zkp_req_match`, `zkp_req_session` (→ `FfiSession`), `zkp_req_jwk_thumbprint`,
-`zkp_req_prepare` (→ `FfiPrepared` with `data_to_sign`, `key_id`, `statement`, `job`,
-`assemble`), `zkp_req_vp_token_json`, `zkp_req_vp_token_cbor`, and `zkp_req_verify` with a
-host-implemented `FfiProofVerifier`. `ZkpReqError` carries the request's `error_code`
-(`invalid_request`, `access_denied`) and a stable `code`. Indexes are `u64`.
+`zkp_req_session` (→ `FfiSession`), `zkp_req_jwk_thumbprint`, `zkp_req_vp_token_json`,
+`zkp_req_vp_token_cbor`, and `zkp_req_verify` with a host-implemented `FfiProofVerifier` and the
+verifier's DER `trust_anchors`. `ZkpReqError` carries the request's `error_code`
+(`invalid_request`, `access_denied`) and a stable `code`. Indexes are `u64`. No FFI function
+produces a nym_auth proof: the facades wave exposes the wallet's plan, which proves.
 
 ### Browser
 
-`wasm-pack build proving/siros-zkp-req-wasm --target web`, for a desktop browser. Exports
-`ZkpProvers` (`loadLongfellow(circuitsZst)`, `loadVega(shapesZst)`, `systems()`), `matchQuery`,
-`session` (→ `ZkpSession`), `prepare` (→ `ZkpPrepared` with `dataToSign`, `keyId`, `statement`,
-`prove(provers, deviceSignature)`) and `vpTokenJson`. It proves on one thread: no Web Worker
-pool, no cross-origin isolation. Objects use the snake_case names of `@sirosfoundation/zkp-req`;
-bytes are `Uint8Array`. A refusal throws `{error_code, kind, code, errors?}`. Verification is
-available in Rust and through the FFI.
+`wasm-pack build proving/siros-zkp-req-wasm --target web`, for a desktop browser. JavaScript
+receives `ZkpProvers` (its constructor, `loadLongfellow(circuitsZst)`, `loadVega(shapesZst)` and
+`systems()`) and `vpTokenJson`. Bytes are `Uint8Array`. A refusal throws `{error_code, kind,
+code}`. No export proves: the facades wave exposes the wallet's plan, which proves through the
+loaded systems on one thread, with no Web Worker pool and no cross-origin isolation.
 
-The module is 2,850,910 bytes (761,127 with brotli at quality 11) and its JavaScript glue 31,300
-(6,097). It links zk-cred-longfellow under MPL-2.0, part of it derived from Google's
-longfellow-zk under Apache-2.0; a page that serves it carries their notices.
+It links zk-cred-longfellow under MPL-2.0, part of it derived from Google's longfellow-zk under
+Apache-2.0; a page that serves it carries their notices.
 
 ## The frontend package
 
 `@sirosfoundation/zkp-req` (wallet-frontend, `packages/zkp-req`) defines the wallet's side:
-`ZkpReq` runs `match`, the consent screen and `prove` across queries, and a host
-(`ZkpPresenterInPageHost`, `ZkpPresenterNativeWrapperHost`) runs a `ZkpPresenter`. Its in-page
-host creates a mock presenter today. `create_zkp_presenter(wallet)` over `siros-zkp-req-wasm`
-replaces it:
-
-* `match(req)`: `wallet.credentials`, `wallet.anchors` and `wallet.now`, then `matchQuery`;
-* `prove(candidate, req, session)`: `session`, `prepare`, `wallet.sign(keyId, "ES256",
-  dataToSign)`, then `prove` with the `ZkpProvers` the host loaded once.
-
-The native wrapper host reaches the same functions through the FFI, with the zk-cred prover the
-app ships. To follow the draft, the
-package's types change in these places:
-
-* `ZkpFormats` holds `proof_backend_values` and `system_id_values`, both required
-  (Section 1.2).
-* `Candidate` names `proof_backend` and the option: `req_set` and its `_req` indexes `items`.
-* `ZkpPresentation` holds `system_id`, `proof_backend`, `req_set` when the query has
-  `_req_sets`, `proof` and `results`. `issuer_key_set` and `proof_time` are members of
-  `Proof.inputs`. `prove` returns the encoded presentation, so `vp-token.ts` only wraps it;
-  its encoder writes `proof_time` with milliseconds, and the systems require the 20-character
-  form.
+`ZkpReq` runs `match`, the consent screen and `prove` across queries, and a host runs a
+`ZkpPresenter`. Its host contract hands the presenter DER anchors per query
+(`anchors(authorities)`). The core resolves `trusted_authorities` itself, against the trust
+store the host provisions (§4.18 of the architecture). The browser facade has no `matchQuery`
+or `prepare`; the facades wave gives it the plan in their place.
 
 ## Acceptance gates
 
 * **G1, honest path** (`tests/flow.rs`, `tests/zkp_req_api.rs` of the FFI). For each system
   (`urn:circuits:longfellow:nym_auth:v1` on `longfellow-libzk-v1`,
-  `urn:circuits:vega:nym_auth:v1` on `vega-v1`): a request is matched, the test host signs the
-  data to sign with a P-256 device key and runs a test prover, the presenter assembles the
-  presentation, ciborium reads it with the draft's structure, and the Verifier accepts it. The
+  `urn:circuits:vega:nym_auth:v1` on `vega-v1`): a signed request passes intake, the credential
+  is tested and its issuer admitted, the test host signs the data to sign with a P-256 device
+  key and runs a test prover, the presenter assembles the presentation, ciborium reads it with
+  the draft's structure, and the Verifier accepts it. The
   pseudonym equals `SHA-256(DST ‖ secret_seed ‖ 0^32 ‖ SHA-256(verifier_id))`, written out in
   the test.
 * **G1 with real proofs** (`proving/e2e/tests/real_proofs.rs`, ignored: run with `--release`
@@ -229,7 +219,10 @@ package's types change in these places:
   `Proof.zk_proof`, and `proof_backend` is new.
 * **G3, refusals** (`tests/refusals.rs`). One table holds one fixture per refusal rule: the
   request rules (`invalid_request`), `vp_formats_not_supported`, the Wallet codes of the system
-  rulebooks' Section 9, and the Verifier's codes. Each row asserts the exact typed error.
+  rulebooks' Section 9, and the Verifier's codes. Each row asserts the exact typed error. An
+  issuer the query's `trusted_authorities` do not admit matches nothing; `siros-trust` tests
+  that rule, and `tests/usable.rs` the binding of the admission to the Document Signer and the
+  query.
 * **G4, known answers** (`tests/known_answers.rs`). The `age_check` examples of the specs, the
   29 February cases worked by hand from the catalogue's rule, and the pseudonym and session
   vectors the provers ship.

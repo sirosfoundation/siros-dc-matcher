@@ -1,469 +1,377 @@
 //! The DCQL query model — OpenID4VP 1.0 §6.
 //!
-//! A faithful transcription of the wire format, with one deliberate
-//! relaxation noted on [`CredentialQuery::meta`]. The spec's own instruction
-//! shapes the rest: "Implementations MUST ignore any unknown properties"
-//! (§6), so nothing here rejects a query for carrying fields it does not
-//! recognise — a wallet that refuses tomorrow's extension is worse than one
-//! that ignores it.
+//! A query is constructed only by parsing ([`DcqlQuery::from_json`], [`DcqlQuery::parse`] or
+//! its `Deserialize`, and [`CredentialQuery::parse`] for one Credential Query). The parse reads
+//! each member once and refuses what §6.1, §6.1.1, §6.2, §6.3 and §7 forbid:
+//!
+//! - a member of the wrong JSON type, `null` included, and an absent REQUIRED member, `meta`
+//!   among them;
+//! - an empty `credentials`, `claims`, `claim_sets`, `credential_sets`, `options`,
+//!   `trusted_authorities` or `values` array;
+//! - a `values` element other than a string, an integer or a boolean;
+//! - an identifier of the wrong syntax or repeated;
+//! - a claims query without `id` in a Credential Query with `claim_sets`;
+//! - `claim_sets` without `claims`;
+//! - an empty `credential_sets` option, and a `claim_sets` or `credential_sets` option naming an
+//!   unknown id;
+//! - a malformed claims path, and an `mso_mdoc` claims path other than a namespace and an
+//!   element.
+//!
+//! "Implementations MUST ignore any unknown properties" (§6): a Credential Query keeps them as
+//! its extension members, for the profile of its format to read.
 
-use rustc_hash::FxHashSet;
+mod error;
+mod read;
 
-use serde::{Deserialize, Serialize};
+use serde::ser::SerializeMap;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 
-use crate::id::{QueryId, QueryIdError};
-use crate::path::PathComponent;
+use crate::authority::TrustedAuthorities;
+use crate::id::{ClaimId, QueryId};
+use crate::meta::CredentialFormat;
+use crate::path::ClaimPath;
+
+pub use error::{
+    ClaimMember, CredentialMember, FormFault, Member, Position, QueryError, QueryTextError,
+    SetMember,
+};
 
 /// A complete DCQL query (§6).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct DcqlQuery {
-    /// The requested credentials (§6.1). REQUIRED and non-empty per spec.
-    pub credentials: Vec<CredentialQuery>,
-    /// Constraints on which combinations to return (§6.2).
-    ///
-    /// Absent means something specific, not "no constraint": "If
-    /// `credential_sets` is not provided, the Verifier requests presentations
-    /// for all Credentials in `credentials`" (§6.4).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub credential_sets: Option<Vec<CredentialSetQuery>>,
+    credentials: Vec<CredentialQuery>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    credential_sets: Option<Vec<CredentialSetQuery>>,
 }
 
-/// One requested credential (§6.1).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// One requested credential (§6.1), with the defaults §6.1 states.
+#[derive(Debug, Clone, PartialEq)]
 pub struct CredentialQuery {
-    /// Identifies this query in the response and in `credential_sets`.
-    pub id: QueryId,
-    /// The requested credential format.
-    pub format: String,
-    /// Whether more than one credential may be returned for this query.
-    ///
-    /// "If omitted, the default value is `false`" (§6.1).
-    #[serde(default)]
-    pub multiple: bool,
-    /// Format-specific constraints on metadata and validity.
-    ///
-    /// The spec marks this REQUIRED, but "If empty, no specific constraints
-    /// are placed" (§6.1) — so a missing `meta` and an empty one ask for the
-    /// same thing. Defaulting rather than rejecting keeps a slightly
-    /// non-conformant verifier working, at no cost to what we match.
-    #[serde(default)]
-    pub meta: Map<String, Value>,
-    /// Authorities whose issuance the verifier will accept (§6.1.1).
-    ///
-    /// Parsed but not evaluated here: deciding whether an issuer chains to a
-    /// trusted authority needs certificate validation and trust-list state
-    /// that a query engine has no business holding. Callers that can answer it
-    /// should do so in their [`crate::eval::Policy`].
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub trusted_authorities: Option<Vec<Value>>,
-    /// Whether cryptographic holder binding is required.
-    ///
-    /// "The default value is `true`" (§6.1).
-    #[serde(default = "default_true", skip_serializing_if = "is_true")]
-    pub require_cryptographic_holder_binding: bool,
-    /// Claims requested from this credential (§6.3).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub claims: Vec<ClaimsQuery>,
-    /// Alternative combinations of [`Self::claims`], by their ids (§6.1).
-    ///
-    /// "`claim_sets` MUST NOT be present if `claims` is absent" (§6.4.1).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub claim_sets: Option<Vec<Vec<String>>>,
+    id: QueryId,
+    format: CredentialFormat,
+    multiple: Multiplicity,
+    meta: Map<String, Value>,
+    trusted_authorities: Option<TrustedAuthorities>,
+    holder_binding: HolderBinding,
+    claims: ClaimRequest,
+    extensions: Vec<(String, Value)>,
 }
 
-/// One requested claim (§6.3).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ClaimsQuery {
-    /// Identifies this claim. "REQUIRED if `claim_sets` is present in the
-    /// Credential Query; OPTIONAL otherwise" (§6.3).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub id: Option<String>,
-    /// Claims path pointer to the claim (§7).
-    pub path: Vec<PathComponent>,
-    /// Expected values. "the Wallet SHOULD return the claim only if the type
-    /// and value of the claim both match exactly for at least one of the
-    /// elements in the array" (§6.3).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub values: Option<Vec<Value>>,
-}
-
-/// A constraint on which combinations of credentials satisfy the request (§6.2).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CredentialSetQuery {
-    /// Each option is a set of [`CredentialQuery::id`]s that together satisfy
-    /// this use case. Satisfying any one option satisfies the set.
-    pub options: Vec<Vec<String>>,
-    /// Whether this set must be satisfied. "If omitted, the default value is
-    /// `true`" (§6.2).
-    #[serde(default = "default_true")]
-    pub required: bool,
-    /// Why the verifier wants this combination, for showing to the user (§6.2).
-    ///
-    /// "OPTIONAL. A string, integer or object" — all three, so a `Value` and
-    /// not a `String`. Nothing here interprets it: the whole purpose of the
-    /// field is to be displayed, and a wallet that drops it asks the user to
-    /// consent to a disclosure without telling them what it is for.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub purpose: Option<Value>,
-}
-
-fn default_true() -> bool {
-    true
-}
-
-#[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip_serializing_if shape
-fn is_true(b: &bool) -> bool {
-    *b
-}
-
-/// Why a document is not a usable DCQL query.
-///
-/// Deliberately short. §6 instructs implementations to "ignore any unknown
-/// properties", and this crate goes further in the same spirit: a query is
-/// rejected only when what the verifier wants cannot be determined, never for
-/// a deviation that can be read past. So a duplicated `id` is fatal — it makes
-/// a reference ambiguous — while a `credential_sets` option naming a query
-/// that does not exist is not, because an option the wallet cannot satisfy is
-/// simply an option it does not offer.
-///
-/// A credential query `id` is a [`QueryId`]: the parse refuses one that
-/// breaks §6.1, because the response keys the presentations by it.
-#[derive(Debug)]
-pub enum QueryError {
-    /// Not well-formed JSON, or not shaped like a DCQL query.
-    Json(serde_json::Error),
-    /// A credential query `id` breaks §6.1.
-    Id(QueryIdError),
-    /// Two credential queries share this `id`. §6.1 requires it to "be unique
-    /// across all Credential Query objects": a reference from
-    /// `credential_sets` to a duplicated id names two different requests, and
-    /// answering the first silently drops the second.
-    DuplicateCredentialId(QueryId),
-    /// Two claims queries within one credential query share this `id`. §6.3
-    /// requires uniqueness "within the particular claims array", for the same
-    /// reason one level down: `claim_sets` refers to claims by id.
-    DuplicateClaimId {
-        /// The `id` of the credential query holding the duplicate.
-        credential: QueryId,
-        /// The duplicated claims query `id`.
-        claim: String,
+/// The claims a Credential Query requests (§6.4.1).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum ClaimRequest {
+    /// `claims` is absent: no selectively disclosable claim is requested.
+    Nothing,
+    /// `claims` without `claim_sets`: every claim is requested.
+    All(Vec<ClaimsQuery>),
+    /// `claims` with `claim_sets`: the first option the credential satisfies.
+    Sets {
+        claims: Vec<ClaimsQuery>,
+        options: Vec<ClaimOption>,
     },
 }
 
-impl core::fmt::Display for QueryError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::Json(e) => write!(f, "not a DCQL query: {e}"),
-            Self::Id(e) => write!(f, "not a DCQL query: {e}"),
-            Self::DuplicateCredentialId(id) => {
-                write!(f, "two credential queries share the id {id:?} (§6.1)")
+/// A `claim_sets` option (§6.1): the claims queries it names, in its order.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClaimOption(Vec<NamedClaim>);
+
+/// A claims query an option names, with the id that names it.
+#[derive(Debug, Clone, PartialEq)]
+struct NamedClaim {
+    id: ClaimId,
+    claim: ClaimsQuery,
+}
+
+/// One requested claim (§6.3).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ClaimsQuery {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id: Option<ClaimId>,
+    path: ClaimPath,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    values: Option<Vec<Value>>,
+}
+
+/// A constraint on which combinations of credentials satisfy the request (§6.2).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CredentialSetQuery {
+    options: Vec<Vec<QueryId>>,
+    required: SetRequirement,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    purpose: Option<Value>,
+}
+
+/// Whether a Credential Query accepts several credentials (§6.1 `multiple`, `false` when
+/// absent).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Multiplicity {
+    /// One credential answers the query.
+    One,
+    /// "multiple Credentials can be returned for this Credential Query".
+    Several,
+}
+
+/// Whether a Credential Query requires cryptographic holder binding (§6.1
+/// `require_cryptographic_holder_binding`, `true` when absent).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum HolderBinding {
+    /// The presentation proves possession of the credential's key.
+    Required,
+    /// The presentation may go without a proof of possession.
+    Optional,
+}
+
+/// Whether a credential set must be satisfied (§6.2 `required`, `true` when absent).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SetRequirement {
+    /// The request is satisfied only with one of the set's options.
+    Required,
+    /// The Wallet may add one of the set's options.
+    Optional,
+}
+
+/// Declares the wire form of a flag: the boolean of its member, `$true` for `true`.
+macro_rules! flag {
+    ($name:ident, $true:ident) => {
+        impl Serialize for $name {
+            fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                serializer.serialize_bool(*self == Self::$true)
             }
-            Self::DuplicateClaimId { credential, claim } => write!(
-                f,
-                "credential query {credential:?} has two claims with the id {claim:?} (§6.3)"
-            ),
         }
+    };
+}
+
+flag!(Multiplicity, Several);
+flag!(HolderBinding, Required);
+flag!(SetRequirement, Required);
+
+impl Serialize for ClaimOption {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_seq(self.ids())
     }
 }
 
-impl std::error::Error for QueryError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Json(e) => Some(e),
-            Self::Id(e) => Some(e),
-            Self::DuplicateCredentialId(_) | Self::DuplicateClaimId { .. } => None,
+/// The members as the query holds them, its extension members last.
+impl Serialize for CredentialQuery {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut query = serializer.serialize_map(None)?;
+        query.serialize_entry("id", &self.id)?;
+        query.serialize_entry("format", &self.format)?;
+        query.serialize_entry("multiple", &self.multiple)?;
+        query.serialize_entry("meta", &self.meta)?;
+        if let Some(authorities) = &self.trusted_authorities {
+            query.serialize_entry("trusted_authorities", authorities)?;
         }
+        if self.holder_binding == HolderBinding::Optional {
+            query.serialize_entry("require_cryptographic_holder_binding", &self.holder_binding)?;
+        }
+        match &self.claims {
+            ClaimRequest::Nothing => {}
+            ClaimRequest::All(claims) => query.serialize_entry("claims", claims)?,
+            ClaimRequest::Sets { claims, options } => {
+                query.serialize_entry("claims", claims)?;
+                query.serialize_entry("claim_sets", options)?;
+            }
+        }
+        for (name, value) in &self.extensions {
+            query.serialize_entry(name, value)?;
+        }
+        query.end()
     }
 }
 
-impl From<serde_json::Error> for QueryError {
-    fn from(e: serde_json::Error) -> Self {
-        Self::Json(e)
+impl<'de> Deserialize<'de> for DcqlQuery {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Self::parse(&Value::deserialize(deserializer)?).map_err(serde::de::Error::custom)
     }
 }
 
 impl DcqlQuery {
-    /// Parse and validate a DCQL query from JSON.
-    ///
-    /// Validation is on this path rather than beside it, so that a caller
-    /// cannot hold a `DcqlQuery` whose ids are ambiguous. See [`QueryError`]
-    /// for what is checked, and for the larger set of things deliberately
-    /// tolerated.
+    /// The DCQL query of the JSON text `json`, as [`Self::parse`] reads its value.
     ///
     /// # Errors
     ///
-    /// [`QueryError`]: the document is not a well-formed DCQL query, or its
-    /// identifiers are not usable. Unknown properties are not an error (§6).
-    pub fn from_json(json: &str) -> Result<Self, QueryError> {
-        let document: Value = serde_json::from_str(json)?;
-        if let Some(error) = credential_ids(&document).find_map(|id| QueryId::parse(id).err()) {
-            return Err(QueryError::Id(error));
-        }
-        let query = Self::deserialize(document)?;
-        query.validate()?;
-        Ok(query)
+    /// [`QueryTextError`]: text that is no JSON, or the [`QueryError`] of its value.
+    pub fn from_json(json: &str) -> Result<Self, QueryTextError> {
+        let document = serde_json::from_str(json).map_err(QueryTextError::Json)?;
+        Self::parse(&document).map_err(QueryTextError::Query)
     }
 
-    /// Check that this query's identifiers are usable.
-    ///
-    /// Called by [`Self::from_json`]. Public for callers that build a query in
-    /// memory rather than parsing one, who need the same guarantee.
+    /// The DCQL query of the JSON value `document`.
     ///
     /// # Errors
     ///
-    /// [`QueryError`], excluding [`QueryError::Json`] and [`QueryError::Id`],
-    /// which only parsing can produce.
-    pub fn validate(&self) -> Result<(), QueryError> {
-        let mut seen: FxHashSet<&QueryId> =
-            FxHashSet::with_capacity_and_hasher(self.credentials.len(), Default::default());
-        for credential in &self.credentials {
-            if !seen.insert(&credential.id) {
-                return Err(QueryError::DuplicateCredentialId(credential.id.clone()));
-            }
-            credential.validate_claim_ids()?;
-        }
-        Ok(())
+    /// [`QueryError`]: the first rule of §6.1, §6.1.1, §6.2, §6.3 or §7 the document breaks.
+    /// Unknown properties are ignored (§6).
+    pub fn parse(document: &Value) -> Result<Self, QueryError> {
+        read::query(document)
+    }
+
+    /// The requested credentials (§6.1), in the Verifier's order.
+    #[must_use]
+    pub fn credentials(&self) -> &[CredentialQuery] {
+        &self.credentials
+    }
+
+    /// The constraints on which combinations to return (§6.2).
+    ///
+    /// Absent means something specific: "If `credential_sets` is not provided, the Verifier
+    /// requests presentations for all Credentials in `credentials`" (§6.4).
+    #[must_use]
+    pub fn credential_sets(&self) -> Option<&[CredentialSetQuery]> {
+        self.credential_sets.as_deref()
     }
 
     /// The credential query with the given id.
+    #[must_use]
     pub fn credential(&self, id: &str) -> Option<&CredentialQuery> {
         self.credentials.iter().find(|c| c.id == *id)
     }
 }
 
-/// The string `id` of each credential query of `document`, a DCQL query.
-fn credential_ids(document: &Value) -> impl Iterator<Item = &str> {
-    document
-        .get("credentials")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|credential| credential.get("id")?.as_str())
-}
-
 impl CredentialQuery {
-    /// The claims query with the given id.
+    /// The Credential Query `value` alone (§6.1). Its errors name it at position 0.
     ///
-    /// Unambiguous because [`DcqlQuery::validate`] rejects duplicated claim
-    /// ids; without that, this would resolve to whichever came first.
-    pub fn claim(&self, id: &str) -> Option<&ClaimsQuery> {
-        self.claims.iter().find(|c| c.id.as_deref() == Some(id))
+    /// # Errors
+    ///
+    /// [`QueryError`]: the first rule of §6.1, §6.1.1, §6.3 or §7 the query breaks.
+    pub fn parse(value: &Value) -> Result<Self, QueryError> {
+        read::credential_query(Position::new(0), value)
     }
 
-    /// §6.3 claim id uniqueness, within this credential query's `claims`.
-    fn validate_claim_ids(&self) -> Result<(), QueryError> {
-        let mut seen: FxHashSet<&str> =
-            FxHashSet::with_capacity_and_hasher(self.claims.len(), Default::default());
-        for id in self.claims.iter().filter_map(|c| c.id.as_deref()) {
-            if !seen.insert(id) {
-                return Err(QueryError::DuplicateClaimId {
-                    credential: self.id.clone(),
-                    claim: id.to_string(),
-                });
-            }
+    /// Identifies this query in the response and in `credential_sets`.
+    #[must_use]
+    pub fn id(&self) -> &QueryId {
+        &self.id
+    }
+
+    /// The requested credential format.
+    #[must_use]
+    pub fn format(&self) -> &CredentialFormat {
+        &self.format
+    }
+
+    /// Whether more than one credential may be returned for this query.
+    #[must_use]
+    pub fn multiplicity(&self) -> Multiplicity {
+        self.multiple
+    }
+
+    /// Format-specific constraints on metadata and validity. "If empty, no specific
+    /// constraints are placed" (§6.1).
+    #[must_use]
+    pub fn meta(&self) -> &Map<String, Value> {
+        &self.meta
+    }
+
+    /// The extension member `name`: a member §6.1 leaves undefined, as the Verifier sent it. A
+    /// profile of the format defines its own, such as `zkp_req`'s `_req`.
+    #[must_use]
+    pub fn extension(&self, name: &str) -> Option<&Value> {
+        self.extensions
+            .iter()
+            .find(|(member, _)| member == name)
+            .map(|(_, value)| value)
+    }
+
+    /// Authorities whose issuance the Verifier accepts (§6.1.1), when it names any.
+    #[must_use]
+    pub fn trusted_authorities(&self) -> Option<&TrustedAuthorities> {
+        self.trusted_authorities.as_ref()
+    }
+
+    /// Whether cryptographic holder binding is required.
+    #[must_use]
+    pub fn holder_binding(&self) -> HolderBinding {
+        self.holder_binding
+    }
+
+    /// Claims requested from this credential (§6.3).
+    #[must_use]
+    pub fn claims(&self) -> &[ClaimsQuery] {
+        match &self.claims {
+            ClaimRequest::Nothing => &[],
+            ClaimRequest::All(claims) | ClaimRequest::Sets { claims, .. } => claims,
         }
-        Ok(())
+    }
+
+    /// The `claim_sets` options of [`Self::claims`] (§6.1), in the Verifier's order of
+    /// preference.
+    #[must_use]
+    pub fn claim_sets(&self) -> Option<&[ClaimOption]> {
+        match &self.claims {
+            ClaimRequest::Sets { options, .. } => Some(options),
+            ClaimRequest::Nothing | ClaimRequest::All(_) => None,
+        }
+    }
+
+    pub(crate) fn claim_request(&self) -> &ClaimRequest {
+        &self.claims
+    }
+
+    /// The claims query with the given id. The parse refuses duplicated claim ids, so the id
+    /// names at most one.
+    #[must_use]
+    pub fn claim(&self, id: &str) -> Option<&ClaimsQuery> {
+        self.claims()
+            .iter()
+            .find(|c| c.id.as_ref().is_some_and(|own| *own == *id))
     }
 }
 
-#[cfg(test)]
-// `expect` alongside `unwrap`: a test that states why it expects to succeed
-// says what broke when it stops succeeding.
-#[allow(clippy::unwrap_used, clippy::expect_used)]
-mod tests {
-    use super::*;
-    use crate::id::QueryIdError;
-
-    /// Defaults the spec states explicitly, all of which change behaviour if
-    /// got wrong: a missing `required` would make a mandatory set optional,
-    /// and a missing `require_cryptographic_holder_binding` would silently
-    /// accept an unbound credential.
-    #[test]
-    fn omitted_fields_take_their_specified_defaults() {
-        let q = DcqlQuery::from_json(
-            r#"{"credentials":[{"id":"pid","format":"mso_mdoc","meta":{}}],
-                "credential_sets":[{"options":[["pid"]]}]}"#,
-        )
-        .unwrap();
-        let c = &q.credentials[0];
-        assert!(!c.multiple);
-        assert!(c.require_cryptographic_holder_binding);
-        assert!(q.credential_sets.unwrap()[0].required);
+impl ClaimsQuery {
+    /// Identifies this claim. "REQUIRED if `claim_sets` is present in the Credential Query;
+    /// OPTIONAL otherwise" (§6.3).
+    #[must_use]
+    pub fn id(&self) -> Option<&ClaimId> {
+        self.id.as_ref()
     }
 
-    /// "Implementations MUST ignore any unknown properties" (§6). A wallet
-    /// that rejects tomorrow's extension is worse than one that ignores it.
-    #[test]
-    fn unknown_properties_are_ignored() {
-        let q = DcqlQuery::from_json(
-            r#"{"credentials":[{"id":"pid","format":"mso_mdoc","meta":{},
-                 "some_future_field":{"a":1}}],
-                "another_future_field":[1,2,3]}"#,
-        )
-        .unwrap();
-        assert_eq!(q.credentials.len(), 1);
+    /// The claims path pointer to the claim (§7).
+    #[must_use]
+    pub fn path(&self) -> &ClaimPath {
+        &self.path
     }
 
-    /// `meta` is REQUIRED by the letter of §6.1, but an empty one means "no
-    /// constraints" — so a missing one asks for the same thing and is not
-    /// worth failing a request over.
-    #[test]
-    fn missing_meta_is_treated_as_no_constraints() {
-        let q =
-            DcqlQuery::from_json(r#"{"credentials":[{"id":"pid","format":"mso_mdoc"}]}"#).unwrap();
-        assert!(q.credentials[0].meta.is_empty());
+    /// Expected values. "the Wallet SHOULD return the claim only if the type and value of the
+    /// claim both match exactly for at least one of the elements in the array" (§6.3).
+    #[must_use]
+    pub fn values(&self) -> Option<&[Value]> {
+        self.values.as_deref()
+    }
+}
+
+impl ClaimOption {
+    /// The ids the option names, in its order.
+    pub fn ids(&self) -> impl Iterator<Item = &ClaimId> {
+        self.0.iter().map(|named| &named.id)
     }
 
-    /// §6.1: an `id` "MUST be unique across all Credential Query objects".
-    /// Without this check the duplicate is not merely tolerated — it changes
-    /// what gets offered, because `credential_sets` resolves a reference to
-    /// whichever entry came first and the second is answered by nobody.
-    #[test]
-    fn duplicate_credential_ids_are_rejected() {
-        let err = DcqlQuery::from_json(
-            r#"{"credentials":[{"id":"pid","format":"mso_mdoc"},
-                               {"id":"pid","format":"dc+sd-jwt"}]}"#,
-        )
-        .expect_err("a duplicated credential id is not usable");
-        assert!(
-            matches!(&err, QueryError::DuplicateCredentialId(id) if id == "pid"),
-            "got {err:?}"
-        );
+    /// The claims queries the option names, in its order.
+    pub fn claims(&self) -> impl Iterator<Item = &ClaimsQuery> {
+        self.0.iter().map(|named| &named.claim)
+    }
+}
+
+impl CredentialSetQuery {
+    /// The options: each a set of Credential Query ids that together satisfy this use case.
+    #[must_use]
+    pub fn options(&self) -> &[Vec<QueryId>] {
+        &self.options
     }
 
-    /// §6.3: a claims `id` must be "unique within the particular claims
-    /// array". Same defect one level down — `claim_sets` refers to claims by
-    /// id, so a duplicate makes an option ambiguous.
-    #[test]
-    fn duplicate_claim_ids_are_rejected() {
-        let err = DcqlQuery::from_json(
-            r#"{"credentials":[{"id":"pid","format":"mso_mdoc","claims":[
-                 {"id":"a","path":["ns","given_name"]},
-                 {"id":"a","path":["ns","family_name"]}],
-                 "claim_sets":[["a"]]}]}"#,
-        )
-        .expect_err("a duplicated claim id is not usable");
-        assert!(
-            matches!(
-                &err,
-                QueryError::DuplicateClaimId { credential, claim }
-                    if credential == "pid" && claim == "a"
-            ),
-            "got {err:?}"
-        );
+    /// Whether this set must be satisfied.
+    #[must_use]
+    pub fn requirement(&self) -> SetRequirement {
+        self.required
     }
 
-    /// Claims without ids are the ordinary case when there are no
-    /// `claim_sets`, and any number of them is fine — the uniqueness rule is
-    /// about ids, and `None` is not an id.
-    #[test]
-    fn claims_without_ids_do_not_collide() {
-        let q = DcqlQuery::from_json(
-            r#"{"credentials":[{"id":"pid","format":"mso_mdoc","claims":[
-                 {"path":["ns","given_name"]},
-                 {"path":["ns","family_name"]}]}]}"#,
-        )
-        .expect("unidentified claims are not duplicates");
-        assert_eq!(q.credentials[0].claims.len(), 2);
-    }
-
-    /// §6.1: an `id` is "a non-empty string consisting of alphanumeric,
-    /// underscore (_), or hyphen (-) characters". One rule per row.
-    #[test]
-    fn credential_ids_follow_section_6_1() {
-        let cases = [
-            ("pid_1-a", Ok(())),
-            ("", Err(QueryIdError::Empty)),
-            ("eu.europa.ec.eudi.pid.1", Err(QueryIdError::Character('.'))),
-            ("pïd", Err(QueryIdError::Character('ï'))),
-        ];
-        for (id, outcome) in cases {
-            assert_eq!(QueryId::parse(id).map(drop), outcome, "{id:?}");
-            let json = format!(r#"{{"credentials":[{{"id":"{id}","format":"mso_mdoc"}}]}}"#);
-            let parsed = DcqlQuery::from_json(&json).map(drop).map_err(|e| match e {
-                QueryError::Id(e) => Some(e),
-                _ => None,
-            });
-            assert_eq!(parsed, outcome.map_err(Some), "{id:?}");
-        }
-    }
-
-    /// A `credential_sets` option naming a query that does not exist is not
-    /// fatal either: an option the wallet cannot satisfy is one it does not
-    /// offer, which §6.4 already handles.
-    #[test]
-    fn a_dangling_credential_set_reference_is_tolerated() {
-        let q = DcqlQuery::from_json(
-            r#"{"credentials":[{"id":"pid","format":"mso_mdoc"}],
-                "credential_sets":[{"options":[["pid"],["nonexistent"]]}]}"#,
-        )
-        .expect("a dangling reference is an option, not a contradiction");
-        assert_eq!(q.credential_sets.as_ref().map(Vec::len), Some(1));
-    }
-
-    /// `purpose` is why the verifier wants a combination, and the wallet's
-    /// only chance to tell the user. §6.2 allows a string, an integer or an
-    /// object, so all three have to survive parsing.
-    #[test]
-    fn purpose_is_kept_in_all_three_shapes() {
-        let q = DcqlQuery::from_json(
-            r#"{"credentials":[{"id":"pid","format":"mso_mdoc"}],
-                "credential_sets":[
-                  {"options":[["pid"]],"purpose":"Proving your age"},
-                  {"options":[["pid"]],"purpose":1},
-                  {"options":[["pid"]],"purpose":{"id":1,"name":"Age check"}}]}"#,
-        )
-        .expect("valid DCQL");
-        let sets = q.credential_sets.expect("sets");
-        assert_eq!(
-            sets[0].purpose,
-            Some(Value::String("Proving your age".into()))
-        );
-        assert_eq!(sets[1].purpose, Some(Value::from(1)));
-        assert_eq!(
-            sets[2].purpose.as_ref().and_then(|p| p.get("name")),
-            Some(&Value::String("Age check".into()))
-        );
-        assert_eq!(
-            serde_json::to_string(&sets[0]).expect("serialize"),
-            r#"{"options":[["pid"]],"required":true,"purpose":"Proving your age"}"#,
-            "purpose round-trips; a wallet passing the query on must not drop it"
-        );
-    }
-
-    /// An absent `purpose` stays absent rather than serialising as null — a
-    /// verifier reading a re-encoded query should not see a field it never
-    /// sent.
-    #[test]
-    fn an_absent_purpose_is_not_serialised() {
-        let q = DcqlQuery::from_json(
-            r#"{"credentials":[{"id":"pid","format":"mso_mdoc"}],
-                "credential_sets":[{"options":[["pid"]]}]}"#,
-        )
-        .expect("valid DCQL");
-        let sets = q.credential_sets.expect("sets");
-        assert!(sets[0].purpose.is_none());
-        assert_eq!(
-            serde_json::to_string(&sets[0]).expect("serialize"),
-            r#"{"options":[["pid"]],"required":true}"#
-        );
-    }
-
-    /// A full query round-trips, including mdoc paths and value filters.
-    #[test]
-    fn realistic_query_round_trips() {
-        let json = r#"{"credentials":[{"id":"mdl","format":"mso_mdoc",
-            "meta":{"doctype_value":"org.iso.18013.5.1.mDL"},
-            "claims":[{"id":"a","path":["org.iso.18013.5.1","age_over_18"],"values":[true]}],
-            "claim_sets":[["a"]]}]}"#;
-        let q = DcqlQuery::from_json(json).unwrap();
-        let c = &q.credentials[0];
-        assert_eq!(c.claims[0].values.as_ref().unwrap()[0], Value::Bool(true));
-        assert_eq!(c.claim_sets.as_ref().unwrap()[0], vec!["a"]);
-        assert_eq!(c.claim("a").unwrap().path.len(), 2);
-
-        let back: DcqlQuery = serde_json::from_str(&serde_json::to_string(&q).unwrap()).unwrap();
-        assert_eq!(back, q);
+    /// `purpose`, as sent: why the Verifier wants this combination, for showing to the user.
+    /// OpenID4VP's drafts defined it as a string, an integer or an object; Section 6.2 of 1.0
+    /// defines no such member, so the parse keeps whatever value it holds.
+    #[must_use]
+    pub fn purpose(&self) -> Option<&Value> {
+        self.purpose.as_ref()
     }
 }

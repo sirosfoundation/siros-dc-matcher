@@ -1,11 +1,11 @@
 //! OpenID4VCI display metadata of one credential configuration, and the merger (D1).
 
 use serde_json::{Map, Value};
+use siros_wallet_state::{ConfigurationId, EmptyIdentifier, IssuerIdentifier};
 
 use crate::claims::{self, ClaimDescription, Label};
 use crate::entry::DisplayEntry;
 use crate::error::{DisplayError, EntryFault};
-use crate::ids::{ConfigurationId, IssuerIdentifier};
 use crate::json::{self, Entries};
 use crate::locale::Localized;
 
@@ -152,8 +152,10 @@ impl IssuerMetadata {
         };
         Ok(Self {
             record: record.clone(),
-            issuer: IssuerIdentifier::new(issuer),
-            configuration_id: ConfigurationId::new(configuration_id),
+            issuer: IssuerIdentifier::parse(issuer)
+                .map_err(|EmptyIdentifier| DisplayError::IssuerIdentifier)?,
+            configuration_id: ConfigurationId::parse(configuration_id)
+                .map_err(|EmptyIdentifier| DisplayError::ConfigurationId)?,
             issuer_display: claims::named_labels(object, DisplayError::Display)?,
             display: credential_display(metadata)?,
             claims,

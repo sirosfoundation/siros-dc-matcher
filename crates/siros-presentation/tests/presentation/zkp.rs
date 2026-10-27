@@ -7,10 +7,12 @@ use ciborium::Value as Ciborium;
 use serde_json::{json, Value};
 use siros_codec::base64url;
 use siros_codec::cbor::Value as Cbor;
+use siros_codec::date::DateTime;
 use siros_oid4vp::ClientId;
 use siros_oid4vp::Handover;
 use siros_presentation::WalletDisplay;
-use siros_zkp_req::ZkpPresentation;
+use siros_trust::Certificate;
+use siros_zkp_req::{ReqSetIndex, ZkpPresentation};
 use siros_zkp_req_nym_auth::presenter::Session;
 use siros_zkp_req_nym_auth::testing::{query, Spec, TestVerifier};
 use siros_zkp_req_nym_auth::verifier_id::{Intermediary, VerifierId};
@@ -60,17 +62,14 @@ fn accepted(query: &Value, presentation: &[u8], handover: &[u8]) {
             client_metadata: &client_metadata(),
             session: &session,
             presentation,
-            now: NOW + 5,
-            tolerance: Tolerance {
-                future: 60,
-                past: 600,
-            },
-            trust_anchors: &[nym_auth_issuer()],
+            now: DateTime::from_unix(NOW + 5).unwrap(),
+            tolerance: Tolerance::seconds(60, 600),
+            trust_anchors: &[Certificate::parse(&nym_auth_issuer()).unwrap()],
         },
         &TestVerifier,
     )
     .unwrap();
-    assert_eq!(verified.issuer_certificate, nym_auth_issuer());
+    assert_eq!(verified.issuer.certificate().der(), nym_auth_issuer());
 }
 
 #[test]
@@ -202,6 +201,9 @@ fn a_credential_answers_the_first_option_it_passes() {
     let response = respond(&wallet.input(&request, &fetches));
     let payload = decrypt_jwe(response.submission());
     let encoded = base64url::decode(payload["vp_token"]["nym"][0].as_str().unwrap()).unwrap();
-    assert_eq!(ZkpPresentation::decode(&encoded).unwrap().req_set, Some(1));
+    assert_eq!(
+        ZkpPresentation::decode(&encoded).unwrap().req_set,
+        Some(ReqSetIndex::new(1))
+    );
     accepted(&nym, &encoded, &redirect_handover());
 }

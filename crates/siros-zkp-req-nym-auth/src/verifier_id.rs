@@ -1,12 +1,10 @@
 //! The Verifier's identity, and `verifier_input` and the `sha-256` pseudonym it selects
 //! (nym_auth catalogue, `pseudonym`: "Verifier identity" and "Configurations").
 
-use std::fmt;
-
 use sha2::{Digest, Sha256};
 use siros_oid4vp::{ClientId, ClientIdPrefix, SemanticIdError, SemanticIdentifier};
 
-use crate::catalogue::{Config, Pseudonym};
+use crate::catalogue::Config;
 
 /// `verifier_id`: a UTF-8 string naming the Verifier, in the one form its trust framework
 /// fixes.
@@ -14,7 +12,7 @@ use crate::catalogue::{Config, Pseudonym};
 pub struct VerifierId(String);
 
 /// Why the `verifier_id` of the fixed form cannot be obtained. Each makes the query invalid.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VerifierIdRule {
     /// The form is `semantic` and no semantic identifier comes from an authenticated source.
     SemanticIdMissing,
@@ -43,11 +41,7 @@ impl VerifierIdRule {
     }
 }
 
-impl fmt::Display for VerifierIdRule {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(VerifierIdRule);
 
 impl std::error::Error for VerifierIdRule {}
 
@@ -103,36 +97,100 @@ pub enum VerifierIdForm {
     X509SanDns,
 }
 
-/// `verifier_input` of a `pseudonym` (the table of "Configurations").
-pub fn verifier_input(pseudonym: &Pseudonym, verifier_id: &VerifierId) -> [u8; 32] {
+/// Declares 32 bytes with one role in the `pseudonym` function.
+macro_rules! bytes32 {
+    ($(#[$doc:meta])* $name:ident) => {
+        $(#[$doc])*
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        pub struct $name([u8; 32]);
+
+        impl $name {
+            /// The value `bytes`.
+            #[must_use]
+            pub const fn new(bytes: [u8; 32]) -> Self {
+                Self(bytes)
+            }
+
+            /// The bytes.
+            #[must_use]
+            pub fn as_bytes(&self) -> &[u8; 32] {
+                &self.0
+            }
+        }
+
+        impl TryFrom<&[u8]> for $name {
+            type Error = LengthError;
+
+            fn try_from(bytes: &[u8]) -> Result<Self, LengthError> {
+                bytes
+                    .try_into()
+                    .map(Self)
+                    .map_err(|_| LengthError(bytes.len()))
+            }
+        }
+    };
+}
+
+/// Bytes of this length, where the value has 32.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct LengthError(pub usize);
+
+bytes32!(
+    /// `verifier_input`: what the configuration derives from the Verifier (the table of
+    /// "Configurations").
+    VerifierInput
+);
+
+bytes32!(
+    /// `prover_input`: what the configuration derives from the attestation; 32 zero bytes for
+    /// the `ssc` configurations.
+    ProverInput
+);
+
+bytes32!(
+    /// A pseudonym: the result of a `pseudonym` item.
+    PseudonymValue
+);
+
+impl ProverInput {
+    /// The `prover_input` of the `ssc` configurations.
+    pub const ZEROS: Self = Self([0; 32]);
+}
+
+/// `verifier_input` of a `pseudonym` with the configuration `config`.
+#[must_use]
+pub fn verifier_input(config: &Config, verifier_id: &VerifierId) -> VerifierInput {
     let id = sha256(verifier_id.as_str().as_bytes());
-    match &pseudonym.config {
+    VerifierInput(match config {
         Config::UserManagedPseudonymXsiteSsc => [0; 32],
         Config::AccountRecoverySsc { verifier_context } => {
-            sha256(&[id, sha256(verifier_context.as_bytes())].concat())
+            sha256(&[id, sha256(verifier_context.as_str().as_bytes())].concat())
         }
         Config::KnownOffenderMatchingSsc | Config::KnownOffenderMatchingPsc => id,
-    }
+    })
 }
 
 /// `pseudonym = SHA256(DST ‖ seed ‖ prover_input ‖ verifier_input)` with
-/// `DST = UTF-8("nym_auth/v1/<config>")`, the `sha-256` PRF of `ver` 1.
+/// `DST = UTF-8("nym_auth/v1/<config>")`, the `sha-256` PRF of `ver` 1. `seed` is the 16-byte
+/// `secret_seed`.
+#[must_use]
 pub fn pseudonym_sha256(
     config: &Config,
     seed: &[u8; 16],
-    prover_input: &[u8; 32],
-    verifier_input: &[u8; 32],
-) -> [u8; 32] {
+    prover_input: &ProverInput,
+    verifier_input: &VerifierInput,
+) -> PseudonymValue {
     let mut hash = Sha256::new();
     hash.update(b"nym_auth/v1/");
     hash.update(config.as_str().as_bytes());
     hash.update(seed);
-    hash.update(prover_input);
-    hash.update(verifier_input);
-    hash.finalize().into()
+    hash.update(prover_input.0);
+    hash.update(verifier_input.0);
+    PseudonymValue(hash.finalize().into())
 }
 
 /// SHA-256.
+#[must_use]
 pub fn sha256(bytes: &[u8]) -> [u8; 32] {
     Sha256::digest(bytes).into()
 }

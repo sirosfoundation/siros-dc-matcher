@@ -7,8 +7,6 @@ mod cose;
 mod jwe;
 mod vp_token;
 
-use std::fmt;
-
 use rand_core::CryptoRngCore;
 use serde_json::{Map, Value};
 
@@ -114,11 +112,7 @@ pub enum ReplyFault {
     NotObject,
 }
 
-impl fmt::Display for ResponseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(ResponseError);
 
 impl std::error::Error for ResponseError {}
 

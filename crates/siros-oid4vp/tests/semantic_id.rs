@@ -50,7 +50,8 @@ fn the_access_certificate_names_its_wallet_relying_party() {
     let natural = Policies::Listed(&[NATURAL]);
     let org = |value: &str| format!("CN=Verifier,2.5.4.97={value}");
     // (case, subject, policies, outcome)
-    let cases: [(&str, String, Policies, Result<&str, SemanticIdError>); 14] = [
+    // The refusal is named by its code: two refusals carry the DER error of their value.
+    let cases: [(&str, String, Policies, Result<&str, &str>); 14] = [
         (
             "a legal person's organizationIdentifier",
             org("VATBE-0876866142"),
@@ -74,73 +75,73 @@ fn the_access_certificate_names_its_wallet_relying_party() {
             "a policies extension that does not decode",
             org("VATBE-0876866142"),
             Policies::Malformed,
-            Err(SemanticIdError::Policies),
+            Err("semantic_id_policies"),
         ),
         (
             "no access certificate policy",
             org("VATBE-0876866142"),
             Policies::Listed(&[]),
-            Err(SemanticIdError::Unclassified),
+            Err("semantic_id_unclassified"),
         ),
         (
             "both a natural and a legal person policy",
             org("VATBE-0876866142"),
             Policies::Listed(&[NATURAL, LEGAL]),
-            Err(SemanticIdError::Contradictory),
+            Err("semantic_id_contradictory"),
         ),
         (
             "a natural person without serialNumber",
             org("VATBE-0876866142"),
             natural,
-            Err(SemanticIdError::Absent),
+            Err("semantic_id_absent"),
         ),
         (
             "two organizationIdentifiers",
             "CN=Verifier,2.5.4.97=VATBE-0876866142,2.5.4.97=NTRBE-0876866142".to_owned(),
             legal,
-            Err(SemanticIdError::Repeated),
+            Err("semantic_id_repeated"),
         ),
         (
             "a serialNumber in a UTF8String",
             // UTF8String "PNOSE-1".
             "CN=Jane Doe,2.5.4.5=#0c07504e4f53452d31".to_owned(),
             natural,
-            Err(SemanticIdError::Encoding),
+            Err("semantic_id_encoding"),
         ),
         (
             "a natural person's type reference for a legal person",
             org("PNOSE-200007292386"),
             legal,
-            Err(SemanticIdError::TypeReference),
+            Err("semantic_id_type_reference"),
         ),
         (
             "a lowercase country code",
             org("VATbe-0876866142"),
             legal,
-            Err(SemanticIdError::Country),
+            Err("semantic_id_country"),
         ),
         (
             "no hyphen-minus",
             org("VATBE0876866142"),
             legal,
-            Err(SemanticIdError::Separator),
+            Err("semantic_id_separator"),
         ),
         (
             "an empty identifier",
             org("VATBE-"),
             legal,
-            Err(SemanticIdError::Identifier),
+            Err("semantic_id_identifier"),
         ),
         (
             "a control character",
             // UTF8String "VATBE-08\u{1}".
             "CN=Verifier,2.5.4.97=#0c0956415442452d303801".to_owned(),
             legal,
-            Err(SemanticIdError::Character),
+            Err("semantic_id_character"),
         ),
     ];
     for (case, subject, policies, outcome) in cases {
         let read = semantic_id(&subject, policies);
-        assert_eq!(read.as_deref().map_err(|e| *e), outcome, "{case}");
+        assert_eq!(read.as_deref().map_err(|e| e.code()), outcome, "{case}");
     }
 }

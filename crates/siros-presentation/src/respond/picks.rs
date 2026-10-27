@@ -1,9 +1,7 @@
 //! The selection the user makes by picking credential picker entries (K3).
 
-use std::fmt;
-
 use itertools::Itertools;
-use siros_dcql::QueryId;
+use siros_dcql::{Multiplicity, QueryId};
 use siros_wallet_state::CredentialId;
 
 use super::selection::{Selection, Subset};
@@ -78,11 +76,7 @@ impl PickError {
     }
 }
 
-impl fmt::Display for PickError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(PickError);
 
 impl std::error::Error for PickError {}
 
@@ -254,9 +248,7 @@ impl Planned<'_> {
             .answered
             .answers(picks.query)
             .ok_or(Inconsistency::Query(picks.query))?;
-        Ok(answers
-            .query()
-            .multiple
+        Ok((answers.query().multiplicity() == Multiplicity::Several)
             .then(|| Subset::new(picks.id.clone(), picks.credentials.clone())))
     }
 }

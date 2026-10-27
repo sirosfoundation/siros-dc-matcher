@@ -17,7 +17,7 @@
     }
   },
   "expect": {
-    "error": "query_not_object"
+    "error": "dcql_malformed"
   },
-  "v0_4": "Same rule; the code follows the draft's wording."
+  "v0_4": "Same rule; DCQL refuses it with its code."
 }

@@ -6,9 +6,9 @@ use rand_core::CryptoRngCore;
 use serde_json::Value;
 use siros_credential::{Credential, Parsed, UsableCredential};
 use siros_dcql::mdoc_components;
-use siros_mdoc::{ElementId, Mdoc};
+use siros_mdoc::{ElementId, Mdoc, SessionTranscript};
 use siros_oid4vp::{Presentation, VerifiedRequest};
-use siros_sdjwt::SdJwt;
+use siros_sdjwt::{Audience, BeforeEpoch, KbNonce, NumericDate, SdJwt};
 use siros_transaction_data::{Amr, Jti, KbJwtInputs, MemberBinding};
 use siros_wallet_state::{CredentialId, KeyId};
 use siros_zkp_req_nym_auth::presenter::Prepared as NymPrepared;
@@ -17,7 +17,9 @@ use super::forms::{DeviceResponse, Form};
 use super::selection::Chosen;
 use super::sign::{key_id, Sign, SignId, SigningInput};
 use crate::error::{Inconsistency, PresentationError};
-use crate::matching::{Answer, Claims, HolderBinding, ProofChoice};
+use siros_dcql::HolderBinding;
+
+use crate::matching::{Answer, Candidate, Claims, ProofChoice};
 use crate::plan::{nym_answer, Bound, Offered};
 use siros_dcql::QueryId;
 
@@ -34,33 +36,19 @@ pub(crate) struct PendingMember<'p> {
     pub(crate) credentials: Vec<(CredentialId, Form<'p>)>,
 }
 
-/// The audience of a response (A6): `origin:` and the calling origin over the Digital
-/// Credentials API, the Client Identifier with its prefix over redirects, signed requests
-/// included (A.4).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Audience(String);
-
-impl Audience {
-    /// The audience of `request`.
-    ///
-    /// # Errors
-    ///
-    /// [`PresentationError::AudienceMissing`] for a request without an origin or a Client
-    /// Identifier.
-    pub(crate) fn of(request: &VerifiedRequest) -> Result<Self, PresentationError> {
-        match (request.origin(), request.verifier().client_id()) {
-            (Some(origin), _) => Ok(Self(format!("origin:{origin}"))),
-            (None, Some(client_id)) => Ok(Self(client_id.as_str().to_owned())),
-            (None, None) => Err(PresentationError::AudienceMissing),
-        }
-    }
-
-    pub(crate) fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    pub(crate) fn into_string(self) -> String {
-        self.0
+/// The audience of a response to `request` (A6): `origin:` and the calling origin over the
+/// Digital Credentials API, the Client Identifier with its prefix over redirects, signed
+/// requests included (A.4).
+///
+/// # Errors
+///
+/// [`PresentationError::AudienceMissing`] for a request without an origin or a Client
+/// Identifier.
+pub(crate) fn audience(request: &VerifiedRequest) -> Result<Audience, PresentationError> {
+    match (request.origin(), request.verifier().client_id()) {
+        (Some(origin), _) => Ok(Audience::new(&format!("origin:{origin}"))),
+        (None, Some(client_id)) => Ok(Audience::new(client_id.as_str())),
+        (None, None) => Err(PresentationError::AudienceMissing),
     }
 }
 
@@ -133,9 +121,7 @@ impl<'p, 'a> Chosen<'p, 'a> {
                         let extra = self.transaction_claims(credential, binding, rng)?;
                         self.claims(credential, claims, &extra, id)?
                     }
-                    Answer::Proof(choice) => {
-                        self.proof(member, candidate.credential(), choice, id)?
-                    }
+                    Answer::Proof(choice) => self.proof(member, candidate, choice, id)?,
                 };
                 if let Form::Unsigned(unsigned, _) = &form {
                     signs.push(Sign::new(id, credential, unsigned.signing_input())?);
@@ -211,12 +197,11 @@ impl<'p, 'a> Chosen<'p, 'a> {
             )));
         }
         let input = self.planned.input;
-        let iat = u64::try_from(input.now.unix()).map_err(|_| PresentationError::Time)?;
-        let audience = Audience::of(input.request)?;
+        let iat = NumericDate::of(input.now).map_err(|BeforeEpoch| PresentationError::Time)?;
         let binding = presentation.key_binding(
             iat,
-            audience.as_str(),
-            input.request.nonce().as_str(),
+            &audience(input.request)?,
+            &KbNonce::new(input.request.nonce().as_str()),
             extra,
         )?;
         Ok(Form::unsigned(binding, id))
@@ -234,7 +219,7 @@ impl<'p, 'a> Chosen<'p, 'a> {
             .pointers()
             .iter()
             .map(|pointer| {
-                let (name_space, identifier) = mdoc_components(pointer.components())?;
+                let (name_space, identifier) = mdoc_components(pointer)?;
                 Ok::<_, PresentationError>(ElementId {
                     name_space,
                     identifier,
@@ -242,19 +227,22 @@ impl<'p, 'a> Chosen<'p, 'a> {
             })
             .try_collect()?;
         let disclosure = mdoc.disclose(&elements, Vec::new())?;
-        let transcript = self.planned.input.request.handover().session_transcript();
-        let input = SigningInput::new(disclosure.signing_input(&transcript));
+        let transcript =
+            SessionTranscript::new(self.planned.input.request.handover().session_transcript());
+        let input = SigningInput::new(disclosure.signing_input(&transcript).as_bytes().to_vec());
         Ok(Form::unsigned(DeviceResponse { disclosure, input }, id))
     }
 
-    /// The nym_auth statement of `choice` by `credential` in the request's session.
+    /// The nym_auth statement of `choice` by `candidate`'s credential, admitted as the candidate
+    /// carries it, in the request's session.
     fn proof(
         &self,
         member: &Offered<'p, 'a>,
-        credential: &UsableCredential<'_>,
+        candidate: &Candidate<UsableCredential<'_>>,
         choice: &ProofChoice,
         id: SignId,
     ) -> Result<Form<'p>, PresentationError> {
+        let credential = candidate.credential();
         let nym_auth = self
             .planned
             .nym_auth
@@ -264,8 +252,14 @@ impl<'p, 'a> Chosen<'p, 'a> {
             .answers
             .zkp()
             .ok_or(Inconsistency::ZkpQuery(member.query))?;
-        let answer = nym_answer(credential, zkp, choice, self.planned.input.now)?;
-        let prepared = NymPrepared::new(answer, nym_auth, &key_id(credential.credential())?)?;
+        let answer = nym_answer(
+            credential,
+            candidate.admission(),
+            zkp,
+            choice,
+            self.planned.input.now,
+        )?;
+        let prepared = NymPrepared::new(answer, nym_auth)?;
         Ok(Form::unsigned(prepared, id))
     }
 }

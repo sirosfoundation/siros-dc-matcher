@@ -1,8 +1,8 @@
 //! Claim rows: a label and a typed value per claim (D2 to D5).
 
 use siros_codec::date::{Date, DateTime};
-use siros_credential::{ClaimPointer, Credential, TypedValue};
-use siros_dcql::PathComponent;
+use siros_credential::{Credential, TypedValue};
+use siros_dcql::{ClaimPath, PathComponent};
 
 use crate::cache::DisplayCache;
 use crate::claims::{describes, ClaimDescription};
@@ -83,7 +83,7 @@ impl DisplayCache {
     pub fn claim_rows(
         &self,
         credential: &Credential,
-        pointers: &[ClaimPointer],
+        pointers: &[ClaimPath],
         preferences: &[Locale],
     ) -> Result<Vec<ClaimRow>, DisplayError> {
         let labels = Labels {

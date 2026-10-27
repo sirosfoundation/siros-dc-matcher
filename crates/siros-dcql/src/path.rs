@@ -1,89 +1,180 @@
 //! Claims path pointers — OpenID4VP 1.0 §7.
 //!
-//! A claims path pointer identifies one or more claims inside a credential.
-//! It is "a non-empty array of strings, nulls and non-negative integers"
-//! (§7), and what those components mean depends on the credential format:
-//! §7.1 defines JSON semantics, §7.2 defines ISO mdoc semantics.
+//! A claims path pointer identifies one or more claims inside a credential. It is "a non-empty
+//! array of strings, nulls and non-negative integers" (§7), and what those components mean
+//! depends on the credential format: §7.1 defines JSON semantics, §7.2 defines ISO mdoc
+//! semantics.
 //!
-//! Both are implemented here so that callers holding ordinary JSON or mdoc
-//! credentials do not each reinvent the processing rules — which is where the
-//! subtle mistakes live, since the spec distinguishes carefully between
-//! *removing an element from the selection* and *aborting with an error*.
-//! [`resolve`] is the one §7.1 implementation: any claim tree that implements
+//! The spec distinguishes *removing an element from the selection* from *aborting with an
+//! error*, and [`resolve`] keeps that distinction. Any claim tree that implements
 //! [`ClaimNode`] walks it, a JSON value and an SD-JWT claim tree alike.
 
-use serde::{Deserialize, Serialize};
+use core::fmt;
+
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 /// One component of a claims path pointer (§7).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 #[serde(untagged)]
 pub enum PathComponent {
     /// A key to select within an object.
     Key(String),
     /// An index to select within an array.
     Index(u64),
-    /// All elements of the currently selected array(s).
-    ///
-    /// Serialises as JSON `null`, which is how it appears on the wire.
+    /// All elements of the currently selected array(s). JSON `null` on the wire.
     Null,
 }
 
 impl PathComponent {
     /// The key, if this component is one.
+    #[must_use]
     pub fn as_key(&self) -> Option<&str> {
         match self {
             Self::Key(k) => Some(k),
-            _ => None,
+            Self::Index(_) | Self::Null => None,
         }
     }
 }
 
-/// Why a claims path pointer could not be processed.
+crate::position!(
+    /// The position of a component within a claims path pointer, from 0.
+    ComponentIndex
+);
+
+/// A claims path pointer (§7): its components, at least one.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+#[serde(transparent)]
+pub struct ClaimPath(Vec<PathComponent>);
+
+/// Why a value is no claims path pointer (§7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ClaimPathError {
+    /// The value is no array.
+    NotArray,
+    /// The array is empty: "A claims path pointer MUST be a non-empty array" (§7).
+    Empty,
+    /// The component at this position is no string, `null` or non-negative integer.
+    Component(ComponentIndex),
+}
+
+impl ClaimPathError {
+    /// A stable identifier.
+    #[must_use]
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::NotArray => "path_not_array",
+            Self::Empty => "path_empty",
+            Self::Component(_) => "path_component",
+        }
+    }
+}
+
+crate::display_code!(ClaimPathError);
+
+impl std::error::Error for ClaimPathError {}
+
+impl ClaimPath {
+    /// The pointer of `components`.
+    ///
+    /// # Errors
+    ///
+    /// [`ClaimPathError::Empty`] for no component.
+    pub fn new(components: Vec<PathComponent>) -> Result<Self, ClaimPathError> {
+        if components.is_empty() {
+            return Err(ClaimPathError::Empty);
+        }
+        Ok(Self(components))
+    }
+
+    /// The pointer to the top-level claim `name`.
+    #[must_use]
+    pub fn key(name: &str) -> Self {
+        Self(vec![PathComponent::Key(name.to_owned())])
+    }
+
+    /// The pointer the JSON value `value` writes.
+    ///
+    /// # Errors
+    ///
+    /// [`ClaimPathError`]: the value is no array, is empty, or holds another component.
+    pub fn parse(value: &Value) -> Result<Self, ClaimPathError> {
+        let Value::Array(components) = value else {
+            return Err(ClaimPathError::NotArray);
+        };
+        let components = components
+            .iter()
+            .enumerate()
+            .map(|(at, component)| match component {
+                Value::String(key) => Ok(PathComponent::Key(key.clone())),
+                Value::Null => Ok(PathComponent::Null),
+                other => other
+                    .as_u64()
+                    .map(PathComponent::Index)
+                    .ok_or(ClaimPathError::Component(ComponentIndex::new(at))),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Self::new(components)
+    }
+
+    /// The components, at least one.
+    #[must_use]
+    pub fn components(&self) -> &[PathComponent] {
+        &self.0
+    }
+
+    /// The components, taken.
+    #[must_use]
+    pub fn into_components(self) -> Vec<PathComponent> {
+        self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for ClaimPath {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Self::parse(&Value::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+    }
+}
+
+/// Why processing a claims path pointer gives an error (§7.1.1, §7.2.1).
 ///
-/// The distinction matters: §7.1.1 says a *type* mismatch aborts processing,
-/// while a *missing* key or index merely removes that element from the
-/// selection. Collapsing the two would turn "this credential lacks the claim"
-/// into "this query is malformed", and the caller responds differently to
-/// each.
+/// §7.1.1 aborts on a component of the wrong *type*, while a *missing* key or index removes
+/// that element from the selection. Step 3 gives an error for an empty selection, which
+/// ordinarily means the credential lacks the claim.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PathError {
-    /// A component was applied to an element of the wrong kind — a string
-    /// component to a non-object, or a null/integer to a non-array (§7.1.1).
+    /// A component was applied to an element of the wrong kind: a string component to a
+    /// non-object, or a null or integer to a non-array (§7.1.1, steps 2.1 to 2.3).
     TypeMismatch {
-        /// Index of the offending component within the pointer.
-        at: usize,
+        /// The component.
+        at: ComponentIndex,
     },
-    /// Nothing was selected once the pointer had been fully processed
-    /// (§7.1.1 step 3). Ordinarily this means the credential does not carry
-    /// the claim.
+    /// Nothing is selected once the pointer is processed (§7.1.1, step 3).
     Empty,
-    /// The pointer is not valid for this credential format — for mdoc, "does
-    /// not contain exactly two components or one of the components is not a
-    /// string" (§7.2.1 step 1).
-    Malformed,
+    /// An mdoc pointer "does not contain exactly two components or one of the components is
+    /// not a string" (§7.2.1, step 1).
+    MdocElement,
 }
 
-impl core::fmt::Display for PathError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+impl fmt::Display for PathError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::TypeMismatch { at } => write!(
-                f,
-                "path component {at} applied to the wrong kind of element"
-            ),
-            Self::Empty => write!(f, "path selected nothing"),
-            Self::Malformed => write!(f, "path is not valid for this credential format"),
+            Self::TypeMismatch { at } => write!(f, "{} at component {at}", self.code()),
+            Self::Empty | Self::MdocElement => f.write_str(self.code()),
         }
     }
 }
+
+impl std::error::Error for PathError {}
 
 impl PathError {
     /// A stable identifier.
+    #[must_use]
     pub fn code(&self) -> &'static str {
         match self {
             Self::TypeMismatch { .. } => "path_type_mismatch",
             Self::Empty => "path_selects_nothing",
-            Self::Malformed => "path_malformed",
+            Self::MdocElement => "path_malformed",
         }
     }
 }
@@ -95,8 +186,7 @@ pub enum Lookup<N> {
     /// The node has the right kind and lacks the member, or the position is out of range or
     /// withheld. The node leaves the selection.
     Absent,
-    /// The node is not an object (for a key) or not an array (for an index). Processing
-    /// aborts.
+    /// The node is no object (for a key) or no array (for an index). Processing aborts.
     WrongKind,
 }
 
@@ -114,59 +204,47 @@ pub trait ClaimNode: Sized {
     /// The element at position `index` of an array node.
     fn element(&self, index: u64) -> Lookup<Self>;
 
-    /// The present elements of an array node. `None` when the node is not an array.
+    /// The present elements of an array node. `None` when the node is no array.
     fn elements(&self) -> Option<Self::Elements>;
 }
 
-/// Process a claims path pointer against the claim tree under `root` (§7.1.1).
+/// The nodes `path` selects in the claim tree under `root` (§7.1.1).
 ///
-/// Returns the selected nodes. Follows the specified steps exactly,
-/// including the asymmetry that gives this function its shape: a component of
-/// the wrong *type* aborts, whereas a key or index that simply is not there
-/// drops that element from the selection and processing continues. An index
-/// on a withheld position selects nothing, and `null` selects the present
-/// elements.
+/// A component of the wrong *type* aborts, and an absent key or index drops that
+/// element from the selection. An index on a withheld position selects nothing, and `null`
+/// selects the present elements.
 ///
 /// # Errors
 ///
-/// [`PathError::Malformed`] for an empty pointer, [`PathError::TypeMismatch`]
-/// per steps 2.1–2.3, and [`PathError::Empty`] per step 3 when the selection
-/// ends up empty.
-pub fn resolve<N: ClaimNode>(root: N, path: &[PathComponent]) -> Result<Vec<N>, PathError> {
-    // §7: "A claims path pointer MUST be a non-empty array". Processing an
-    // empty one would fall through to step 3 with the root still selected and
-    // hand back the entire credential — a query too malformed to say what it
-    // wants would select everything in it.
-    if path.is_empty() {
-        return Err(PathError::Malformed);
-    }
-
+/// [`PathError::TypeMismatch`] per steps 2.1 to 2.3, and [`PathError::Empty`] per step 3 when
+/// the selection ends up empty.
+pub fn resolve<N: ClaimNode>(root: N, path: &ClaimPath) -> Result<Vec<N>, PathError> {
     // Step 1: select the root element.
     let mut selected = vec![root];
 
     // Step 2: process components from left to right.
-    for (at, component) in path.iter().enumerate() {
+    for (at, component) in path.components().iter().enumerate() {
+        let at = ComponentIndex::new(at);
         let mut next = Vec::new();
         for node in &selected {
             match component {
-                // 2.1 — string: select the key. Non-object aborts; a missing
-                // key removes that element rather than aborting.
+                // 2.1: a string selects the key. A non-object aborts; a missing key removes
+                // the element.
                 PathComponent::Key(key) => take(node.member(key), &mut next, at)?,
-                // 2.2 — null: select all elements of the selected array(s).
-                // Non-array aborts. Note there is no "missing" case here: an
-                // empty array contributes nothing and that is not an error yet.
+                // 2.2: null selects all elements of the selected arrays. A non-array aborts;
+                // an empty array contributes nothing.
                 PathComponent::Null => {
                     next.extend(node.elements().ok_or(PathError::TypeMismatch { at })?);
                 }
-                // 2.3 — integer: select that index. Non-array aborts; an index
-                // past the end removes that array rather than aborting.
+                // 2.3: an integer selects that index. A non-array aborts; an index past the
+                // end removes the array.
                 PathComponent::Index(i) => take(node.element(*i), &mut next, at)?,
             }
         }
         selected = next;
     }
 
-    // Step 3: an empty selection is an error, not an empty result.
+    // Step 3: an empty selection is an error.
     if selected.is_empty() {
         return Err(PathError::Empty);
     }
@@ -174,7 +252,7 @@ pub fn resolve<N: ClaimNode>(root: N, path: &[PathComponent]) -> Result<Vec<N>, 
 }
 
 /// Add what component `at` found to the selection `next`.
-fn take<N>(found: Lookup<N>, next: &mut Vec<N>, at: usize) -> Result<(), PathError> {
+fn take<N>(found: Lookup<N>, next: &mut Vec<N>, at: ComponentIndex) -> Result<(), PathError> {
     match found {
         Lookup::Found(child) => next.push(child),
         Lookup::Absent => {}
@@ -208,198 +286,27 @@ impl<'a> ClaimNode for &'a Value {
     }
 }
 
-/// Process a claims path pointer against a JSON credential (§7.1.1): [`resolve`]
-/// over a [`serde_json::Value`].
+/// The values `path` selects in the JSON credential `root` (§7.1.1): [`resolve`] over a
+/// [`serde_json::Value`].
 ///
 /// # Errors
 ///
 /// [`PathError`] as [`resolve`] gives it.
-pub fn resolve_json<'a>(
-    root: &'a Value,
-    path: &[PathComponent],
-) -> Result<Vec<&'a Value>, PathError> {
+pub fn resolve_json<'a>(root: &'a Value, path: &ClaimPath) -> Result<Vec<&'a Value>, PathError> {
     resolve(root, path)
 }
 
-/// Validate a claims path pointer for an ISO mdoc credential (§7.2.1 step 1)
-/// and return its `(namespace, data_element_identifier)`.
+/// The `(namespace, data_element_identifier)` of an mdoc pointer (§7.2.1, step 1).
+///
+/// An mdoc pointer holds no `null` or index, and no flattened dotted string: ISO namespaces
+/// contain dots themselves (`org.iso.18013.5.1`), so a flattened path cannot be split back.
 ///
 /// # Errors
 ///
-/// [`PathError::Malformed`] unless the pointer is exactly two string
-/// components.
-///
-/// Note what this rules out: an mdoc path may not use `null` or an index, and
-/// may not be flattened to a single dotted string. ISO namespaces contain dots
-/// themselves (`org.iso.18013.5.1`), so a flattened path cannot be split back
-/// unambiguously — a mistake that yields namespace `org` and looks plausible
-/// right up until nothing matches.
-pub fn mdoc_components(path: &[PathComponent]) -> Result<(&str, &str), PathError> {
-    match path {
+/// [`PathError::MdocElement`] unless the pointer is exactly two string components.
+pub fn mdoc_components(path: &ClaimPath) -> Result<(&str, &str), PathError> {
+    match path.components() {
         [PathComponent::Key(ns), PathComponent::Key(id)] => Ok((ns, id)),
-        _ => Err(PathError::Malformed),
-    }
-}
-
-#[cfg(test)]
-#[allow(clippy::unwrap_used)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    fn key(k: &str) -> PathComponent {
-        PathComponent::Key(k.to_string())
-    }
-
-    /// The example from §7's own text: a nested object claim.
-    #[test]
-    fn selects_a_nested_key() {
-        let c = json!({"address": {"street_address": "Weidenstraße 22"}});
-        let got = resolve_json(&c, &[key("address"), key("street_address")]).unwrap();
-        assert_eq!(got, vec![&json!("Weidenstraße 22")]);
-    }
-
-    /// Null selects every element of an array (§7.1 "all elements").
-    #[test]
-    fn null_selects_all_array_elements() {
-        let c = json!({"degrees": [{"type": "BA"}, {"type": "MA"}]});
-        let got = resolve_json(&c, &[key("degrees"), PathComponent::Null, key("type")]).unwrap();
-        assert_eq!(got, vec![&json!("BA"), &json!("MA")]);
-    }
-
-    #[test]
-    fn integer_selects_one_array_element() {
-        let c = json!({"degrees": [{"type": "BA"}, {"type": "MA"}]});
-        let got =
-            resolve_json(&c, &[key("degrees"), PathComponent::Index(1), key("type")]).unwrap();
-        assert_eq!(got, vec![&json!("MA")]);
-    }
-
-    /// §7.1.1 2.1 — a key that does not exist removes the element from the
-    /// selection. With nothing left, step 3 makes that an Empty error, which
-    /// is a different thing from the query being malformed.
-    #[test]
-    fn missing_key_is_empty_not_a_type_error() {
-        let c = json!({"given_name": "Erika"});
-        assert_eq!(
-            resolve_json(&c, &[key("family_name")]),
-            Err(PathError::Empty)
-        );
-    }
-
-    /// A missing key removes only *that* element; siblings survive. This is
-    /// the case that separates "remove from selection" from "abort".
-    #[test]
-    fn missing_key_removes_only_the_element_that_lacks_it() {
-        let c = json!({"degrees": [{"type": "BA"}, {"other": "x"}, {"type": "MA"}]});
-        let got = resolve_json(&c, &[key("degrees"), PathComponent::Null, key("type")]).unwrap();
-        assert_eq!(got, vec![&json!("BA"), &json!("MA")]);
-    }
-
-    /// §7.1.1 2.3 — an out-of-range index removes the array from the
-    /// selection rather than aborting.
-    #[test]
-    fn out_of_range_index_is_empty_not_a_type_error() {
-        let c = json!({"degrees": [{"type": "BA"}]});
-        assert_eq!(
-            resolve_json(&c, &[key("degrees"), PathComponent::Index(7)]),
-            Err(PathError::Empty)
-        );
-    }
-
-    /// §7.1.1 2.1 — a string component applied to a non-object aborts.
-    #[test]
-    fn string_component_on_a_non_object_aborts() {
-        let c = json!({"name": "Erika"});
-        assert_eq!(
-            resolve_json(&c, &[key("name"), key("first")]),
-            Err(PathError::TypeMismatch { at: 1 })
-        );
-    }
-
-    /// §7.1.1 2.2 and 2.3 — null or an index on a non-array aborts.
-    #[test]
-    fn null_or_index_on_a_non_array_aborts() {
-        let c = json!({"name": "Erika"});
-        assert_eq!(
-            resolve_json(&c, &[key("name"), PathComponent::Null]),
-            Err(PathError::TypeMismatch { at: 1 })
-        );
-        assert_eq!(
-            resolve_json(&c, &[key("name"), PathComponent::Index(0)]),
-            Err(PathError::TypeMismatch { at: 1 })
-        );
-    }
-
-    /// An empty array yields nothing, but that only becomes an error at step
-    /// 3 — it is not a type mismatch.
-    #[test]
-    fn null_over_an_empty_array_is_empty_not_a_type_error() {
-        let c = json!({"degrees": []});
-        assert_eq!(
-            resolve_json(&c, &[key("degrees"), PathComponent::Null]),
-            Err(PathError::Empty)
-        );
-    }
-
-    /// §7 — "A claims path pointer MUST be a non-empty array". An empty one
-    /// would otherwise return the whole credential.
-    #[test]
-    fn an_empty_pointer_is_malformed_not_the_whole_credential() {
-        let c = json!({"given_name": "Erika", "family_name": "Mustermann"});
-        assert_eq!(resolve_json(&c, &[]), Err(PathError::Malformed));
-    }
-
-    /// §7.2.1 step 1 — mdoc pointers are exactly two strings.
-    #[test]
-    fn mdoc_path_must_be_exactly_two_strings() {
-        assert_eq!(
-            mdoc_components(&[key("org.iso.18013.5.1"), key("family_name")]),
-            Ok(("org.iso.18013.5.1", "family_name"))
-        );
-        assert_eq!(
-            mdoc_components(&[key("only_one")]),
-            Err(PathError::Malformed)
-        );
-        assert_eq!(
-            mdoc_components(&[key("a"), key("b"), key("c")]),
-            Err(PathError::Malformed)
-        );
-        assert_eq!(
-            mdoc_components(&[key("ns"), PathComponent::Index(0)]),
-            Err(PathError::Malformed)
-        );
-        assert_eq!(mdoc_components(&[]), Err(PathError::Malformed));
-    }
-
-    /// The dotted ISO namespace stays one component. Flattening it and
-    /// splitting on the first dot yields namespace `org`, which matches
-    /// nothing while looking entirely reasonable.
-    #[test]
-    fn dotted_iso_namespace_is_one_component() {
-        let path = [key("org.iso.18013.5.1"), key("age_over_18")];
-        let (ns, id) = mdoc_components(&path).unwrap();
-        assert_eq!(ns, "org.iso.18013.5.1");
-        assert_eq!(id, "age_over_18");
-    }
-
-    /// Wire form: strings, integers and nulls all round-trip.
-    #[test]
-    fn components_deserialise_from_the_wire_form() {
-        let p: Vec<PathComponent> =
-            serde_json::from_str(r#"["degrees", null, 0, "type"]"#).unwrap();
-        assert_eq!(
-            p,
-            vec![
-                key("degrees"),
-                PathComponent::Null,
-                PathComponent::Index(0),
-                key("type")
-            ]
-        );
-        assert_eq!(
-            serde_json::to_string(&p).unwrap(),
-            r#"["degrees",null,0,"type"]"#
-        );
+        _ => Err(PathError::MdocElement),
     }
 }

@@ -16,11 +16,13 @@
 use std::fmt;
 
 use siros_codec::date::Date;
+use siros_zkp_req::ZkProof;
 use siros_zkp_req_nym_auth::prover::{
     NymAuthProofVerifier, NymAuthProver, ProofFailure, ProofJob, ProofOutput, ProverFailure,
     Statement,
 };
 use siros_zkp_req_nym_auth::system::{ArtifactPin, NymAuthSystem};
+use siros_zkp_req_nym_auth::verifier_id::PseudonymValue;
 use zk_cred_longfellow::nymauth::{
     NymAuthCircuitParams, NymAuthError, NymAuthProver as Prover, NymAuthRequest,
     NymAuthVerifier as Verifier, NymAuthWitnessInput,
@@ -43,8 +45,8 @@ fn params() -> NymAuthCircuitParams {
 pub enum ArtifactError {
     /// The bytes are not the pinned file.
     Pin(ArtifactPin),
-    /// The pinned file does not decompress within its content's length.
-    Decompress,
+    /// The pinned file does not decompress within its content's length: zstd's message.
+    Decompress(String),
     /// zk-cred-longfellow refused the circuits.
     Circuits(String),
 }
@@ -53,7 +55,7 @@ impl fmt::Display for ArtifactError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Pin(pin) => write!(f, "not the pinned {} ({} bytes)", pin.name, pin.len),
-            Self::Decompress => f.write_str("the circuits do not decompress"),
+            Self::Decompress(cause) => write!(f, "the circuits do not decompress: {cause}"),
             Self::Circuits(detail) => write!(f, "circuits refused: {detail}"),
         }
     }
@@ -68,7 +70,7 @@ fn circuits(circuits_zst: &[u8]) -> Result<Vec<u8>, ArtifactError> {
         return Err(ArtifactError::Pin(artifact.compressed));
     }
     zstd::bulk::decompress(circuits_zst, artifact.content.len)
-        .map_err(|_| ArtifactError::Decompress)
+        .map_err(|error| ArtifactError::Decompress(error.to_string()))
 }
 
 /// The prover of the system.
@@ -107,10 +109,7 @@ impl LongfellowVerifier {
 
 /// Whether the statement is one of this system on this backend.
 fn serves(statement: &Statement) -> bool {
-    statement.system == SYSTEM
-        && SYSTEM
-            .backends()
-            .contains(&statement.proof_backend.as_str())
+    statement.system == SYSTEM && SYSTEM.runs_on(&statement.proof_backend)
 }
 
 /// The text values of the hash circuit (Section 4): T, and E and C with their values for no
@@ -137,14 +136,14 @@ impl Dates {
 
     fn request<'a>(&'a self, statement: &'a Statement) -> NymAuthRequest<'a> {
         NymAuthRequest {
-            issuer_key_x: statement.issuer_key.x(),
-            issuer_key_y: statement.issuer_key.y(),
+            issuer_key_x: statement.issuer.key().x(),
+            issuer_key_y: statement.issuer.key().y(),
             time: &self.time,
             earliest: &self.earliest,
             cutoff: &self.cutoff,
-            challenge_digest: &statement.challenge_digest,
-            verifier_input: &statement.verifier_input,
-            transcript_seed: &statement.session_transcript,
+            challenge_digest: statement.challenge_digest.as_bytes(),
+            verifier_input: statement.verifier_input.as_bytes(),
+            transcript_seed: statement.session_transcript.as_bytes(),
         }
     }
 }
@@ -159,7 +158,7 @@ impl NymAuthProver for LongfellowProver {
         let witness = NymAuthWitnessInput {
             issuer_signed: job.issuer_signed(),
             secret_seed: job.secret_seed(),
-            device_signature: job.device_signature(),
+            device_signature: job.device_signature().as_bytes(),
         };
         let proved = self
             .0
@@ -175,8 +174,8 @@ impl NymAuthProver for LongfellowProver {
                 | NymAuthError::Verification(_) => ProverFailure::Failed,
             })?;
         Ok(ProofOutput {
-            zk_proof: proved.proof,
-            pseudonym: proved.pseudonym,
+            zk_proof: ZkProof::new(proved.proof),
+            pseudonym: PseudonymValue::new(proved.pseudonym),
         })
     }
 }
@@ -185,15 +184,19 @@ impl NymAuthProofVerifier for LongfellowVerifier {
     fn verify(
         &self,
         statement: &Statement,
-        pseudonym: &[u8; 32],
-        zk_proof: &[u8],
+        pseudonym: &PseudonymValue,
+        zk_proof: &ZkProof,
     ) -> Result<(), ProofFailure> {
         if !serves(statement) {
             return Err(ProofFailure::Internal);
         }
         let dates = Dates::of(statement).ok_or(ProofFailure::Internal)?;
         self.0
-            .verify(&dates.request(statement), pseudonym, zk_proof)
+            .verify(
+                &dates.request(statement),
+                pseudonym.as_bytes(),
+                zk_proof.as_bytes(),
+            )
             .map_err(|e| match e {
                 NymAuthError::ProofEncoding(_) => ProofFailure::Encoding,
                 NymAuthError::Verification(_) => ProofFailure::Invalid,

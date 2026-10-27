@@ -207,7 +207,10 @@ pub fn mdoc() -> Credential {
             "issuerAuth",
             Cbor::Array(vec![
                 Cbor::Bytes(vec![0xa1, 0x01, 0x26]),
-                Cbor::Map(vec![(Cbor::Unsigned(33), Cbor::Bytes(vec![0x30, 0x00]))]),
+                Cbor::Map(vec![(
+                    Cbor::Unsigned(33),
+                    Cbor::Bytes(include_bytes!("vectors/issuer.der").to_vec()),
+                )]),
                 Cbor::Bytes(tagged(&mso).encode()),
                 Cbor::Bytes(vec![0; 64]),
             ]),

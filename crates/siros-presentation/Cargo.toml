@@ -24,9 +24,12 @@ wallet = [
     "dep:siros-sdjwt",
     "dep:siros-transaction-data",
     "dep:zeroize",
+    "siros-codec/json",
+    "siros-credential/chain",
     "siros-display/credential",
     "siros-mdoc/crypto",
     "siros-oid4vp/crypto",
+    "siros-trust/chain",
     "siros-zkp-req-nym-auth/request",
 ]
 
@@ -37,6 +40,7 @@ serde_json = { workspace = true }
 siros-codec = { workspace = true }
 siros-credential = { workspace = true }
 siros-dcql = { workspace = true }
+siros-trust = { workspace = true }
 siros-wallet-state = { workspace = true }
 siros-zkp-req = { workspace = true }
 siros-zkp-req-nym-auth = { workspace = true }

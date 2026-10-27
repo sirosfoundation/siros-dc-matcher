@@ -2,12 +2,11 @@
 
 use rustc_hash::FxHashSet;
 use serde_json::{Map, Value};
-use siros_credential::ClaimPointer;
+use siros_dcql::{ClaimPath, Vct};
 
 use crate::claims::{self, Label};
 use crate::entry::DisplayEntry;
 use crate::error::{DisplayError, EntryFault};
-use crate::ids::Vct;
 use crate::json::{self, Entries};
 use crate::locale::{Locale, Localized};
 use crate::text::DisplayText;
@@ -24,7 +23,7 @@ pub struct TypeMetadata {
 /// A claim metadata object (Section 5.6): its path, and its labels when it has `display`.
 #[derive(Debug, Clone)]
 pub(crate) struct TypeClaim {
-    pub(crate) path: ClaimPointer,
+    pub(crate) path: ClaimPath,
     pub(crate) labels: Option<Vec<Label>>,
 }
 

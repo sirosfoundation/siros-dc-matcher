@@ -8,6 +8,7 @@ use std::borrow::Cow;
 
 use serde_json::Value;
 use siros_codec::base64url;
+use siros_codec::json::JsonTextError;
 
 use super::{CompactFault, NoQuery, PayloadFault};
 use crate::protocol::Protocol;
@@ -34,7 +35,8 @@ pub(super) fn request_object(protocol: Protocol, data: &Value) -> Result<Cow<'_,
 
 /// The request object inside a decoded, unverified JWS payload.
 fn payload_object<'a>(payload: Vec<u8>) -> Result<Cow<'a, Value>, NoQuery> {
-    let object: Value = serde_json::from_slice(&payload).map_err(|_| NoQuery::PayloadNotJson)?;
+    let object: Value = serde_json::from_slice(&payload)
+        .map_err(|error| NoQuery::PayloadNotJson(JsonTextError::of(&error)))?;
     if object.get("dcql_query").is_none() {
         return Err(NoQuery::PayloadHasNoDcqlQuery);
     }

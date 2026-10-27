@@ -1,82 +1,203 @@
-//! Why a stored SD-JWT or a key binding is refused. Each error has a stable code.
+//! Why a stored SD-JWT or a key binding is refused. Each error has a stable code and carries
+//! its cause.
 
 use std::fmt;
 
-/// Why text is not a stored SD-JWT (RFC 9901, Sections 4 and 7.1).
+use siros_codec::json::JsonFault;
+use siros_codec::Base64Error;
+
+use crate::alg::Digest;
+use crate::tree::DisclosureId;
+
+/// Why a base64url segment encodes no JSON value.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum EncodedJsonFault {
+    /// The segment is not base64url without padding.
+    Base64(Base64Error),
+    /// The bytes are no JSON value, or an object repeats a member name (RFC 7519, Section 4).
+    Json(JsonFault),
+}
+
+/// Why the issuer JWT is no compact JWS of a JSON header and payload (RFC 7515, Section 7.1).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum IssuerJwtFault {
+    /// It has this many `.`-separated segments, where a JWS has three.
+    Segments(usize),
+    /// The signature segment is empty.
+    SignatureEmpty,
+    /// The signature segment is not base64url without padding.
+    Signature(Base64Error),
+    /// The header segment encodes no JSON value.
+    Header(EncodedJsonFault),
+    /// The header is not a JSON object.
+    HeaderNotObject,
+    /// The payload segment encodes no JSON value.
+    Payload(EncodedJsonFault),
+    /// The payload is not a JSON object.
+    PayloadNotObject,
+}
+
+/// Why a disclosure is none of the two forms of Sections 4.2.1 and 4.2.2.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum DisclosureFault {
+    /// The text encodes no JSON value.
+    Encoding(EncodedJsonFault),
+    /// The value is not a JSON array.
+    NotArray,
+    /// The array has this many elements, where a disclosure has two or three.
+    Length(usize),
+    /// The salt is not a string.
+    Salt,
+    /// The claim name is not a string.
+    Name,
+}
+
+/// Why `_sd_alg` names no supported algorithm.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum SdAlgFault {
+    /// It is not a string.
+    NotString,
+    /// It names this algorithm, outside `sha-256`, `sha-384` and `sha-512`.
+    Unknown(String),
+}
+
+/// A reserved claim name outside its role (Sections 4.1, 4.1.1 and 7.1, step 3.c.ii.2).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ReservedFault {
+    /// An `_sd` member is not an array.
+    SdNotArray,
+    /// An `_sd` member holds an entry other than a digest string.
+    SdDigest,
+    /// An object outside an array element has a `...` member.
+    Ellipsis,
+    /// An object below the payload's top level has an `_sd_alg` member.
+    NestedSdAlg,
+    /// A disclosure names this reserved claim: `_sd`, `...` or `_sd_alg`.
+    Disclosed(String),
+    /// An array element holds `...` beside another member.
+    ElementMembers,
+    /// An array element's `...` is not a digest string.
+    ElementDigest,
+}
+
+/// Where a disclosure is referenced against its form (Section 7.1, steps 3.c.ii.1 and
+/// 3.c.iii.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Placement {
+    /// An `_sd` digest names an array element disclosure.
+    ElementInObject,
+    /// An array digest names an object property disclosure.
+    PropertyInArray,
+}
+
+/// Why text is not a stored SD-JWT (RFC 9901, Sections 4 and 7.1).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ParseError {
     /// The issuer JWT is not three base64url segments whose header and payload are JSON objects
     /// with unique member names.
-    IssuerJwt,
-    /// A disclosure is empty, is not base64url, or does not decode to a JSON array of a string
-    /// salt and a value, or of a string salt, a string claim name and a value (Section 4.2).
-    Disclosure,
+    IssuerJwt(IssuerJwtFault),
+    /// A disclosure does not decode to a JSON array of a string salt and a value, or of a string
+    /// salt, a string claim name and a value (Section 4.2).
+    Disclosure {
+        /// The disclosure.
+        disclosure: DisclosureId,
+        /// What breaks its form.
+        fault: DisclosureFault,
+    },
     /// `_sd_alg` is not `sha-256`, `sha-384` or `sha-512` (Sections 4.1.1 and 9.4).
-    UnsupportedSdAlg,
-    /// `_sd`, `...` or `_sd_alg` appears outside its role: `_sd` holding an array of digest
-    /// strings, `...` as the only member of an array element holding one digest string,
-    /// `_sd_alg` at the top level of the payload (Sections 4.1, 4.1.1 and 7.1, step 3.c.ii.2).
-    ReservedClaimName,
-    /// A digest appears twice in the payload and the disclosures, or two disclosures share a
-    /// digest (Section 7.1, step 4).
-    RepeatedDigest,
-    /// An `_sd` digest names an array element disclosure, or an array digest names an object
-    /// property disclosure (Section 7.1, steps 3.c.ii.1 and 3.c.iii.1).
-    MisplacedDisclosure,
-    /// A disclosure names a claim that its object already has (Section 7.1, step 3.c.ii.3).
-    ClaimNameExists,
-    /// No digest of the payload or of another disclosure references a disclosure (Section 7.1,
-    /// step 5).
-    UnreferencedDisclosure,
+    UnsupportedSdAlg(SdAlgFault),
+    /// `_sd`, `...` or `_sd_alg` appears outside its role.
+    ReservedClaimName(ReservedFault),
+    /// This digest appears twice in the payload and the disclosures, or two disclosures share it
+    /// (Section 7.1, step 4).
+    RepeatedDigest(Digest),
+    /// A digest names a disclosure of the other form.
+    MisplacedDisclosure {
+        /// The disclosure.
+        disclosure: DisclosureId,
+        /// Where its digest stands.
+        placement: Placement,
+    },
+    /// A disclosure names this claim, which its object already has (Section 7.1, step
+    /// 3.c.ii.3).
+    ClaimNameExists(String),
+    /// No digest of the payload or of another disclosure references this disclosure (Section
+    /// 7.1, step 5).
+    UnreferencedDisclosure(DisclosureId),
     /// The claims nest deeper than [`MAX_DEPTH`](crate::MAX_DEPTH), disclosures included.
     TooDeep,
+    /// The issuer JWT's `x5c` header parameter breaks RFC 7515, Section 4.1.6.
+    X5c(X5cError),
+}
+
+siros_codec::position!(
+    /// The position of a certificate in `x5c`, the signer's at 0.
+    pub(crate) X5cIndex
+);
+
+/// Why an `x5c` header parameter is no chain of certificates (RFC 7515, Section 4.1.6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum X5cError {
+    /// It is not an array.
+    NotArray,
+    /// The array is empty.
+    Empty,
+    /// The certificate at this position is not a string.
+    NotString(X5cIndex),
+    /// The certificate at this position is not base64 with padding.
+    Base64(X5cIndex, Base64Error),
 }
 
 impl ParseError {
     /// A stable identifier.
+    #[must_use]
     pub fn code(&self) -> &'static str {
         match self {
-            Self::IssuerJwt => "issuer_jwt_malformed",
-            Self::Disclosure => "disclosure_malformed",
-            Self::UnsupportedSdAlg => "sd_alg_unsupported",
-            Self::ReservedClaimName => "reserved_claim_name",
-            Self::RepeatedDigest => "digest_repeated",
-            Self::MisplacedDisclosure => "disclosure_misplaced",
-            Self::ClaimNameExists => "claim_name_exists",
-            Self::UnreferencedDisclosure => "disclosure_unreferenced",
+            Self::IssuerJwt(_) => "issuer_jwt_malformed",
+            Self::Disclosure { .. } => "disclosure_malformed",
+            Self::UnsupportedSdAlg(_) => "sd_alg_unsupported",
+            Self::ReservedClaimName(_) => "reserved_claim_name",
+            Self::RepeatedDigest(_) => "digest_repeated",
+            Self::MisplacedDisclosure { .. } => "disclosure_misplaced",
+            Self::ClaimNameExists(_) => "claim_name_exists",
+            Self::UnreferencedDisclosure(_) => "disclosure_unreferenced",
             Self::TooDeep => "claims_too_deep",
+            Self::X5c(_) => "issuer_jwt_x5c_malformed",
         }
     }
 }
 
 impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
+        write!(f, "{}: {self:?}", self.code())
     }
 }
 
 impl std::error::Error for ParseError {}
 
 /// Why claims do not form a KB-JWT payload.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum KeyBindingError {
-    /// An extra claim is named `iat`, `aud`, `nonce` or `sd_hash`, or shares its name with
-    /// another extra claim.
-    ClaimCollision,
+    /// An extra claim has this name, which Section 4.3 gives a required claim: `iat`, `aud`,
+    /// `nonce` or `sd_hash`.
+    RequiredClaim(String),
+    /// Two extra claims have this name.
+    RepeatedClaim(String),
 }
 
 impl KeyBindingError {
     /// A stable identifier.
+    #[must_use]
     pub fn code(&self) -> &'static str {
         match self {
-            Self::ClaimCollision => "kb_jwt_claim_collision",
+            Self::RequiredClaim(_) | Self::RepeatedClaim(_) => "kb_jwt_claim_collision",
         }
     }
 }
 
 impl fmt::Display for KeyBindingError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
+        write!(f, "{}: {self:?}", self.code())
     }
 }
 

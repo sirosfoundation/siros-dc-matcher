@@ -1,15 +1,19 @@
 //! Why intake refused a request.
 
-use std::fmt;
+use std::str::Utf8Error;
 
+use der::asn1::ObjectIdentifier;
+use siros_codec::json::JsonTextError;
+use siros_codec::member::MemberFault;
 use siros_codec::Base64Error;
+use siros_dcql::QueryError;
 
 use crate::client_id::ClientIdError;
 use crate::error_code::ErrorCode;
 
 /// A rule of OpenID4VP 1.0 (or of RFC 9101, RFC 7515, RFC 5280) that a request breaks, or a
 /// host answer that does not fit the effect it answers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IntakeError {
     /// The authorization request URI has no query of form-encoded parameters, each once.
     NotAnAuthorizationRequest(FormFault),
@@ -62,8 +66,10 @@ pub enum IntakeError {
     CertificateHashMismatch,
     /// `kid` does not name a key of the `decentralized_identifier` DID.
     KidNotOfClient,
-    /// The host's trust answer carries no P-256 JWK for a key it was asked to resolve.
+    /// The host's trust answer carries no JWK for a key it was asked to resolve.
     KeyNotResolved,
+    /// The JWK of the host's trust answer is no P-256 key.
+    ResolvedKeyInvalid(JwkFault),
     /// The `jwt` Header Parameter is not a Verifier Attestation JWT (Section 12).
     AttestationInvalid(AttestationFault),
     /// The attestation's `sub` is not the `verifier_attestation` value.
@@ -80,6 +86,8 @@ pub enum IntakeError {
     NoVerifiableSignature,
     /// The DC API request has no entry this wallet reads.
     EnvelopeUnreadable,
+    /// The DC API request is no JSON text.
+    EnvelopeNotJson(JsonTextError),
     /// A signed DC API request has no non-empty `expected_origins` of strings (A.2).
     ExpectedOriginsMissing,
     /// The calling origin is not in `expected_origins` (A.2).
@@ -112,8 +120,10 @@ pub enum IntakeError {
     QueryAndScope,
     /// The request has no `dcql_query` (Section 5.1).
     DcqlQueryMissing,
-    /// `dcql_query` is not a DCQL query `siros-dcql` accepts.
-    DcqlQueryInvalid,
+    /// A parameter of a form-encoded request is no JSON text (Section 5.1).
+    ParameterNotJson(JsonParameter, JsonTextError),
+    /// `dcql_query` is no DCQL query `siros-dcql` accepts.
+    DcqlQueryInvalid(QueryError),
     /// `client_metadata` is not a JSON object.
     ClientMetadataInvalid,
     /// `transaction_data` is not a non-empty array of strings (Section 5.1).
@@ -122,6 +132,9 @@ pub enum IntakeError {
     VerifierInfo(VerifierInfoRule),
     /// An encrypted Response Mode, and no key of `jwks` is a P-256 `ECDH-ES` encryption key.
     EncryptionKeyMissing,
+    /// No key of `jwks` is a usable P-256 `ECDH-ES` encryption key, and the first that names
+    /// P-256 is no P-256 key: its fault.
+    EncryptionKeyInvalid(JwkFault),
     /// `encrypted_response_enc_values_supported` names no `enc` of the Response Mode's
     /// envelope: `A128GCM` or `A256GCM` for a JWE, these or `A192GCM` for a `COSE_Encrypt`.
     EncryptionUnsupported,
@@ -134,7 +147,7 @@ pub enum IntakeError {
 }
 
 /// Why an authorization request URI has no query of form-encoded parameters (Section 5).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FormFault {
     /// The URI has no query.
     NoQuery,
@@ -143,11 +156,11 @@ pub enum FormFault {
     /// A `%` is not followed by two hexadecimal digits.
     Escape,
     /// A decoded name or value is not UTF-8.
-    NotUtf8,
+    NotUtf8(Utf8Error),
 }
 
 /// The rule a JWS breaks (RFC 7515, Sections 7.1 and 7.2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JwsFault {
     /// A Compact Serialization is not three segments.
     Segments,
@@ -163,11 +176,11 @@ pub enum JwsFault {
     /// The `trust_chain` Header Parameter is not an array of strings.
     TrustChain,
     /// The fetched Request Object is not UTF-8 text.
-    NotUtf8,
+    NotUtf8(Utf8Error),
 }
 
 /// Why a JWS is refused: its serialization, its algorithm, or a critical extension.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JwsError {
     /// The serialization breaks a rule.
     Malformed(JwsFault),
@@ -178,7 +191,7 @@ pub enum JwsError {
 }
 
 /// The rule an `x5c` Header Parameter breaks (RFC 7515, Section 4.1.6).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChainFault {
     /// `x5c` is absent, not an array, or empty.
     Absent,
@@ -187,15 +200,84 @@ pub enum ChainFault {
     /// A certificate is not base64 with padding.
     Encoding(Base64Error),
     /// The leaf is not a DER X.509 certificate.
-    LeafNotCertificate,
+    LeafNotCertificate(der::Error),
     /// The leaf's key is not a P-256 key.
-    LeafKey,
+    LeafKey(LeafKeyFault),
     /// The leaf's SubjectAltName extension does not decode.
-    SubjectAltName,
+    SubjectAltName(der::Error),
+}
+
+/// Why a leaf certificate's key is no P-256 key (RFC 5480).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LeafKeyFault {
+    /// The key's algorithm is this one, where the wallet takes `id-ecPublicKey`.
+    Algorithm(ObjectIdentifier),
+    /// The `id-ecPublicKey` parameters are absent.
+    CurveAbsent,
+    /// The parameters are no OBJECT IDENTIFIER.
+    Curve(der::Error),
+    /// The named curve is this one, where the wallet takes `prime256v1`.
+    OtherCurve(ObjectIdentifier),
+    /// The subjectPublicKey BIT STRING has unused bits.
+    Unaligned,
+    /// The point is not on the curve.
+    Point,
+}
+
+/// A coordinate of an EC JWK (RFC 7518, Section 6.2.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Coordinate {
+    /// `x`.
+    X,
+    /// `y`.
+    Y,
+}
+
+/// Why a JWK is no public P-256 key (RFC 7518, Section 6.2.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JwkFault {
+    /// `kty` is not `EC`, or `crv` is not `P-256`.
+    OtherKey,
+    /// The coordinate is absent or not a string.
+    CoordinateAbsent(Coordinate),
+    /// The coordinate is not unpadded base64url.
+    CoordinateEncoding(Coordinate, Base64Error),
+    /// The coordinate has this many bytes, where P-256 takes 32.
+    CoordinateLength(Coordinate, usize),
+    /// The point is not on the curve.
+    Point,
+}
+
+/// A claim of a Verifier Attestation JWT the wallet reads (Section 12).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AttestationClaim {
+    /// `iss`: a string.
+    Iss,
+    /// `sub`: a string.
+    Sub,
+    /// `exp`: a number.
+    Exp,
+    /// `nbf`: a number, when present.
+    Nbf,
+    /// `cnf`: an object with a `jwk`.
+    Cnf,
+    /// `redirect_uris`: an array of strings, when present.
+    RedirectUris,
+}
+
+/// Why the claims of a Verifier Attestation JWT are refused (Section 12).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClaimsFault {
+    /// The payload is no JSON object.
+    NotObject(JsonTextError),
+    /// The claim breaks its rule.
+    Claim(AttestationClaim, MemberFault),
+    /// `cnf.jwk` is no P-256 key.
+    Key(JwkFault),
 }
 
 /// The rule the `jwt` Header Parameter of a `verifier_attestation` request breaks (Section 12).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AttestationFault {
     /// The request has no string `jwt` Header Parameter.
     Absent,
@@ -203,10 +285,31 @@ pub enum AttestationFault {
     Jws(JwsError),
     /// The attestation's `typ` is not `verifier-attestation+jwt`.
     Typ,
-    /// The attestation's claims lack a string `iss` or `sub`, a numeric `exp`, or a P-256
-    /// `cnf.jwk`, or have a non-numeric `nbf` or a `redirect_uris` other than an array of
-    /// strings.
-    Claims,
+    /// The attestation's claims break a rule.
+    Claims(ClaimsFault),
+}
+
+/// A request parameter that holds JSON (Section 5.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum JsonParameter {
+    /// `dcql_query`.
+    DcqlQuery,
+    /// `client_metadata`.
+    ClientMetadata,
+    /// `transaction_data`.
+    TransactionData,
+}
+
+impl JsonParameter {
+    /// The code of a refusal of the parameter.
+    #[must_use]
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::DcqlQuery => "dcql_query_invalid",
+            Self::ClientMetadata => "client_metadata_invalid",
+            Self::TransactionData => "transaction_data_invalid",
+        }
+    }
 }
 
 /// A rule of `verifier_info` (Section 5.1) that a request breaks.
@@ -247,7 +350,7 @@ impl VerifierInfoRule {
 impl IntakeError {
     /// A stable identifier.
     #[must_use]
-    pub fn code(self) -> &'static str {
+    pub fn code(&self) -> &'static str {
         match self {
             Self::NotAnAuthorizationRequest(_) => "not_an_authorization_request",
             Self::ClientIdMissing => "client_id_missing",
@@ -275,6 +378,7 @@ impl IntakeError {
             Self::CertificateHashMismatch => "certificate_hash_mismatch",
             Self::KidNotOfClient => "kid_not_of_client",
             Self::KeyNotResolved => "key_not_resolved",
+            Self::ResolvedKeyInvalid(_) => "resolved_key_invalid",
             Self::AttestationInvalid(_) => "attestation_invalid",
             Self::AttestationSubjectMismatch => "attestation_subject_mismatch",
             Self::AttestationExpired => "attestation_expired",
@@ -282,7 +386,7 @@ impl IntakeError {
             Self::RedirectUriNotAttested => "redirect_uri_not_attested",
             Self::ClientIdInPayload => "client_id_in_payload",
             Self::NoVerifiableSignature => "no_verifiable_signature",
-            Self::EnvelopeUnreadable => "envelope_unreadable",
+            Self::EnvelopeUnreadable | Self::EnvelopeNotJson(_) => "envelope_unreadable",
             Self::ExpectedOriginsMissing => "expected_origins_missing",
             Self::OriginNotExpected => "origin_not_expected",
             Self::ResponseTypeUnsupported => "response_type_unsupported",
@@ -297,11 +401,13 @@ impl IntakeError {
             Self::ScopeUnsupported => "scope_unsupported",
             Self::QueryAndScope => "query_and_scope",
             Self::DcqlQueryMissing => "dcql_query_missing",
-            Self::DcqlQueryInvalid => "dcql_query_invalid",
+            Self::ParameterNotJson(parameter, _) => parameter.code(),
+            Self::DcqlQueryInvalid(_) => "dcql_query_invalid",
             Self::ClientMetadataInvalid => "client_metadata_invalid",
             Self::TransactionDataInvalid => "transaction_data_invalid",
             Self::VerifierInfo(rule) => rule.code(),
             Self::EncryptionKeyMissing => "encryption_key_missing",
+            Self::EncryptionKeyInvalid(_) => "encryption_key_invalid",
             Self::EncryptionUnsupported => "encryption_unsupported",
             Self::AnswerMismatch => "answer_mismatch",
             Self::UnexpectedTrustKey => "unexpected_trust_key",
@@ -311,7 +417,7 @@ impl IntakeError {
 
     /// The error code of OpenID4VP 1.0, Section 8.5, a Verifier receives for this refusal.
     #[must_use]
-    pub fn error_code(self) -> ErrorCode {
+    pub fn error_code(&self) -> ErrorCode {
         match self {
             Self::RequestUriMethodInvalid => ErrorCode::InvalidRequestUriMethod,
             Self::ScopeUnsupported => ErrorCode::InvalidScope,
@@ -340,6 +446,7 @@ impl IntakeError {
             | Self::CertificateHashMismatch
             | Self::KidNotOfClient
             | Self::KeyNotResolved
+            | Self::ResolvedKeyInvalid(_)
             | Self::AttestationInvalid(_)
             | Self::AttestationSubjectMismatch
             | Self::AttestationExpired
@@ -348,6 +455,7 @@ impl IntakeError {
             | Self::ClientIdInPayload
             | Self::NoVerifiableSignature
             | Self::EnvelopeUnreadable
+            | Self::EnvelopeNotJson(_)
             | Self::ExpectedOriginsMissing
             | Self::OriginNotExpected
             | Self::ResponseTypeUnsupported
@@ -361,11 +469,13 @@ impl IntakeError {
             | Self::ResponseUriHostMismatch
             | Self::QueryAndScope
             | Self::DcqlQueryMissing
-            | Self::DcqlQueryInvalid
+            | Self::ParameterNotJson(..)
+            | Self::DcqlQueryInvalid(_)
             | Self::ClientMetadataInvalid
             | Self::TransactionDataInvalid
             | Self::VerifierInfo(_)
             | Self::EncryptionKeyMissing
+            | Self::EncryptionKeyInvalid(_)
             | Self::EncryptionUnsupported
             | Self::AnswerMismatch
             | Self::UnexpectedTrustKey
@@ -396,10 +506,14 @@ impl From<VerifierInfoRule> for IntakeError {
     }
 }
 
-impl fmt::Display for IntakeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
+siros_codec::display_code!(IntakeError);
+
+impl std::error::Error for IntakeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::ParameterNotJson(_, error) => Some(error),
+            Self::DcqlQueryInvalid(error) => Some(error),
+            _ => None,
+        }
     }
 }
-
-impl std::error::Error for IntakeError {}

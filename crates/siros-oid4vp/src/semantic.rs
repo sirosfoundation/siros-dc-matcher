@@ -9,8 +9,6 @@
 //! code; hyphen-minus "-" [...]; and identifier", the type references of TS 119 475 Tables 2
 //! and 4 (GEN-5.1.3-02, GEN-5.1.5-02).
 
-use std::fmt;
-
 /// The identity type references of a legal person (ETSI TS 119 475, Table 2).
 const LEGAL_TYPES: [&str; 5] = ["VAT", "NTR", "LEI", "EOR", "EXC"];
 /// The identity type references of a natural person: TIN (ETSI TS 119 475, Table 4), and items
@@ -46,10 +44,11 @@ impl Person {
 pub struct SemanticIdentifier(String);
 
 /// Why a certificate gives no semantics identifier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SemanticIdError {
     /// The certificate policies extension does not decode.
-    Policies,
+    #[cfg(feature = "crypto")]
+    Policies(der::Error),
     /// No certificate policy says whether the subject is a natural or a legal person.
     Unclassified,
     /// The certificate policies say both.
@@ -60,7 +59,8 @@ pub enum SemanticIdError {
     Repeated,
     /// A `serialNumber` that is not a `PrintableString`, or an `organizationIdentifier` that is
     /// no `DirectoryString` of UTF-8 or printable text.
-    Encoding,
+    #[cfg(feature = "crypto")]
+    Encoding(der::Error),
     /// The value starts with no identity type reference of the person.
     TypeReference,
     /// The country code is not two uppercase letters.
@@ -79,12 +79,14 @@ impl SemanticIdError {
     #[must_use]
     pub fn code(self) -> &'static str {
         match self {
-            Self::Policies => "semantic_id_policies",
+            #[cfg(feature = "crypto")]
+            Self::Policies(_) => "semantic_id_policies",
             Self::Unclassified => "semantic_id_unclassified",
             Self::Contradictory => "semantic_id_contradictory",
             Self::Absent => "semantic_id_absent",
             Self::Repeated => "semantic_id_repeated",
-            Self::Encoding => "semantic_id_encoding",
+            #[cfg(feature = "crypto")]
+            Self::Encoding(_) => "semantic_id_encoding",
             Self::TypeReference => "semantic_id_type_reference",
             Self::Country => "semantic_id_country",
             Self::Separator => "semantic_id_separator",
@@ -94,11 +96,7 @@ impl SemanticIdError {
     }
 }
 
-impl fmt::Display for SemanticIdError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(SemanticIdError);
 
 impl std::error::Error for SemanticIdError {}
 

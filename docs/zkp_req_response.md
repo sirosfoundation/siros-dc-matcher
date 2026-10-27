@@ -33,9 +33,9 @@ function without a result gives `true`.
 
 ## Checks, in order
 
-1. The `vp_token` (`presentations_of`): a JSON object without repeated members, an entry for the
-   query, a non-empty array, one element unless the query sets `multiple`, each element unpadded
-   base64url.
+1. The `vp_token` (`presentations_of`, feature `vp-token`): a JSON object, no object in it naming
+   a member twice, an entry for the query, a non-empty array, one element unless the query sets
+   `multiple`, each element unpadded base64url.
 2. The presentation (`ZkpPresentation::decode`): one strict CBOR item (definite lengths, no
    repeated keys, depth at most 32, nothing after it), a map with exactly the members above.
 3. Steps 1 to 5 of Section 4.1 (`answered_option`): the system and the backend are listed, the

@@ -3,14 +3,20 @@
 //!
 //! `urn:mms:bbs-cd:nym_auth:v1` is not listed: no Wallet proves it yet.
 
-use std::fmt;
-
 use siros_codec::date::Date;
-use siros_zkp_req::{CredentialType, PairRefusal};
+use siros_zkp_req::{CredentialType, PairRefusal, ProofBackend, SystemId, ZkProof};
 
 use crate::age::Bounds;
-use crate::catalogue::{Config, Form, Function, Item, Prf, MDOC_DOCTYPE};
+use crate::catalogue::{Config, Form, Item, Prf, MDOC_DOCTYPE};
 use crate::verifier_id::sha256;
+
+/// The largest `zk_proof` the proof backends read (`longfellow-libzk-v1`, `vega-v1`).
+pub const MAX_ZK_PROOF: usize = 1 << 20;
+
+const LONGFELLOW_ID: SystemId = SystemId::from_static("urn:circuits:longfellow:nym_auth:v1");
+const VEGA_ID: SystemId = SystemId::from_static("urn:circuits:vega:nym_auth:v1");
+const LONGFELLOW_BACKENDS: &[ProofBackend] = &[ProofBackend::from_static("longfellow-libzk-v1")];
+const VEGA_BACKENDS: &[ProofBackend] = &[ProofBackend::from_static("vega-v1")];
 
 /// A nym_auth system.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -46,11 +52,7 @@ impl Unsupported {
     }
 }
 
-impl fmt::Display for Unsupported {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(Unsupported);
 
 /// The stable identifier of a pair refusal (`zkp_req`, Section 1.3) for a nym_auth system.
 pub fn pair_code(refusal: &PairRefusal<Unsupported>) -> &'static str {
@@ -137,24 +139,33 @@ impl NymAuthSystem {
     pub const ALL: [Self; 2] = [Self::LongfellowV1, Self::VegaV1];
 
     /// The system identifier.
-    pub fn id(self) -> &'static str {
+    #[must_use]
+    pub fn id(self) -> SystemId {
         match self {
-            Self::LongfellowV1 => "urn:circuits:longfellow:nym_auth:v1",
-            Self::VegaV1 => "urn:circuits:vega:nym_auth:v1",
+            Self::LongfellowV1 => LONGFELLOW_ID,
+            Self::VegaV1 => VEGA_ID,
         }
     }
 
     /// The system with identifier `id`.
-    pub fn from_id(id: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|s| s.id() == id)
+    #[must_use]
+    pub fn from_id(id: &SystemId) -> Option<Self> {
+        Self::ALL.into_iter().find(|s| s.id() == *id)
     }
 
     /// The proof backends the system runs on (Section 1).
-    pub fn backends(self) -> &'static [&'static str] {
+    #[must_use]
+    pub fn backends(self) -> &'static [ProofBackend] {
         match self {
-            Self::LongfellowV1 => &["longfellow-libzk-v1"],
-            Self::VegaV1 => &["vega-v1"],
+            Self::LongfellowV1 => LONGFELLOW_BACKENDS,
+            Self::VegaV1 => VEGA_BACKENDS,
         }
+    }
+
+    /// Whether the system runs on `backend` (Section 1).
+    #[must_use]
+    pub fn runs_on(self, backend: &ProofBackend) -> bool {
+        self.backends().contains(backend)
     }
 
     /// The attestation form it proves over.
@@ -178,11 +189,20 @@ impl NymAuthSystem {
     }
 
     /// The exact length of `zk_proof` the system rulebook states, if it states one.
+    #[must_use]
     pub fn zk_proof_len(self) -> Option<usize> {
         match self {
             Self::LongfellowV1 => None,
             Self::VegaV1 => Some(96_079),
         }
+    }
+
+    /// Whether `zk_proof` has a length the system's proof backend reads: at most
+    /// [`MAX_ZK_PROOF`], and the rulebook's exact length where it states one.
+    #[must_use]
+    pub fn admits_zk_proof(self, zk_proof: &ZkProof) -> bool {
+        let length = zk_proof.as_bytes().len();
+        length <= MAX_ZK_PROOF && self.zk_proof_len().is_none_or(|n| n == length)
     }
 
     /// Whether the system supports an option: its items, and E and C at the proof date
@@ -196,20 +216,15 @@ impl NymAuthSystem {
         items: impl IntoIterator<Item = &'a Item>,
         bounds: &Bounds,
     ) -> Result<(), Unsupported> {
-        let mut pseudonym = false;
-        for item in items {
-            if let Function::Pseudonym(p) = &item.function {
-                if p.config != Config::KnownOffenderMatchingSsc {
-                    return Err(Unsupported::Config);
-                }
-                if p.prf != Prf::Sha256 {
-                    return Err(Unsupported::Prf);
-                }
-                pseudonym = true;
-            }
+        let pseudonym = items
+            .into_iter()
+            .find_map(Item::pseudonym)
+            .ok_or(Unsupported::NoPseudonym)?;
+        if *pseudonym.config() != Config::KnownOffenderMatchingSsc {
+            return Err(Unsupported::Config);
         }
-        if !pseudonym {
-            return Err(Unsupported::NoPseudonym);
+        if pseudonym.prf() != Prf::Sha256 {
+            return Err(Unsupported::Prf);
         }
         let (min, max) = self.bound_window();
         if !bounds.within(min, max) {
@@ -220,15 +235,18 @@ impl NymAuthSystem {
 }
 
 impl siros_zkp_req::System for NymAuthSystem {
-    fn id(&self) -> &str {
+    fn id(&self) -> SystemId {
         NymAuthSystem::id(*self)
     }
 
-    fn runs_on(&self, backend: &str) -> bool {
-        self.backends().contains(&backend)
+    fn runs_on(&self, backend: &ProofBackend) -> bool {
+        NymAuthSystem::runs_on(*self, backend)
     }
 
     fn proves_over(&self, credential_type: &CredentialType) -> bool {
-        matches!(credential_type, CredentialType::MsoMdoc { doctype } if doctype == MDOC_DOCTYPE)
+        matches!(
+            credential_type,
+            CredentialType::MsoMdoc { doctype } if doctype.as_str() == MDOC_DOCTYPE
+        )
     }
 }

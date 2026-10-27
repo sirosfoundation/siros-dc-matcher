@@ -1,8 +1,6 @@
 //! Why a plan, a selection or a response failed. Each error has a stable code and the
 //! OpenID4VP 1.0, Section 8.5 code the verifier receives.
 
-use std::fmt;
-
 use siros_credential::EntryRef;
 use siros_dcql::PathError;
 use siros_display::DisplayError;
@@ -10,12 +8,13 @@ use siros_mdoc::DisclosureError;
 use siros_oid4vp::{ErrorCode, HttpsUrl, ResponseError};
 use siros_sdjwt::KeyBindingError;
 use siros_transaction_data::TransactionDataError;
+use siros_trust::{ChainRefusal, Unadmitted};
 use siros_wallet_state::KeyId;
 use siros_zkp_req_nym_auth::policy::RequestRefusal;
 use siros_zkp_req_nym_auth::presenter::{ProveError, Unanswerable};
 
 use crate::ids::{AdditionIndex, CandidateIndex, OfferIndex, QueryIndex, SetIndex};
-use crate::matching::{AskedError, ChoiceError, Failure};
+use crate::matching::{ChoiceError, Failure};
 use crate::plan::{DigestError, EntryPosition, Unproven};
 use crate::respond::{PickError, SignatureError, SubsetError};
 use siros_dcql::QueryId;
@@ -23,10 +22,8 @@ use siros_dcql::QueryId;
 /// Why the core gives no plan, no chosen offer or no response.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PresentationError {
-    /// A Credential Query of the request breaks a rule (`invalid_request`).
-    Asked(AskedError),
     /// The wallet has no offer for the request, and why.
-    NoOffer(Failure<Unproven>),
+    NoOffer(Failure<Unadmitted<ChainRefusal>, Unproven>),
     /// An entry of `transaction_data`, or its binding to an offer, breaks a rule. The code is
     /// its own.
     TransactionData(TransactionDataError),
@@ -100,7 +97,7 @@ pub enum PresentationError {
 }
 
 /// How a plan contradicts itself: a position or an answer that a list of the plan lacks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Inconsistency {
     /// A member names a query the matching lacks.
     Query(QueryIndex),
@@ -134,7 +131,6 @@ impl PresentationError {
     /// A stable identifier.
     pub fn code(&self) -> &'static str {
         match self {
-            Self::Asked(e) => e.code(),
             Self::NoOffer(failure) => failure.code(),
             Self::TransactionData(e) => e.code(),
             Self::Display(e) => e.code(),
@@ -176,7 +172,6 @@ impl PresentationError {
     /// of the wallet, as `zkp_req.md`, Section 5 sends one.
     pub fn error_code(&self) -> ErrorCode {
         match self {
-            Self::Asked(_) => ErrorCode::InvalidRequest,
             Self::NoOffer(failure) => oid4vp_code(failure.error_code()),
             Self::TransactionData(e) => e.error_code(),
             Self::Prove(e) => oid4vp_code(e.error_code()),
@@ -222,11 +217,7 @@ fn oid4vp_code(code: siros_zkp_req::ErrorCode) -> ErrorCode {
     }
 }
 
-impl fmt::Display for PresentationError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(PresentationError);
 
 impl std::error::Error for PresentationError {}
 
@@ -244,8 +235,7 @@ macro_rules! causes {
 }
 
 causes! {
-    AskedError => Asked,
-    Failure<Unproven> => NoOffer,
+    Failure<Unadmitted<ChainRefusal>, Unproven> => NoOffer,
     TransactionDataError => TransactionData,
     DisplayError => Display,
     DigestError => Digest,

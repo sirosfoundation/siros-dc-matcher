@@ -1,15 +1,13 @@
 //! The answer of an option: a usable pair, a usable attestation and the seed that opens it, for
 //! which every item of the option holds (system rulebooks, Section 7, step 1).
 
-use std::fmt;
-
 use crate::attestation::{Credential, OpenedSeed, SecretSeed, SeedMismatch, UsableAttestation};
 use crate::outcome::{ItemCode, ZkpError};
 use crate::pair::{failed_assertions, UsablePair};
 
-/// What the proof of an option needs: a usable pair for it, a usable attestation at the pair's
-/// proof date, and the `secret_seed` that opens the attestation's `ssc`. Every assertion of the
-/// option holds for the attestation.
+/// What the proof of an option needs: a usable pair for it, an attestation usable for its query
+/// at the pair's proof date, and the `secret_seed` that opens the attestation's `ssc`. Every
+/// assertion of the option holds for the attestation.
 #[derive(Debug, Clone)]
 pub struct Answer<'q> {
     pair: UsablePair<'q>,
@@ -20,6 +18,9 @@ pub struct Answer<'q> {
 /// Why an attestation does not answer an option.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Unanswerable {
+    /// The attestation is usable for the authorities of another query than the pair's: another
+    /// `id`, or other `trusted_authorities`.
+    OtherQuery,
     /// The attestation was tested at another date than the pair's proof date.
     ProofDate,
     /// Items of the option fail for the attestation: an assertion, or the `pseudonym`'s seed.
@@ -27,21 +28,18 @@ pub enum Unanswerable {
 }
 
 impl Unanswerable {
-    /// A stable identifier: `proof_date`, or `credential` for failed items, with their codes in
-    /// the variant.
+    /// A stable identifier: `other_query`, `proof_date`, or `credential` for failed items, with
+    /// their codes in the variant.
     pub fn code(&self) -> &'static str {
         match self {
+            Self::OtherQuery => "other_query",
             Self::ProofDate => "proof_date",
             Self::Failed(_) => "credential",
         }
     }
 }
 
-impl fmt::Display for Unanswerable {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(Unanswerable);
 
 impl std::error::Error for Unanswerable {}
 
@@ -51,14 +49,19 @@ impl<'q> Answer<'q> {
     ///
     /// # Errors
     ///
-    /// [`Unanswerable::ProofDate`] for an attestation tested at another date than the pair's,
-    /// and [`Unanswerable::Failed`] with the `age_check` that fails and `seed_mismatch` for a
-    /// seed that does not open `ssc`.
+    /// [`Unanswerable::OtherQuery`] for an attestation usable for the authorities of another
+    /// query, [`Unanswerable::ProofDate`] for one tested at another date than the pair's, and
+    /// [`Unanswerable::Failed`] with the `age_check` that fails and `seed_mismatch` for a seed
+    /// that does not open `ssc`.
     pub fn new(
         pair: UsablePair<'q>,
         attestation: UsableAttestation,
         secret_seed: &SecretSeed,
     ) -> Result<Self, Unanswerable> {
+        let query = pair.option().query().query().credential_query();
+        if !attestation.issuer().authorities().are_those_of(query) {
+            return Err(Unanswerable::OtherQuery);
+        }
         if attestation.proof_time().date() != pair.date() {
             return Err(Unanswerable::ProofDate);
         }
@@ -92,7 +95,7 @@ impl<'q> Answer<'q> {
 ///
 /// The items that fail: the `age_check` assertion, then the `pseudonym` whose `secret_seed`
 /// does not open `ssc`.
-pub(crate) fn opened_seed(
+fn opened_seed(
     pair: &UsablePair<'_>,
     credential: &Credential,
     secret_seed: &SecretSeed,
@@ -105,8 +108,8 @@ pub(crate) fn opened_seed(
         Ok(_) => Err(assertions),
         Err(SeedMismatch) => {
             let seed = ZkpError::Item {
-                option: option.option().req_set,
-                item: pair.pseudonym().0,
+                option: option.option().req_set(),
+                item: pair.pseudonym().index,
                 code: ItemCode::SeedMismatch,
             };
             Err(assertions.into_iter().chain([seed]).collect())

@@ -17,6 +17,7 @@ use siros_presentation::{
     PresentationError, Response, Selection, SignId, Subset,
 };
 use siros_transaction_data::{Amr, Factor, Inherence, Possession};
+use siros_trust::TrustStore;
 use siros_wallet_state::{CredentialId, WalletState};
 use siros_zkp_req_nym_auth::system::NymAuthSystem;
 use siros_zkp_req_nym_auth::testing::{self, Issuer, Spec, TestProver, SEED};
@@ -54,6 +55,32 @@ pub fn sd_jwt(vct: &str, claims: &[(&str, Value)]) -> String {
 
 /// An SD-JWT VC as [`sd_jwt`] gives it, with the payload members of `extra`.
 pub fn sd_jwt_with(vct: &str, claims: &[(&str, Value)], extra: Value) -> String {
+    sd_jwt_issued(
+        vct,
+        claims,
+        extra,
+        json!({"alg": "ES256", "typ": "dc+sd-jwt"}),
+    )
+}
+
+/// An SD-JWT VC as [`sd_jwt`] gives it, whose issuer JWT header carries the certificates `x5c`,
+/// DER, in base64.
+pub fn sd_jwt_x5c(vct: &str, claims: &[(&str, Value)], x5c: &[&[u8]]) -> String {
+    let x5c: Vec<String> = x5c.iter().map(|der| base64(der)).collect();
+    let header = json!({"alg": "ES256", "typ": "dc+sd-jwt", "x5c": x5c});
+    sd_jwt_issued(vct, claims, json!({}), header)
+}
+
+/// base64 with padding (RFC 4648, Section 4), as `x5c` writes a certificate.
+pub fn base64(bytes: &[u8]) -> String {
+    let mut text = b64(bytes).replace('-', "+").replace('_', "/");
+    while text.len() % 4 != 0 {
+        text.push('=');
+    }
+    text
+}
+
+fn sd_jwt_issued(vct: &str, claims: &[(&str, Value)], extra: Value, header: Value) -> String {
     let disclosures: Vec<String> = claims.iter().map(|(n, v)| disclosure(n, v)).collect();
     let digests: Vec<String> = disclosures
         .iter()
@@ -69,7 +96,6 @@ pub fn sd_jwt_with(vct: &str, claims: &[(&str, Value)], extra: Value) -> String 
     for (name, value) in extra.as_object().unwrap() {
         payload[name] = value.clone();
     }
-    let header = json!({"alg": "ES256", "typ": "dc+sd-jwt"});
     let input = format!(
         "{}.{}",
         b64(header.to_string().as_bytes()),
@@ -91,6 +117,21 @@ pub fn disclosed(name: &str, value: &Value) -> String {
 
 /// An mdoc of `doc_type` bound to the holder's key, with the elements `items` in one namespace.
 pub fn mdoc(doc_type: &str, name_space: &str, items: &[(&str, Cbor)]) -> String {
+    mdoc_by(
+        &Issuer::root(0x12, "Test mDL issuer"),
+        doc_type,
+        name_space,
+        items,
+    )
+}
+
+/// An mdoc as [`mdoc`] gives it, which `issuer` signs, its certificate the `x5chain`.
+pub fn mdoc_by(
+    issuer: &Issuer,
+    doc_type: &str,
+    name_space: &str,
+    items: &[(&str, Cbor)],
+) -> String {
     let text = Cbor::text;
     let tagged = |value: &Cbor| Cbor::Tag(24, Box::new(Cbor::Bytes(value.encode())));
     let encoded: Vec<Vec<u8>> = items
@@ -147,7 +188,6 @@ pub fn mdoc(doc_type: &str, name_space: &str, items: &[(&str, Cbor)]) -> String 
             ]),
         ),
     ]);
-    let issuer = Issuer::root(0x12, "Test mDL issuer");
     let payload = tagged(&mso).encode();
     let protected = Cbor::Map(vec![(Cbor::Unsigned(1), Cbor::Negative(6))]).encode();
     let sig_structure = Cbor::Array(vec![
@@ -170,7 +210,7 @@ pub fn mdoc(doc_type: &str, name_space: &str, items: &[(&str, Cbor)]) -> String 
             text("issuerAuth"),
             Cbor::Array(vec![
                 Cbor::Bytes(protected),
-                Cbor::Map(vec![(Cbor::Unsigned(33), Cbor::Bytes(issuer.der))]),
+                Cbor::Map(vec![(Cbor::Unsigned(33), Cbor::Bytes(issuer.der.clone()))]),
                 Cbor::Bytes(payload),
                 Cbor::Bytes(signature.to_bytes().to_vec()),
             ]),
@@ -228,6 +268,7 @@ pub struct Wallet {
     pub background: Vec<CredentialId>,
     pub key_factors: Vec<(siros_wallet_state::KeyId, Amr)>,
     pub documents: Vec<(String, FetchResponse)>,
+    pub trust: TrustStore,
     state: WalletState,
 }
 
@@ -306,6 +347,7 @@ impl Wallet {
             background: Vec::new(),
             key_factors,
             documents: Vec::new(),
+            trust: TrustStore::parse("[]").unwrap(),
             state,
         }
     }
@@ -328,6 +370,7 @@ impl Wallet {
         PlanInput {
             request,
             credentials: &self.credentials,
+            trust: &self.trust,
             records: self.state.presentations(),
             display: &self.display,
             locales: &self.locales,

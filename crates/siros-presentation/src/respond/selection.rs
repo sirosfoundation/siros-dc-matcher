@@ -1,9 +1,7 @@
 //! The user's selection, parsed against the plan (A3, A4), and the refusal of a background
 //! fulfilment that needs the wallet's display (A9).
 
-use std::fmt;
-
-use siros_dcql::QueryId;
+use siros_dcql::{Multiplicity, QueryId};
 use siros_wallet_state::CredentialId;
 
 use crate::display_rule::WalletDisplay;
@@ -51,11 +49,7 @@ impl SubsetError {
     }
 }
 
-impl fmt::Display for SubsetError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(SubsetError);
 
 impl std::error::Error for SubsetError {}
 
@@ -206,7 +200,7 @@ impl<'a> Planned<'a> {
             .filter(|&index| {
                 self.answered
                     .answers(index)
-                    .is_some_and(|answers| answers.query().multiple)
+                    .is_some_and(|answers| answers.query().multiplicity() == Multiplicity::Several)
             })
             .ok_or_else(|| PresentationError::SubsetQuery(id.clone()))
     }

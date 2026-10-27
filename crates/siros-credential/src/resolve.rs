@@ -4,12 +4,14 @@
 use serde_json::{Map, Value as Json};
 use siros_codec::base64url;
 use siros_codec::cbor::Value as Cbor;
-use siros_dcql::{mdoc_components, resolve, PathComponent, PathError};
+use siros_dcql::{
+    mdoc_components, resolve, ClaimPath, CredentialFormat, CredentialRef, CryptographicBinding,
+    PathError,
+};
 use siros_mdoc::{IssuerSignedItem, Mdoc};
 use siros_sdjwt::{Node, NodeValue};
 
 use crate::credential::{Body, Credential};
-use crate::pointer::ClaimPointer;
 use crate::usable::UsableCredential;
 use crate::value::{self, TypedValue};
 
@@ -32,25 +34,21 @@ impl<'a> Found<'a> {
 }
 
 impl Credential {
-    /// The values of the claims `pointer` selects, in the order of their selection.
+    /// The values of the claims `path` selects, in the order of their selection.
     ///
     /// For an SD-JWT VC, [`siros_dcql::resolve`] walks the claim tree: an index counts issued
     /// positions and selects nothing at a withheld one, and `null` selects the present
-    /// elements. For an mdoc, the pointer is `[namespace, element]` and selects that element's
+    /// elements. For an mdoc, the path is `[namespace, element]` and selects that element's
     /// value.
     ///
     /// # Errors
     ///
-    /// [`PathError`] when the pointer does not fit the credential or selects nothing.
-    pub fn claims(&self, pointer: &ClaimPointer) -> Result<Vec<TypedValue<'_>>, PathError> {
-        Ok(self
-            .select(pointer.components())?
-            .into_iter()
-            .map(Found::typed)
-            .collect())
+    /// [`PathError`] when the path does not fit the credential or selects nothing.
+    pub fn claims(&self, path: &ClaimPath) -> Result<Vec<TypedValue<'_>>, PathError> {
+        Ok(self.select(path)?.into_iter().map(Found::typed).collect())
     }
 
-    fn select(&self, path: &[PathComponent]) -> Result<Vec<Found<'_>>, PathError> {
+    fn select(&self, path: &ClaimPath) -> Result<Vec<Found<'_>>, PathError> {
         match &self.body {
             Body::SdJwtVc(vc) => Ok(resolve(vc.sd_jwt().root(), path)?
                 .into_iter()
@@ -63,12 +61,12 @@ impl Credential {
 
 /// The value of the element `path` names (Section 7.2.1). A namespace or an element the mdoc
 /// lacks selects nothing.
-fn element<'a>(mdoc: &'a Mdoc, path: &[PathComponent]) -> Result<&'a Cbor, PathError> {
+fn element<'a>(mdoc: &'a Mdoc, path: &ClaimPath) -> Result<&'a Cbor, PathError> {
     let (name_space, identifier) = mdoc_components(path)?;
     mdoc.name_spaces()
         .iter()
-        .find(|n| n.name() == name_space)
-        .and_then(|n| n.items().iter().find(|i| i.identifier() == identifier))
+        .find(|n| *n.name() == name_space)
+        .and_then(|n| n.items().iter().find(|i| *i.identifier() == identifier))
         .map(IssuerSignedItem::value)
         .ok_or(PathError::Empty)
 }
@@ -81,16 +79,16 @@ fn element<'a>(mdoc: &'a Mdoc, path: &[PathComponent]) -> Result<&'a Cbor, PathE
 /// 6.1 converts CBOR to JSON.
 impl siros_dcql::Credential for Credential {
     /// The decimal `credentialId`.
-    fn id(&self) -> &str {
+    fn id(&self) -> &CredentialRef {
         Credential::id(self)
     }
 
     /// `dc+sd-jwt` or `mso_mdoc`.
-    fn format(&self) -> &str {
-        Credential::format(self).identifier()
+    fn format(&self) -> &CredentialFormat {
+        self.format_identifier()
     }
 
-    fn claim(&self, path: &[PathComponent]) -> Result<Vec<Json>, PathError> {
+    fn claim(&self, path: &ClaimPath) -> Result<Vec<Json>, PathError> {
         Ok(self
             .select(path)?
             .into_iter()
@@ -99,30 +97,30 @@ impl siros_dcql::Credential for Credential {
     }
 
     /// An SD-JWT VC is bound when it has `cnf`; an mdoc always has its MSO's device key.
-    fn has_cryptographic_holder_binding(&self) -> bool {
+    fn binding(&self) -> CryptographicBinding {
         match &self.body {
-            Body::SdJwtVc(vc) => vc.bound(),
-            Body::Mdoc(_) => true,
+            Body::SdJwtVc(vc) => vc.binding(),
+            Body::Mdoc(_) => CryptographicBinding::Bound,
         }
     }
 }
 
 /// DCQL evaluation over usable credentials only (A1).
 impl siros_dcql::Credential for UsableCredential<'_> {
-    fn id(&self) -> &str {
+    fn id(&self) -> &CredentialRef {
         siros_dcql::Credential::id(self.credential())
     }
 
-    fn format(&self) -> &str {
+    fn format(&self) -> &CredentialFormat {
         siros_dcql::Credential::format(self.credential())
     }
 
-    fn claim(&self, path: &[PathComponent]) -> Result<Vec<Json>, PathError> {
+    fn claim(&self, path: &ClaimPath) -> Result<Vec<Json>, PathError> {
         self.credential().claim(path)
     }
 
-    fn has_cryptographic_holder_binding(&self) -> bool {
-        self.credential().has_cryptographic_holder_binding()
+    fn binding(&self) -> CryptographicBinding {
+        self.credential().binding()
     }
 }
 

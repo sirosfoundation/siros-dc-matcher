@@ -46,8 +46,8 @@ pub use credential::{KeyHolding, MatchCredential};
 pub use display_rule::{Choice, DisplayFacts, Presentability, TransactionData, WalletDisplay};
 pub use ids::{AdditionIndex, CandidateIndex, OfferIndex, OptionIndex, QueryIndex, SetIndex};
 pub use matching::{
-    Answer, Answered, Answers, Asked, AskedError, Candidate, ChoiceError, Claims, Excluded,
-    Failure, HolderBinding, Matching, ProofChoice, QueryRefusal, ZkpQuery, ZkpRefusal,
+    Answer, Answered, Answers, Asked, Candidate, ChoiceError, Claims, Excluded, Exclusion, Failure,
+    Matching, ProofChoice, QueryRefusal, ZkpQuery, ZkpRefusal,
 };
 pub use offers::{
     Addition, EntryCarriers, EntryQueries, Member, Offer, Offers, Refusal, MAX_ADDITIONS,
@@ -66,8 +66,8 @@ pub use error::{Inconsistency, PresentationError};
 #[cfg(feature = "wallet")]
 pub use plan::{
     plan, refusal, AdditionView, ConsentView, CredentialView, DigestError, EntryPosition, Fetches,
-    JsonCause, MemberView, NoSeed, OfferView, OptionRefusal, PlanDigest, PlanInput, PlanStep,
-    Planned, Shown, Unproven,
+    MemberView, NoSeed, OfferView, OptionRefusal, PlanDigest, PlanInput, PlanStep, Planned, Shown,
+    Unproven,
 };
 #[cfg(feature = "wallet")]
 pub use respond::{

@@ -1,5 +1,5 @@
 {
-  "description": "claim_sets present.",
+  "description": "claim_sets without claims: DCQL refuses it (OpenID4VP 1.0, Section 6.4.1).",
   "query": {
     "id": "nym_attestation",
     "format": "zkp_req",
@@ -35,6 +35,7 @@
     }
   },
   "expect": {
-    "error": "claim_sets_present"
-  }
+    "error": "claim_sets_without_claims"
+  },
+  "v0_4": "DCQL refuses claim_sets without claims first, with its code (v0.4: claim_sets_present)."
 }

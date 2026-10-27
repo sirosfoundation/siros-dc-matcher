@@ -4,10 +4,11 @@
 
 use sha2::{Digest, Sha256, Sha384, Sha512};
 use siros_codec::base64url::{self, Base64Url};
+use siros_codec::json::Json;
 use siros_oid4vp::TransactionDataItem;
 
 use crate::error::{MemberPath, TransactionDataError};
-use crate::json::{self, Json};
+use crate::json;
 
 /// A hash algorithm of the IANA Named Information Hash Algorithm Registry that this wallet
 /// computes, weakest first.

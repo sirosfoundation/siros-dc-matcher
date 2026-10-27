@@ -1,9 +1,13 @@
 //! A credential of the wallet state, read through its format component (C1).
 
+use siros_dcql::{CredentialFormat, CredentialRef, DocType, Vct};
 use siros_mdoc::{Mdoc, P256Key};
 use siros_sdjwt::SdJwt;
+#[cfg(feature = "chain")]
+use siros_trust::{ChainError, IssuerChain};
 use siros_wallet_state::{
-    BatchId, CredentialEntry, CredentialId, InstanceId, KeyId, MetadataValue,
+    BatchId, ConfigurationId, CredentialEntry, CredentialId, InstanceId, IssuerIdentifier, KeyId,
+    MetadataValue,
 };
 
 use crate::error::CredentialError;
@@ -18,19 +22,41 @@ const AUXILIARY_DATA: &str = "auxiliary_data";
 /// A wallet state entry whose `data` its format component reads.
 pub struct Credential {
     entry: EntryRef,
-    id: String,
-    issuer: Option<String>,
-    configuration_id: Option<String>,
+    id: CredentialRef,
+    format: CredentialFormat,
+    issuer: Option<IssuerIdentifier>,
+    configuration_id: Option<ConfigurationId>,
     key_id: Option<KeyId>,
     auxiliary_data: Vec<MetadataValue>,
     validity: Validity,
+    #[cfg(feature = "chain")]
+    issuer_chain: Option<IssuerChain>,
     pub(crate) body: Body,
 }
 
 /// The parsed format value.
 pub(crate) enum Body {
-    SdJwtVc(SdJwtVc),
+    SdJwtVc(Box<SdJwtVc>),
     Mdoc(Box<Mdoc>),
+}
+
+impl Body {
+    fn format(&self) -> Format {
+        match self {
+            Self::SdJwtVc(_) => Format::SdJwtVc,
+            Self::Mdoc(_) => Format::Mdoc,
+        }
+    }
+
+    /// The issuer chain: the mdoc's `x5chain`, or the SD-JWT VC issuer JWT's `x5c` when it has
+    /// one.
+    #[cfg(feature = "chain")]
+    fn issuer_chain(&self) -> Result<Option<IssuerChain>, ChainError> {
+        match self {
+            Self::SdJwtVc(vc) => vc.sd_jwt().x5c().map(IssuerChain::parse).transpose(),
+            Self::Mdoc(mdoc) => IssuerChain::parse(mdoc.issuer_auth().x5chain()).map(Some),
+        }
+    }
 }
 
 /// The entry a credential is read from: its `credentialId`, `batchId` and `instanceId`.
@@ -69,10 +95,31 @@ pub enum Format {
 
 impl Format {
     /// The format identifier of OpenID4VP 1.0, Appendix B: `dc+sd-jwt` or `mso_mdoc`.
+    #[must_use]
     pub fn identifier(self) -> &'static str {
         match self {
             Self::SdJwtVc => "dc+sd-jwt",
             Self::Mdoc => "mso_mdoc",
+        }
+    }
+}
+
+/// The type of a credential: the SD-JWT VC's `vct`, or the mdoc's `docType`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CredentialType<'a> {
+    /// An SD-JWT VC's `vct`.
+    Vct(&'a Vct),
+    /// An mdoc's `docType`.
+    DocType(&'a DocType),
+}
+
+impl<'a> CredentialType<'a> {
+    /// The type's text.
+    #[must_use]
+    pub fn as_str(self) -> &'a str {
+        match self {
+            Self::Vct(vct) => vct.as_str(),
+            Self::DocType(doc_type) => doc_type.as_str(),
         }
     }
 }
@@ -95,7 +142,8 @@ impl Credential {
     /// is a JSON object; `nbf` and `exp` are NumericDates. Every mdoc element value, at every
     /// depth, has one of the ten types of [`TypedValue`](crate::TypedValue): its tags are 0
     /// over a `tdate` and 1004 over a `full-date`, its map keys are text, and it holds no
-    /// `undefined`.
+    /// `undefined`. With the feature `chain`, the issuer chain (TR2), the mdoc's `x5chain` or
+    /// the SD-JWT VC issuer JWT's `x5c`, parses.
     ///
     /// # Errors
     ///
@@ -105,7 +153,7 @@ impl Credential {
             "dc+sd-jwt" | "vc+sd-jwt" => {
                 let vc = SdJwtVc::read(entry.data().as_str())?;
                 let validity = vc.validity();
-                (Body::SdJwtVc(vc), validity)
+                (Body::SdJwtVc(Box::new(vc)), validity)
             }
             "mso_mdoc" => {
                 let mdoc = Box::new(Mdoc::parse(entry.data().as_str())?);
@@ -122,9 +170,10 @@ impl Credential {
                 batch_id: entry.batch_id(),
                 instance_id: entry.instance_id(),
             },
-            id: entry.credential_id().to_string(),
-            issuer: entry.issuer().map(|issuer| issuer.as_str().to_owned()),
-            configuration_id: entry.configuration_id().map(|id| id.as_str().to_owned()),
+            id: CredentialRef::new(&entry.credential_id().to_string()),
+            format: CredentialFormat::new(body.format().identifier()),
+            issuer: entry.issuer().cloned(),
+            configuration_id: entry.configuration_id().cloned(),
             key_id: entry.key_id().cloned(),
             auxiliary_data: entry
                 .metadata()
@@ -133,6 +182,8 @@ impl Credential {
                 .map(|m| m.value().clone())
                 .collect(),
             validity,
+            #[cfg(feature = "chain")]
+            issuer_chain: body.issuer_chain()?,
             body,
         })
     }
@@ -143,11 +194,9 @@ impl Credential {
     }
 
     /// The format.
+    #[must_use]
     pub fn format(&self) -> Format {
-        match self.body {
-            Body::SdJwtVc(_) => Format::SdJwtVc,
-            Body::Mdoc(_) => Format::Mdoc,
-        }
+        self.body.format()
     }
 
     /// The parsed format value.
@@ -159,21 +208,24 @@ impl Credential {
     }
 
     /// The type: the SD-JWT VC's `vct`, or the mdoc's `docType`.
-    pub fn credential_type(&self) -> &str {
+    #[must_use]
+    pub fn credential_type(&self) -> CredentialType<'_> {
         match &self.body {
-            Body::SdJwtVc(vc) => vc.vct(),
-            Body::Mdoc(mdoc) => mdoc.doc_type(),
+            Body::SdJwtVc(vc) => CredentialType::Vct(vc.vct()),
+            Body::Mdoc(mdoc) => CredentialType::DocType(mdoc.doc_type()),
         }
     }
 
     /// The entry's `credentialIssuerIdentifier`. `None` when the wallet did not know it.
-    pub fn issuer(&self) -> Option<&str> {
-        self.issuer.as_deref()
+    #[must_use]
+    pub fn issuer(&self) -> Option<&IssuerIdentifier> {
+        self.issuer.as_ref()
     }
 
     /// The entry's `credentialConfigurationId`. `None` when the wallet did not know it.
-    pub fn configuration_id(&self) -> Option<&str> {
-        self.configuration_id.as_deref()
+    #[must_use]
+    pub fn configuration_id(&self) -> Option<&ConfigurationId> {
+        self.configuration_id.as_ref()
     }
 
     /// The validity: the MSO's `validFrom` and `validUntil`, or the SD-JWT VC's `nbf` and
@@ -192,6 +244,13 @@ impl Credential {
         }
     }
 
+    /// The issuer chain (TR2): the mdoc's `x5chain`, or the SD-JWT VC issuer JWT's `x5c`. `None`
+    /// for an SD-JWT VC without `x5c`.
+    #[cfg(feature = "chain")]
+    pub fn issuer_chain(&self) -> Option<&IssuerChain> {
+        self.issuer_chain.as_ref()
+    }
+
     /// The entry's `kid`: the key pair the credential is bound to.
     pub fn key_id(&self) -> Option<&KeyId> {
         self.key_id.as_ref()
@@ -204,7 +263,12 @@ impl Credential {
     }
 
     /// The decimal `credentialId`: the identifier DCQL evaluation echoes.
-    pub(crate) fn id(&self) -> &str {
+    pub(crate) fn id(&self) -> &CredentialRef {
         &self.id
+    }
+
+    /// The format identifier DCQL evaluation compares with a query's `format`.
+    pub(crate) fn format_identifier(&self) -> &CredentialFormat {
+        &self.format
     }
 }

@@ -1,9 +1,7 @@
 //! What a nym_auth query, credential or proof can fail on, as typed values with the codes of
 //! the specs.
 
-use std::fmt;
-
-use siros_zkp_req::RequestRule;
+use siros_zkp_req::{ItemIndex, ReqSetIndex, RequestRule};
 
 use crate::catalogue::CatalogueRule;
 
@@ -26,11 +24,7 @@ impl InvalidRequest {
     }
 }
 
-impl fmt::Display for InvalidRequest {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(InvalidRequest);
 
 impl std::error::Error for InvalidRequest {}
 
@@ -70,10 +64,8 @@ impl ItemCode {
 pub enum CredentialCode {
     /// The proof time lies outside `[validFrom, validUntil)`.
     Validity,
-    /// `issuerAuth` fails under the `x5chain` key, or the MSO omits an item's digest.
+    /// `issuerAuth` fails under the `x5chain` key.
     IssuerSignature,
-    /// The certificate chains to no authority of the query's `trusted_authorities`.
-    IssuerUntrusted,
     /// The device signature fails under the MSO's device key.
     DeviceBinding,
     /// The credential lies outside the form the system reads.
@@ -86,7 +78,6 @@ impl CredentialCode {
         match self {
             Self::Validity => "validity",
             Self::IssuerSignature => "issuer_signature",
-            Self::IssuerUntrusted => "issuer_untrusted",
             Self::DeviceBinding => "device_binding",
             Self::CredentialForm => "credential_form",
         }
@@ -100,9 +91,9 @@ pub enum ZkpError {
     /// An item fails.
     Item {
         /// The option's index in `_req_sets`, `None` without them.
-        option: Option<usize>,
+        option: Option<ReqSetIndex>,
         /// The item's `_req` index.
-        item: usize,
+        item: ItemIndex,
         /// The failure.
         code: ItemCode,
     },
@@ -120,8 +111,4 @@ impl ZkpError {
     }
 }
 
-impl fmt::Display for ZkpError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(ZkpError);

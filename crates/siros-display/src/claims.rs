@@ -1,8 +1,7 @@
 //! Labels, and the claim descriptions that give them to the claims at a path.
 
 use serde_json::{Map, Value};
-use siros_credential::ClaimPointer;
-use siros_dcql::PathComponent;
+use siros_dcql::{ClaimPath, PathComponent};
 
 use crate::error::{DisplayError, EntryFault};
 use crate::json::{self, Entries};
@@ -51,7 +50,7 @@ pub(crate) fn named_labels(
 /// path, and a label for each `display` entry that has a `name`.
 #[derive(Debug, Clone)]
 pub(crate) struct ClaimDescription {
-    pub(crate) path: ClaimPointer,
+    pub(crate) path: ClaimPath,
     pub(crate) labels: Vec<Label>,
 }
 
@@ -108,30 +107,16 @@ fn agree(first: &[PathComponent], second: &[PathComponent]) -> Result<(), Displa
     }
 }
 
-/// A claims path pointer of display metadata: a non-empty array of strings, nulls and
-/// non-negative integers (OpenID4VCI 1.0, Appendix C; SD-JWT VC, Section 5.6.1).
-pub(crate) fn path(value: Option<&Value>) -> Result<ClaimPointer, DisplayError> {
-    let Some(Value::Array(components)) = value else {
-        return Err(DisplayError::ClaimPath);
-    };
-    let components = components
-        .iter()
-        .map(|component| match component {
-            Value::String(key) => Ok(PathComponent::Key(key.clone())),
-            Value::Null => Ok(PathComponent::Null),
-            Value::Number(n) => n
-                .as_u64()
-                .map(PathComponent::Index)
-                .ok_or(DisplayError::ClaimPath),
-            _ => Err(DisplayError::ClaimPath),
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    ClaimPointer::parse(components).map_err(|_| DisplayError::ClaimPath)
+/// The required claims path pointer `value` of display metadata (OpenID4VCI 1.0, Appendix C;
+/// SD-JWT VC, Section 5.6.1).
+pub(crate) fn path(value: Option<&Value>) -> Result<ClaimPath, DisplayError> {
+    let value = value.ok_or(DisplayError::Claims(EntryFault::MemberMissing))?;
+    ClaimPath::parse(value).map_err(DisplayError::ClaimPath)
 }
 
 /// Whether the description path `described` addresses the claim at `path`: the same length,
 /// equal keys and indexes, and `null` addressing any index or `null` of `path`.
-pub(crate) fn describes(described: &ClaimPointer, path: &[PathComponent]) -> bool {
+pub(crate) fn describes(described: &ClaimPath, path: &[PathComponent]) -> bool {
     let described = described.components();
     described.len() == path.len()
         && described.iter().zip(path).all(|(d, p)| match (d, p) {

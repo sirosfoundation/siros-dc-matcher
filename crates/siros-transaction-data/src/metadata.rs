@@ -4,13 +4,14 @@
 use std::collections::hash_map::Entry;
 
 use rustc_hash::FxHashMap;
-use siros_credential::{ClaimPointer, Credential, Format, TypedValue};
-use siros_dcql::{PathComponent, PathError};
+use siros_codec::json::Json;
+use siros_credential::{Credential, Format, TypedValue};
+use siros_dcql::{ClaimPath, PathError};
 use siros_oid4vp::{BodyLimit, Fetch, FetchResponse, HttpStatus, HttpsUrl, MediaType};
 
 use crate::error::{MetadataPart, TransactionDataError};
 use crate::integrity::Integrity;
-use crate::json::{Fields, Json};
+use crate::json::Fields;
 use crate::kind::SupportedType;
 use crate::labels::{ClaimMetadata, DisplayMetadata, UiLabels};
 
@@ -109,7 +110,7 @@ impl<'c> ScaMetadata<'c> {
         if credential.format() != Format::SdJwtVc {
             return Err(TransactionDataError::NotSdJwtVc);
         }
-        let url = HttpsUrl::parse(credential.credential_type())
+        let url = HttpsUrl::parse(credential.credential_type().as_str())
             .ok_or(TransactionDataError::VctNotHttps)?;
         Ok(Fetch::get(url, MediaType::JSON, MAX_DOCUMENT))
     }
@@ -139,9 +140,9 @@ impl<'c> ScaMetadata<'c> {
         let Json::Object(object) = document else {
             return Err(malformed("type metadata"));
         };
-        let mut fields = object.into_fields();
+        let mut fields = Fields::new(object);
         match fields.take("vct") {
-            Some(Json::String(vct)) if vct == credential.credential_type() => {}
+            Some(Json::String(vct)) if vct == credential.credential_type().as_str() => {}
             Some(Json::String(_)) => return Err(TransactionDataError::VctMismatch),
             _ => return Err(malformed("vct")),
         }
@@ -152,7 +153,7 @@ impl<'c> ScaMetadata<'c> {
         };
         let types = match fields.take("transaction_data_types") {
             None => Vec::new(),
-            Some(Json::Object(types)) => transaction_data_types(credential, types.into_fields())?,
+            Some(Json::Object(types)) => transaction_data_types(credential, Fields::new(types))?,
             Some(_) => return Err(malformed(TRANSACTION_DATA_TYPES)),
         };
         Ok(Self {
@@ -202,7 +203,7 @@ fn transaction_data_types(
                     TRANSACTION_DATA_TYPES,
                 )));
             };
-            let mut entry = entry.into_fields();
+            let mut entry = Fields::new(entry);
             let display = TypeDisplay {
                 claims: source(
                     credential,
@@ -311,16 +312,13 @@ fn read(
     if let Some(integrity) = integrity {
         integrity.check(body)?;
     }
-    let malformed = TransactionDataError::MetadataMalformed(MetadataPart::new("document"));
-    let text = std::str::from_utf8(body).map_err(|_| malformed)?;
-    Json::parse(text).map_err(|_| malformed)
+    let text = std::str::from_utf8(body).map_err(TransactionDataError::MetadataNotUtf8)?;
+    Json::parse_unique(text.as_bytes()).map_err(TransactionDataError::MetadataNotJson)
 }
 
 /// The integrity metadata of the credential's top-level claim `name`, when it has the claim.
 fn pin(credential: &Credential, name: &str) -> Result<Option<Integrity>, TransactionDataError> {
-    let pointer = ClaimPointer::parse(vec![PathComponent::Key(name.to_owned())])
-        .map_err(|_| TransactionDataError::IntegrityMalformed)?;
-    match credential.claims(&pointer).as_deref() {
+    match credential.claims(&ClaimPath::key(name)).as_deref() {
         Err(PathError::Empty) => Ok(None),
         Ok([TypedValue::Text(text)]) => Integrity::parse(text).map(Some),
         _ => Err(TransactionDataError::IntegrityMalformed),

@@ -54,7 +54,6 @@ pub use binding::{bind, Jti, KbJwtInputs, MemberBinding, Presented};
 pub use entry::Entry;
 pub use error::{MemberPath, MetadataPart, TransactionDataError};
 pub use hash::HashAlg;
-pub use json::MAX_DEPTH;
 pub use kind::SupportedType;
 pub use metadata::{Fetched, ScaMetadata, Step};
 pub use ts12::ImageUrl;

@@ -12,8 +12,7 @@
 //! `DeviceResponse`. [`device_signing_input`] gives the same data from a session transcript, a
 //! document type and the `DeviceSigned` namespaces alone.
 //!
-//! The feature `crypto` adds the Document Signer certificate ([`P256Certificate`]) and ES256
-//! verification ([`es256_verifies`]).
+//! The feature `crypto` adds ES256 verification ([`es256_verifies`]).
 
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
@@ -26,27 +25,33 @@
 )]
 
 mod device;
+mod device_key;
 mod disclosure;
 mod error;
 mod issuer_auth;
+mod key_authorizations;
 mod mdoc;
 mod mso;
+mod names;
+mod signature;
 
 #[cfg(feature = "crypto")]
 mod es256;
-#[cfg(feature = "crypto")]
-mod x509;
 
-pub use device::{
-    device_signing_digest, device_signing_input, DeviceNameSpaces, DeviceSignedElement,
-};
+pub use device::{device_signing_input, DeviceNameSpaces, DeviceSignedElement};
+pub use device_key::{P256Key, PointError};
 pub use disclosure::{Disclosure, ElementId};
-pub use error::{DisclosureError, MdocError};
+pub use error::{
+    AlgorithmFault, DeviceKeyFault, DisclosureError, DocTypeFault, EnvelopeFault, IssuerAuthFault,
+    ItemFault, ItemMember, KeyAuthorizationsFault, MdocError, NameFault, NameSpacesFault,
+    NamesFault, PayloadFault, ValidityFault, ValidityTime, ValueDigestsFault,
+};
 pub use issuer_auth::IssuerAuth;
+pub use key_authorizations::KeyAuthorizations;
 pub use mdoc::{IssuerNameSpace, IssuerSignedItem, Mdoc};
-pub use mso::{DigestAlgorithm, KeyAuthorizations, Mso, P256Key, Validity};
+pub use mso::{DigestAlgorithm, ItemDigest, Mso, Validity};
+pub use names::{DigestId, ElementIdentifier, NameSpace};
+pub use signature::{CoseAlgorithm, MessageDigest, SessionTranscript, SigStructure};
 
 #[cfg(feature = "crypto")]
 pub use es256::es256_verifies;
-#[cfg(feature = "crypto")]
-pub use x509::{chains_to, CertificateError, P256Certificate};

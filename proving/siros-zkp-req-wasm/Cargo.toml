@@ -1,7 +1,7 @@
 [package]
 name = "siros-zkp-req-wasm"
 version = "0.11.0"
-description = "The zkp_req presenter for the browser, with the Longfellow and Vega provers"
+description = "The zkp_req parts of the browser presenter: the Longfellow and Vega provers and the vp_token"
 publish = false
 edition.workspace = true
 license.workspace = true
@@ -13,14 +13,12 @@ rust-version.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-siros-codec = { workspace = true }
-siros-oid4vp = { workspace = true }
+siros-dcql = { workspace = true }
 siros-zkp-req = { workspace = true }
 siros-zkp-req-nym-auth = { workspace = true }
 siros-zkp-backend-longfellow = { workspace = true }
 siros-zkp-backend-vega = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
 serde-wasm-bindgen = "0.6.5"
 serde_bytes = "0.11.19"
 wasm-bindgen = "0.2.100"

@@ -6,7 +6,7 @@ use siros_codec::date::{Date, DateTime};
 use siros_mdoc::Mdoc;
 use siros_sdjwt::{Claim, ClaimValue, Element};
 
-use crate::error::CredentialError;
+use crate::error::{CborTag, CredentialError};
 
 /// A claim value with its type.
 #[derive(Clone, Copy)]
@@ -202,7 +202,9 @@ fn classify(value: &Cbor) -> (TypedValue<'_>, Option<CredentialError>) {
                 other => (cbor(other), Some(CredentialError::Tdate)),
             }
         }
-        Cbor::Tag(_, inner) => return (cbor(inner), Some(CredentialError::Tag)),
+        Cbor::Tag(tag, inner) => {
+            return (cbor(inner), Some(CredentialError::Tag(CborTag::new(*tag))))
+        }
         Cbor::Bool(b) => TypedValue::Bool(*b),
         Cbor::Null => TypedValue::Null,
         Cbor::Encoded(_) => return (TypedValue::Null, Some(CredentialError::Undefined)),

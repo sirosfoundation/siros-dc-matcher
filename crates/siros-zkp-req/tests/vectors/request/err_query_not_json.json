@@ -14,7 +14,7 @@
     }
   },
   "expect": {
-    "error": "query_not_object"
+    "error": "dcql_malformed"
   },
-  "v0_4": "Text that is not JSON is no object (v0.4: query_not_parseable)."
+  "v0_4": "Text that is not JSON is no object, which DCQL refuses (v0.4: query_not_parseable)."
 }

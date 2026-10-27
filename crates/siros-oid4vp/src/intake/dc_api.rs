@@ -2,6 +2,7 @@
 
 use serde_json::{Map, Value};
 use siros_codec::date::DateTime;
+use siros_codec::json::JsonTextError;
 
 use super::request::{self, Arrival};
 use super::signature::{self, Verifier};
@@ -21,8 +22,8 @@ pub(super) fn intake(
     now: DateTime,
     answers: &mut Answers<'_>,
 ) -> Result<VerifiedRequest, Halt> {
-    let envelope: Value =
-        serde_json::from_slice(request).map_err(|_| IntakeError::EnvelopeUnreadable)?;
+    let envelope: Value = serde_json::from_slice(request)
+        .map_err(|error| IntakeError::EnvelopeNotJson(JsonTextError::of(&error)))?;
     let (protocol, data) = entry(&envelope).ok_or(IntakeError::EnvelopeUnreadable)?;
     match protocol {
         Protocol::Unsigned => {
@@ -65,11 +66,11 @@ pub(super) fn intake(
                 Some(request @ Value::Object(_)) => request,
                 _ => data,
             };
-            let malformed = IntakeError::JwsMalformed(JwsFault::Serialization);
+            let malformed = || IntakeError::JwsMalformed(JwsFault::Serialization);
             let payload_b64 = jws
                 .get("payload")
                 .and_then(Value::as_str)
-                .ok_or(malformed)?;
+                .ok_or_else(malformed)?;
             let payload = jose::segment(payload_b64).map_err(IntakeError::from)?;
             let params = request_object(&payload)?;
             // A.3.2.2: `client_id` travels in each signature's protected header only.
@@ -79,7 +80,7 @@ pub(super) fn intake(
             let signatures = jws
                 .get("signatures")
                 .and_then(Value::as_array)
-                .ok_or(malformed)?;
+                .ok_or_else(malformed)?;
             let verifier = first_qualifying(signatures, payload_b64, now, answers)?;
             Ok(request::verified(
                 &params,

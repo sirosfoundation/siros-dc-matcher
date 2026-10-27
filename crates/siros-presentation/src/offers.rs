@@ -7,8 +7,9 @@ mod joining;
 
 use itertools::{Either, Itertools};
 use serde_json::Value;
-use siros_dcql::{CredentialSetQuery, Dropped};
+use siros_dcql::{CredentialSetQuery, Dropped, SetRequirement};
 
+use crate::credential::MatchCredential;
 use crate::ids::{CandidateIndex, QueryIndex, SetIndex};
 use crate::matching::Answered;
 use choices::{product, sum, Capped, Choices, Examining, Space};
@@ -96,7 +97,7 @@ pub enum Refusal<E> {
 }
 
 impl Offer {
-    /// The `purpose` of each credential set the offer satisfies, in set order (Section 6.2).
+    /// The `purpose` of each credential set the offer satisfies, in set order.
     pub fn purposes(&self) -> &[Value] {
         &self.purposes
     }
@@ -159,7 +160,7 @@ impl Offers {
     /// order, the last set varying fastest, each followed by its joins; up to [`MAX_EXAMINED`]
     /// combinations and joins are examined, and at most [`MAX_OFFERS`] offers and
     /// [`MAX_ADDITIONS`] additions per offer are kept.
-    pub fn of<C, R, E>(
+    pub fn of<C: MatchCredential, R, E>(
         answered: &Answered<'_, C, R>,
         entries: &[EntryCarriers],
         mut accept: impl FnMut(&[Member]) -> Result<(), E>,
@@ -235,10 +236,10 @@ fn sets(
         .enumerate()
         .partition_map(|(index, set)| {
             let choices = Choices::of_set(space, set);
-            if set.required {
+            if set.requirement() == SetRequirement::Required {
                 Either::Left(choices)
             } else {
-                let index = SetIndex::at(index);
+                let index = SetIndex::new(index);
                 Either::Right(OptionalSet { index, choices })
             }
         })

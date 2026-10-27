@@ -5,7 +5,7 @@ use rustc_hash::FxHashSet;
 use serde_json::{Map, Value};
 use siros_codec::base64url;
 use siros_codec::cbor::{self, Value as Cbor};
-use siros_dcql::QueryId;
+use siros_dcql::{Multiplicity, QueryId};
 
 use super::ResponseError;
 use crate::error_code::ErrorCode;
@@ -106,7 +106,9 @@ impl VerifiedRequest {
         match presentations.len() {
             0 => Err(ResponseError::NoPresentation),
             1 => Ok(()),
-            _ if !query.multiple => Err(ResponseError::MultipleNotAllowed),
+            _ if query.multiplicity() == Multiplicity::One => {
+                Err(ResponseError::MultipleNotAllowed)
+            }
             _ => Ok(()),
         }
     }

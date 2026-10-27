@@ -4,6 +4,7 @@
 use p256::ecdsa::signature::Signer as _;
 use p256::ecdsa::Signature;
 use serde_json::json;
+use siros_codec::base64url;
 use siros_codec::cbor::Value as Cbor;
 use siros_presentation::{
     AdditionIndex, DigestError, Fulfilment, OfferIndex, PlanDigest, PresentationError, Selection,
@@ -68,7 +69,9 @@ fn selections_and_signatures_parse_against_the_plan() {
             "AA=A",
             0,
             vec![],
-            Some(PresentationError::Digest(DigestError::Encoding)),
+            Some(PresentationError::Digest(DigestError::Encoding(
+                base64url::decode("AA=A").unwrap_err(),
+            ))),
         ),
         (
             "a digest not of 32 bytes",

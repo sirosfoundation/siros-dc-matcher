@@ -15,6 +15,8 @@ mod nym_request;
 mod offers;
 mod refusals;
 mod sd_jwt;
+mod seed;
+mod trust;
 mod usable;
 mod verifier;
 mod wallet;

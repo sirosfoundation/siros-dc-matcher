@@ -4,8 +4,8 @@
 use std::fmt;
 
 use sha2::{Digest, Sha256};
-use siros_codec::base64url;
 use siros_codec::cbor::Value;
+use siros_codec::{base64url, Base64Error};
 use siros_dcql::PathComponent;
 use siros_oid4vp::VerifiedRequest;
 use siros_zkp_req_nym_auth::verifier_id::VerifierId;
@@ -13,7 +13,9 @@ use siros_zkp_req_nym_auth::verifier_id::VerifierId;
 use super::transactions::EntryPosition;
 use super::view::{AdditionView, CredentialView, MemberView, OfferView};
 use crate::display_rule::WalletDisplay;
-use crate::matching::{Answer, HolderBinding};
+use siros_dcql::HolderBinding;
+
+use crate::matching::Answer;
 
 /// The domain of the digest, which names this encoding.
 const DOMAIN: &str = "siros-presentation plan 2";
@@ -27,7 +29,7 @@ pub struct PlanDigest([u8; 32]);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DigestError {
     /// The text is not unpadded base64url.
-    Encoding,
+    Encoding(Base64Error),
     /// The text decodes to this many bytes; a digest has 32.
     Length(usize),
 }
@@ -36,17 +38,13 @@ impl DigestError {
     /// A stable identifier.
     pub fn code(self) -> &'static str {
         match self {
-            Self::Encoding => "selection_digest_encoding",
+            Self::Encoding(_) => "selection_digest_encoding",
             Self::Length(_) => "selection_digest_length",
         }
     }
 }
 
-impl fmt::Display for DigestError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(DigestError);
 
 impl std::error::Error for DigestError {}
 
@@ -57,7 +55,7 @@ impl PlanDigest {
     ///
     /// [`DigestError`]: text that is not unpadded base64url, or not of 32 bytes.
     pub fn parse(text: &str) -> Result<Self, DigestError> {
-        let bytes = base64url::decode(text).map_err(|_| DigestError::Encoding)?;
+        let bytes = base64url::decode(text).map_err(DigestError::Encoding)?;
         let length = bytes.len();
         <[u8; 32]>::try_from(bytes)
             .map(Self)
@@ -198,7 +196,7 @@ impl Encode for Answer {
             Self::Proof(choice) => Value::Array(vec![
                 Value::Unsigned(1),
                 Value::Unsigned(choice.option().value() as u64),
-                Value::text(choice.system().id()),
+                Value::text(choice.system().id().as_str()),
                 Value::text(choice.backend().as_str()),
             ]),
         }

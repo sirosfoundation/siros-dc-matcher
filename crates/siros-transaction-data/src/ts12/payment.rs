@@ -1,9 +1,10 @@
 //! `urn:eudi:sca:payment:1`: payment confirmation (EC TS12 v1.0.1, Section 4.3.1).
 
 use siros_codec::date::{Date, DateTime};
+use siros_codec::json::{Json, JsonNumber};
 
 use crate::error::{MemberPath, TransactionDataError};
-use crate::json::{self, optional, Fields, Json, Number};
+use crate::json::{self, optional, Fields};
 use crate::kind::SupportedType;
 use crate::ts12::currency::CurrencyCode;
 use crate::ts12::display::Leaves;
@@ -56,7 +57,7 @@ pub(crate) struct PartyPaths {
 struct Recurrence {
     start_date: Option<Date>,
     end_date: Option<Date>,
-    number: Option<Number>,
+    number: Option<JsonNumber>,
     frequency: Frequency,
     mit_options: Option<MitOptions>,
     rest: Vec<(String, Json)>,
@@ -69,8 +70,8 @@ struct MitOptions {
     max_amount: Option<Amount>,
     total_amount: Option<Amount>,
     initial_amount: Option<Amount>,
-    initial_amount_number: Option<Number>,
-    apr: Option<Number>,
+    initial_amount_number: Option<JsonNumber>,
+    apr: Option<JsonNumber>,
     rest: Vec<(String, Json)>,
 }
 

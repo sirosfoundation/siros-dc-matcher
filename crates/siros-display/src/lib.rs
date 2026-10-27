@@ -31,7 +31,7 @@ pub mod proof;
 pub mod purpose;
 mod text;
 
-pub use error::{DisplayError, EntryFault, LogoFault};
+pub use error::{ColourFault, DisplayError, EntryFault, LogoFault};
 pub use locale::{choose, preferred, Locale, LocaleError, Localized};
 pub use text::{DisplayText, TextError, LABEL_MAX, VALUE_MAX};
 
@@ -45,8 +45,6 @@ mod claims;
 mod colour;
 #[cfg(feature = "credential")]
 mod entry;
-#[cfg(feature = "credential")]
-mod ids;
 #[cfg(feature = "credential")]
 mod issuer;
 #[cfg(feature = "credential")]
@@ -64,8 +62,6 @@ pub use cache::DisplayCache;
 pub use card::Card;
 #[cfg(feature = "credential")]
 pub use colour::Colour;
-#[cfg(feature = "credential")]
-pub use ids::{ConfigurationId, IssuerIdentifier, Vct};
 #[cfg(feature = "credential")]
 pub use issuer::IssuerMetadata;
 #[cfg(feature = "credential")]

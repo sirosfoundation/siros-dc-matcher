@@ -4,7 +4,14 @@
 use sha2::{Digest, Sha256};
 use siros_codec::base64url;
 use siros_codec::cbor::{CborError, Unsupported, Value};
-use siros_mdoc::{DeviceSignedElement, DisclosureError, ElementId, Mdoc, MdocError};
+use siros_codec::member::MemberFault;
+use siros_codec::Base64Error;
+use siros_mdoc::{
+    AlgorithmFault, DeviceKeyFault, DeviceSignedElement, DigestId, DisclosureError, DocTypeFault,
+    ElementId, ElementIdentifier, EnvelopeFault, IssuerAuthFault, ItemFault, ItemMember,
+    KeyAuthorizationsFault, Mdoc, MdocError, NameFault, NameSpace, NameSpacesFault, PayloadFault,
+    ValidityFault, ValueDigestsFault,
+};
 
 const DOC_TYPE: &str = "org.example.doc.1";
 const NAME_SPACE: &str = "org.example.1";
@@ -184,8 +191,8 @@ fn disclosed(elements: &[(&str, &str)], device_signed: &[(&str, &str)]) -> Got {
     let device_signed = device_signed
         .iter()
         .map(|&(name_space, identifier)| DeviceSignedElement {
-            name_space: name_space.to_owned(),
-            identifier: identifier.to_owned(),
+            name_space: NameSpace::new(name_space),
+            identifier: ElementIdentifier::new(identifier),
             value: Value::Bytes(vec![0x7e; 32]),
         })
         .collect();
@@ -202,7 +209,7 @@ fn each_rule_refuses_its_fixture() {
         (
             "encoding",
             read("not base64url!"),
-            Got::Mdoc(MdocError::Encoding),
+            Got::Mdoc(MdocError::Encoding(Base64Error::Alphabet(3))),
         ),
         (
             "cbor",
@@ -214,47 +221,51 @@ fn each_rule_refuses_its_fixture() {
         (
             "envelope",
             edited(|p| p.documents = 2),
-            Got::Mdoc(MdocError::Envelope),
+            Got::Mdoc(MdocError::Envelope(EnvelopeFault::Documents(2))),
         ),
         (
             "issuer_auth",
             edited(|p| p.signature = text("r and s")),
-            Got::Mdoc(MdocError::IssuerAuth),
+            Got::Mdoc(MdocError::IssuerAuth(IssuerAuthFault::Signature)),
         ),
         (
             "algorithm",
             edited(|p| p.protected = Value::Bytes(vec![0xa0])),
-            Got::Mdoc(MdocError::Algorithm),
+            Got::Mdoc(MdocError::Algorithm(AlgorithmFault::Absent)),
         ),
         (
             "x5chain",
             edited(|p| p.unprotected = Value::Map(Vec::new())),
-            Got::Mdoc(MdocError::X5chain),
+            Got::Mdoc(MdocError::X5chain(MemberFault::Absent)),
         ),
         (
             "payload",
             edited(|p| p.payload = Some(map(vec![("docType", text(DOC_TYPE))]))),
-            Got::Mdoc(MdocError::Payload),
+            Got::Mdoc(MdocError::Payload(PayloadFault::NotTagged)),
         ),
         (
             "doc_type",
             edited(|p| p.document_doc_type = "org.example.other.1"),
-            Got::Mdoc(MdocError::DocType),
+            Got::Mdoc(MdocError::DocType(DocTypeFault::Mismatch)),
         ),
         (
             "digest_algorithm",
             edited(|p| p.digest_algorithm = "MD5"),
-            Got::Mdoc(MdocError::DigestAlgorithm),
+            Got::Mdoc(MdocError::DigestAlgorithm(NameFault::Unknown)),
         ),
         (
             "value_digests",
             edited(|p| p.digests[0].1 = Value::Bytes(vec![0; 31])),
-            Got::Mdoc(MdocError::ValueDigests),
+            Got::Mdoc(MdocError::ValueDigests(ValueDigestsFault::DigestLength(
+                NameSpace::new(NAME_SPACE),
+                DigestId::new(0),
+                31,
+            ))),
         ),
         (
             "device_key",
             edited(|p| p.device_key[1].1 = Value::Unsigned(2)),
-            Got::Mdoc(MdocError::DeviceKey),
+            Got::Mdoc(MdocError::DeviceKey(DeviceKeyFault::Curve)),
         ),
         (
             "key_authorizations",
@@ -267,17 +278,22 @@ fn each_rule_refuses_its_fixture() {
                     ),
                 ])
             }),
-            Got::Mdoc(MdocError::KeyAuthorizations),
+            Got::Mdoc(MdocError::KeyAuthorizations(
+                KeyAuthorizationsFault::Overlap(NameSpace::new(SIGNED)),
+            )),
         ),
         (
             "validity",
             edited(|p| p.validity[2] = p.validity[1]),
-            Got::Mdoc(MdocError::Validity),
+            Got::Mdoc(MdocError::Validity(ValidityFault::Order)),
         ),
         (
             "name_spaces",
             edited(|p| p.items.clear()),
-            Got::Mdoc(MdocError::NameSpaces),
+            Got::Mdoc(MdocError::NameSpaces(NameSpacesFault::Items(
+                NameSpace::new(NAME_SPACE),
+                MemberFault::Empty,
+            ))),
         ),
         (
             "item",
@@ -288,7 +304,7 @@ fn each_rule_refuses_its_fixture() {
                     ("elementValue", text("Ada")),
                 ]))
             }),
-            Got::Mdoc(MdocError::Item),
+            Got::Mdoc(MdocError::Item(ItemFault::Member(ItemMember::Random))),
         ),
         (
             "repeated_element",

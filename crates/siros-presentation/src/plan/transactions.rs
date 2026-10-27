@@ -3,7 +3,7 @@
 
 use itertools::Itertools;
 use siros_codec::date::DateTime;
-use siros_credential::{Credential, EntryRef, Format, Instance, UsableCredential};
+use siros_credential::{Credential, EntryRef, Format, UsableCredential};
 use siros_dcql::QueryId;
 use siros_oid4vp::VerifiedRequest;
 use siros_transaction_data::{
@@ -13,14 +13,15 @@ use siros_wallet_state::CredentialId;
 
 use super::fetches::Fetches;
 use super::Unproven;
+use crate::credential::MatchCredential;
 use crate::error::{Inconsistency, PresentationError};
-use crate::ids::{position, CandidateIndex, QueryIndex};
+use crate::ids::{CandidateIndex, QueryIndex};
 use crate::matching::{Answered, Answers, Candidate};
 use crate::offers::{EntryCarriers, EntryQueries, Member};
 
-position!(
+siros_codec::position!(
     /// The position of an entry in the request's `transaction_data`.
-    EntryPosition
+    pub(crate) EntryPosition
 );
 
 /// The presented credential a transaction entry binds to (T4): the Credential Query it answers,
@@ -33,7 +34,7 @@ pub(crate) struct Bound {
 
 impl Bound {
     /// The credential `candidate` presented for the query of `answers`.
-    pub(crate) fn of<C: Instance, R>(
+    pub(crate) fn of<C: MatchCredential, R>(
         answers: &Answers<'_, C, R>,
         candidate: &Candidate<C>,
     ) -> Self {
@@ -124,7 +125,7 @@ impl<'a> Transactions<'a> {
                 self.entries
                     .iter()
                     .position(|entry| std::ptr::eq(entry, *bound))
-                    .map(EntryPosition::at)
+                    .map(EntryPosition::new)
                     .ok_or(Inconsistency::Entry)
             })
             .collect()
@@ -180,7 +181,7 @@ impl<'a> Transactions<'a> {
                 member.candidates.iter().filter_map(|&(_, candidate)| {
                     let metadata = self.metadata_of(candidate)?;
                     let bound = Bound::of(member.answers, candidate);
-                    Some((bound, Presented::new(&member.answers.query().id, metadata)))
+                    Some((bound, Presented::new(member.answers.query().id(), metadata)))
                 })
             })
             .collect();
@@ -238,12 +239,12 @@ pub(crate) struct Offered<'w, 'a> {
     pub(crate) candidates: Vec<(CandidateIndex, &'w Candidate<UsableCredential<'a>>)>,
 }
 
-impl Offered<'_, '_> {
+impl<'a> Offered<'_, 'a> {
     /// Whether the entries of `bound` bind to the member's candidate `candidate`.
     pub(crate) fn carries(
         &self,
         bound: &Bound,
-        candidate: &Candidate<UsableCredential<'_>>,
+        candidate: &Candidate<UsableCredential<'a>>,
     ) -> bool {
         *bound == Bound::of(self.answers, candidate)
     }

@@ -15,7 +15,7 @@ serde = { workspace = true }
 # `raw_value` gives each JSON value as its text, which keeps numbers as the verifier wrote them.
 serde_json = { workspace = true, features = ["raw_value"] }
 sha2 = "0.10.9"
-siros-codec = { workspace = true }
+siros-codec = { workspace = true, features = ["json"] }
 siros-credential = { workspace = true }
 siros-dcql = { workspace = true }
 siros-display = { workspace = true }

@@ -26,6 +26,7 @@
 //! stated plainly in the README rather than left to be rediscovered.
 
 use serde::{Deserialize, Serialize};
+use siros_dcql::{CredentialFormat, CredentialRef};
 
 use crate::profile::MatchProfile;
 
@@ -62,12 +63,12 @@ pub struct Credential {
     ///
     /// Opaque to the matcher. It must be meaningful to the wallet, and must
     /// not be a value the wallet would mind the platform storing.
-    pub id: String,
+    pub id: CredentialRef,
     /// Storage format, e.g. `mso_mdoc` or `dc+sd-jwt`.
     ///
     /// The format a *verifier asks for* is a separate thing, mapped onto this
     /// by the profile — see [`crate::profile::FormatRule`].
-    pub format: String,
+    pub format: CredentialFormat,
     /// ISO mdoc docType, when this is an mdoc.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub doctype: Option<String>,
@@ -128,8 +129,14 @@ pub struct Claim {
 /// Why a blob could not be read.
 #[derive(Debug, PartialEq, Eq)]
 pub enum DecodeError {
-    /// The bytes are not valid CBOR, or not shaped like a database.
-    Malformed,
+    /// The bytes end inside an item.
+    Truncated,
+    /// The bytes are no CBOR at this offset.
+    Syntax(usize),
+    /// The CBOR is not shaped like a database: where, when the reader knows, and what it found.
+    Shape(Option<usize>, String),
+    /// Items nest deeper than the reader allows.
+    TooDeep,
     /// The blob's version is one this matcher does not understand.
     ///
     /// Carries the version so a diagnostic can say *which*, which is the
@@ -141,7 +148,16 @@ pub enum DecodeError {
 impl core::fmt::Display for DecodeError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Self::Malformed => write!(f, "credential blob is not valid CBOR"),
+            Self::Truncated => write!(f, "credential blob ends inside an item"),
+            Self::Syntax(offset) => write!(f, "credential blob is no CBOR at byte {offset}"),
+            Self::Shape(Some(offset), found) => {
+                write!(
+                    f,
+                    "credential blob is no database at byte {offset}: {found}"
+                )
+            }
+            Self::Shape(None, found) => write!(f, "credential blob is no database: {found}"),
+            Self::TooDeep => write!(f, "credential blob nests too deeply"),
             Self::UnsupportedVersion(v) => {
                 write!(f, "credential blob version {v} is newer than this matcher")
             }
@@ -175,12 +191,18 @@ impl CredentialDatabase {
     ///
     /// # Errors
     ///
-    /// [`DecodeError::Malformed`] for anything unparseable, and
-    /// [`DecodeError::UnsupportedVersion`] for a blob from a future wallet.
+    /// [`DecodeError`]: bytes that are no database, or a blob from a future wallet
+    /// ([`DecodeError::UnsupportedVersion`]).
     /// Both are ordinary conditions in the picker, not exceptional ones: the
     /// matcher reports no entries and the user sees no wallet.
     pub fn from_cbor(bytes: &[u8]) -> Result<Self, DecodeError> {
-        let db: Self = ciborium::from_reader(bytes).map_err(|_| DecodeError::Malformed)?;
+        let db: Self = ciborium::from_reader(bytes).map_err(|error| match error {
+            // The reader is the byte slice, whose only failure is its end.
+            ciborium::de::Error::Io(_) => DecodeError::Truncated,
+            ciborium::de::Error::Syntax(offset) => DecodeError::Syntax(offset),
+            ciborium::de::Error::Semantic(offset, found) => DecodeError::Shape(offset, found),
+            ciborium::de::Error::RecursionLimitExceeded => DecodeError::TooDeep,
+        })?;
         if db.version > VERSION {
             return Err(DecodeError::UnsupportedVersion(db.version));
         }
@@ -276,10 +298,10 @@ mod tests {
             CredentialDatabase::from_cbor(&bytes),
             Err(DecodeError::UnsupportedVersion(VERSION + 7))
         );
-        assert_eq!(
+        assert!(matches!(
             CredentialDatabase::from_cbor(b"\xff\xff not cbor"),
-            Err(DecodeError::Malformed)
-        );
+            Err(DecodeError::Shape(..))
+        ));
     }
 
     /// Garbage in must not panic: this runs where a trap shows the user

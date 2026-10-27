@@ -11,8 +11,9 @@
 
 use serde_json::Value;
 use siros_codec::base64url;
-use siros_dcql::PathComponent;
-use siros_sdjwt::SdJwt;
+use siros_codec::date::DateTime;
+use siros_dcql::ClaimPath;
+use siros_sdjwt::{Audience, KbNonce, NumericDate, SdJwt};
 
 use crate::common::{compact_fixture, issued, json_fixture, processed};
 
@@ -59,7 +60,7 @@ fn rfc9901_examples() {
 
         let stated = compact_fixture(&format!("{dir}/presentation.txt"));
         let (sent, kb_jwt) = stated.split_at(stated.rfind('~').unwrap() + 1);
-        let pointers: Vec<Vec<PathComponent>> = serde_json::from_str(pointers).unwrap();
+        let pointers: Vec<ClaimPath> = serde_json::from_str(pointers).unwrap();
         let presentation = sd_jwt.select(&pointers).unwrap();
         assert_eq!(presentation.as_str(), sent, "{dir}");
 
@@ -75,9 +76,10 @@ fn rfc9901_examples() {
         let payload = decoded(segments.next().unwrap());
         let binding = presentation
             .key_binding(
-                payload["iat"].as_u64().unwrap(),
-                payload["aud"].as_str().unwrap(),
-                payload["nonce"].as_str().unwrap(),
+                NumericDate::of(DateTime::from_unix(payload["iat"].as_i64().unwrap()).unwrap())
+                    .unwrap(),
+                &Audience::new(payload["aud"].as_str().unwrap()),
+                &KbNonce::new(payload["nonce"].as_str().unwrap()),
                 &[],
             )
             .unwrap();

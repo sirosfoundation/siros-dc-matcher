@@ -2,13 +2,14 @@
 
 use siros_codec::base64url;
 use siros_codec::date::DateTime;
+use siros_codec::json::Json;
 use siros_credential::Format;
-use siros_dcql::{CredentialQuery, DcqlQuery, QueryId};
+use siros_dcql::{CredentialQuery, DcqlQuery, HolderBinding, QueryId};
 use siros_oid4vp::TransactionDataItem;
 
 use crate::binding::Binding;
 use crate::error::{MemberPath, TransactionDataError};
-use crate::json::{self, Json, JsonError};
+use crate::json::{self, Fields};
 use crate::kind::{SupportedType, TransactionType};
 
 /// A `transaction_data` entry of a supported type, its members parsed into typed values.
@@ -42,14 +43,14 @@ impl Entry {
         now: DateTime,
     ) -> Result<Self, TransactionDataError> {
         let bytes = base64url::decode(raw.as_str()).map_err(TransactionDataError::NotBase64url)?;
-        let text = String::from_utf8(bytes).map_err(|_| TransactionDataError::NotJsonObject)?;
-        let object = match Json::parse(&text) {
-            Ok(Json::Object(object)) => object,
-            Ok(_) | Err(JsonError::Malformed) => return Err(TransactionDataError::NotJsonObject),
-            Err(JsonError::DuplicateKey) => return Err(TransactionDataError::DuplicateKey),
-            Err(JsonError::TooDeep) => return Err(TransactionDataError::TooDeep),
-        };
-        let mut fields = object.into_fields();
+        let text = String::from_utf8(bytes)
+            .map_err(|error| TransactionDataError::NotUtf8(error.utf8_error()))?;
+        let object =
+            match Json::parse_unique(text.as_bytes()).map_err(TransactionDataError::NotJson)? {
+                Json::Object(members) => members,
+                _ => return Err(TransactionDataError::NotJsonObject),
+            };
+        let mut fields = Fields::new(object);
         let identifier = json::text(fields.require("type", TYPE)?, TYPE)?;
         let named = credential_ids(fields.require("credential_ids", CREDENTIAL_IDS)?)?;
         let body = SupportedType::named(&identifier)
@@ -61,7 +62,7 @@ impl Entry {
                 let credential = query
                     .credential(id)
                     .ok_or(TransactionDataError::UnknownCredentialId)?;
-                authorizes(credential, body.format()).map(|()| credential.id.clone())
+                authorizes(credential, body.format()).map(|()| credential.id().clone())
             })
             .collect::<Result<_, _>>()?;
         Ok(Self {
@@ -109,11 +110,11 @@ impl Entry {
 /// `format`: a query of another format, or an SD-JWT VC query without cryptographic holder
 /// binding (B.3.3).
 fn authorizes(credential: &CredentialQuery, format: Format) -> Result<(), TransactionDataError> {
-    if credential.format != format.identifier() {
+    if *credential.format() != format.identifier() {
         return Err(TransactionDataError::QueryFormat);
     }
-    if credential.format == Format::SdJwtVc.identifier()
-        && !credential.require_cryptographic_holder_binding
+    if *credential.format() == Format::SdJwtVc.identifier()
+        && credential.holder_binding() == HolderBinding::Optional
     {
         return Err(TransactionDataError::HolderBindingNotRequired);
     }

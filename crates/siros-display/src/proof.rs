@@ -52,19 +52,18 @@ fn items<'q>(
     query: &'q ZkpReqQuery,
     option: &'q QueryOption,
 ) -> impl Iterator<Item = Result<&'q ReqItem, DisplayError>> {
-    option.items.iter().map(move |&index| {
+    option.items().iter().map(move |&index| {
         query
-            .items
-            .get(index)
-            .ok_or(DisplayError::OptionItemUnknown(index))
+            .item(index)
+            .ok_or(DisplayError::OptionItemUnknown(index.value()))
     })
 }
 
 /// The label of `item` and the detail it shows.
 #[inline]
 fn parts(item: &ReqItem) -> (&str, Option<String>) {
-    let param = |name: &str| item.params.get(name).and_then(Value::as_str);
-    match item.fn_id.as_str() {
+    let param = |name: &str| item.params().get(name).and_then(Value::as_str);
+    match item.fn_id().as_str() {
         "age_check" => ("Age check", param("range").map(|r| format!("age {r}"))),
         "pseudonym" => ("Pseudonym", param("config").map(|c| format!("config {c}"))),
         other => (other, None),

@@ -1,10 +1,20 @@
 [package]
 name = "siros-codec"
 version = "0.11.0"
-description = "Strict CBOR and unpadded base64url for the SIROS wallet core"
+description = "Strict CBOR, strict JSON, base64 and dates for the SIROS wallet core"
 publish = false
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
+
+[features]
+# The strict JSON reader. serde_json's `raw_value` gives each value as its text, which keeps
+# numbers as their writer wrote them.
+json = ["dep:rustc-hash", "dep:serde", "serde_json/raw_value"]
+
+[dependencies]
+rustc-hash = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true }

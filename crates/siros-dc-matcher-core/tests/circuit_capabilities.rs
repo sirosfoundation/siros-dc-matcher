@@ -273,17 +273,14 @@ fn offered(db: &CredentialDatabase, query: Value) -> Vec<String> {
     let Some(context) = UnverifiedRequest::first_registered(request.as_bytes(), &registered) else {
         return vec![];
     };
-    let Some(typed) = context.query().matching_query() else {
-        return vec![];
-    };
-    let policy =
-        ProfilePolicy::new(&db.profile).with_context(context.query(), context.client_metadata());
-    execute(&typed, &credentials(db), &policy)
+    let typed = context.query();
+    let policy = ProfilePolicy::new(&db.profile).with_client_metadata(context.client_metadata());
+    execute(typed, &credentials(db), &policy)
         .query("nym")
         .map(|m| {
-            m.candidates
+            m.candidates()
                 .iter()
-                .map(|c| c.credential_id.clone())
+                .map(|c| c.credential_id().as_str().to_owned())
                 .collect()
         })
         .unwrap_or_default()
@@ -533,12 +530,12 @@ fn the_verifiers_circuit_lists_still_apply_with_capabilities() {
     let run = |ids: &[&str]| {
         let bytes = request(ids);
         let context = UnverifiedRequest::first_registered(bytes.as_bytes(), &registered).unwrap();
-        let typed = context.query().matching_query().unwrap();
-        let policy = ProfilePolicy::new(&db.profile)
-            .with_context(context.query(), context.client_metadata());
-        execute(&typed, &credentials(&db), &policy)
+        let typed = context.query();
+        let policy =
+            ProfilePolicy::new(&db.profile).with_client_metadata(context.client_metadata());
+        execute(typed, &credentials(&db), &policy)
             .query("nym")
-            .map_or(0, |m| m.candidates.len())
+            .map_or(0, |m| m.candidates().len())
     };
     assert_eq!(run(&[CIRCUIT]), 1);
     assert_eq!(run(&["urn:other"]), 0);

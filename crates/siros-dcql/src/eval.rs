@@ -1,58 +1,64 @@
 //! Selecting claims and credentials — OpenID4VP 1.0 §6.4.
 //!
-//! Two rules here are easy to miss and both change what a wallet offers:
+//! Two rules here change what a wallet offers:
 //!
-//! - "If the Wallet cannot deliver all claims requested by the Verifier
-//!   according to these rules, it MUST NOT return the respective Credential"
-//!   (§6.4.1). A credential that lacks a requested claim is not a weak match;
-//!   it is not a match. Filtering on format and metadata alone offers
-//!   credentials that cannot satisfy the request.
-//! - "If `credential_sets` is not provided, the Verifier requests
-//!   presentations for all Credentials in `credentials`" (§6.4). Absent means
-//!   *every* query must be satisfied, not *no constraint*.
+//! - "If the Wallet cannot deliver all claims requested by the Verifier according to these
+//!   rules, it MUST NOT return the respective Credential" (§6.4.1). A credential that lacks a
+//!   requested claim answers nothing.
+//! - "If `credential_sets` is not provided, the Verifier requests presentations for all
+//!   Credentials in `credentials`" (§6.4). Absent means *every* query must be satisfied.
 
 use serde_json::Value;
 
-use crate::id::QueryId;
-use crate::path::{PathComponent, PathError};
-use crate::query::{ClaimsQuery, CredentialQuery, CredentialSetQuery, DcqlQuery};
+use crate::meta::{CredentialFormat, CredentialRef};
+use crate::path::{ClaimPath, PathError};
+use crate::query::{
+    ClaimRequest, ClaimsQuery, CredentialQuery, DcqlQuery, HolderBinding, SetRequirement,
+};
+use crate::result::{
+    Candidate, ClaimPathRefusal, QueryMatch, QueryResult, Satisfaction, SelectedClaim,
+};
 
 /// A credential the wallet holds, as far as DCQL is concerned.
 pub trait Credential {
     /// Stable identifier, echoed back in match results.
-    fn id(&self) -> &str;
+    fn id(&self) -> &CredentialRef;
     /// Storage format, e.g. `mso_mdoc`.
-    fn format(&self) -> &str;
-    /// Resolve a claims path pointer (§7) against this credential.
+    fn format(&self) -> &CredentialFormat;
+    /// The values `path` selects in this credential (§7).
     ///
     /// # Errors
     ///
-    /// [`PathError`] as defined by the processing rules for this credential's
-    /// format. [`PathError::Empty`] — the credential simply lacks the claim —
-    /// is the ordinary case and not exceptional.
-    fn claim(&self, path: &[PathComponent]) -> Result<Vec<Value>, PathError>;
+    /// [`PathError`] as the processing rules of this credential's format give it.
+    /// [`PathError::Empty`], the credential lacking the claim, is the ordinary case.
+    fn claim(&self, path: &ClaimPath) -> Result<Vec<Value>, PathError>;
 
     /// Whether this credential is cryptographically bound to its holder.
     ///
-    /// Answers §6.1's `require_cryptographic_holder_binding`, whose default is
-    /// `true`: a verifier says nothing and still means "bound". A credential
-    /// that answers `false` is not offered to such a query.
+    /// Answers §6.1's `require_cryptographic_holder_binding`, whose default is `true`: a
+    /// verifier that says nothing still means "bound". A query that requires binding never
+    /// receives a credential that answers [`CryptographicBinding::Unbound`].
     ///
-    /// Deliberately without a default implementation. A blanket `true` would
-    /// let an implementor who never considered the question assert a security
-    /// property on their credentials' behalf, and the failure mode is a
-    /// verifier being handed exactly what it said it would not accept.
-    fn has_cryptographic_holder_binding(&self) -> bool;
+    /// Each implementor answers it: a blanket answer would assert a security property on behalf
+    /// of credentials whose implementor never considered the question.
+    fn binding(&self) -> CryptographicBinding;
 }
 
-/// Format and metadata matching, which DCQL deliberately leaves
-/// format-specific.
+/// Whether a credential is cryptographically bound to its holder (§6.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CryptographicBinding {
+    /// A presentation can prove possession of the credential's key.
+    Bound,
+    /// The credential is bound to no key.
+    Unbound,
+}
+
+/// Format and metadata matching, which DCQL leaves format-specific.
 ///
-/// §6.1 defines `meta` as "an object defining additional properties ...
-/// defined per Credential Format", so a generic engine cannot interpret it.
-/// Anything a deployment layers on top — a format that is satisfied by a
-/// different stored format, a capability the wallet must actually have —
-/// belongs here too.
+/// §6.1 defines `meta` as "an object defining additional properties ... defined per
+/// Credential Format", which only a format-aware policy interprets. Anything a deployment
+/// layers on top, such as a format another stored format satisfies, or a capability the wallet
+/// must have, belongs here too.
 pub trait Policy<C: Credential + ?Sized> {
     /// Whether this credential can satisfy this query's format, metadata and
     /// any deployment-specific constraints. Claims are checked separately.
@@ -61,536 +67,183 @@ pub trait Policy<C: Credential + ?Sized> {
 
 /// Format equality and nothing else.
 ///
-/// Enough to use the crate standalone, and the right default for a caller
-/// with no `meta` conventions of its own. Anything richer — `doctype_value`,
-/// `vct_values`, a ZK format satisfied by ordinary mdoc storage — is a
-/// deployment's own [`Policy`].
+/// Enough to use the crate standalone, and the default for a caller with no `meta` conventions
+/// of its own. A deployment's own [`Policy`] reads `doctype_value` and `vct_values`.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ExactFormat;
 
 impl<C: Credential + ?Sized> Policy<C> for ExactFormat {
     fn matches(&self, query: &CredentialQuery, credential: &C) -> bool {
-        query.format == credential.format()
-    }
-}
-
-/// A claim the wallet would disclose for a match.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SelectedClaim {
-    /// `id` of the claims query this satisfies, when it had one.
-    pub claim_id: Option<String>,
-    /// The path that selected it.
-    pub path: Vec<PathComponent>,
-}
-
-/// One credential that satisfies one credential query.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Candidate {
-    /// The credential's own identifier.
-    pub credential_id: String,
-    /// Claims to disclose — exactly these, and no others (§6.4).
-    pub claims: Vec<SelectedClaim>,
-}
-
-/// The candidates for one credential query.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct QueryMatch {
-    /// The credential query's `id`.
-    pub query_id: QueryId,
-    /// Credentials that satisfy it, in the order the wallet holds them.
-    pub candidates: Vec<Candidate>,
-    /// Whether the query accepts more than one credential (§6.1 `multiple`).
-    ///
-    /// Carried on the result so combinations can be enumerated without the
-    /// query alongside, the same reason [`QueryResult::credential_sets`] is.
-    pub multiple: bool,
-}
-
-impl QueryMatch {
-    /// Whether any credential satisfies this query.
-    pub fn is_satisfied(&self) -> bool {
-        !self.candidates.is_empty()
-    }
-}
-
-/// One way to satisfy the whole request.
-///
-/// Every member is presented *together*: this is what the picker offers as a
-/// single choice, and what the user consents to as a unit.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Combination {
-    /// Which credential answers which query, with the claims to disclose.
-    pub members: Vec<(String, Candidate)>,
-    /// Why the verifier asked for this, from the `purpose` of each credential
-    /// set this combination satisfies (§6.2), in set order.
-    ///
-    /// Carried per combination rather than left on the query because that is
-    /// where it is needed: a request with several credential sets offers
-    /// several combinations, and the reason shown beside one of them is the
-    /// reason belonging to *its* set. Empty when the verifier gave no reason,
-    /// which includes every request without `credential_sets`.
-    pub purposes: Vec<Value>,
-}
-
-/// How many combinations were not built.
-///
-/// A count and a *lie* are not the same thing, which is why this is an enum
-/// and not a `usize`. The number of combinations is a product of the per-query
-/// widths, and a wallet holding enough credentials overflows it — at which
-/// point the difference between "we skipped 18446744073709551551" and "we
-/// skipped more than we can count" is the difference between a number a caller
-/// can show a user and one that will make them doubt everything else on the
-/// screen.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Dropped {
-    /// Exactly this many were not built.
-    Exact(usize),
-    /// At least this many were not built; the true product overflowed
-    /// `usize`, so it is unknown and unrepresentable.
-    AtLeast(usize),
-}
-
-impl Dropped {
-    /// The number, exact or not. Pair it with [`Self::is_exact`] before
-    /// showing it to anyone.
-    pub fn count(self) -> usize {
-        match self {
-            Self::Exact(n) | Self::AtLeast(n) => n,
-        }
-    }
-
-    /// Whether [`Self::count`] is the true number rather than a lower bound.
-    pub fn is_exact(self) -> bool {
-        matches!(self, Self::Exact(_))
-    }
-
-    /// Whether anything was dropped at all.
-    pub fn any(self) -> bool {
-        self.count() > 0
-    }
-
-    /// Both counts together.
-    ///
-    /// Inexact if either side is — and also if the sum itself overflows, which
-    /// two exact counts can do. Saturating and still calling that `Exact`
-    /// would be the very lie this type exists to prevent, one layer up from
-    /// the product that motivated it.
-    fn add(self, other: Self) -> Self {
-        match self.count().checked_add(other.count()) {
-            Some(total) if self.is_exact() && other.is_exact() => Self::Exact(total),
-            Some(total) => Self::AtLeast(total),
-            None => Self::AtLeast(usize::MAX),
-        }
-    }
-}
-
-/// The combinations that satisfy a request, and whether the list was cut short.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Combinations {
-    /// Ways to satisfy the request, in wallet order.
-    pub combinations: Vec<Combination>,
-    /// How many were discarded to stay within the caller's limit.
-    ///
-    /// Named rather than left implicit: a picker that silently shows the first
-    /// few of many is telling the user those are the only options they have.
-    pub dropped: Dropped,
-}
-
-/// The outcome of evaluating a query.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct QueryResult {
-    /// Per-credential-query candidates, in query order.
-    pub matches: Vec<QueryMatch>,
-    /// Whether the wallet can satisfy the request at all.
-    ///
-    /// False means the wallet "MUST NOT return any Credential(s)" (§6.4) —
-    /// so nothing should be offered, not even the part that did match.
-    pub satisfiable: bool,
-    /// The request's credential sets, kept so combinations can be enumerated
-    /// without handing the query around alongside its own result.
-    pub credential_sets: Option<Vec<CredentialSetQuery>>,
-}
-
-impl QueryResult {
-    /// The candidates for a given query id.
-    pub fn query(&self, id: &str) -> Option<&QueryMatch> {
-        self.matches.iter().find(|m| m.query_id == id)
+        *query.format() == *credential.format()
     }
 }
 
 /// Evaluate a DCQL query against the credentials a wallet holds.
 ///
-/// `policy` decides format and metadata matching; this function owns the
-/// claim selection and set logic the spec defines generically.
+/// `policy` decides format and metadata matching; this function owns the claim selection and
+/// set logic the spec defines generically. A credential whose claims path processing gives an
+/// error (§7.1.1, §7.2.1) answers nothing, and its [`QueryMatch::refusals`] say why.
 pub fn execute<C: Credential>(
     query: &DcqlQuery,
     credentials: &[C],
     policy: &impl Policy<C>,
 ) -> QueryResult {
     let matches: Vec<QueryMatch> = query
-        .credentials
+        .credentials()
         .iter()
-        .map(|cq| QueryMatch {
-            query_id: cq.id.clone(),
-            multiple: cq.multiple,
-            candidates: credentials
-                .iter()
-                // §6.1 `require_cryptographic_holder_binding`, default true.
-                // Before the policy and the claims, because an unbound
-                // credential is not a weaker match for a query that requires
-                // binding — it is disqualified, however well it fits
-                // otherwise.
-                .filter(|c| {
-                    !cq.require_cryptographic_holder_binding || c.has_cryptographic_holder_binding()
-                })
-                .filter(|c| policy.matches(cq, *c))
-                .filter_map(|c| {
-                    select_claims(cq, c).map(|claims| Candidate {
-                        credential_id: c.id().to_string(),
-                        claims,
-                    })
-                })
-                .collect(),
+        .map(|cq| {
+            let (candidates, refusals) = candidates(cq, credentials, policy);
+            QueryMatch::new(cq.id().clone(), cq.multiplicity(), candidates, refusals)
         })
         .collect();
-
-    // `credentials` is REQUIRED and non-empty (§6), but parsing does not
-    // enforce it, and every check below is vacuously true over an empty set:
-    // an empty query would be reported satisfiable and the picker would offer
-    // an entry backed by nothing.
-    if query.credentials.is_empty() {
-        return QueryResult {
-            matches,
-            satisfiable: false,
-            credential_sets: query.credential_sets.clone(),
-        };
-    }
-
-    let required_sets_met = match &query.credential_sets {
-        // "If `credential_sets` is not provided, the Verifier requests
-        // presentations for all Credentials in `credentials`" (§6.4) — every
-        // query must be satisfied, which is the opposite of unconstrained.
-        None => matches.iter().all(QueryMatch::is_satisfied),
-        // Otherwise every required set must have at least one satisfiable
-        // option; optional sets impose nothing.
-        Some(sets) => sets.iter().filter(|s| s.required).all(|set| {
-            set.options.iter().any(|option| {
-                option.iter().all(|id| {
-                    matches
-                        .iter()
-                        .any(|m| m.query_id == *id && m.is_satisfied())
-                })
-            })
-        }),
-    };
-
-    // A request whose sets are all optional passes the check above with
-    // nothing matched, because "all required sets are satisfied" is vacuously
-    // true. Conformant, and useless in a picker: the wallet would be offered
-    // to the user with no credential behind it.
-    let anything_to_offer = matches.iter().any(QueryMatch::is_satisfied);
-
-    QueryResult {
-        satisfiable: required_sets_met && anything_to_offer,
+    let satisfaction = Satisfaction::of(satisfiable(query, &matches));
+    QueryResult::new(
         matches,
-        credential_sets: query.credential_sets.clone(),
-    }
+        satisfaction,
+        query.credential_sets().map(<[_]>::to_vec),
+    )
 }
 
-impl QueryResult {
-    /// Enumerate the ways this wallet can satisfy the request.
-    ///
-    /// A combination is a set of credentials presented *together*, which is
-    /// what a picker offers as one selectable option. Alternatives are
-    /// separate combinations.
-    ///
-    /// `limit` bounds the result, because the count is a product: three
-    /// queries with four candidates each is sixty-four combinations, and a
-    /// picker cannot use them all. Whatever is dropped is counted in
-    /// [`Combinations::dropped`] rather than silently discarded — a list of
-    /// options that quietly omits some is a list the user cannot reason about.
-    ///
-    /// Optional credential sets (§6.2 `required: false`) are not enumerated.
-    /// The wallet MAY include them, so whether to offer one is a UI decision
-    /// about what to ask the user for, not a matching decision, and folding
-    /// them in here would multiply the combination count for choices the
-    /// verifier said it can do without.
-    pub fn combinations(&self, limit: usize) -> Combinations {
-        if !self.satisfiable {
-            return Combinations {
-                combinations: Vec::new(),
-                dropped: Dropped::Exact(0),
-            };
-        }
-
-        // Each required group is a set of query ids that must all be answered
-        // by one combination. Without `credential_sets` that is every query
-        // (§6.4); with them it is one satisfiable option per required set.
-        let groups: Vec<(Option<Value>, Vec<Vec<String>>)> = match &self.credential_sets {
-            None => vec![(
-                None,
-                vec![self
-                    .matches
-                    .iter()
-                    .map(|m| m.query_id.to_string())
-                    .collect()],
-            )],
-            Some(sets) => sets
-                .iter()
-                .filter(|s| s.required)
-                .map(|set| {
-                    let options = set
-                        .options
-                        .iter()
-                        .filter(|option| {
-                            option
-                                .iter()
-                                .all(|id| self.query(id).is_some_and(QueryMatch::is_satisfied))
-                        })
-                        .cloned()
-                        .collect();
-                    (set.purpose.clone(), options)
-                })
-                .collect(),
-        };
-
-        // Every set optional: nothing is required, so there is no combination
-        // to enumerate. Returning one empty combination here would hand the
-        // picker an option containing no credentials at all. What to offer
-        // from the optional sets is the caller's decision.
-        if groups.is_empty() {
-            return Combinations {
-                combinations: Vec::new(),
-                dropped: Dropped::Exact(0),
-            };
-        }
-
-        // Choose one option per required group, then one candidate per query
-        // in the chosen options.
-        let mut out: Vec<Combination> = vec![Combination {
-            members: Vec::new(),
-            purposes: Vec::new(),
-        }];
-        let mut dropped = Dropped::Exact(0);
-
-        for (purpose, options) in &groups {
-            let mut next: Vec<Combination> = Vec::new();
-            for partial in &out {
-                for option in options {
-                    // Generate only what still fits. The full product can be
-                    // enormous — ten candidates across three queries is a
-                    // thousand — and materialising it to then keep 32 defeats
-                    // the point of a limit. What is skipped is counted from
-                    // the arithmetic rather than by building it.
-                    let budget = limit.saturating_sub(next.len());
-                    let (products, skipped) = candidate_products(self, option, budget);
-                    dropped = dropped.add(skipped);
-                    for members in products {
-                        let mut combined = partial.members.clone();
-                        combined.extend(members);
-                        let mut purposes = partial.purposes.clone();
-                        purposes.extend(purpose.clone());
-                        next.push(Combination {
-                            members: combined,
-                            purposes,
-                        });
-                    }
-                }
-            }
-            out = next;
-            if out.is_empty() {
-                break;
-            }
-        }
-
-        Combinations {
-            combinations: out,
-            dropped,
-        }
-    }
-}
-
-/// Up to `budget` ways to answer each query id in `option`, and how many
-/// further ways existed.
-///
-/// One candidate per query, except where the query set §6.1 `multiple`, in
-/// which case that query is answered by *all* of its candidates at once and so
-/// contributes a single way rather than one per credential.
-///
-/// The count is a product of the per-query widths, so it is computed rather
-/// than reached by building every combination and discarding most of them.
-fn candidate_products(
-    result: &QueryResult,
-    option: &[String],
-    budget: usize,
-) -> (Vec<Vec<(String, Candidate)>>, Dropped) {
-    let mut total: usize = 1;
-    // Whether the product ran out of `usize` on the way. Tracked rather than
-    // inferred from `total == usize::MAX`, which a genuine product could also
-    // reach, and clamping is what makes the count a bound instead of a number.
-    let mut overflowed = false;
-    for id in option {
-        let Some(query_match) = result.query(id) else {
-            return (Vec::new(), Dropped::Exact(0));
-        };
-        match total.checked_mul(query_width(query_match)) {
-            Some(product) => total = product,
-            None => {
-                overflowed = true;
-                total = usize::MAX;
-            }
-        }
-    }
-    if total == 0 {
-        return (Vec::new(), Dropped::Exact(0));
-    }
-
-    let take = total.min(budget);
-    let mut products: Vec<Vec<(String, Candidate)>> = Vec::with_capacity(take);
-
-    // How many members each combination will hold: one per query, except a
-    // `multiple` query which contributes all of its candidates. Constant
-    // across the loop below, so it is computed once — a `multiple` query over
-    // many credentials otherwise grows a vector sized for one member each.
-    let members_per_combination: usize = option
+/// The credentials of `credentials` that answer `cq`, each with the claims it discloses, and
+/// those whose claims path processing gives an error.
+fn candidates<C: Credential>(
+    cq: &CredentialQuery,
+    credentials: &[C],
+    policy: &impl Policy<C>,
+) -> (Vec<Candidate>, Vec<ClaimPathRefusal>) {
+    let mut candidates = Vec::new();
+    let mut refusals = Vec::new();
+    // §6.1 `require_cryptographic_holder_binding`, default true, before the policy and the
+    // claims: an unbound credential is disqualified for a query that requires binding.
+    let eligible = credentials
         .iter()
-        .filter_map(|id| result.query(id))
-        .map(|query_match| {
-            if query_match.multiple {
-                query_match.candidates.len()
-            } else {
-                1
-            }
+        .filter(|c| {
+            cq.holder_binding() == HolderBinding::Optional
+                || c.binding() == CryptographicBinding::Bound
         })
-        .sum();
-
-    // Index arithmetic rather than a growing cartesian product: the nth
-    // combination is a mixed-radix reading of n across the per-query candidate
-    // counts, so only the ones actually wanted are built.
-    for n in 0..take {
-        let mut remainder = n;
-        let mut members = Vec::with_capacity(members_per_combination);
-        for id in option {
-            let Some(query_match) = result.query(id) else {
-                return (Vec::new(), Dropped::Exact(0));
-            };
-            // A `multiple` query has width 1 and contributes every candidate,
-            // so it consumes none of the mixed-radix index — `% 1` and `/ 1`
-            // would be the no-ops that fall out of the arithmetic anyway.
-            if query_match.multiple {
-                members.extend(
-                    query_match
-                        .candidates
-                        .iter()
-                        .map(|candidate| (id.clone(), candidate.clone())),
-                );
-                continue;
-            }
-            let width = query_match.candidates.len();
-            let Some(candidate) = query_match.candidates.get(remainder % width) else {
-                return (Vec::new(), Dropped::Exact(0));
-            };
-            members.push((id.clone(), candidate.clone()));
-            remainder /= width;
+        .filter(|c| policy.matches(cq, *c));
+    for credential in eligible {
+        match select_claims(cq, credential) {
+            Ok(Some(claims)) => candidates.push(Candidate::new(credential.id().clone(), claims)),
+            Ok(None) => {}
+            Err(error) => refusals.push(ClaimPathRefusal::new(credential.id().clone(), error)),
         }
-        products.push(members);
     }
+    (candidates, refusals)
+}
 
-    let remaining = total - take;
-    let dropped = if overflowed {
-        Dropped::AtLeast(remaining)
-    } else {
-        Dropped::Exact(remaining)
+/// Whether the wallet can satisfy `query` with `matches`.
+fn satisfiable(query: &DcqlQuery, matches: &[QueryMatch]) -> bool {
+    let required_sets_met = match query.credential_sets() {
+        // "If `credential_sets` is not provided, the Verifier requests presentations for all
+        // Credentials in `credentials`" (§6.4): every query must be satisfied.
+        None => matches.iter().all(QueryMatch::is_satisfied),
+        // Otherwise every required set must have at least one satisfiable option; optional
+        // sets impose nothing.
+        Some(sets) => sets
+            .iter()
+            .filter(|s| s.requirement() == SetRequirement::Required)
+            .all(|set| {
+                set.options().iter().any(|option| {
+                    option.iter().all(|id| {
+                        matches
+                            .iter()
+                            .any(|m| m.query_id() == id && m.is_satisfied())
+                    })
+                })
+            }),
     };
-    (products, dropped)
+    // A request whose sets are all optional passes the check above with nothing matched,
+    // because "all required sets are satisfied" is vacuously true. Conformant, and useless in a
+    // picker: the wallet would be offered to the user with no credential behind it.
+    let anything_to_offer = matches.iter().any(QueryMatch::is_satisfied);
+    required_sets_met && anything_to_offer
 }
 
-/// How many distinct ways one query can be answered within a combination.
+/// Which claims `credential` discloses for `query` (§6.4.1); `None` when it lacks one.
 ///
-/// One per candidate normally. A query that set §6.1 `multiple` is answered by
-/// all of its candidates together, which is one way, not none — so a query
-/// with no candidates at all still has width zero and makes the whole product
-/// zero.
-///
-/// Answering a `multiple` query with everything that matches, rather than
-/// enumerating each credential as its own alternative, is the reading under
-/// which the flag does something: "multiple Credentials can be returned for
-/// this Credential Query" (§6.1). It also collapses the combination count
-/// where the permissive reading would multiply it, and the holder still
-/// consents to the combination as a whole.
-fn query_width(query_match: &QueryMatch) -> usize {
-    if query_match.multiple && !query_match.candidates.is_empty() {
-        1
-    } else {
-        query_match.candidates.len()
-    }
-}
-
-/// Which claims to disclose for one credential, or `None` if this credential
-/// cannot satisfy the query at all (§6.4.1).
-///
-/// The four cases are the spec's, in its order:
+/// The three cases are the spec's, in its order:
 ///
 /// - `claims` absent: no selectively disclosable claims are requested.
-/// - `claims` present, `claim_sets` absent: all of them are requested, and
-///   every one must resolve.
-/// - both present: the first option the credential can satisfy wins, because
-///   "The order of the options ... expresses the Verifier's preference".
-/// - `claim_sets` without `claims` is invalid, and matches nothing.
+/// - `claims` present, `claim_sets` absent: all of them are requested, and every one must
+///   resolve.
+/// - both present: the first option the credential satisfies wins, because "The order of the
+///   options ... expresses the Verifier's preference".
+///
+/// # Errors
+///
+/// [`PathError`]: the processing of a claims path gives an error other than an empty
+/// selection (§7.1.1, §7.2.1). With `claim_sets`, the first such error, when no option is
+/// satisfied.
 pub fn select_claims<C: Credential + ?Sized>(
     query: &CredentialQuery,
     credential: &C,
-) -> Option<Vec<SelectedClaim>> {
-    match (query.claims.is_empty(), query.claim_sets.as_ref()) {
-        // "`claim_sets` MUST NOT be present if `claims` is absent" (§6.4.1).
-        // Refusing rather than ignoring: the verifier asked for a combination
-        // of claims it never listed, so what it wants cannot be determined.
-        (true, Some(_)) => None,
-
-        // No selectively disclosable claims requested; mandatory-to-present
-        // claims are the format's business, not the query engine's.
-        (true, None) => Some(Vec::new()),
-
-        // All listed claims requested. Any one missing disqualifies the whole
-        // credential — "MUST NOT return the respective Credential" (§6.4.1).
-        (false, None) => query
-            .claims
-            .iter()
-            .map(|c| resolve(c, credential))
-            .collect::<Option<Vec<_>>>(),
-
-        // One combination, first satisfiable wins.
-        (false, Some(sets)) => sets.iter().find_map(|set| {
-            set.iter()
-                .map(|id| query.claim(id).and_then(|c| resolve(c, credential)))
-                .collect::<Option<Vec<_>>>()
-        }),
+) -> Result<Option<Vec<SelectedClaim>>, PathError> {
+    match query.claim_request() {
+        // Mandatory-to-present claims are the format's business.
+        ClaimRequest::Nothing => Ok(Some(Vec::new())),
+        // Any one claim missing disqualifies the whole credential: "MUST NOT return the
+        // respective Credential" (§6.4.1).
+        ClaimRequest::All(claims) => every(claims.iter(), credential),
+        ClaimRequest::Sets { options, .. } => {
+            let mut first_error = None;
+            for option in options {
+                match every(option.claims(), credential) {
+                    Ok(Some(selected)) => return Ok(Some(selected)),
+                    Ok(None) => {}
+                    Err(error) => {
+                        first_error.get_or_insert(error);
+                    }
+                }
+            }
+            first_error.map_or(Ok(None), Err)
+        }
     }
 }
 
-/// Resolve one claims query against a credential, honouring `values`.
-///
-/// Returns `None` when the credential lacks the claim, or when a `values`
-/// restriction excludes it — §6.4.1 says such a claim "should be treated the
-/// same as if it did not exist in the Credential", which is exactly what
-/// returning `None` here achieves.
-fn resolve<C: Credential + ?Sized>(claim: &ClaimsQuery, credential: &C) -> Option<SelectedClaim> {
-    let found = credential.claim(&claim.path).ok()?;
-    if found.is_empty() {
-        return None;
-    }
-
-    if let Some(expected) = &claim.values {
-        // "the type and value of the claim both match exactly for at least
-        // one of the elements" (§6.3). serde_json's PartialEq is exact on
-        // both, so `true` does not match `"true"` and 1 does not match "1".
-        if !found.iter().any(|v| expected.contains(v)) {
-            return None;
+/// The claims of `claims` that `credential` discloses, when it holds every one.
+fn every<'q, C: Credential + ?Sized>(
+    claims: impl Iterator<Item = &'q ClaimsQuery>,
+    credential: &C,
+) -> Result<Option<Vec<SelectedClaim>>, PathError> {
+    let mut selected = Vec::new();
+    for claim in claims {
+        match resolve(claim, credential)? {
+            Some(found) => selected.push(found),
+            None => return Ok(None),
         }
     }
+    Ok(Some(selected))
+}
 
-    Some(SelectedClaim {
-        claim_id: claim.id.clone(),
-        path: claim.path.clone(),
-    })
+/// One claims query against a credential, honouring `values`; `None` when the credential lacks
+/// the claim.
+///
+/// A claim a `values` restriction excludes "should be treated the same as if it did not exist
+/// in the Credential" (§6.4.1).
+fn resolve<C: Credential + ?Sized>(
+    claim: &ClaimsQuery,
+    credential: &C,
+) -> Result<Option<SelectedClaim>, PathError> {
+    let found = match credential.claim(claim.path()) {
+        Ok(found) => found,
+        Err(PathError::Empty) => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    // An empty selection is step 3's `Empty` (§7.1.1).
+    if found.is_empty() {
+        return Ok(None);
+    }
+    if let Some(expected) = claim.values() {
+        // "the type and value of the claim both match exactly for at least one of the
+        // elements" (§6.3). serde_json's PartialEq is exact on both: `true` differs from
+        // `"true"`, and 1 from "1".
+        if !found.iter().any(|v| expected.contains(v)) {
+            return Ok(None);
+        }
+    }
+    Ok(Some(SelectedClaim::new(
+        claim.id().cloned(),
+        claim.path().clone(),
+    )))
 }

@@ -1,51 +1,66 @@
 //! A `zkp_req` Credential Query (`zkp_req`, Sections 1.1, 2 and 2.1).
 
 use serde_json::{Map, Value};
+use siros_codec::member::{ArrayIndex, MemberFault};
+use siros_dcql::{
+    CredentialFormat, CredentialQuery, DocType, HolderBinding, Multiplicity, QueryId, Vct,
+};
 
-use crate::outcome::RequestRule;
+use crate::ids::{FnId, ItemIndex, ReqSetIndex, ReturnHandle, W3cType};
+use crate::json::{identifier, non_empty_array, non_empty_strings};
+use crate::outcome::{OptionFault, RequestRule, ReturnFault, TypeValueFault};
 
 /// The Credential Format Identifier of a `zkp_req` query.
 pub const FORMAT: &str = "zkp_req";
 
-/// A `return` handle: a non-empty string of ASCII letters, digits, `_` and `-` (Section 2).
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ReturnHandle(String);
-
-impl ReturnHandle {
-    /// The handle, when `text` has the syntax of Section 2.
-    pub fn parse(text: &str) -> Option<Self> {
-        let valid = !text.is_empty()
-            && text
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
-        valid.then(|| Self(text.to_owned()))
-    }
-
-    /// The handle's text.
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
 /// One `_req` item (Section 2).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReqItem {
+    fn_id: FnId,
+    ret: Option<ReturnHandle>,
+    params: Map<String, Value>,
+}
+
+impl ReqItem {
     /// `fn_id`: a function of the catalogue of the credential's type.
-    pub fn_id: String,
+    #[must_use]
+    pub fn fn_id(&self) -> &FnId {
+        &self.fn_id
+    }
+
     /// `return`: the handle of the result. Absent for an assertion.
-    pub ret: Option<ReturnHandle>,
+    #[must_use]
+    pub fn ret(&self) -> Option<&ReturnHandle> {
+        self.ret.as_ref()
+    }
+
     /// `params`, as sent. Empty when absent: each parameter then takes its default.
-    pub params: Map<String, Value>,
+    #[must_use]
+    pub fn params(&self) -> &Map<String, Value> {
+        &self.params
+    }
 }
 
 /// One option: the `_req` items the Verifier accepts together (Section 2.1).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueryOption {
+    req_set: Option<ReqSetIndex>,
+    items: Vec<ItemIndex>,
+}
+
+impl QueryOption {
     /// The option's index in `_req_sets`, which the presentation carries as `req_set`. `None`
     /// for the one option of a query without `_req_sets`.
-    pub req_set: Option<usize>,
+    #[must_use]
+    pub fn req_set(&self) -> Option<ReqSetIndex> {
+        self.req_set
+    }
+
     /// The `_req` indexes of the option, in the Verifier's order, each once.
-    pub items: Vec<usize>,
+    #[must_use]
+    pub fn items(&self) -> &[ItemIndex] {
+        &self.items
+    }
 }
 
 /// The credential type a query asks for: `meta`, read for its `source_format`
@@ -55,191 +70,204 @@ pub enum CredentialType {
     /// `mso_mdoc`, with `doctype_value` (OpenID4VP 1.0, B.2.3).
     MsoMdoc {
         /// `doctype_value`.
-        doctype: String,
+        doctype: DocType,
     },
     /// `dc+sd-jwt`, with `vct_values` (OpenID4VP 1.0, B.3.5).
     SdJwt {
         /// `vct_values`.
-        vct_values: Vec<String>,
+        vct_values: Vec<Vct>,
     },
     /// `jwt_vc_json` or `ldp_vc`, with `type_values` (OpenID4VP 1.0, B.1.1).
     W3c {
         /// The source format.
-        source_format: String,
+        source_format: CredentialFormat,
         /// `type_values`.
-        type_values: Vec<Vec<String>>,
+        type_values: Vec<Vec<W3cType>>,
     },
     /// A format whose own profile defines its `meta` members, such as `bbs_cd`.
     Profiled {
         /// The source format.
-        source_format: String,
-        /// The `meta` members other than `source_format`, as sent.
+        source_format: CredentialFormat,
+        /// `meta`, as sent.
         meta: Map<String, Value>,
     },
 }
 
 impl CredentialType {
     /// `meta.source_format`.
-    pub fn source_format(&self) -> &str {
+    #[must_use]
+    pub fn source_format(&self) -> CredentialFormat {
         match self {
-            Self::MsoMdoc { .. } => "mso_mdoc",
-            Self::SdJwt { .. } => "dc+sd-jwt",
-            Self::W3c { source_format, .. } | Self::Profiled { source_format, .. } => source_format,
+            Self::MsoMdoc { .. } => CredentialFormat::new("mso_mdoc"),
+            Self::SdJwt { .. } => CredentialFormat::new("dc+sd-jwt"),
+            Self::W3c { source_format, .. } | Self::Profiled { source_format, .. } => {
+                source_format.clone()
+            }
         }
     }
 }
 
-/// One entry of `trusted_authorities` (OpenID4VP 1.0, Section 6.1.1).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TrustedAuthority {
-    /// `type`.
-    pub kind: AuthorityKind,
-    /// `values`, non-empty.
-    pub values: Vec<String>,
+/// Whether a query has `_req_sets` (Section 2.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ReqSets {
+    /// It has none: `_req` is its one option, and a presentation carries no `req_set`.
+    Absent,
+    /// Its options are its `_req_sets`, and a presentation names one by `req_set`.
+    Present,
 }
 
-/// The `type` of a trusted authority (OpenID4VP 1.0, Section 6.1.1).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AuthorityKind {
-    /// `aki`: base64url KeyIdentifiers of an Authority Key Identifier.
-    Aki,
-    /// `etsi_tl`: ETSI Trusted List identifiers.
-    EtsiTl,
-    /// `openid_federation`: OpenID Federation Entity Identifiers.
-    OpenidFederation,
-    /// A type this version does not define.
-    Other(String),
-}
-
-/// A parsed `zkp_req` Credential Query.
+/// A `zkp_req` Credential Query: the DCQL Credential Query and what `zkp_req` reads from it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ZkpReqQuery {
-    /// `id`.
-    pub id: String,
-    /// `meta`, read for its source format.
-    pub credential_type: CredentialType,
-    /// `_req`, in order. An item's index identifies it.
-    pub items: Vec<ReqItem>,
-    /// The options, in the Verifier's order of preference.
-    pub options: Vec<QueryOption>,
-    /// Whether the query has `_req_sets`.
-    pub has_req_sets: bool,
-    /// `trusted_authorities`, when present.
-    pub trusted_authorities: Option<Vec<TrustedAuthority>>,
-    /// `require_cryptographic_holder_binding`; `true` when absent (OpenID4VP 1.0, Section 6.1).
-    pub require_holder_binding: bool,
-    /// `multiple`: whether several presentations may answer; `false` when absent (OpenID4VP
-    /// 1.0, Section 6.1).
-    pub multiple: bool,
+    query: CredentialQuery,
+    credential_type: CredentialType,
+    items: Vec<ReqItem>,
+    options: Vec<QueryOption>,
+    req_sets: ReqSets,
 }
 
 impl ZkpReqQuery {
-    /// Parses one Credential Query (one element of `dcql_query.credentials`).
+    /// The `zkp_req` reading of the Credential Query `query`, which DCQL parsed: its `format`,
+    /// `meta`, `_req` and `_req_sets`.
     ///
     /// # Errors
     ///
     /// [`RequestRule`]: the first rule of Sections 1.1, 2 and 2.1 the query breaks.
-    pub fn parse(query: &Value) -> Result<Self, RequestRule> {
-        let query = query.as_object().ok_or(RequestRule::QueryNotObject)?;
-        let id = match query.get("id") {
-            Some(Value::String(id)) if !id.is_empty() => id.clone(),
-            _ => return Err(RequestRule::QueryIdInvalid),
-        };
-        if query.get("format").and_then(Value::as_str) != Some(FORMAT) {
+    pub fn parse(query: &CredentialQuery) -> Result<Self, RequestRule> {
+        if *query.format() != FORMAT {
             return Err(RequestRule::FormatNotZkpReq);
         }
-        if query.contains_key("claims") {
+        if !query.claims().is_empty() {
             return Err(RequestRule::ClaimsPresent);
         }
-        if query.contains_key("claim_sets") {
-            return Err(RequestRule::ClaimSetsPresent);
-        }
-        let credential_type = read_meta(query.get("meta"))?;
-        let items = read_items(query.get("_req"))?;
-        let (options, has_req_sets) = read_options(query.get("_req_sets"), items.len())?;
+        let credential_type = read_meta(query.meta())?;
+        let items = read_items(query.extension("_req"))?;
+        let (options, req_sets) = read_options(query.extension("_req_sets"), items.len())?;
         Ok(Self {
-            id,
+            query: query.clone(),
             credential_type,
             items,
             options,
-            has_req_sets,
-            trusted_authorities: read_authorities(query.get("trusted_authorities"))?,
-            require_holder_binding: read_bool(
-                query.get("require_cryptographic_holder_binding"),
-                true,
-                RequestRule::HolderBindingInvalid,
-            )?,
-            multiple: read_bool(query.get("multiple"), false, RequestRule::MultipleInvalid)?,
+            req_sets,
         })
     }
 
+    /// The DCQL Credential Query.
+    #[must_use]
+    pub fn credential_query(&self) -> &CredentialQuery {
+        &self.query
+    }
+
+    /// `id`.
+    #[must_use]
+    pub fn id(&self) -> &QueryId {
+        self.query.id()
+    }
+
+    /// `meta`, read for its source format.
+    #[must_use]
+    pub fn credential_type(&self) -> &CredentialType {
+        &self.credential_type
+    }
+
+    /// `_req`, in order. An item's index identifies it.
+    #[must_use]
+    pub fn items(&self) -> &[ReqItem] {
+        &self.items
+    }
+
+    /// The item at `index` of `_req`.
+    #[must_use]
+    pub fn item(&self, index: ItemIndex) -> Option<&ReqItem> {
+        self.items.get(index.value())
+    }
+
+    /// The options, in the Verifier's order of preference.
+    #[must_use]
+    pub fn options(&self) -> &[QueryOption] {
+        &self.options
+    }
+
+    /// Whether the query has `_req_sets`.
+    #[must_use]
+    pub fn req_sets(&self) -> ReqSets {
+        self.req_sets
+    }
+
+    /// `require_cryptographic_holder_binding`; required when absent (OpenID4VP 1.0, Section
+    /// 6.1).
+    #[must_use]
+    pub fn holder_binding(&self) -> HolderBinding {
+        self.query.holder_binding()
+    }
+
+    /// `multiple`: whether several presentations may answer; one when absent (OpenID4VP 1.0,
+    /// Section 6.1).
+    #[must_use]
+    pub fn multiplicity(&self) -> Multiplicity {
+        self.query.multiplicity()
+    }
+
     /// The option with index `req_set` of `_req_sets`, or the one option without them.
-    pub fn option(&self, req_set: Option<usize>) -> Option<&QueryOption> {
+    #[must_use]
+    pub fn option(&self, req_set: Option<ReqSetIndex>) -> Option<&QueryOption> {
         self.options.iter().find(|o| o.req_set == req_set)
     }
 }
 
-fn read_meta(meta: Option<&Value>) -> Result<CredentialType, RequestRule> {
-    let meta = meta
-        .and_then(Value::as_object)
-        .ok_or(RequestRule::MetaInvalid)?;
-    let source_format = meta
-        .get("source_format")
-        .and_then(Value::as_str)
-        .filter(|s| !s.is_empty())
-        .ok_or(RequestRule::SourceFormatInvalid)?;
-    match source_format {
+fn read_meta(meta: &Map<String, Value>) -> Result<CredentialType, RequestRule> {
+    let source_format = match meta.get("source_format") {
+        None => Err(MemberFault::Absent),
+        Some(Value::String(text)) if text.is_empty() => Err(MemberFault::Empty),
+        Some(Value::String(text)) => Ok(text.as_str()),
+        Some(_) => Err(MemberFault::WrongType),
+    }
+    .map_err(RequestRule::SourceFormatInvalid)?;
+    let credential_type = match source_format {
         "mso_mdoc" => match meta.get("doctype_value") {
+            None => Err(TypeValueFault::Member(MemberFault::Absent)),
             Some(Value::String(doctype)) => Ok(CredentialType::MsoMdoc {
-                doctype: doctype.clone(),
+                doctype: DocType::new(doctype),
             }),
-            _ => Err(RequestRule::TypeValueInvalid),
+            Some(_) => Err(TypeValueFault::Member(MemberFault::WrongType)),
         },
-        "dc+sd-jwt" => Ok(CredentialType::SdJwt {
-            vct_values: strings(meta.get("vct_values")).ok_or(RequestRule::TypeValueInvalid)?,
-        }),
-        "jwt_vc_json" | "ldp_vc" => Ok(CredentialType::W3c {
-            source_format: source_format.to_owned(),
-            type_values: type_values(meta.get("type_values"))
-                .ok_or(RequestRule::TypeValueInvalid)?,
-        }),
-        _ => {
-            let mut members = meta.clone();
-            members.remove("source_format");
-            Ok(CredentialType::Profiled {
-                source_format: source_format.to_owned(),
-                meta: members,
+        "dc+sd-jwt" => non_empty_strings(meta.get("vct_values"), Vct::new)
+            .map(|vct_values| CredentialType::SdJwt { vct_values })
+            .map_err(TypeValueFault::Member),
+        "jwt_vc_json" | "ldp_vc" => {
+            type_values(meta.get("type_values")).map(|type_values| CredentialType::W3c {
+                source_format: CredentialFormat::new(source_format),
+                type_values,
             })
         }
+        _ => Ok(CredentialType::Profiled {
+            source_format: CredentialFormat::new(source_format),
+            meta: meta.clone(),
+        }),
+    };
+    credential_type.map_err(RequestRule::TypeValueInvalid)
+}
+
+/// `type_values`: a non-empty array of non-empty arrays of strings.
+fn type_values(value: Option<&Value>) -> Result<Vec<Vec<W3cType>>, TypeValueFault> {
+    let mut lists = Vec::new();
+    for (index, entry) in non_empty_array(value)
+        .map_err(TypeValueFault::Member)?
+        .iter()
+        .enumerate()
+    {
+        let list = non_empty_strings(Some(entry), W3cType::new)
+            .map_err(|fault| TypeValueFault::List(ArrayIndex::new(index), fault))?;
+        lists.push(list);
     }
-}
-
-/// A non-empty array of strings.
-fn strings(value: Option<&Value>) -> Option<Vec<String>> {
-    let list: Vec<String> = value?
-        .as_array()?
-        .iter()
-        .map(|v| v.as_str().map(str::to_owned))
-        .collect::<Option<_>>()?;
-    (!list.is_empty()).then_some(list)
-}
-
-fn type_values(value: Option<&Value>) -> Option<Vec<Vec<String>>> {
-    let list: Vec<Vec<String>> = value?
-        .as_array()?
-        .iter()
-        .map(|v| strings(Some(v)))
-        .collect::<Option<_>>()?;
-    (!list.is_empty()).then_some(list)
+    Ok(lists)
 }
 
 fn read_items(req: Option<&Value>) -> Result<Vec<ReqItem>, RequestRule> {
-    let items = match req {
-        Some(Value::Array(items)) if !items.is_empty() => items,
-        _ => return Err(RequestRule::ReqInvalid),
-    };
+    let items = non_empty_array(req).map_err(RequestRule::ReqInvalid)?;
     let mut out: Vec<ReqItem> = Vec::with_capacity(items.len());
     for (index, item) in items.iter().enumerate() {
+        let index = ItemIndex::new(index);
         let item = read_item(item, index)?;
         let repeated = item
             .ret
@@ -253,7 +281,7 @@ fn read_items(req: Option<&Value>) -> Result<Vec<ReqItem>, RequestRule> {
     Ok(out)
 }
 
-fn read_item(item: &Value, index: usize) -> Result<ReqItem, RequestRule> {
+fn read_item(item: &Value, index: ItemIndex) -> Result<ReqItem, RequestRule> {
     let item = item
         .as_object()
         .ok_or(RequestRule::ItemNotObject { item: index })?;
@@ -263,107 +291,71 @@ fn read_item(item: &Value, index: usize) -> Result<ReqItem, RequestRule> {
     {
         return Err(RequestRule::ItemMemberUnknown { item: index });
     }
-    let fn_id = match item.get("fn_id") {
-        Some(Value::String(f)) if !f.is_empty() => f.clone(),
-        _ => return Err(RequestRule::FnIdInvalid { item: index }),
-    };
+    let fn_id = identifier(item.get("fn_id"), FnId::parse)
+        .map_err(|fault| RequestRule::FnIdInvalid { item: index, fault })?;
     let params = match item.get("params") {
         None => Map::new(),
         Some(Value::Object(params)) => params.clone(),
         Some(_) => return Err(RequestRule::ParamsNotObject { item: index }),
     };
-    let ret = match item.get("return") {
-        None => None,
-        Some(value) => Some(
-            value
-                .as_str()
-                .and_then(ReturnHandle::parse)
-                .ok_or(RequestRule::ReturnInvalid { item: index })?,
-        ),
-    };
+    let ret = item
+        .get("return")
+        .map(|value| {
+            let text = value.as_str().ok_or(ReturnFault::NotString)?;
+            ReturnHandle::parse(text).map_err(ReturnFault::Syntax)
+        })
+        .transpose()
+        .map_err(|fault| RequestRule::ReturnInvalid { item: index, fault })?;
     Ok(ReqItem { fn_id, ret, params })
 }
 
 fn read_options(
     sets: Option<&Value>,
     items: usize,
-) -> Result<(Vec<QueryOption>, bool), RequestRule> {
-    let Some(sets) = sets else {
+) -> Result<(Vec<QueryOption>, ReqSets), RequestRule> {
+    if sets.is_none() {
         let all = QueryOption {
             req_set: None,
-            items: (0..items).collect(),
+            items: (0..items).map(ItemIndex::new).collect(),
         };
-        return Ok((vec![all], false));
-    };
-    let sets = match sets {
-        Value::Array(sets) if !sets.is_empty() => sets,
-        _ => return Err(RequestRule::ReqSetsInvalid),
-    };
-    let options = sets
+        return Ok((vec![all], ReqSets::Absent));
+    }
+    let options = non_empty_array(sets)
+        .map_err(RequestRule::ReqSetsInvalid)?
         .iter()
         .enumerate()
-        .map(|(index, set)| read_option(set, index, items))
+        .map(|(index, set)| {
+            let option = ReqSetIndex::new(index);
+            read_option(set, items)
+                .map(|items| QueryOption {
+                    req_set: Some(option),
+                    items,
+                })
+                .map_err(|fault| RequestRule::OptionInvalid { option, fault })
+        })
         .collect::<Result<_, _>>()?;
-    Ok((options, true))
+    Ok((options, ReqSets::Present))
 }
 
-fn read_option(set: &Value, index: usize, items: usize) -> Result<QueryOption, RequestRule> {
-    let invalid = RequestRule::OptionInvalid { option: index };
+/// The `_req` indexes of an option of `_req_sets`, for a `_req` of `items` items.
+fn read_option(set: &Value, items: usize) -> Result<Vec<ItemIndex>, OptionFault> {
     let set = match set {
-        Value::Array(set) if !set.is_empty() => set,
-        _ => return Err(invalid),
+        Value::Array(set) if set.is_empty() => return Err(OptionFault::Empty),
+        Value::Array(set) => set,
+        _ => return Err(OptionFault::NotArray),
     };
-    let mut out: Vec<usize> = Vec::with_capacity(set.len());
-    for entry in set {
-        let item = entry
-            .as_u64()
-            .and_then(|i| usize::try_from(i).ok())
-            .filter(|i| *i < items)
-            .ok_or(invalid)?;
+    let mut out: Vec<ItemIndex> = Vec::with_capacity(set.len());
+    for (position, entry) in set.iter().enumerate() {
+        let position = ArrayIndex::new(position);
+        let index = entry.as_u64().ok_or(OptionFault::NotInteger(position))?;
+        let item = match usize::try_from(index) {
+            Ok(index) if index < items => ItemIndex::new(index),
+            Ok(_) | Err(_) => return Err(OptionFault::OutOfRange(position)),
+        };
         if out.contains(&item) {
-            return Err(invalid);
+            return Err(OptionFault::Repeated(item));
         }
         out.push(item);
     }
-    Ok(QueryOption {
-        req_set: Some(index),
-        items: out,
-    })
-}
-
-fn read_authorities(value: Option<&Value>) -> Result<Option<Vec<TrustedAuthority>>, RequestRule> {
-    let Some(value) = value else {
-        return Ok(None);
-    };
-    let read = |entry: &Value| -> Option<TrustedAuthority> {
-        let entry = entry.as_object()?;
-        let kind = match entry.get("type")?.as_str()? {
-            "aki" => AuthorityKind::Aki,
-            "etsi_tl" => AuthorityKind::EtsiTl,
-            "openid_federation" => AuthorityKind::OpenidFederation,
-            other => AuthorityKind::Other(other.to_owned()),
-        };
-        Some(TrustedAuthority {
-            kind,
-            values: strings(entry.get("values"))?,
-        })
-    };
-    let list: Option<Vec<TrustedAuthority>> = value
-        .as_array()
-        .filter(|a| !a.is_empty())
-        .and_then(|a| a.iter().map(read).collect());
-    list.map(Some).ok_or(RequestRule::TrustedAuthoritiesInvalid)
-}
-
-/// A boolean member, `default` when absent.
-fn read_bool(
-    value: Option<&Value>,
-    default: bool,
-    invalid: RequestRule,
-) -> Result<bool, RequestRule> {
-    match value {
-        None => Ok(default),
-        Some(Value::Bool(b)) => Ok(*b),
-        Some(_) => Err(invalid),
-    }
+    Ok(out)
 }

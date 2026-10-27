@@ -1,0 +1,491 @@
+//! The matching surface Kotlin and Swift will call.
+//!
+//! These pin the behaviour that differs from what the two SDKs do today, so a
+//! regression in the shared engine shows up here rather than as a wallet that
+//! silently stops being offered.
+
+use std::collections::HashMap;
+
+use serde_json::json;
+use siros_dc_matcher_core::fixtures;
+use siros_dc_matcher_core::profile::Capability;
+use siros_dc_matcher_ffi::matching::{match_dc_api_request, match_dcql, MatchError};
+
+mod zkp_req;
+
+fn wallet(zk: Option<Capability>) -> Vec<u8> {
+    fixtures::wallet(zk.into_iter().collect())
+        .to_cbor()
+        .expect("encoding")
+}
+
+/// An inline request object, as `openid4vp-v1-unsigned` carries it.
+fn dcql(format: &str, claims: serde_json::Value, meta: serde_json::Value) -> String {
+    json!({"credentials": [{
+        "id": "q1", "format": format, "meta": meta, "claims": claims
+    }]})
+    .to_string()
+}
+
+fn age_claim() -> serde_json::Value {
+    json!([{"path": ["org.iso.18013.5.1", "age_over_18"]}])
+}
+
+/// The rule both SDKs miss today: a credential lacking a requested claim must
+/// not be offered (§6.4.1). Filtering on format and doctype alone would offer
+/// this one, and the presentation would then fail after the user consented.
+#[test]
+fn a_credential_missing_a_requested_claim_is_not_offered() {
+    let blob = wallet(None);
+    let query = dcql(
+        "mso_mdoc",
+        json!([{"path": ["org.iso.18013.5.1", "portrait"]}]),
+        json!({"doctype_value": "org.iso.18013.5.1.mDL"}),
+    );
+
+    let out = match_dcql(blob, query).expect("matched");
+    assert!(!out.satisfiable);
+    assert!(out.combinations.is_empty());
+}
+
+/// Only the claims the query asked for are returned — not everything the
+/// credential holds. The caller discloses exactly this set.
+#[test]
+fn only_the_requested_claims_come_back() {
+    let blob = wallet(None);
+    let query = dcql(
+        "mso_mdoc",
+        age_claim(),
+        json!({"doctype_value": "org.iso.18013.5.1.mDL"}),
+    );
+
+    let out = match_dcql(blob, query).expect("matched");
+    let member = &out.combinations[0].members[0];
+    assert_eq!(member.credential_id, "mdl-1");
+    assert_eq!(
+        member.claims,
+        vec![vec!["org.iso.18013.5.1", "age_over_18"]]
+    );
+}
+
+/// The ZK path, across the boundary: a mso_mdoc_zk request reaches an ordinary
+/// stored mdoc, and the chosen system comes back so the caller does not have
+/// to work it out again.
+#[test]
+fn a_zk_request_returns_the_chosen_system() {
+    let blob = wallet(Some(fixtures::longfellow(None)));
+    let query = dcql(
+        "mso_mdoc_zk",
+        age_claim(),
+        json!({
+            "doctype_value": "org.iso.18013.5.1.mDL",
+            "zk_system_type": [{"id": "1", "system": "longfellow-libzk-v1", "num_attributes": "2"}]
+        }),
+    );
+
+    let out = match_dcql(blob, query).expect("matched");
+    let member = &out.combinations[0].members[0];
+    assert_eq!(member.credential_id, "mdl-1");
+    assert_eq!(member.capabilities[0].system, "longfellow-libzk-v1");
+}
+
+/// A wallet that cannot prove is not offered for a ZK request.
+#[test]
+fn a_zk_request_without_a_capability_offers_nothing() {
+    let blob = wallet(None);
+    let query = dcql(
+        "mso_mdoc_zk",
+        age_claim(),
+        json!({
+            "doctype_value": "org.iso.18013.5.1.mDL",
+            "zk_system_type": [{"id": "1", "system": "longfellow-libzk-v1"}]
+        }),
+    );
+    assert!(!match_dcql(blob, query).expect("matched").satisfiable);
+}
+
+/// `ppid_context` is carried, not matched on — a pseudonym context changes
+/// what is produced, not which credential can produce it. Both SDKs read it
+/// today, so losing it here would be a functional regression.
+#[test]
+fn ppid_context_is_carried_through() {
+    let blob = wallet(None);
+    let query = dcql(
+        "mso_mdoc",
+        age_claim(),
+        json!({
+            "doctype_value": "org.iso.18013.5.1.mDL",
+            "ppid_context": "https://rp.example/ctx"
+        }),
+    );
+
+    let out = match_dcql(blob, query).expect("matched");
+    let meta: &HashMap<String, String> = &out.combinations[0].members[0].meta;
+    assert_eq!(
+        meta.get("ppid_context").map(String::as_str),
+        Some("https://rp.example/ctx")
+    );
+}
+
+/// The DC API envelope picks the first protocol the profile answers.
+#[test]
+fn the_envelope_selects_a_supported_protocol() {
+    let blob = wallet(None);
+    let request = json!({"requests": [
+        {"protocol": "some-future-thing", "data": {}},
+        {"protocol": "openid4vp-v1-unsigned", "data": {"dcql_query":
+            serde_json::from_str::<serde_json::Value>(
+                &dcql("mso_mdoc", age_claim(), json!({"doctype_value": "org.iso.18013.5.1.mDL"}))
+            ).expect("query")}}
+    ]})
+    .to_string();
+
+    let out = match_dc_api_request(blob, request).expect("matched");
+    assert!(out.satisfiable);
+}
+
+/// A supported protocol carrying an unreadable request is a request problem,
+/// not a negotiation one.
+///
+/// Before signed requests existed the two could not be told apart, because a
+/// protocol the profile listed was always readable. Reporting this as
+/// "unsupported protocol" sends a caller debugging a malformed signed request
+/// to look at its protocol list.
+#[test]
+fn a_malformed_request_under_a_supported_protocol_is_a_request_error() {
+    let blob = wallet(None);
+    let request = json!({"requests": [
+        {"protocol": "openid4vp-v1-signed", "data": {"request": "aGVhZGVy.@@@@.c2ln"}}
+    ]})
+    .to_string();
+
+    match match_dc_api_request(blob, request) {
+        Err(MatchError::Request { reason }) => {
+            assert!(reason.contains("base64url"), "got: {reason}");
+        }
+        other => panic!("expected a request error, got {other:?}"),
+    }
+}
+
+/// An envelope offering nothing the wallet speaks is distinct from an empty
+/// match: the wallet may hold exactly what was asked for and still not speak
+/// the protocol it was asked in.
+#[test]
+fn an_unspeakable_protocol_is_its_own_error() {
+    let blob = wallet(None);
+    let request = json!({"requests": [{"protocol": "some-future-thing", "data": {}}]}).to_string();
+
+    match match_dc_api_request(blob, request) {
+        // What was offered comes back: a variant with no fields loses its
+        // message crossing the boundary, so the protocols the verifier named
+        // are the only thing that makes this actionable in a host app's log.
+        Err(MatchError::UnsupportedProtocol { offered }) => {
+            assert_eq!(offered, vec!["some-future-thing".to_string()]);
+        }
+        other => panic!("expected UnsupportedProtocol, got {other:?}"),
+    }
+}
+
+/// Malformed input is an error, never a panic — this runs behind an FFI
+/// boundary, and a panic there would take the host application with it.
+#[test]
+fn malformed_input_is_an_error_not_a_panic() {
+    let blob = wallet(None);
+
+    assert!(matches!(
+        match_dcql(vec![0xff, 0xff], "{}".into()),
+        Err(MatchError::Blob { .. })
+    ));
+    assert!(matches!(
+        match_dcql(blob.clone(), "not json".into()),
+        Err(MatchError::Request { .. })
+    ));
+    assert!(matches!(
+        match_dc_api_request(blob, "not json".into()),
+        Err(MatchError::Request { .. })
+    ));
+}
+
+/// Per-query candidates are complete even when the combination list is capped.
+///
+/// The combination count is a product, so it is bounded; a caller unioning the
+/// combinations to learn "which credentials qualify" would miss some, and
+/// filtering on that union silently drops credentials a user could present.
+/// `matches` exists so no caller has to.
+#[test]
+fn per_query_candidates_are_complete_when_combinations_are_capped() {
+    // Two queries, forty credentials each: sixteen hundred combinations
+    // against a cap of thirty-two.
+    let mut db = fixtures::wallet(Vec::new());
+    let template = db.credentials[0].clone();
+    for i in 2..=40 {
+        let mut extra = template.clone();
+        extra.id = format!("mdl-{i}").as_str().into();
+        db.credentials.push(extra);
+    }
+    let blob = db.to_cbor().expect("encoding");
+
+    let claims = json!([{"path": ["org.iso.18013.5.1", "age_over_18"]}]);
+    let meta = json!({"doctype_value": "org.iso.18013.5.1.mDL"});
+    let query = json!({"credentials": [
+        {"id": "a", "format": "mso_mdoc", "meta": meta, "claims": claims},
+        {"id": "b", "format": "mso_mdoc", "meta": meta, "claims": claims}
+    ]})
+    .to_string();
+
+    let out = match_dcql(blob, query).expect("matched");
+    assert!(out.dropped > 0, "this fixture is meant to exceed the cap");
+
+    for query_id in ["a", "b"] {
+        let m = out
+            .matches
+            .iter()
+            .find(|m| m.query_id == query_id)
+            .unwrap_or_else(|| panic!("no matches for {query_id}"));
+        assert_eq!(m.credentials.len(), 40, "every candidate for {query_id}");
+    }
+
+    // The union of the capped combinations is genuinely short of that — which
+    // is the whole reason `matches` exists.
+    let from_combinations: std::collections::BTreeSet<_> = out
+        .combinations
+        .iter()
+        .flat_map(|c| c.members.iter())
+        .filter(|m| m.query_id == "a")
+        .map(|m| m.credential_id.clone())
+        .collect();
+    assert!(
+        from_combinations.len() < 40,
+        "expected the capped union to be incomplete, got {}",
+        from_combinations.len()
+    );
+}
+
+/// The per-query view carries the same detail as a combination member.
+#[test]
+fn per_query_candidates_carry_claims_and_capabilities() {
+    let blob = wallet(Some(fixtures::longfellow(None)));
+    let query = dcql(
+        "mso_mdoc_zk",
+        age_claim(),
+        json!({
+            "doctype_value": "org.iso.18013.5.1.mDL",
+            "zk_system_type": [{"id": "1", "system": "longfellow-libzk-v1"}]
+        }),
+    );
+
+    let out = match_dcql(blob, query).expect("matched");
+    let candidate = &out.matches[0].credentials[0];
+    assert_eq!(candidate.credential_id, "mdl-1");
+    assert_eq!(
+        candidate.claims,
+        vec![vec!["org.iso.18013.5.1", "age_over_18"]]
+    );
+    assert_eq!(candidate.capabilities[0].system, "longfellow-libzk-v1");
+}
+
+/// `matches` is per-query and survives an unsatisfiable request; `satisfiable`
+/// is the authoritative answer to whether any of it may be offered, and the
+/// check a caller reading `matches` has to make.
+///
+/// This is not a curiosity. A caller that reads `matches` without checking
+/// `satisfiable` offers the half of a two-credential request that the wallet
+/// can answer, and the user consents to a presentation that cannot satisfy the
+/// verifier — the §6.4 "MUST NOT return any Credential(s)" case. Reading
+/// `combinations` hides the mistake, because that list is empty exactly when
+/// the request is unsatisfiable, so the check is easy to leave out and hard to
+/// notice missing.
+#[test]
+fn matches_survives_an_unsatisfiable_request_but_combinations_do_not() {
+    let blob = wallet(None);
+    // Two queries, one of which the wallet cannot answer. Absent
+    // `credential_sets` means the verifier asks for all of them (§6.4).
+    let query = json!({"credentials": [
+        {
+            "id": "answerable",
+            "format": "mso_mdoc",
+            "meta": {"doctype_value": "org.iso.18013.5.1.mDL"},
+            "claims": age_claim(),
+        },
+        {
+            "id": "unanswerable",
+            "format": "mso_mdoc",
+            "meta": {"doctype_value": "org.iso.18013.5.1.mDL"},
+            "claims": [{"path": ["org.iso.18013.5.1", "portrait"]}],
+        },
+    ]})
+    .to_string();
+
+    let out = match_dcql(blob, query).expect("matched");
+
+    assert!(!out.satisfiable, "half a request is not a satisfiable one");
+    assert!(
+        out.combinations.is_empty(),
+        "nothing may be offered, so there is no way to satisfy it"
+    );
+
+    let answerable = out
+        .matches
+        .iter()
+        .find(|m| m.query_id == "answerable")
+        .expect("the query that matched is still reported");
+    assert!(
+        !answerable.credentials.is_empty(),
+        "`matches` reports per-query candidates regardless of the whole; \
+         a caller must consult `satisfiable` before offering them"
+    );
+}
+
+/// A §6.2 `purpose` crosses the FFI boundary ready to display, because a
+/// wallet asking for consent without saying what for is the gap this closes.
+///
+/// §6.2 permits a string, an integer or an object. UniFFI has no JSON value,
+/// so each is rendered: a string loses its quotes, and anything else keeps its
+/// JSON form rather than being dropped — the verifiers most specific about
+/// their reason are exactly the ones that send an object.
+#[test]
+fn a_purpose_reaches_the_caller_as_a_display_string() {
+    let blob = wallet(None);
+    let query = json!({
+        "credentials": [{
+            "id": "q1", "format": "mso_mdoc",
+            "meta": {"doctype_value": "org.iso.18013.5.1.mDL"},
+            "claims": age_claim()
+        }],
+        "credential_sets": [{"options": [["q1"]], "purpose": "Confirming you are over 18"}]
+    })
+    .to_string();
+
+    let out = match_dcql(blob, query).expect("matched");
+    assert!(out.satisfiable);
+    assert_eq!(
+        out.combinations[0].purposes,
+        vec!["Confirming you are over 18".to_string()],
+        "a string purpose arrives without its JSON quotes"
+    );
+}
+
+/// An object purpose survives as JSON rather than vanishing.
+#[test]
+fn a_non_string_purpose_is_rendered_not_dropped() {
+    let blob = wallet(None);
+    let query = json!({
+        "credentials": [{
+            "id": "q1", "format": "mso_mdoc",
+            "meta": {"doctype_value": "org.iso.18013.5.1.mDL"},
+            "claims": age_claim()
+        }],
+        "credential_sets": [{"options": [["q1"]], "purpose": {"id": 7}}]
+    })
+    .to_string();
+
+    let out = match_dcql(blob, query).expect("matched");
+    assert_eq!(
+        out.combinations[0].purposes,
+        vec![r#"{"id":7}"#.to_string()]
+    );
+}
+
+/// A duplicated credential query id is a request error, not a silent
+/// first-one-wins (§6.1). The reference from `credential_sets` would name two
+/// different requests, and answering one of them drops the other.
+#[test]
+fn a_duplicated_credential_query_id_is_a_request_error() {
+    let blob = wallet(None);
+    let query = json!({"credentials": [
+        {"id": "q1", "format": "mso_mdoc", "meta": {}, "claims": age_claim()},
+        {"id": "q1", "format": "dc+sd-jwt", "meta": {}, "claims": age_claim()}
+    ]})
+    .to_string();
+
+    let err = match_dcql(blob, query).expect_err("a duplicated id is not usable");
+    assert!(
+        matches!(&err, MatchError::Request { reason } if reason.contains("unique")
+            || reason.contains("share the id")),
+        "got {err:?}"
+    );
+}
+
+/// A wallet holding `n` interchangeable licences.
+///
+/// The canonical fixture holds exactly one, on purpose and shared by three
+/// suites, so this builds its own rather than changing what those assertions
+/// mean. Interchangeable is the point: every credential satisfies every query,
+/// which is what makes the combination count a full power.
+fn identical_licences(n: usize) -> Vec<u8> {
+    use siros_dc_matcher_core::db::{Claim, Credential, CredentialDatabase};
+    use siros_dc_matcher_core::profile::MatchProfile;
+
+    let mut db = CredentialDatabase::new(MatchProfile::siros_default());
+    for i in 0..n {
+        db.credentials.push(Credential {
+            id: format!("mdl-{i}").as_str().into(),
+            format: "mso_mdoc".into(),
+            doctype: Some("org.iso.18013.5.1.mDL".into()),
+            vct: None,
+            title: format!("Driving Licence {i}"),
+            subtitle: "Transportstyrelsen".into(),
+            icon: None,
+            claims: vec![Claim {
+                path: vec!["org.iso.18013.5.1".into(), "age_over_18".into()],
+                value: "true".into(),
+                display: "Over 18".into(),
+                display_value: Some("Yes".into()),
+            }],
+        });
+    }
+    db.to_cbor().expect("encoding")
+}
+
+/// The count crossing the FFI is narrowed to a fixed width, and a value that
+/// does not survive that narrowing is not exact — whatever the engine said.
+///
+/// This is the case worth pinning, because the engine is telling the truth:
+/// three candidates across forty queries is 3^40 combinations, which *fits* a
+/// `usize`, so the engine reports an exact count. It does not fit the FFI's
+/// narrower field. Clamped and still labelled exact, it would assert a precise
+/// figure that is merely the width of the field — the same overstated
+/// precision this pair of fields exists to prevent, reintroduced by the cast.
+#[test]
+fn a_dropped_count_too_large_to_narrow_is_not_exact() {
+    let blob = identical_licences(3);
+    let queries: Vec<serde_json::Value> = (0..40)
+        .map(|i| {
+            json!({
+                "id": format!("q{i}"), "format": "mso_mdoc",
+                "meta": {"doctype_value": "org.iso.18013.5.1.mDL"},
+                "claims": age_claim()
+            })
+        })
+        .collect();
+    let query = json!({"credentials": queries}).to_string();
+
+    let out = match_dcql(blob, query).expect("matched");
+    assert!(out.satisfiable);
+    assert_eq!(out.dropped, u32::MAX, "clamped to the field's width");
+    assert!(
+        !out.dropped_is_exact,
+        "3^40 is exact in a usize and far past this field; saying exact here \
+         would claim u32::MAX was the count"
+    );
+}
+
+/// A count that does fit is still reported as exact, so the check above is not
+/// simply switching the flag off for anything large.
+#[test]
+fn a_dropped_count_that_fits_stays_exact() {
+    let blob = identical_licences(3);
+    let queries: Vec<serde_json::Value> = (0..2)
+        .map(|i| {
+            json!({
+                "id": format!("q{i}"), "format": "mso_mdoc",
+                "meta": {"doctype_value": "org.iso.18013.5.1.mDL"},
+                "claims": age_claim()
+            })
+        })
+        .collect();
+    let query = json!({"credentials": queries}).to_string();
+
+    let out = match_dcql(blob, query).expect("matched");
+    assert!(out.dropped_is_exact, "9 combinations is a number we have");
+}

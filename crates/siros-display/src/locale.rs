@@ -190,11 +190,7 @@ impl LocaleError {
     }
 }
 
-impl fmt::Display for LocaleError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(LocaleError);
 
 impl std::error::Error for LocaleError {}
 

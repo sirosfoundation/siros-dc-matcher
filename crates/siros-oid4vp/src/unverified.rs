@@ -9,15 +9,12 @@
 //! selection time, before anything is disclosed. The picker decides only which entries to draw.
 //! Nothing read here may be treated as authenticated by anything downstream.
 
-mod query;
 mod shape;
 
-use serde::Deserialize;
 use serde_json::Value;
+use siros_codec::json::JsonTextError;
 use siros_codec::Base64Error;
-use siros_dcql::DcqlQuery;
-
-pub use query::UnverifiedQuery;
+use siros_dcql::{DcqlQuery, QueryError};
 
 use crate::protocol::Protocol;
 
@@ -43,11 +40,11 @@ pub enum NoQuery {
     /// The payload segment is no unpadded base64url the picker decodes.
     PayloadNotBase64url(PayloadFault),
     /// The payload decoded, but is not JSON.
-    PayloadNotJson,
+    PayloadNotJson(JsonTextError),
     /// The payload is JSON but carries no `dcql_query`.
     PayloadHasNoDcqlQuery,
     /// A `dcql_query` was found but does not parse as DCQL.
-    Malformed(String),
+    Malformed(QueryError),
     /// The protocol is none of the three of OpenID4VP 1.0, A.1.
     NoParser,
 }
@@ -64,7 +61,7 @@ impl NoQuery {
             Self::ShapeDoesNotMatchProtocol => "shape_does_not_match_protocol",
             Self::NotACompactJws(_) => "not_a_compact_jws",
             Self::PayloadNotBase64url(_) => "payload_not_base64url",
-            Self::PayloadNotJson => "payload_not_json",
+            Self::PayloadNotJson(_) => "payload_not_json",
             Self::PayloadHasNoDcqlQuery => "payload_has_no_dcql_query",
             Self::Malformed(_) => "dcql_query_malformed",
             Self::NoParser => "protocol_unsupported",
@@ -90,7 +87,7 @@ impl NoQuery {
             }
             Self::NotACompactJws(_) => "data.request is not a compact JWS".into(),
             Self::PayloadNotBase64url(_) => "JWS payload is not unpadded base64url".into(),
-            Self::PayloadNotJson => "JWS payload is not JSON".into(),
+            Self::PayloadNotJson(_) => "JWS payload is not JSON".into(),
             Self::PayloadHasNoDcqlQuery => "JWS payload has no `dcql_query`".into(),
             Self::Malformed(e) => format!("dcql_query failed to parse: {e}"),
             Self::NoParser => "no parser for this protocol in this build".into(),
@@ -123,14 +120,14 @@ pub enum PayloadFault {
 /// One DC API request entry, read without verification (OpenID4VP 1.0, Appendix A).
 ///
 /// Its existence guarantees a protocol of A.1 and a `data` in the shape that protocol names,
-/// carrying a `dcql_query` that [`UnverifiedQuery`] reads. Every value comes from a payload
-/// whose signature nobody checked.
+/// carrying a `dcql_query` that DCQL parses. Every value comes from a payload whose signature
+/// nobody checked.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UnverifiedRequest {
     protocol: Protocol,
     /// The request object without its `dcql_query`, which `query` holds.
     object: Value,
-    query: UnverifiedQuery,
+    query: DcqlQuery,
 }
 
 impl UnverifiedRequest {
@@ -147,7 +144,7 @@ impl UnverifiedRequest {
             .as_object_mut()
             .and_then(|o| o.remove("dcql_query"))
             .ok_or(NoQuery::PayloadHasNoDcqlQuery)?;
-        let query = UnverifiedQuery::parse(raw)?;
+        let query = DcqlQuery::parse(&raw).map_err(NoQuery::Malformed)?;
         Ok(Self {
             protocol,
             object,
@@ -207,7 +204,7 @@ impl UnverifiedRequest {
 
     /// The request object's `dcql_query`.
     #[must_use]
-    pub fn query(&self) -> &UnverifiedQuery {
+    pub fn query(&self) -> &DcqlQuery {
         &self.query
     }
 }
@@ -250,7 +247,7 @@ fn entry_diagnosis(entry: &Value, registered: &dyn Fn(&str) -> bool) -> String {
     match strict_query(protocol, data) {
         Ok(q) => format!(
             "{protocol}: dcql_query parsed ({} credential queries) - should not have reached here",
-            q.credentials.len()
+            q.credentials().len()
         ),
         Err(e) => format!("{protocol}: {}", e.reason()),
     }
@@ -264,5 +261,5 @@ fn strict_query(label: &str, data: &Value) -> Result<DcqlQuery, NoQuery> {
     let raw = object
         .get("dcql_query")
         .ok_or(NoQuery::PayloadHasNoDcqlQuery)?;
-    DcqlQuery::deserialize(raw).map_err(|e| NoQuery::Malformed(e.to_string()))
+    DcqlQuery::parse(raw).map_err(NoQuery::Malformed)
 }

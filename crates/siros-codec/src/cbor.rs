@@ -10,12 +10,13 @@
 //! definite lengths, and map keys sorted by their encoded bytes.
 
 use std::fmt;
+use std::str::Utf8Error;
 
 /// The deepest nesting the reader accepts.
 pub const MAX_DEPTH: usize = 32;
 
 /// Why bytes are not one CBOR item the reader accepts.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CborError {
     /// The input ends inside an item.
     Truncated,
@@ -24,7 +25,7 @@ pub enum CborError {
     /// An encoding the reader refuses, named by [`Unsupported`].
     Unsupported(Unsupported),
     /// A text string is not UTF-8.
-    InvalidUtf8,
+    InvalidUtf8(Utf8Error),
     /// A map has the same key twice.
     DuplicateKey,
     /// Arrays, maps and tags nest deeper than [`MAX_DEPTH`].
@@ -52,7 +53,7 @@ impl CborError {
             Self::Truncated => "cbor_truncated",
             Self::TrailingBytes => "cbor_trailing_bytes",
             Self::Unsupported(_) => "cbor_unsupported",
-            Self::InvalidUtf8 => "cbor_invalid_utf8",
+            Self::InvalidUtf8(_) => "cbor_invalid_utf8",
             Self::DuplicateKey => "cbor_duplicate_key",
             Self::TooDeep => "cbor_too_deep",
         }
@@ -65,14 +66,25 @@ impl fmt::Display for CborError {
             Self::Truncated => "CBOR item is truncated",
             Self::TrailingBytes => "bytes follow the CBOR item",
             Self::Unsupported(_) => "unsupported CBOR encoding",
-            Self::InvalidUtf8 => "CBOR text is not UTF-8",
+            Self::InvalidUtf8(_) => "CBOR text is not UTF-8",
             Self::DuplicateKey => "CBOR map repeats a key",
             Self::TooDeep => "CBOR nests too deeply",
         })
     }
 }
 
-impl std::error::Error for CborError {}
+impl std::error::Error for CborError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidUtf8(error) => Some(error),
+            Self::Truncated
+            | Self::TrailingBytes
+            | Self::Unsupported(_)
+            | Self::DuplicateKey
+            | Self::TooDeep => None,
+        }
+    }
+}
 
 /// One decoded item and the bytes it was encoded in.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -267,8 +279,7 @@ impl<'a> Reader<'a> {
             }
             Major::Text => {
                 let n = self.length(argument)?;
-                let text =
-                    std::str::from_utf8(self.take(n)?).map_err(|_| CborError::InvalidUtf8)?;
+                let text = std::str::from_utf8(self.take(n)?).map_err(CborError::InvalidUtf8)?;
                 Ok(Kind::Text(text))
             }
             Major::Array => self.array(argument, depth),

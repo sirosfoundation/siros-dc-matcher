@@ -7,7 +7,7 @@ use p256::PublicKey;
 use serde_json::{Map, Value};
 use siros_codec::base64url;
 
-use crate::intake::{IntakeError, JwsError, JwsFault};
+use crate::intake::{Coordinate, IntakeError, JwkFault, JwsError, JwsFault};
 use crate::values::Kid;
 
 /// One signature over a payload: its JOSE Header and what it signs.
@@ -93,16 +93,29 @@ pub(crate) fn segment(text: &str) -> Result<Vec<u8>, JwsError> {
 }
 
 /// The key of a public JWK with `kty` `EC` and `crv` `P-256`, its coordinates 32 bytes each.
-pub(crate) fn p256_key(jwk: &Value) -> Option<PublicKey> {
+pub(crate) fn p256_key(jwk: &Value) -> Result<PublicKey, JwkFault> {
     let text = |name: &str| jwk.get(name).and_then(Value::as_str);
-    if text("kty")? != "EC" || text("crv")? != "P-256" {
-        return None;
+    if text("kty") != Some("EC") || text("crv") != Some("P-256") {
+        return Err(JwkFault::OtherKey);
     }
-    let coordinate = |name: &str| {
-        base64url::decode(text(name)?)
-            .ok()
-            .filter(|c| c.len() == 32)
+    let coordinate = |coordinate: Coordinate| {
+        let name = match coordinate {
+            Coordinate::X => "x",
+            Coordinate::Y => "y",
+        };
+        let text = text(name).ok_or(JwkFault::CoordinateAbsent(coordinate))?;
+        let bytes = base64url::decode(text)
+            .map_err(|error| JwkFault::CoordinateEncoding(coordinate, error))?;
+        match bytes.len() {
+            32 => Ok(bytes),
+            length => Err(JwkFault::CoordinateLength(coordinate, length)),
+        }
     };
-    let point = [vec![0x04], coordinate("x")?, coordinate("y")?].concat();
-    PublicKey::from_sec1_bytes(&point).ok()
+    let point = [
+        vec![0x04],
+        coordinate(Coordinate::X)?,
+        coordinate(Coordinate::Y)?,
+    ]
+    .concat();
+    PublicKey::from_sec1_bytes(&point).map_err(|_| JwkFault::Point)
 }

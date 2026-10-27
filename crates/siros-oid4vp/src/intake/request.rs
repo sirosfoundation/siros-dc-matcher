@@ -6,7 +6,7 @@ use siros_dcql::DcqlQuery;
 
 use super::signature::{strings, Metadata, UriRule, Verifier};
 use super::trust::Verdict;
-use super::{IntakeError, VerifierInfoRule};
+use super::{IntakeError, JwkFault, VerifierInfoRule};
 use crate::client_id::ClientId;
 use crate::fetch::HttpsUrl;
 use crate::handover::ec_jwk_thumbprint;
@@ -265,8 +265,7 @@ fn dcql_query(params: &Map<String, Value>) -> Result<(DcqlQuery, Value), IntakeE
         (None, true) => Err(IntakeError::ScopeUnsupported),
         (None, false) => Err(IntakeError::DcqlQueryMissing),
         (Some(raw), false) => {
-            let query = DcqlQuery::from_json(&raw.to_string())
-                .map_err(|_| IntakeError::DcqlQueryInvalid)?;
+            let query = DcqlQuery::parse(raw).map_err(IntakeError::DcqlQueryInvalid)?;
             Ok((query, raw.clone()))
         }
     }
@@ -332,17 +331,29 @@ fn encryption(
         .and_then(|j| j.get("keys"))
         .and_then(Value::as_array)
         .ok_or(IntakeError::EncryptionKeyMissing)?;
-    let (jwk, key) = keys
+    // RFC 7517, Section 5: a key that is no P-256 key is passed over. When none is usable, the
+    // first that names P-256 gives the cause.
+    let mut unreadable = None;
+    let chosen = keys
         .iter()
-        .find_map(|jwk| {
+        .filter(|jwk| {
             let text = |name: &str| jwk.get(name).and_then(Value::as_str);
-            let usable = text("alg") == Some("ECDH-ES") && text("use").is_none_or(|u| u == "enc");
-            if !usable {
-                return None;
-            }
-            Some((jwk, jose::p256_key(jwk)?))
+            text("alg") == Some("ECDH-ES") && text("use").is_none_or(|u| u == "enc")
         })
-        .ok_or(IntakeError::EncryptionKeyMissing)?;
+        .find_map(|jwk| match jose::p256_key(jwk) {
+            Ok(key) => Some((jwk, key)),
+            Err(JwkFault::OtherKey) => None,
+            Err(fault) => {
+                if unreadable.is_none() {
+                    unreadable = Some(fault);
+                }
+                None
+            }
+        });
+    let (jwk, key) = chosen.ok_or(unreadable.map_or(
+        IntakeError::EncryptionKeyMissing,
+        IntakeError::EncryptionKeyInvalid,
+    ))?;
     let thumbprint = ec_jwk_thumbprint(jwk).ok_or(IntakeError::EncryptionKeyMissing)?;
     let enc = match metadata.and_then(|m| m.get("encrypted_response_enc_values_supported")) {
         None => ContentEncryption::A128Gcm,

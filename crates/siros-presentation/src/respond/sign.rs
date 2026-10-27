@@ -1,28 +1,17 @@
 //! The `Sign` effects of a chosen offer, and the host's signatures parsed against them (A5).
 
-use std::fmt;
-
+use siros_codec::signature::Es256Signature;
 use siros_credential::Credential;
 use siros_mdoc::{es256_verifies, P256Key};
 use siros_wallet_state::KeyId;
 
 use crate::error::PresentationError;
 
-/// The identifier of a [`Sign`] effect, which its signature names.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct SignId(usize);
-
-impl SignId {
-    /// The identifier `id`, as the host returns it.
-    pub fn new(id: usize) -> Self {
-        Self(id)
-    }
-
-    /// The number.
-    pub fn value(self) -> usize {
-        self.0
-    }
-}
+siros_codec::position!(
+    /// The identifier of a [`Sign`] effect, which its signature names: its position among the
+    /// effects.
+    pub SignId
+);
 
 /// The bytes a holder key signs for one presentation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,11 +35,11 @@ pub struct Sign {
 
 /// A signature that verifies under the holder key of its `Sign` effect.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct VerifiedSignature([u8; 64]);
+pub(crate) struct VerifiedSignature(Es256Signature);
 
 impl VerifiedSignature {
-    /// `r ‖ s`.
-    pub(crate) fn bytes(&self) -> &[u8; 64] {
+    /// The signature.
+    pub(crate) fn signature(&self) -> &Es256Signature {
         &self.0
     }
 }
@@ -83,11 +72,7 @@ impl SignatureError {
     }
 }
 
-impl fmt::Display for SignatureError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(SignatureError);
 
 impl std::error::Error for SignatureError {}
 
@@ -131,10 +116,8 @@ impl Sign {
 
     /// The signature `signature`, `r ‖ s`, when it verifies under the holder key (A5).
     fn verified(&self, signature: Vec<u8>) -> Result<VerifiedSignature, SignatureError> {
-        let length = signature.len();
-        let signature: [u8; 64] = signature
-            .try_into()
-            .map_err(|_| SignatureError::Length(self.id, length))?;
+        let signature = Es256Signature::parse(&signature)
+            .map_err(|length| SignatureError::Length(self.id, length.0))?;
         if es256_verifies(&self.holder, &self.input.0, &signature) {
             Ok(VerifiedSignature(signature))
         } else {

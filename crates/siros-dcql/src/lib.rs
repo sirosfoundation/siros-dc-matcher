@@ -4,7 +4,7 @@
 //! A DCQL query is how a verifier states what it wants. It carries a list of
 //! [`CredentialQuery`] entries — each constrained by format, type and claims —
 //! and optionally a list of [`CredentialSetQuery`] entries expressing which
-//! *combinations* of those would satisfy the request.
+//! *combinations* of those would satisfy the request. A query is constructed only by parsing.
 //!
 //! [`execute`] evaluates such a query against anything implementing
 //! [`Credential`], with format and metadata matching delegated to a
@@ -15,26 +15,100 @@
 //!
 //! # Layout
 //!
-//! [`query`] is the wire model (§6.1–6.3), [`path`] resolves claims path
-//! pointers (§7), and [`eval`] performs selection (§6.4).
+//! [`query`] is the wire model (§6.1–6.3), [`authority`] its `trusted_authorities`
+//! (§6.1.1), [`path`] resolves claims path pointers (§7), and [`eval`] performs selection
+//! (§6.4).
+//!
+//! # Shared vocabulary
+//!
+//! The request vocabulary the SIROS wallet core's components share is defined here, once:
+//! [`QueryId`], [`ClaimPath`], the credential type identifiers [`DocType`] and [`Vct`], and
+//! [`TrustedAuthorities`] with its [`AuthorityType`] and [`AuthorityValue`]. The crate depends
+//! on no other workspace crate, so that it publishes on its own.
 //!
 //! [oid4vp]: https://openid.net/specs/openid-4-verifiable-presentations-1_0.html
 
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
-#![deny(clippy::unwrap_used, clippy::expect_used)]
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
 
+/// Declares a position in a list of the query or a pointer: a number from 0.
+macro_rules! position {
+    ($(#[$doc:meta])* $name:ident) => {
+        $(#[$doc])*
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+        pub struct $name(usize);
+
+        impl $name {
+            /// The position `value`.
+            #[must_use]
+            pub const fn new(value: usize) -> Self {
+                Self(value)
+            }
+
+            /// The position, from 0.
+            #[must_use]
+            pub const fn value(self) -> usize {
+                self.0
+            }
+        }
+
+        impl ::core::fmt::Display for $name {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                write!(f, "{}", self.0)
+            }
+        }
+    };
+}
+
+pub(crate) use position;
+
+/// Implements `Display` for each type, showing its stable code: what its `code()` returns.
+/// siros-codec's macro of the same name serves the other crates; this crate depends on none.
+macro_rules! display_code {
+    ($($name:ty),+ $(,)?) => {
+        $(
+            impl ::core::fmt::Display for $name {
+                fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                    f.write_str(self.code())
+                }
+            }
+        )+
+    };
+}
+
+pub(crate) use display_code;
+
+pub mod authority;
+mod combinations;
 pub mod eval;
 pub mod id;
+pub mod meta;
 pub mod path;
 pub mod query;
+mod result;
 
-pub use eval::{
-    execute, Candidate, Combination, Combinations, Credential, Dropped, ExactFormat, Policy,
-    QueryMatch, QueryResult, SelectedClaim,
+pub use authority::{
+    AuthorityType, AuthorityValue, TrustedAuthorities, TrustedAuthority, TrustedAuthorityError,
 };
-pub use id::{QueryId, QueryIdError};
+pub use combinations::{Combination, Combinations, Dropped};
+pub use eval::{execute, select_claims, Credential, CryptographicBinding, ExactFormat, Policy};
+pub use id::{ClaimId, ClaimIdError, QueryId, QueryIdError};
+pub use meta::{CredentialFormat, CredentialRef, DocType, Vct};
 pub use path::{
-    mdoc_components, resolve, resolve_json, ClaimNode, Lookup, PathComponent, PathError,
+    mdoc_components, resolve, resolve_json, ClaimNode, ClaimPath, ClaimPathError, ComponentIndex,
+    Lookup, PathComponent, PathError,
 };
-pub use query::{ClaimsQuery, CredentialQuery, CredentialSetQuery, DcqlQuery, QueryError};
+pub use query::{
+    ClaimMember, ClaimOption, ClaimsQuery, CredentialMember, CredentialQuery, CredentialSetQuery,
+    DcqlQuery, FormFault, HolderBinding, Member, Multiplicity, Position, QueryError,
+    QueryTextError, SetMember, SetRequirement,
+};
+pub use result::{
+    Candidate, ClaimPathRefusal, QueryMatch, QueryResult, Satisfaction, SelectedClaim,
+};

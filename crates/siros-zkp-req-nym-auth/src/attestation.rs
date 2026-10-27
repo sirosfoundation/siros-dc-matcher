@@ -1,22 +1,95 @@
 //! The Wallet's tests of a credential (system rulebooks, Section 7, step 1), with the codes of
-//! Section 9. [`UsableAttestation`] is the credential that passes them at a proof time, and
-//! [`OpenedSeed`] is a delivered `secret_seed` that opens its `ssc` (privatedata, Section 5A.2).
+//! Section 9 (N3). [`TestedAttestation`] is the credential that passes them at a proof time;
+//! [`UsableAttestation`] adds the admission of its Document Signer for one query; [`OpenedSeed`]
+//! is a delivered `secret_seed` that opens its `ssc` (privatedata, Section 5A.2).
 
 use std::fmt;
 
 use siros_codec::date::DateTime;
-use siros_mdoc::{chains_to, es256_verifies, CertificateError, Mdoc, MdocError, P256Certificate};
+use siros_mdoc::{es256_verifies, Mdoc, P256Key, PointError};
+use siros_trust::{AdmittedIssuer, Certificate, CertificateError};
 use zeroize::Zeroizing;
 
+use crate::catalogue::NymAuthQuery;
 use crate::mdoc::{self, FormError, NymAuthMdoc, Reading};
 use crate::outcome::CredentialCode;
 use crate::verifier_id::sha256;
 
-/// A nym_auth credential with its Document Signer certificate read.
+/// A Document Signer certificate with the P-256 key the issuer signs with: the first of an
+/// mdoc's `x5chain`, or the `issuer_key_set` of a presentation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DocumentSigner {
+    certificate: Certificate,
+    key: P256Key,
+}
+
+/// Why a certificate's key is no P-256 key in the systems' form.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum KeyError {
+    /// The key is not `id-ecPublicKey` on `prime256v1`.
+    NotP256,
+    /// The key is not an uncompressed point.
+    Point(PointError),
+}
+
+/// Why bytes are no Document Signer certificate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DocumentSignerError {
+    /// The certificate does not parse.
+    Certificate(CertificateError),
+    /// Its key.
+    Key(KeyError),
+}
+
+impl DocumentSignerError {
+    /// A stable identifier.
+    #[must_use]
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Certificate(e) => e.code(),
+            Self::Key(KeyError::NotP256) => "certificate_key_algorithm",
+            Self::Key(KeyError::Point(_)) => "certificate_key_point",
+        }
+    }
+}
+
+siros_codec::display_code!(DocumentSignerError);
+
+impl std::error::Error for DocumentSignerError {}
+
+impl DocumentSigner {
+    /// The Document Signer of the DER certificate `der`, whose key is an uncompressed P-256
+    /// point.
+    ///
+    /// # Errors
+    ///
+    /// [`DocumentSignerError`]: the certificate or its key.
+    pub fn parse(der: &[u8]) -> Result<Self, DocumentSignerError> {
+        let certificate = Certificate::parse(der).map_err(DocumentSignerError::Certificate)?;
+        let point = certificate
+            .p256_key()
+            .ok_or(DocumentSignerError::Key(KeyError::NotP256))?;
+        let key =
+            P256Key::from_sec1(point).map_err(|e| DocumentSignerError::Key(KeyError::Point(e)))?;
+        Ok(Self { certificate, key })
+    }
+
+    /// The certificate.
+    pub fn certificate(&self) -> &Certificate {
+        &self.certificate
+    }
+
+    /// The issuer key Q.
+    pub fn key(&self) -> &P256Key {
+        &self.key
+    }
+}
+
+/// A nym_auth credential with its Document Signer read.
 #[derive(Debug, Clone)]
 pub struct Credential {
     mdoc: NymAuthMdoc,
-    certificate: P256Certificate,
+    signer: DocumentSigner,
 }
 
 impl Credential {
@@ -25,27 +98,27 @@ impl Credential {
         &self.mdoc
     }
 
-    /// The Document Signer certificate.
-    pub fn certificate(&self) -> &P256Certificate {
-        &self.certificate
+    /// The Document Signer.
+    pub fn signer(&self) -> &DocumentSigner {
+        &self.signer
     }
 }
 
 /// Why a credential cannot be read in the nym_auth form: `credential_form`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Unreadable {
     /// The mdoc.
     Form(FormError),
-    /// The Document Signer certificate.
-    Certificate(CertificateError),
+    /// The Document Signer.
+    Signer(DocumentSignerError),
 }
 
 impl Unreadable {
-    /// A stable identifier: the code of the mdoc's or the certificate's rule.
+    /// A stable identifier: the code of the mdoc's or the Document Signer's rule.
     pub fn code(&self) -> &'static str {
         match self {
             Self::Form(e) => e.code(),
-            Self::Certificate(e) => e.code(),
+            Self::Signer(e) => e.code(),
         }
     }
 }
@@ -63,22 +136,20 @@ impl Failures {
         &self.credential
     }
 
-    /// The codes of the failed tests, in the order `issuer_signature`, `issuer_untrusted`,
-    /// `validity`. It holds at least one.
+    /// The codes of the failed tests, in the order `issuer_signature`, `validity`. It holds at
+    /// least one.
     pub fn codes(&self) -> &[CredentialCode] {
         &self.codes
     }
 }
 
-/// Why a stored credential is no usable attestation at the proof time.
+/// Why an mdoc is no tested attestation at the proof time.
 #[derive(Debug, Clone)]
 pub enum Unusable {
     /// An mdoc of another `docType`: it does not match the query.
     OtherDocType,
     /// The credential cannot be read in the nym_auth form: `credential_form`.
     Unreadable(Unreadable),
-    /// The MSO lists another digest of an element, or none: `issuer_signature`.
-    Unlisted,
     /// The credential reads and fails the tests of [`Failures::codes`].
     Fails(Box<Failures>),
 }
@@ -89,7 +160,6 @@ impl Unusable {
         match self {
             Self::OtherDocType => &[],
             Self::Unreadable(_) => &[CredentialCode::CredentialForm],
-            Self::Unlisted => &[CredentialCode::IssuerSignature],
             Self::Fails(failures) => failures.codes(),
         }
     }
@@ -98,97 +168,65 @@ impl Unusable {
     pub fn credential(&self) -> Option<&Credential> {
         match self {
             Self::Fails(failures) => Some(failures.credential()),
-            Self::OtherDocType | Self::Unreadable(_) | Self::Unlisted => None,
+            Self::OtherDocType | Self::Unreadable(_) => None,
         }
     }
 
-    /// A stable identifier: `other_doc_type`, the code of the one failed test, or `credential`
-    /// for the tests of [`Failures`].
+    /// A stable identifier: `other_doc_type`, `credential_form`, or `credential` for the tests
+    /// of [`Failures`].
     pub fn code(&self) -> &'static str {
         match self {
             Self::OtherDocType => "other_doc_type",
             Self::Unreadable(_) => CredentialCode::CredentialForm.code(),
-            Self::Unlisted => CredentialCode::IssuerSignature.code(),
             Self::Fails(_) => "credential",
         }
     }
 }
 
-impl fmt::Display for Unusable {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(Unusable);
 
 impl std::error::Error for Unusable {}
 
-/// A credential that passes the tests that need neither the seed nor the device signature at a
-/// proof time: the form, the issuer signature and the listed digests, the trust in the issuer
-/// when the query names authorities, and the validity. Proving requires it.
+/// A credential that passes the credential tests at a proof time (N3): the nym_auth form, the
+/// issuer signature under the Document Signer's key, and the validity. A parsed [`Mdoc`] lists
+/// the digest of every item it holds.
 #[derive(Debug, Clone)]
-pub struct UsableAttestation {
+pub struct TestedAttestation {
     credential: Credential,
     proof_time: DateTime,
 }
 
-impl UsableAttestation {
-    /// Reads `data` of a stored `mso_mdoc` credential and tests it at `proof_time`. `anchors`
-    /// are the DER certificates the issuer must chain to, when the query names authorities.
-    ///
-    /// # Errors
-    ///
-    /// [`Unusable`]: another `docType`, an unreadable credential, or the failed tests.
-    pub fn new(
-        data: &str,
-        anchors: Option<&[Vec<u8>]>,
-        proof_time: DateTime,
-    ) -> Result<Self, Unusable> {
-        Self::tested(mdoc::read(data), anchors, proof_time)
-    }
-
-    /// Tests `mdoc`, which `siros-mdoc` parsed, at `proof_time`, as [`UsableAttestation::new`]
-    /// tests a stored credential.
+impl TestedAttestation {
+    /// Tests `mdoc` at `proof_time`.
     ///
     /// # Errors
     ///
     /// [`Unusable`]: another `docType`, a credential out of the nym_auth form, or the failed
     /// tests.
-    pub fn of(
-        mdoc: &Mdoc,
-        anchors: Option<&[Vec<u8>]>,
-        proof_time: DateTime,
-    ) -> Result<Self, Unusable> {
-        Self::tested(mdoc::read_mdoc(mdoc), anchors, proof_time)
-    }
-
-    fn tested(
-        reading: Result<Reading, FormError>,
-        anchors: Option<&[Vec<u8>]>,
-        proof_time: DateTime,
-    ) -> Result<Self, Unusable> {
-        let mdoc = match reading {
+    pub fn of(mdoc: &Mdoc, proof_time: DateTime) -> Result<Self, Unusable> {
+        let document_signer = mdoc.issuer_auth().x5chain().first();
+        let mdoc = match mdoc::read_mdoc(mdoc) {
             Ok(Reading::NymAuth(mdoc)) => *mdoc,
             Ok(Reading::OtherDocType) => return Err(Unusable::OtherDocType),
-            Err(FormError::Mdoc(MdocError::ItemDigest)) => return Err(Unusable::Unlisted),
             Err(e) => return Err(Unusable::Unreadable(Unreadable::Form(e))),
         };
-        let certificate = P256Certificate::parse(mdoc.document_signer())
-            .map_err(|e| Unusable::Unreadable(Unreadable::Certificate(e)))?;
-        let mut codes = Vec::new();
-        if !es256_verifies(
-            certificate.key(),
-            mdoc.sig_structure(),
+        let signer = DocumentSigner::parse(document_signer)
+            .map_err(|e| Unusable::Unreadable(Unreadable::Signer(e)))?;
+        let signed = es256_verifies(
+            signer.key(),
+            mdoc.sig_structure().as_bytes(),
             mdoc.issuer_signature(),
-        ) {
-            codes.push(CredentialCode::IssuerSignature);
-        }
-        if anchors.is_some_and(|anchors| !chains_to(&certificate, anchors)) {
-            codes.push(CredentialCode::IssuerUntrusted);
-        }
-        if !(mdoc.valid_from() <= proof_time && proof_time < mdoc.valid_until()) {
-            codes.push(CredentialCode::Validity);
-        }
-        let credential = Credential { mdoc, certificate };
+        );
+        let valid = mdoc.valid_from() <= proof_time && proof_time < mdoc.valid_until();
+        let codes: Vec<CredentialCode> = [
+            (signed, CredentialCode::IssuerSignature),
+            (valid, CredentialCode::Validity),
+        ]
+        .into_iter()
+        .filter(|(passed, _)| !passed)
+        .map(|(_, code)| code)
+        .collect();
+        let credential = Credential { mdoc, signer };
         if codes.is_empty() {
             Ok(Self {
                 credential,
@@ -210,22 +248,92 @@ impl UsableAttestation {
     }
 }
 
+/// Why an admitted issuer does not make a tested attestation usable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum OtherIssuer {
+    /// The admission names another certificate than the attestation's Document Signer.
+    Certificate,
+    /// The admission is for the authorities of another query: another `id`, or other
+    /// `trusted_authorities`.
+    Query,
+}
+
+impl OtherIssuer {
+    /// A stable identifier.
+    #[must_use]
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Certificate => "admission_other_certificate",
+            Self::Query => "admission_other_query",
+        }
+    }
+}
+
+siros_codec::display_code!(OtherIssuer);
+
+impl std::error::Error for OtherIssuer {}
+
+/// A tested attestation whose Document Signer the query's `trusted_authorities` admit (N3,
+/// TR3). Proving requires it.
+#[derive(Debug, Clone)]
+pub struct UsableAttestation {
+    tested: TestedAttestation,
+    issuer: AdmittedIssuer,
+}
+
+impl UsableAttestation {
+    /// `tested`, usable for `query` because `issuer` admits its Document Signer.
+    ///
+    /// # Errors
+    ///
+    /// [`OtherIssuer`]: `issuer` names another certificate than `tested`'s Document Signer, or
+    /// other authorities than those of `query`.
+    pub fn new(
+        tested: TestedAttestation,
+        issuer: AdmittedIssuer,
+        query: &NymAuthQuery,
+    ) -> Result<Self, OtherIssuer> {
+        if issuer.leaf() != Some(tested.credential().signer().certificate()) {
+            return Err(OtherIssuer::Certificate);
+        }
+        if !issuer
+            .authorities()
+            .are_those_of(query.query().credential_query())
+        {
+            return Err(OtherIssuer::Query);
+        }
+        Ok(Self { tested, issuer })
+    }
+
+    /// The credential.
+    pub fn credential(&self) -> &Credential {
+        self.tested.credential()
+    }
+
+    /// The proof time the credential passes the tests at.
+    pub fn proof_time(&self) -> DateTime {
+        self.tested.proof_time()
+    }
+
+    /// The admission of the Document Signer.
+    pub fn issuer(&self) -> &AdmittedIssuer {
+        &self.issuer
+    }
+}
+
 /// `SHA-256(secret_seed)` is not the credential's `ssc`: `seed_mismatch`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SeedMismatch;
 
 impl SeedMismatch {
     /// A stable identifier.
+    #[must_use]
     pub fn code(self) -> &'static str {
         "seed_mismatch"
     }
 }
 
-impl fmt::Display for SeedMismatch {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
+siros_codec::display_code!(SeedMismatch);
 
 impl std::error::Error for SeedMismatch {}
 
@@ -260,7 +368,7 @@ impl OpenedSeed {
     ///
     /// [`SeedMismatch`] when `SHA-256(secret_seed)` is not `ssc`.
     pub fn open(credential: &Credential, secret_seed: &SecretSeed) -> Result<Self, SeedMismatch> {
-        if sha256(&*secret_seed.0) == *credential.mdoc().ssc().value() {
+        if sha256(&*secret_seed.0) == *credential.mdoc().ssc().value().as_bytes() {
             Ok(Self(secret_seed.0.clone()))
         } else {
             Err(SeedMismatch)

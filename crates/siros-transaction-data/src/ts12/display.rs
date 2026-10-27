@@ -2,10 +2,10 @@
 
 use serde_json::Value as JsonValue;
 use siros_codec::date::Date;
+use siros_codec::json::{Json, JsonNumber};
 use siros_display::{preferred, DisplayText, Locale};
 
 use crate::error::TransactionDataError;
-use crate::json::{Json, Number};
 use crate::kind::SupportedType;
 use crate::labels::{DisplayMetadata, KeyPath, Label};
 use crate::ts12::rules::ImageUrl;
@@ -79,12 +79,12 @@ impl Leaves {
     }
 
     /// The number member `name`.
-    pub(crate) fn number(&mut self, name: &str, value: &Number, floor: Option<Level>) {
+    pub(crate) fn number(&mut self, name: &str, value: &JsonNumber, floor: Option<Level>) {
         self.push(name, LeafValue::Number(value.text().to_owned()), floor);
     }
 
     /// The number member `name`, when present.
-    pub(crate) fn optional_number(&mut self, name: &str, value: Option<&Number>) {
+    pub(crate) fn optional_number(&mut self, name: &str, value: Option<&JsonNumber>) {
         if let Some(value) = value {
             self.number(name, value, None);
         }
@@ -116,7 +116,7 @@ impl Leaves {
         for (name, value) in members {
             match value {
                 Json::Object(object) => {
-                    self.object(name, |leaves| leaves.rest(object.members()));
+                    self.object(name, |leaves| leaves.rest(object));
                 }
                 Json::String(text) => self.text(name, text, None),
                 Json::Number(number) => self.number(name, number, None),
@@ -143,7 +143,6 @@ fn compact(value: &Json) -> String {
         ),
         Json::Object(object) => {
             let members = object
-                .members()
                 .iter()
                 .map(|(name, item)| format!("{}:{}", quoted(name), compact(item)))
                 .collect::<Vec<_>>();

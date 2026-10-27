@@ -4,10 +4,13 @@
 
 use std::fmt;
 
-use crate::formats::ZkpFormats;
-use crate::presentation::ZkpPresentation;
-use crate::query::{QueryOption, ReqItem, ZkpReqQuery};
 use siros_codec::cbor::Value;
+
+use crate::formats::ZkpFormats;
+use crate::ids::{ItemIndex, ReqSetIndex, ResultKey, SystemId};
+use crate::presentation::ZkpPresentation;
+use crate::query::{QueryOption, ReqItem, ReqSets, ZkpReqQuery};
+use crate::select::System;
 
 /// Why a presentation breaks steps 1 to 5 of Section 4.1.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,7 +32,7 @@ pub enum StructureRejection {
     /// Step 5: an item whose function has no result has a value other than `true`.
     ResultNotTrue {
         /// The item's `_req` index.
-        item: usize,
+        item: ItemIndex,
     },
 }
 
@@ -50,76 +53,70 @@ impl fmt::Display for StructureRejection {
 
 impl std::error::Error for StructureRejection {}
 
-/// The answered option of `presentation`, after steps 1 to 5 of Section 4.1.
+/// The answered option of `presentation` and its system, after steps 1 to 5 of Section 4.1.
 ///
-/// `runs_on` says whether a system runs on a proof backend. `has_result` says whether an
+/// `system_of` gives the Verifier's system of an identifier. `has_result` says whether an
 /// item's function has a result (the function catalogue's rule).
 ///
 /// # Errors
 ///
-/// [`StructureRejection`]: the first step that fails.
-pub fn answered_option<'q>(
+/// [`StructureRejection`]: the first step that fails. Step 2 fails for a system the
+/// Verifier runs none of.
+pub fn answered_option<'q, S: System>(
     query: &'q ZkpReqQuery,
     formats: &ZkpFormats,
     presentation: &ZkpPresentation,
-    runs_on: impl Fn(&str, &str) -> bool,
+    system_of: impl Fn(&SystemId) -> Option<S>,
     has_result: impl Fn(&ReqItem) -> bool,
-) -> Result<&'q QueryOption, StructureRejection> {
+) -> Result<(&'q QueryOption, S), StructureRejection> {
     if !formats.lists_system(&presentation.system_id) {
         return Err(StructureRejection::SystemNotListed);
     }
     if !formats.lists_backend(&presentation.proof_backend) {
         return Err(StructureRejection::BackendNotListed);
     }
-    if !runs_on(&presentation.system_id, &presentation.proof_backend) {
-        return Err(StructureRejection::SystemNotOnBackend);
-    }
+    let system = system_of(&presentation.system_id)
+        .filter(|system| system.runs_on(&presentation.proof_backend))
+        .ok_or(StructureRejection::SystemNotOnBackend)?;
     let option = option_of(query, presentation.req_set)?;
     check_results(query, option, &presentation.results, has_result)?;
-    Ok(option)
+    Ok((option, system))
 }
 
 fn option_of(
     query: &ZkpReqQuery,
-    req_set: Option<u64>,
+    req_set: Option<ReqSetIndex>,
 ) -> Result<&QueryOption, StructureRejection> {
-    match (query.has_req_sets, req_set) {
-        (true, None) => Err(StructureRejection::ReqSetMissing),
-        (false, Some(_)) => Err(StructureRejection::ReqSetExtra),
-        (_, req_set) => {
-            let index = req_set.map(usize::try_from).transpose();
-            index
-                .ok()
-                .and_then(|i| query.option(i))
-                .ok_or(StructureRejection::ReqSetUnknown)
-        }
+    match (query.req_sets(), req_set) {
+        (ReqSets::Present, None) => Err(StructureRejection::ReqSetMissing),
+        (ReqSets::Absent, Some(_)) => Err(StructureRejection::ReqSetExtra),
+        (_, req_set) => query
+            .option(req_set)
+            .ok_or(StructureRejection::ReqSetUnknown),
     }
 }
 
 fn check_results(
     query: &ZkpReqQuery,
     option: &QueryOption,
-    results: &[(String, Value)],
+    results: &[(ResultKey, Value)],
     has_result: impl Fn(&ReqItem) -> bool,
 ) -> Result<(), StructureRejection> {
-    let mut handles = Vec::with_capacity(option.items.len());
-    for &index in &option.items {
-        let item = query
-            .items
-            .get(index)
-            .ok_or(StructureRejection::ReqSetUnknown)?;
-        let Some(handle) = &item.ret else { continue };
+    let mut handles = 0_usize;
+    for &index in option.items() {
+        let item = query.item(index).ok_or(StructureRejection::ReqSetUnknown)?;
+        let Some(handle) = item.ret() else { continue };
         let value = results
             .iter()
-            .find(|(k, _)| k == handle.as_str())
-            .map(|(_, v)| v)
+            .find(|(key, _)| key.as_str() == handle.as_str())
+            .map(|(_, value)| value)
             .ok_or(StructureRejection::ResultKeys)?;
         if !has_result(item) && *value != Value::Bool(true) {
             return Err(StructureRejection::ResultNotTrue { item: index });
         }
-        handles.push(handle.as_str());
+        handles += 1;
     }
-    if results.len() != handles.len() {
+    if results.len() != handles {
         return Err(StructureRejection::ResultKeys);
     }
     Ok(())

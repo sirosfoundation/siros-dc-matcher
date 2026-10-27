@@ -8,7 +8,7 @@ use siros_oid4vp::{Presentation, Submission};
 use siros_wallet_state::{CredentialId, PresentationId, PresentationRecord, TransactionId};
 use siros_zkp_req_nym_auth::prover::NymAuthProver;
 
-use super::prepare::{Audience, PendingMember, Prepared};
+use super::prepare::{audience, PendingMember, Prepared};
 use super::sign::{verified, Sign, SignId, VerifiedSignature};
 use crate::error::PresentationError;
 
@@ -77,7 +77,7 @@ impl Prepared<'_, '_> {
             token.json().to_string(),
             used,
             planned.input.now,
-            Audience::of(request)?.into_string(),
+            audience(request)?.as_str().to_owned(),
         );
         Ok(Response { submission, record })
     }

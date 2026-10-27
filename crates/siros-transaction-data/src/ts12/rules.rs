@@ -6,9 +6,10 @@
 
 use siros_codec::base64;
 use siros_codec::date::Date;
+use siros_codec::json::{Json, JsonNumber};
 
 use crate::error::{MemberPath, TransactionDataError};
-use crate::json::{self, Json, Number};
+use crate::json;
 use crate::ts12::currency::{CurrencyCode, Minor};
 
 /// A string of `MIN` to `MAX` characters (JSON Schema `minLength`, `maxLength`).
@@ -67,11 +68,11 @@ impl<const MIN: usize, const MAX: usize> AsRef<str> for Text<MIN, MAX> {
 }
 
 /// An amount of a currency, with the text the verifier wrote (Section 4.3.1, `amount`).
-pub(crate) struct Amount(Number);
+pub(crate) struct Amount(JsonNumber);
 
 impl Amount {
     /// The number.
-    pub(crate) fn number(&self) -> &Number {
+    pub(crate) fn number(&self) -> &JsonNumber {
         &self.0
     }
 }
