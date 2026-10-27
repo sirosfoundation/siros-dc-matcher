@@ -3,7 +3,7 @@
 
 use std::fmt;
 
-use siros_codec::json::{Json, JsonFault, ReadFault};
+use siros_codec::json::{Json, JsonFault};
 use siros_codec::{base64url, Base64Error};
 use siros_dcql::{Multiplicity, QueryId};
 
@@ -12,12 +12,10 @@ use crate::ids::PresentationIndex;
 /// Why a `vp_token` gives no presentations for a query.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VpTokenError {
-    /// The text is no JSON value the strict reader holds.
-    NotJson(ReadFault),
+    /// The strict reader refuses the text.
+    NotJson(JsonFault),
     /// The JSON value is no object.
     NotObject,
-    /// An object repeats this member name.
-    DuplicateMember(String),
     /// The object has no entry for the query's `id`.
     QueryIdMissing,
     /// The entry is not an array.
@@ -45,8 +43,8 @@ impl VpTokenError {
     #[must_use]
     pub fn code(&self) -> &'static str {
         match self {
-            Self::NotJson(_) | Self::NotObject => "response_not_object",
-            Self::DuplicateMember(_) => "duplicate_member",
+            Self::NotJson(JsonFault::Read(_)) | Self::NotObject => "response_not_object",
+            Self::NotJson(JsonFault::RepeatedMember(_)) => "duplicate_member",
             Self::QueryIdMissing => "query_id_missing",
             Self::NotArray => "presentations_not_array",
             Self::Empty => "presentations_empty",
@@ -69,7 +67,6 @@ impl std::error::Error for VpTokenError {
             Self::NotJson(fault) => Some(fault),
             Self::NotBase64url { error, .. } => Some(error),
             Self::NotObject
-            | Self::DuplicateMember(_)
             | Self::QueryIdMissing
             | Self::NotArray
             | Self::Empty
@@ -90,11 +87,10 @@ pub fn presentations_of(
     query_id: &QueryId,
     multiplicity: Multiplicity,
 ) -> Result<Vec<Vec<u8>>, VpTokenError> {
-    let members = match Json::parse_unique(vp_token.as_bytes()) {
-        Ok(Json::Object(members)) => members,
-        Ok(_) => return Err(VpTokenError::NotObject),
-        Err(JsonFault::Read(fault)) => return Err(VpTokenError::NotJson(fault)),
-        Err(JsonFault::RepeatedMember(name)) => return Err(VpTokenError::DuplicateMember(name)),
+    let Json::Object(members) =
+        Json::parse_unique(vp_token.as_bytes()).map_err(VpTokenError::NotJson)?
+    else {
+        return Err(VpTokenError::NotObject);
     };
     let entry = members
         .iter()
