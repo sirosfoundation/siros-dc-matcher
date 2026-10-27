@@ -5,8 +5,6 @@ use crate::entry::{
 use crate::levels::{Credman, Credman2, Credman4, V1, V4};
 use crate::set::Sent;
 use crate::sets_on_host::EntrySets;
-use core::fmt;
-use std::collections::TryReserveError;
 
 /// The host of one matcher invocation: the verifier's request, the wallet's
 /// credentials, the calling app, the standalone entries, and the entry sets
@@ -44,11 +42,7 @@ impl Host {
 
     /// The verifier's request: the Digital Credentials API request as JSON.
     /// A matcher reads it once.
-    ///
-    /// # Errors
-    ///
-    /// [`TryReserveError`] when the reported length cannot be allocated.
-    pub fn request(&self) -> Result<Vec<u8>, TryReserveError> {
+    pub fn request(&self) -> Vec<u8> {
         self.credman.request()
     }
 
@@ -83,12 +77,11 @@ impl Host {
     ///
     /// # Errors
     ///
-    /// [`CredentialsError`] when the reported length cannot be allocated,
-    /// the host copies nothing before that length, or it reports more bytes
-    /// than it was asked for.
+    /// [`CredentialsError`] when the host copies nothing before the length it
+    /// reported, or reports more bytes than it was asked for.
     pub fn credentials(&self) -> Result<Vec<u8>, CredentialsError> {
         let size = self.credentials_size();
-        let mut blob = zeroed(size).map_err(CredentialsError::TooLarge)?;
+        let mut blob = vec![0; size];
         let mut delivered = 0;
         while let Some(rest) = blob.get_mut(delivered..).filter(|rest| !rest.is_empty()) {
             let copied = self.read_credentials_at(rest, delivered)?;
@@ -147,67 +140,25 @@ impl Host {
     }
 }
 
-/// `size` zero bytes, or the reason they cannot be allocated.
-fn zeroed(size: usize) -> Result<Vec<u8>, TryReserveError> {
-    let mut buffer = Vec::new();
-    buffer.try_reserve_exact(size)?;
-    buffer.resize(size, 0);
-    Ok(buffer)
-}
-
-/// Why the credential blob could not be read. Every variant but `TooLarge`
-/// is the host breaking the
+/// Why the credential blob could not be read: the host broke the
 /// [`V1::read_credentials_buffer`] contract.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum CredentialsError {
-    /// The blob's reported length cannot be allocated.
-    TooLarge(TryReserveError),
     /// The host reported copying `copied` bytes into a buffer of `asked`.
+    #[error("host reported {copied} credential bytes for a {asked}-byte buffer")]
     Overrun { asked: usize, copied: usize },
     /// The host copied nothing at byte `delivered` of the `size` bytes it
     /// reported.
+    #[error("host stopped at credential byte {delivered} of {size}")]
     Incomplete { delivered: usize, size: usize },
     /// The host reported copying `copied` bytes from `offset`, past the
     /// `size` bytes it reported.
+    #[error("host reported {copied} credential bytes from {offset}, past its size {size}")]
     PastEnd {
         offset: usize,
         copied: usize,
         size: usize,
     },
-}
-
-impl fmt::Display for CredentialsError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::TooLarge(cause) => write!(f, "credential blob too large: {cause}"),
-            Self::Overrun { asked, copied } => {
-                write!(
-                    f,
-                    "host reported {copied} credential bytes for a {asked}-byte buffer"
-                )
-            }
-            Self::Incomplete { delivered, size } => {
-                write!(f, "host stopped at credential byte {delivered} of {size}")
-            }
-            Self::PastEnd {
-                offset,
-                copied,
-                size,
-            } => write!(
-                f,
-                "host reported {copied} credential bytes from {offset}, past its size {size}"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for CredentialsError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::TooLarge(cause) => Some(cause),
-            Self::Overrun { .. } | Self::Incomplete { .. } | Self::PastEnd { .. } => None,
-        }
-    }
 }
 
 /// What [`Host::connect_with`] applies after reading the host level.

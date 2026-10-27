@@ -88,6 +88,7 @@ dependencies = [
  "android-credman-sys",
  "c8str",
  "serde_json",
+ "thiserror 2.0.20",
 ]
 
 [[package]]

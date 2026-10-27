@@ -62,9 +62,10 @@ fn main() {
     let Some(mut sets) = host.entry_sets() else {
         return;
     };
-    // Without both inputs there is nothing to offer, and no debug flag to
-    // report the failure with.
-    let (Ok(request), Ok(registration)) = (host.request(), host.credentials()) else {
+    let request = host.request();
+    // Without the registration there is nothing to offer, and no debug flag
+    // to report the failure with.
+    let Ok(registration) = host.credentials() else {
         return;
     };
     let input = Input {
