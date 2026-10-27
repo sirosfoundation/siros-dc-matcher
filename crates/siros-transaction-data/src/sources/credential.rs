@@ -133,7 +133,8 @@ impl<'c> CredentialSources<'c> {
     }
 
     /// The definition, or why there is none, of a type a source names; `None` for a type no
-    /// source names.
+    /// source names, and for every type the signed credential metadata does not name when the
+    /// type metadata does not read: [`Self::otherwise`] gives why.
     fn named(&self, type_id: &TypeId) -> Option<Result<Projected, NotServed>> {
         let rulebook = Rulebook::of_type(type_id);
         if let Some(definition) = self.paso.as_ref().and_then(|paso| paso.definition(type_id)) {

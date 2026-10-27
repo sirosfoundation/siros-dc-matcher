@@ -271,8 +271,8 @@ impl Tables<'_> {
                 };
                 let type_id = type_id
                     .as_text()
-                    .and_then(|text| TypeId::parse(text).ok())
                     .ok_or(malformed(Member::ServedTypes))?;
+                let type_id = TypeId::parse(type_id).map_err(CredentialFault::TypeId)?;
                 let served = match wire::unsigned(served) {
                     Some(at) => Ok(self.definition(at)?),
                     None => Err(wire::unserved(served)?),

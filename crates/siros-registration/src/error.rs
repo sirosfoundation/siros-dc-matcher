@@ -5,7 +5,7 @@ use siros_codec::member::MemberFault;
 use siros_credential::TreeError;
 use siros_dcql::ClaimPathError;
 use siros_display::{LocaleError, TextError};
-use siros_transaction_data::{ProjectionError, TypeRepeated};
+use siros_transaction_data::{EmptyTypeId, ProjectionError, TypeRepeated};
 use siros_trust::KeyIdentifierError;
 
 use crate::ids::{CredentialIndex, DefinitionIndex, IconIndex};
@@ -122,6 +122,8 @@ pub enum CredentialFault {
     KeyIdentifier(KeyIdentifierError),
     /// An admitting authority names this `type`, which is no trust store type.
     StoreType(String),
+    /// A served type is the empty string.
+    TypeId(EmptyTypeId),
     /// A served type is named twice.
     TypeRepeated(TypeRepeated),
     /// The card names an icon at this position, which the registration lacks.
@@ -168,6 +170,7 @@ impl CredentialFault {
             Self::Path(error) => error.code(),
             Self::KeyIdentifier(error) => error.code(),
             Self::StoreType(_) => "registration_store_type_unknown",
+            Self::TypeId(_) => "registration_type_empty",
             Self::TypeRepeated(error) => error.code(),
             Self::IconUnknown(_) => "registration_icon_unknown",
             Self::DefinitionUnknown(_) => "registration_definition_unknown",
