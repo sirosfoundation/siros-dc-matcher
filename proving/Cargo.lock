@@ -1221,6 +1221,7 @@ dependencies = [
  "sha2",
  "siros-codec",
  "siros-zkp-req-nym-auth",
+ "thiserror 2.0.21",
  "zk-cred-longfellow",
  "zstd",
 ]
@@ -1231,6 +1232,7 @@ version = "0.11.0"
 dependencies = [
  "siros-codec",
  "siros-zkp-req-nym-auth",
+ "thiserror 2.0.21",
  "zk-cred-vega",
  "zstd",
 ]
