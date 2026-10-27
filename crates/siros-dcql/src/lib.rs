@@ -30,6 +30,37 @@
     clippy::panic
 )]
 
+/// Declares a position in a list of the query or a pointer: a number from 0.
+macro_rules! position {
+    ($(#[$doc:meta])* $name:ident) => {
+        $(#[$doc])*
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+        pub struct $name(usize);
+
+        impl $name {
+            /// The position `value`.
+            #[must_use]
+            pub const fn new(value: usize) -> Self {
+                Self(value)
+            }
+
+            /// The position, from 0.
+            #[must_use]
+            pub const fn value(self) -> usize {
+                self.0
+            }
+        }
+
+        impl ::core::fmt::Display for $name {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                write!(f, "{}", self.0)
+            }
+        }
+    };
+}
+
+pub(crate) use position;
+
 pub mod authority;
 mod combinations;
 pub mod eval;
@@ -44,14 +75,17 @@ pub use authority::{
 };
 pub use combinations::{Combination, Combinations, Dropped};
 pub use eval::{execute, select_claims, Credential, CryptographicBinding, ExactFormat, Policy};
-pub use id::{foreign_character, ClaimId, ClaimIdError, QueryId, QueryIdError};
+pub use id::{ClaimId, ClaimIdError, QueryId, QueryIdError};
 pub use meta::{CredentialFormat, CredentialRef, DocType, Vct};
 pub use path::{
-    mdoc_components, resolve, resolve_json, ClaimNode, ComponentIndex, Lookup, PathComponent,
-    PathError,
+    mdoc_components, resolve, resolve_json, ClaimNode, ClaimPath, ClaimPathError, ComponentIndex,
+    Lookup, PathComponent, PathError,
 };
 pub use query::{
-    ClaimsQuery, CredentialQuery, CredentialSetQuery, DcqlQuery, HolderBinding, Multiplicity,
-    QueryError, SetRequirement,
+    ClaimMember, ClaimOption, ClaimsQuery, CredentialMember, CredentialQuery, CredentialSetQuery,
+    DcqlQuery, FormFault, HolderBinding, Member, Multiplicity, Position, QueryError, SetMember,
+    SetRequirement,
 };
-pub use result::{Candidate, QueryMatch, QueryResult, Satisfaction, SelectedClaim};
+pub use result::{
+    Candidate, ClaimPathRefusal, QueryMatch, QueryResult, Satisfaction, SelectedClaim,
+};

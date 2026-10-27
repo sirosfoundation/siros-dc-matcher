@@ -3,14 +3,14 @@
 
 use crate::id::{ClaimId, QueryId};
 use crate::meta::CredentialRef;
-use crate::path::PathComponent;
+use crate::path::{ClaimPath, PathError};
 use crate::query::{CredentialSetQuery, Multiplicity};
 
 /// A claim the wallet would disclose for a match.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SelectedClaim {
     claim_id: Option<ClaimId>,
-    path: Vec<PathComponent>,
+    path: ClaimPath,
 }
 
 /// One credential that satisfies one credential query.
@@ -20,11 +20,19 @@ pub struct Candidate {
     claims: Vec<SelectedClaim>,
 }
 
+/// A credential whose claims path processing gives an error (§7.1.1, §7.2.1), and the error.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClaimPathRefusal {
+    credential_id: CredentialRef,
+    error: PathError,
+}
+
 /// The candidates for one credential query.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueryMatch {
     query_id: QueryId,
     candidates: Vec<Candidate>,
+    refusals: Vec<ClaimPathRefusal>,
     multiple: Multiplicity,
 }
 
@@ -47,7 +55,7 @@ pub struct QueryResult {
 }
 
 impl SelectedClaim {
-    pub(crate) fn new(claim_id: Option<ClaimId>, path: Vec<PathComponent>) -> Self {
+    pub(crate) fn new(claim_id: Option<ClaimId>, path: ClaimPath) -> Self {
         Self { claim_id, path }
     }
 
@@ -59,14 +67,35 @@ impl SelectedClaim {
 
     /// The path that selected it.
     #[must_use]
-    pub fn path(&self) -> &[PathComponent] {
+    pub fn path(&self) -> &ClaimPath {
         &self.path
     }
 
     /// The path that selected it, taken.
     #[must_use]
-    pub fn into_path(self) -> Vec<PathComponent> {
+    pub fn into_path(self) -> ClaimPath {
         self.path
+    }
+}
+
+impl ClaimPathRefusal {
+    pub(crate) fn new(credential_id: CredentialRef, error: PathError) -> Self {
+        Self {
+            credential_id,
+            error,
+        }
+    }
+
+    /// The credential's own identifier.
+    #[must_use]
+    pub fn credential_id(&self) -> &CredentialRef {
+        &self.credential_id
+    }
+
+    /// The error of its claims path processing.
+    #[must_use]
+    pub fn error(&self) -> &PathError {
+        &self.error
     }
 }
 
@@ -96,10 +125,12 @@ impl QueryMatch {
         query_id: QueryId,
         multiple: Multiplicity,
         candidates: Vec<Candidate>,
+        refusals: Vec<ClaimPathRefusal>,
     ) -> Self {
         Self {
             query_id,
             candidates,
+            refusals,
             multiple,
         }
     }
@@ -116,8 +147,15 @@ impl QueryMatch {
         &self.candidates
     }
 
-    /// Whether the query accepts more than one credential (§6.1 `multiple`). Carried on the
-    /// result so combinations can be enumerated without the query alongside.
+    /// The credentials the policy admits whose claims path processing gives an error, in the
+    /// order the wallet holds them. None of them is a candidate.
+    #[must_use]
+    pub fn refusals(&self) -> &[ClaimPathRefusal] {
+        &self.refusals
+    }
+
+    /// Whether the query accepts more than one credential (§6.1 `multiple`), for enumerating
+    /// combinations without the query.
     #[must_use]
     pub fn multiplicity(&self) -> Multiplicity {
         self.multiple

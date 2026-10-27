@@ -1,25 +1,30 @@
 //! The DCQL query model — OpenID4VP 1.0 §6.
 //!
 //! A query is constructed only by parsing ([`DcqlQuery::from_json`], [`DcqlQuery::parse`] or
-//! its `Deserialize`), which enforces the identifier syntax and uniqueness of §6.1 and §6.3 and
-//! the structure of `trusted_authorities` (§6.1.1). "Implementations MUST ignore any unknown
-//! properties" (§6), and so does the parse.
+//! its `Deserialize`). The parse reads each member once and refuses what §6.1, §6.1.1, §6.2,
+//! §6.3 and §7 forbid: a malformed member, an identifier of the wrong syntax or repeated, an
+//! empty `credentials`, a `claim_sets` or `credential_sets` option naming an unknown id, a
+//! malformed claims path, and an `mso_mdoc` claims path other than a namespace and an element.
+//! "Implementations MUST ignore any unknown properties" (§6), and so does the parse.
 
-mod unchecked;
+mod error;
+mod read;
 
-use core::fmt;
-
+use serde::ser::SerializeStruct;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 
-use crate::authority::{TrustedAuthorities, TrustedAuthorityError};
-use crate::id::{ClaimId, ClaimIdError, QueryId, QueryIdError};
+use crate::authority::TrustedAuthorities;
+use crate::id::{ClaimId, QueryId};
 use crate::meta::CredentialFormat;
-use crate::path::PathComponent;
+use crate::path::ClaimPath;
+
+pub use error::{
+    ClaimMember, CredentialMember, FormFault, Member, Position, QueryError, SetMember,
+};
 
 /// A complete DCQL query (§6).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(try_from = "unchecked::Unchecked")]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct DcqlQuery {
     credentials: Vec<CredentialQuery>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -27,45 +32,58 @@ pub struct DcqlQuery {
 }
 
 /// One requested credential (§6.1), with the defaults §6.1 states.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CredentialQuery {
     id: QueryId,
     format: CredentialFormat,
-    #[serde(default = "Multiplicity::stated")]
     multiple: Multiplicity,
-    #[serde(default)]
     meta: Map<String, Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     trusted_authorities: Option<TrustedAuthorities>,
-    #[serde(
-        rename = "require_cryptographic_holder_binding",
-        default = "HolderBinding::stated",
-        skip_serializing_if = "HolderBinding::is_stated"
-    )]
     holder_binding: HolderBinding,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    claims: Vec<ClaimsQuery>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    claim_sets: Option<Vec<Vec<ClaimId>>>,
+    claims: ClaimRequest,
+}
+
+/// The claims a Credential Query requests (§6.4.1).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum ClaimRequest {
+    /// `claims` is absent or empty: no selectively disclosable claim is requested.
+    Nothing,
+    /// `claims` without `claim_sets`: every claim is requested.
+    All(Vec<ClaimsQuery>),
+    /// `claims` with `claim_sets`: the first option the credential satisfies.
+    Sets {
+        claims: Vec<ClaimsQuery>,
+        options: Vec<ClaimOption>,
+    },
+}
+
+/// A `claim_sets` option (§6.1): the claims queries it names, in its order.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClaimOption(Vec<NamedClaim>);
+
+/// A claims query an option names, with the id that names it.
+#[derive(Debug, Clone, PartialEq)]
+struct NamedClaim {
+    id: ClaimId,
+    claim: ClaimsQuery,
 }
 
 /// One requested claim (§6.3).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ClaimsQuery {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     id: Option<ClaimId>,
-    path: Vec<PathComponent>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    path: ClaimPath,
+    #[serde(skip_serializing_if = "Option::is_none")]
     values: Option<Vec<Value>>,
 }
 
 /// A constraint on which combinations of credentials satisfy the request (§6.2).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CredentialSetQuery {
     options: Vec<Vec<QueryId>>,
-    #[serde(default = "SetRequirement::stated")]
     required: SetRequirement,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     purpose: Option<Value>,
 }
 
@@ -98,134 +116,55 @@ pub enum SetRequirement {
     Optional,
 }
 
-impl HolderBinding {
-    /// Whether the member takes the value §6.1 states for its absence, which the serialisation
-    /// leaves out.
-    fn is_stated(&self) -> bool {
-        *self == Self::stated()
-    }
-}
-
-/// Declares the wire form of a flag: the boolean of its member, with `$true` for `true` and
-/// `$false` for `false`, and `$stated` when the member is absent.
+/// Declares the wire form of a flag: the boolean of its member, `$true` for `true`.
 macro_rules! flag {
-    ($name:ident, $true:ident, $false:ident, $stated:ident) => {
-        impl $name {
-            /// The value §6.1 or §6.2 states for an absent member.
-            fn stated() -> Self {
-                Self::$stated
-            }
-        }
-
+    ($name:ident, $true:ident) => {
         impl Serialize for $name {
             fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
                 serializer.serialize_bool(*self == Self::$true)
             }
         }
-
-        impl<'de> Deserialize<'de> for $name {
-            fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-                Ok(if bool::deserialize(deserializer)? {
-                    Self::$true
-                } else {
-                    Self::$false
-                })
-            }
-        }
     };
 }
 
-flag!(Multiplicity, Several, One, One);
-flag!(HolderBinding, Required, Optional, Required);
-flag!(SetRequirement, Required, Optional, Required);
+flag!(Multiplicity, Several);
+flag!(HolderBinding, Required);
+flag!(SetRequirement, Required);
 
-/// Why a document is not a usable DCQL query.
-///
-/// §6 instructs implementations to "ignore any unknown properties", and the parse goes further
-/// in the same spirit: a query is refused only when what the Verifier wants cannot be
-/// determined. A duplicated `id` makes a reference ambiguous and is refused; a
-/// `credential_sets` option naming a query that does not exist is an option the wallet cannot
-/// satisfy, and is kept.
-#[derive(Debug)]
-pub enum QueryError {
-    /// Not well-formed JSON, or not shaped like a DCQL query.
-    Json(serde_json::Error),
-    /// A credential query `id`, or one a `credential_sets` option names, breaks §6.1.
-    Id(QueryIdError),
-    /// A claims query `id`, or one a `claim_sets` option names, breaks §6.3.
-    ClaimId {
-        /// The `id` of the credential query holding it.
-        credential: QueryId,
-        /// Why.
-        error: ClaimIdError,
-    },
-    /// `trusted_authorities` breaks §6.1.1.
-    TrustedAuthorities {
-        /// The `id` of the credential query holding it.
-        credential: QueryId,
-        /// Why.
-        error: TrustedAuthorityError,
-    },
-    /// Two credential queries share this `id`. §6.1 requires it to "be unique across all
-    /// Credential Query objects": a reference from `credential_sets` to a duplicated id names
-    /// two different requests, and answering the first silently drops the second.
-    DuplicateCredentialId(QueryId),
-    /// Two claims queries within one credential query share this `id`. §6.3 requires
-    /// uniqueness "within the particular claims array", for the same reason one level down:
-    /// `claim_sets` refers to claims by id.
-    DuplicateClaimId {
-        /// The `id` of the credential query holding the duplicate.
-        credential: QueryId,
-        /// The duplicated claims query `id`.
-        claim: ClaimId,
-    },
-}
-
-impl QueryError {
-    /// A stable identifier.
-    #[must_use]
-    pub fn code(&self) -> &'static str {
-        match self {
-            Self::Json(_) => "dcql_malformed",
-            Self::Id(error) => error.code(),
-            Self::ClaimId { error, .. } => error.code(),
-            Self::TrustedAuthorities { error, .. } => error.code(),
-            Self::DuplicateCredentialId(_) => "query_id_not_unique",
-            Self::DuplicateClaimId { .. } => "claim_id_not_unique",
-        }
+impl Serialize for ClaimOption {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_seq(self.ids())
     }
 }
 
-impl fmt::Display for QueryError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Json(e) => write!(f, "{}: {e}", self.code()),
-            Self::Id(_) => f.write_str(self.code()),
-            Self::DuplicateCredentialId(credential)
-            | Self::ClaimId { credential, .. }
-            | Self::TrustedAuthorities { credential, .. }
-            | Self::DuplicateClaimId { credential, .. } => {
-                write!(f, "{}: {credential}", self.code())
+impl Serialize for CredentialQuery {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut query = serializer.serialize_struct("CredentialQuery", 8)?;
+        query.serialize_field("id", &self.id)?;
+        query.serialize_field("format", &self.format)?;
+        query.serialize_field("multiple", &self.multiple)?;
+        query.serialize_field("meta", &self.meta)?;
+        if let Some(authorities) = &self.trusted_authorities {
+            query.serialize_field("trusted_authorities", authorities)?;
+        }
+        if self.holder_binding == HolderBinding::Optional {
+            query.serialize_field("require_cryptographic_holder_binding", &self.holder_binding)?;
+        }
+        match &self.claims {
+            ClaimRequest::Nothing => {}
+            ClaimRequest::All(claims) => query.serialize_field("claims", claims)?,
+            ClaimRequest::Sets { claims, options } => {
+                query.serialize_field("claims", claims)?;
+                query.serialize_field("claim_sets", options)?;
             }
         }
+        query.end()
     }
 }
 
-impl std::error::Error for QueryError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Json(e) => Some(e),
-            Self::Id(e) => Some(e),
-            Self::ClaimId { error, .. } => Some(error),
-            Self::TrustedAuthorities { error, .. } => Some(error),
-            Self::DuplicateCredentialId(_) | Self::DuplicateClaimId { .. } => None,
-        }
-    }
-}
-
-impl From<serde_json::Error> for QueryError {
-    fn from(e: serde_json::Error) -> Self {
-        Self::Json(e)
+impl<'de> Deserialize<'de> for DcqlQuery {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Self::parse(&Value::deserialize(deserializer)?).map_err(serde::de::Error::custom)
     }
 }
 
@@ -234,9 +173,8 @@ impl DcqlQuery {
     ///
     /// # Errors
     ///
-    /// [`QueryError`]: the document is not a well-formed DCQL query, or its identifiers or
-    /// `trusted_authorities` break §6.1, §6.1.1 or §6.3. Unknown properties are not an error
-    /// (§6).
+    /// [`QueryError`]: the first rule of §6.1, §6.1.1, §6.2, §6.3 or §7 the document breaks.
+    /// Unknown properties are ignored (§6).
     pub fn from_json(json: &str) -> Result<Self, QueryError> {
         Self::parse(&serde_json::from_str(json)?)
     }
@@ -247,10 +185,7 @@ impl DcqlQuery {
     ///
     /// [`QueryError`], as for [`Self::from_json`].
     pub fn parse(document: &Value) -> Result<Self, QueryError> {
-        if let Some(error) = unchecked::typed_error(document) {
-            return Err(error);
-        }
-        Self::try_from(unchecked::Unchecked::deserialize(document)?)
+        read::query(document)
     }
 
     /// The requested credentials (§6.1), in the Verifier's order.
@@ -318,21 +253,31 @@ impl CredentialQuery {
     /// Claims requested from this credential (§6.3).
     #[must_use]
     pub fn claims(&self) -> &[ClaimsQuery] {
-        &self.claims
+        match &self.claims {
+            ClaimRequest::Nothing => &[],
+            ClaimRequest::All(claims) | ClaimRequest::Sets { claims, .. } => claims,
+        }
     }
 
-    /// Alternative combinations of [`Self::claims`], by their ids (§6.1), in the Verifier's
-    /// order of preference.
+    /// The `claim_sets` options of [`Self::claims`] (§6.1), in the Verifier's order of
+    /// preference.
     #[must_use]
-    pub fn claim_sets(&self) -> Option<&[Vec<ClaimId>]> {
-        self.claim_sets.as_deref()
+    pub fn claim_sets(&self) -> Option<&[ClaimOption]> {
+        match &self.claims {
+            ClaimRequest::Sets { options, .. } => Some(options),
+            ClaimRequest::Nothing | ClaimRequest::All(_) => None,
+        }
+    }
+
+    pub(crate) fn claim_request(&self) -> &ClaimRequest {
+        &self.claims
     }
 
     /// The claims query with the given id. The parse refuses duplicated claim ids, so the id
     /// names at most one.
     #[must_use]
     pub fn claim(&self, id: &str) -> Option<&ClaimsQuery> {
-        self.claims
+        self.claims()
             .iter()
             .find(|c| c.id.as_ref().is_some_and(|own| *own == *id))
     }
@@ -348,7 +293,7 @@ impl ClaimsQuery {
 
     /// The claims path pointer to the claim (§7).
     #[must_use]
-    pub fn path(&self) -> &[PathComponent] {
+    pub fn path(&self) -> &ClaimPath {
         &self.path
     }
 
@@ -357,6 +302,18 @@ impl ClaimsQuery {
     #[must_use]
     pub fn values(&self) -> Option<&[Value]> {
         self.values.as_deref()
+    }
+}
+
+impl ClaimOption {
+    /// The ids the option names, in its order.
+    pub fn ids(&self) -> impl Iterator<Item = &ClaimId> {
+        self.0.iter().map(|named| &named.id)
+    }
+
+    /// The claims queries the option names, in its order.
+    pub fn claims(&self) -> impl Iterator<Item = &ClaimsQuery> {
+        self.0.iter().map(|named| &named.claim)
     }
 }
 

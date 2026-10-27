@@ -4,8 +4,8 @@
 use std::collections::hash_map::Entry;
 
 use rustc_hash::FxHashMap;
-use siros_credential::{ClaimPointer, Credential, Format, TypedValue};
-use siros_dcql::{PathComponent, PathError};
+use siros_credential::{Credential, Format, TypedValue};
+use siros_dcql::{ClaimPath, PathError};
 use siros_oid4vp::{BodyLimit, Fetch, FetchResponse, HttpStatus, HttpsUrl, MediaType};
 
 use crate::error::{MetadataPart, TransactionDataError};
@@ -318,9 +318,7 @@ fn read(
 
 /// The integrity metadata of the credential's top-level claim `name`, when it has the claim.
 fn pin(credential: &Credential, name: &str) -> Result<Option<Integrity>, TransactionDataError> {
-    let pointer = ClaimPointer::parse(vec![PathComponent::Key(name.to_owned())])
-        .map_err(|_| TransactionDataError::IntegrityMalformed)?;
-    match credential.claims(&pointer).as_deref() {
+    match credential.claims(&ClaimPath::key(name)).as_deref() {
         Err(PathError::Empty) => Ok(None),
         Ok([TypedValue::Text(text)]) => Integrity::parse(text).map(Some),
         _ => Err(TransactionDataError::IntegrityMalformed),

@@ -24,8 +24,8 @@ use std::collections::BTreeMap;
 
 use serde_json::Value;
 use siros_dcql::{
-    Credential as _, CredentialFormat, CredentialQuery, CredentialRef, CryptographicBinding,
-    PathComponent, PathError,
+    ClaimPath, Credential as _, CredentialFormat, CredentialQuery, CredentialRef,
+    CryptographicBinding, PathComponent, PathError,
 };
 
 use crate::circuit_capabilities::{Capabilities, RequestedItem};
@@ -92,11 +92,12 @@ impl siros_dcql::Credential for BlobCredential<'_> {
     /// currently issues puts a requestable claim inside one. Widening this
     /// means giving the blob real value structure, which is a wire-format
     /// change and deliberately not smuggled in here.
-    fn claim(&self, path: &[PathComponent]) -> Result<Vec<Value>, PathError> {
-        if path.is_empty() {
-            return Err(PathError::Malformed);
-        }
-        let wanted: Option<Vec<&str>> = path.iter().map(PathComponent::as_key).collect();
+    fn claim(&self, path: &ClaimPath) -> Result<Vec<Value>, PathError> {
+        let wanted: Option<Vec<&str>> = path
+            .components()
+            .iter()
+            .map(PathComponent::as_key)
+            .collect();
         let Some(wanted) = wanted else {
             // A pointer this blob cannot express is not a malformed query —
             // the verifier may be asking something perfectly valid of a
@@ -563,11 +564,15 @@ fn discloses_nym_auth_secrets(query: &CredentialQuery) -> bool {
     use siros_dcql::PathComponent;
     query.claims().is_empty()
         || query.claims().iter().any(|claim| {
-            claim.path().iter().any(|component| match component {
-                PathComponent::Key(k) => NYM_AUTH_UNDISCLOSABLE.contains(&k.as_str()),
-                PathComponent::Null => true,
-                PathComponent::Index(_) => false,
-            })
+            claim
+                .path()
+                .components()
+                .iter()
+                .any(|component| match component {
+                    PathComponent::Key(k) => NYM_AUTH_UNDISCLOSABLE.contains(&k.as_str()),
+                    PathComponent::Null => true,
+                    PathComponent::Index(_) => false,
+                })
         })
 }
 
@@ -740,6 +745,7 @@ pub fn resolve<'a>(
             .map(|claim| {
                 claim
                     .path()
+                    .components()
                     .iter()
                     .filter_map(PathComponent::as_key)
                     .map(str::to_owned)

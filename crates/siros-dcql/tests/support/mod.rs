@@ -4,7 +4,7 @@
 
 use serde_json::Value;
 use siros_dcql::{
-    CredentialFormat, CredentialRef, CryptographicBinding, DcqlQuery, PathComponent, PathError,
+    ClaimPath, CredentialFormat, CredentialRef, CryptographicBinding, DcqlQuery, PathError,
     QueryResult, Satisfaction,
 };
 
@@ -47,7 +47,7 @@ impl siros_dcql::Credential for JsonCredential {
     fn format(&self) -> &CredentialFormat {
         &self.format
     }
-    fn claim(&self, path: &[PathComponent]) -> Result<Vec<Value>, PathError> {
+    fn claim(&self, path: &ClaimPath) -> Result<Vec<Value>, PathError> {
         siros_dcql::resolve_json(&self.body, path).map(|v| v.into_iter().cloned().collect())
     }
     fn binding(&self) -> CryptographicBinding {

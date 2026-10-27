@@ -26,11 +26,34 @@ this file.
   `CredentialQuery`, `ClaimsQuery` and `CredentialSetQuery` are private and read through
   accessors of the same names (`credentials()`, `id()`, `format()`, `meta()`, `claims()`,
   `claim_sets()`, `path()`, `values()`, `options()`, `purpose()`); `DcqlQuery::validate` is
-  gone. `DcqlQuery::parse` reads a JSON value, and `Deserialize` runs the same checks.
+  gone. `DcqlQuery::parse` reads a JSON value in one pass, and `Deserialize` runs it. A member
+  of the wrong form is `QueryError::Form`, which names the `Member` and its `FormFault`.
+- **BREAKING:** the parse refuses an empty `credentials` (`QueryError::Form` with
+  `FormFault::Empty`), a `claim_sets` option naming an id no claims query has
+  (`QueryError::UnknownClaimId`), a `credential_sets` option naming an id no Credential Query
+  has (`QueryError::UnknownCredentialId`), `claim_sets` without claims
+  (`QueryError::ClaimSetsWithoutClaims`), a claims `path` that is no claims path pointer
+  (`QueryError::ClaimPath` with its `ClaimPathError`), and an `mso_mdoc` claims path other than
+  two strings (`QueryError::MdocPath`).
+- **BREAKING:** a claims path pointer is a `ClaimPath`, at least one `PathComponent`:
+  `ClaimsQuery::path`, `SelectedClaim::path` and `into_path`, `Credential::claim`, `resolve`,
+  `resolve_json` and `mdoc_components` take or give one. `PathError::Malformed` is gone;
+  `PathError::MdocElement` is the error of §7.2.1, with the code `path_malformed`.
+  `PathComponent` has no `Deserialize`; `ClaimPath` deserializes through `ClaimPath::parse`.
+- **BREAKING:** `select_claims` gives `Result<Option<Vec<SelectedClaim>>, PathError>`: a
+  claims path processing error other than an empty selection is an error. With `claim_sets`,
+  the next option is tried, and the first error is given when no option is satisfied.
+  `execute` keeps such a credential out of the candidates and records it in
+  `QueryMatch::refusals`, a `ClaimPathRefusal` each.
+- **BREAKING:** `CredentialQuery::claim_sets` gives the `ClaimOption`s, each with the `ids()`
+  and the `claims()` it names.
 - **BREAKING:** `trusted_authorities` parses into `TrustedAuthorities`: a non-empty array of
   `TrustedAuthority`, each an `AuthorityType` and a non-empty list of `AuthorityValue`s
   (§6.1.1). A malformed one is `QueryError::TrustedAuthorities` with its
-  `TrustedAuthorityError`; `null` reads as absent.
+  `TrustedAuthorityError`; `null` reads as absent. An entry's `type` is absent
+  (`TypeAbsent`) or no string (`TypeNotString`); its `values` is absent (`ValuesAbsent`), no
+  array (`ValuesNotArray`), empty (`ValuesEmpty`), or holds a non-string at a `Position`
+  (`ValueNotString`). `TrustedAuthorities` has no `Deserialize`.
 - **BREAKING:** a claims query id, and an id a `claim_sets` option names, is a `ClaimId` (§6.3);
   another is `QueryError::ClaimId`. A `credential_sets` option names `QueryId`s; another id is
   `QueryError::Id`. `QueryError::DuplicateClaimId::claim` is a `ClaimId`.
@@ -50,6 +73,9 @@ this file.
   `CredentialFormat`; `Candidate::credential_id` is a `CredentialRef`.
 - Every error has a stable code, which its `Display` writes. A query that repeats an id is
   checked by comparing each id with the earlier ones.
+- `QueryResult::combinations` walks the candidates of each query as an odometer, the first
+  query turning fastest: the order of the combinations is unchanged.
+- The crate depends on `serde` and `serde_json` only.
 
 ### Added
 
@@ -58,8 +84,11 @@ this file.
   `TrustedAuthorities`, `TrustedAuthorityError`, `CredentialFormat`, `Multiplicity`,
   `HolderBinding`, `SetRequirement`, `CryptographicBinding`, `Satisfaction`, `ComponentIndex`,
   `QueryError::code` and `select_claims` at the crate root.
-- `CredentialRef`, `DocType` and `Vct`, the text values a held credential and `meta` carry, and
-  `foreign_character`, the identifier alphabet check of §6.1 and §6.3.
+- `CredentialRef`, `DocType` and `Vct`, the text values a held credential and `meta` carry.
+- `ClaimPath`, `ClaimPathError`, `ClaimOption`, `ClaimPathRefusal`, `Position`, `Member`,
+  `CredentialMember`, `ClaimMember`, `SetMember`, `FormFault`, and `QueryError::Form`,
+  `ClaimPath`, `UnknownClaimId`, `UnknownCredentialId`, `ClaimSetsWithoutClaims` and
+  `MdocPath`.
 
 - `resolve`, the §7.1.1 processing over any claim tree that implements `ClaimNode` (with `Lookup`), which `resolve_json` now runs on, and `PathError::code`.
 

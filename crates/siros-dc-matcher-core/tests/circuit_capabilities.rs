@@ -273,12 +273,10 @@ fn offered(db: &CredentialDatabase, query: Value) -> Vec<String> {
     let Some(context) = UnverifiedRequest::first_registered(request.as_bytes(), &registered) else {
         return vec![];
     };
-    let Some(typed) = context.query().matching_query() else {
-        return vec![];
-    };
+    let typed = context.query().matching_query();
     let policy =
         ProfilePolicy::new(&db.profile).with_context(context.query(), context.client_metadata());
-    execute(&typed, &credentials(db), &policy)
+    execute(typed, &credentials(db), &policy)
         .query("nym")
         .map(|m| {
             m.candidates()
@@ -533,10 +531,10 @@ fn the_verifiers_circuit_lists_still_apply_with_capabilities() {
     let run = |ids: &[&str]| {
         let bytes = request(ids);
         let context = UnverifiedRequest::first_registered(bytes.as_bytes(), &registered).unwrap();
-        let typed = context.query().matching_query().unwrap();
+        let typed = context.query().matching_query();
         let policy = ProfilePolicy::new(&db.profile)
             .with_context(context.query(), context.client_metadata());
-        execute(&typed, &credentials(&db), &policy)
+        execute(typed, &credentials(&db), &policy)
             .query("nym")
             .map_or(0, |m| m.candidates().len())
     };

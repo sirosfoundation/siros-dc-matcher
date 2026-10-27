@@ -146,21 +146,17 @@ fn run(input: &Input<'_>, sets: &mut impl SetSink) {
     // it uses the rulebook example's `claims` object. Nothing in it is
     // authenticated; the wallet runs intake at selection.
     let registered = |label: &str| db.profile.parser_for(label).is_some();
-    let Some((unverified, query)) = UnverifiedRequest::first_registered(request, &registered)
-        .and_then(|unverified| {
-            let query = unverified.query().matching_query()?;
-            Some((unverified, query))
-        })
-    else {
+    let Some(unverified) = UnverifiedRequest::first_registered(request, &registered) else {
         diag.emit(sets, "request", || diagnose(request, &registered));
         return;
     };
     let protocol = unverified.protocol().label();
+    let query = unverified.query().matching_query();
 
     let held = credentials(&db);
     let policy = ProfilePolicy::new(&db.profile)
         .with_context(unverified.query(), unverified.client_metadata());
-    let result = execute(&query, &held, &policy);
+    let result = execute(query, &held, &policy);
 
     // "If the Wallet cannot deliver all non-optional Credentials requested by
     // the Verifier according to these rules, it MUST NOT return any
@@ -316,6 +312,7 @@ fn disclosed_fields(
             credential.claims.iter().find(|c| {
                 c.path.iter().map(String::as_str).eq(claim
                     .path()
+                    .components()
                     .iter()
                     .filter_map(siros_dcql::PathComponent::as_key))
             })

@@ -4,10 +4,10 @@ use serde_json::Value;
 #[cfg(feature = "wallet")]
 use siros_credential::UsableCredential;
 use siros_credential::{Format, Instance};
-use siros_dcql::{PathComponent, PathError};
+use siros_dcql::{ClaimPath, PathError};
 use siros_trust::QueryAuthorities;
 #[cfg(feature = "wallet")]
-use siros_trust::{AdmittedIssuer, TrustStore};
+use siros_trust::{AdmittedIssuer, ChainRefusal, TrustStore, Unadmitted};
 
 /// A credential as the matching reads it: a usable credential of the wallet (C4), or a credential
 /// of the picker's registration projection.
@@ -16,17 +16,23 @@ pub trait MatchCredential: Instance {
     /// `AdmittedIssuer`, or the picker's [`siros_trust::Admission`] from the TR5 facts.
     type Admission: Clone;
 
+    /// Why a query's authorities admit the credential's issuer not.
+    type Unadmitted: Clone;
+
     /// What resolves a query's `trusted_authorities` beside the credential: the wallet's trust
     /// store, or nothing for a credential of the projection, which carries its TR5 facts.
     type Trust: ?Sized;
 
-    /// The admission of the credential's issuer by `authorities` through `trust` (TR3); `None`
-    /// when they admit it not, and the credential matches nothing (A1).
+    /// The admission of the credential's issuer by `authorities` through `trust` (TR3).
+    ///
+    /// # Errors
+    ///
+    /// [`Self::Unadmitted`] when they admit it not, and the credential matches nothing (A1).
     fn admission(
         &self,
         authorities: &QueryAuthorities,
         trust: &Self::Trust,
-    ) -> Option<Self::Admission>;
+    ) -> Result<Self::Admission, Self::Unadmitted>;
 
     /// The format.
     fn format(&self) -> Format;
@@ -42,8 +48,8 @@ pub trait MatchCredential: Instance {
     ///
     /// # Errors
     ///
-    /// [`PathError`] when the pointer does not fit the credential or selects nothing.
-    fn claim_values(&self, path: &[PathComponent]) -> Result<Vec<Value>, PathError>;
+    /// [`PathError`] when the path does not fit the credential or selects nothing.
+    fn claim_values(&self, path: &ClaimPath) -> Result<Vec<Value>, PathError>;
 }
 
 /// Whether the wallet holds the key a credential is bound to.
@@ -58,6 +64,7 @@ pub enum KeyHolding {
 #[cfg(feature = "wallet")]
 impl MatchCredential for UsableCredential<'_> {
     type Admission = AdmittedIssuer;
+    type Unadmitted = Unadmitted<ChainRefusal>;
     type Trust = TrustStore;
 
     /// The admission of the issuer chain against the trust store at the time the credential is
@@ -66,9 +73,9 @@ impl MatchCredential for UsableCredential<'_> {
         &self,
         authorities: &QueryAuthorities,
         store: &TrustStore,
-    ) -> Option<AdmittedIssuer> {
+    ) -> Result<AdmittedIssuer, Unadmitted<ChainRefusal>> {
         let chain = self.credential().issuer_chain();
-        AdmittedIssuer::resolve(authorities, chain, store, self.time()).ok()
+        AdmittedIssuer::resolve(authorities, chain, store, self.time())
     }
 
     fn format(&self) -> Format {
@@ -88,7 +95,7 @@ impl MatchCredential for UsableCredential<'_> {
         }
     }
 
-    fn claim_values(&self, path: &[PathComponent]) -> Result<Vec<Value>, PathError> {
+    fn claim_values(&self, path: &ClaimPath) -> Result<Vec<Value>, PathError> {
         siros_dcql::Credential::claim(self.credential(), path)
     }
 }

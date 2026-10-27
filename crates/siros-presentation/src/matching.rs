@@ -4,14 +4,16 @@
 mod failure;
 mod zkp;
 
+use std::convert::Infallible;
+
 use itertools::{Either, Itertools};
 use serde_json::Value;
 use siros_codec::date::Date;
-use siros_credential::{least_used, ClaimPointer, Format, PointerError};
+use siros_credential::{least_used, Format};
 use siros_dcql::eval::select_claims;
 use siros_dcql::{
-    CredentialFormat, CredentialQuery, CredentialRef, CredentialSetQuery, CryptographicBinding,
-    DcqlQuery, HolderBinding, PathComponent, PathError, QueryId,
+    ClaimPath, CredentialFormat, CredentialQuery, CredentialRef, CredentialSetQuery,
+    CryptographicBinding, DcqlQuery, HolderBinding, PathError, QueryId,
 };
 use siros_trust::QueryAuthorities;
 use siros_wallet_state::PresentationRecord;
@@ -97,14 +99,14 @@ pub enum Answer {
 /// Section 6.4.1).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Claims {
-    pointers: Vec<ClaimPointer>,
+    pointers: Vec<ClaimPath>,
     holder_binding: HolderBinding,
 }
 
 impl Claims {
     /// The claims path pointers, in the order of the claims query; `[namespace, element]` for an
     /// mdoc.
-    pub fn pointers(&self) -> &[ClaimPointer] {
+    pub fn pointers(&self) -> &[ClaimPath] {
         &self.pointers
     }
 
@@ -122,10 +124,10 @@ pub struct Matching<'r, C: MatchCredential> {
 }
 
 enum Outcome<C: MatchCredential> {
-    Claims(Vec<Admitted<C, Claims>>),
+    Claims(Matched<C, Claims>),
     Proof {
         zkp: Box<ZkpQuery>,
-        credentials: Vec<Admitted<C, ()>>,
+        matched: Matched<C, ()>,
     },
     Refused(QueryRefusal),
 }
@@ -135,6 +137,38 @@ struct Admitted<C: MatchCredential, T> {
     credential: C,
     found: T,
     admission: C::Admission,
+}
+
+/// The credentials of a query's format and type before the `zkp_req` tests: those that match
+/// it, each with what it answers, and those it excludes.
+struct Matched<C: MatchCredential, T> {
+    found: Vec<Admitted<C, T>>,
+    excluded: Vec<Excluded<C, Infallible>>,
+}
+
+impl<C: MatchCredential, T> Matched<C, T> {
+    fn new() -> Self {
+        Self {
+            found: Vec::new(),
+            excluded: Vec::new(),
+        }
+    }
+
+    /// Add `credential`, which answers with `found`, when `authorities` admit its issuer
+    /// through `trust` (TR3); else exclude it with the refusal.
+    fn admit(&mut self, credential: C, found: T, authorities: &QueryAuthorities, trust: &C::Trust) {
+        match credential.admission(authorities, trust) {
+            Ok(admission) => self.found.push(Admitted {
+                credential,
+                found,
+                admission,
+            }),
+            Err(refusal) => self.excluded.push(Excluded {
+                credential,
+                reason: Exclusion::Unadmitted(refusal),
+            }),
+        }
+    }
 }
 
 impl<'r, C: MatchCredential + Clone> Matching<'r, C> {
@@ -152,12 +186,13 @@ impl<'r, C: MatchCredential + Clone> Matching<'r, C> {
     /// Any other format matches nothing. A query that requires holder binding matches only a
     /// credential whose key the wallet holds, and an mdoc always needs its key. No query other
     /// than `zkp_req` matches a nym_auth attestation, whose attributes are undisclosable. Claims
-    /// are selected by DCQL (OpenID4VP 1.0, Section 6.4.1); a selected claims path that is no
-    /// pointer refuses the query. `policy` says whether the request meets the nym_auth policy;
-    /// a nym_auth query of a request that does not is refused.
+    /// are selected by DCQL (OpenID4VP 1.0, Section 6.4.1); a credential whose claims path
+    /// processing gives an error (Sections 7.1.1 and 7.2.1) is excluded with it. `policy` says
+    /// whether the request meets the nym_auth policy; a nym_auth query of a request that does
+    /// not is refused.
     ///
-    /// A credential whose issuer the query's `trusted_authorities` do not admit through `trust`
-    /// matches nothing (TR3); a query with a malformed `aki` value is refused.
+    /// A credential whose issuer the query's `trusted_authorities` admit not through `trust` is
+    /// excluded with the refusal (TR3); a query with a malformed `aki` value is refused.
     pub fn new(
         asked: Asked<'r>,
         credentials: &[C],
@@ -182,24 +217,20 @@ impl<'r, C: MatchCredential + Clone> Matching<'r, C> {
                 let outcome = match asked.query.format().as_str() {
                     "zkp_req" => {
                         match ZkpQuery::read(asked.sent, client_metadata, policy, systems, date) {
-                            Ok(zkp) => Outcome::Proof {
-                                credentials: admitted(
-                                    zkp.provable(&instances)
-                                        .into_iter()
-                                        .map(|c| (c, ()))
-                                        .collect(),
-                                    &authorities,
-                                    trust,
-                                ),
-                                zkp: Box::new(zkp),
-                            },
+                            Ok(zkp) => {
+                                let mut matched = Matched::new();
+                                for credential in zkp.provable(&instances) {
+                                    matched.admit(credential, (), &authorities, trust);
+                                }
+                                Outcome::Proof {
+                                    zkp: Box::new(zkp),
+                                    matched,
+                                }
+                            }
                             Err(refusal) => Outcome::Refused(QueryRefusal::Zkp(refusal)),
                         }
                     }
-                    _ => match answering(asked.query, &instances) {
-                        Ok(found) => Outcome::Claims(admitted(found, &authorities, trust)),
-                        Err(error) => Outcome::Refused(QueryRefusal::ClaimPath(error)),
-                    },
+                    _ => Outcome::Claims(answering(asked.query, &instances, &authorities, trust)),
                 };
                 (asked, outcome)
             })
@@ -223,8 +254,9 @@ impl<'r, C: MatchCredential + Clone> Matching<'r, C> {
             .into_iter()
             .map(|(asked, outcome)| {
                 let outcome = match outcome {
-                    Outcome::Claims(found) => QueryOutcome::Claims(
-                        found
+                    Outcome::Claims(matched) => QueryOutcome::Claims {
+                        candidates: matched
+                            .found
                             .into_iter()
                             .map(|found| Candidate {
                                 credential: found.credential,
@@ -232,10 +264,11 @@ impl<'r, C: MatchCredential + Clone> Matching<'r, C> {
                                 admission: found.admission,
                             })
                             .collect(),
-                    ),
-                    Outcome::Proof { zkp, credentials } => {
-                        let (candidates, excluded) =
-                            credentials.into_iter().partition_map(|found| {
+                        excluded: matched.excluded.into_iter().map(Excluded::widen).collect(),
+                    },
+                    Outcome::Proof { zkp, matched } => {
+                        let (candidates, unproven): (Vec<_>, Vec<_>) =
+                            matched.found.into_iter().partition_map(|found| {
                                 match choose(&found.credential, &found.admission, &zkp) {
                                     Ok(choice) => Either::Left(Candidate {
                                         credential: found.credential,
@@ -244,10 +277,13 @@ impl<'r, C: MatchCredential + Clone> Matching<'r, C> {
                                     }),
                                     Err(reason) => Either::Right(Excluded {
                                         credential: found.credential,
-                                        reason,
+                                        reason: Exclusion::Unproven(reason),
                                     }),
                                 }
                             });
+                        let mut excluded: Vec<Excluded<C, R>> =
+                            matched.excluded.into_iter().map(Excluded::widen).collect();
+                        excluded.extend(unproven);
                         QueryOutcome::Proof {
                             zkp,
                             candidates,
@@ -266,43 +302,27 @@ impl<'r, C: MatchCredential + Clone> Matching<'r, C> {
     }
 }
 
-/// The credentials of `found` whose issuer `authorities` admit through `trust`, each with its
-/// admission (TR3). Another credential matches nothing (A1).
-fn admitted<C: MatchCredential, T>(
-    found: Vec<(C, T)>,
-    authorities: &QueryAuthorities,
-    trust: &C::Trust,
-) -> Vec<Admitted<C, T>> {
-    found
-        .into_iter()
-        .filter_map(|(credential, found)| {
-            let admission = credential.admission(authorities, trust)?;
-            Some(Admitted {
-                credential,
-                found,
-                admission,
-            })
-        })
-        .collect()
-}
-
-/// The instances of `instances` that answer `query`, each with the claims it discloses.
-///
-/// # Errors
-///
-/// [`PointerError`] for a selected claims path that is no pointer.
+/// The instances of `instances` that answer `query`, each with the claims it discloses and the
+/// admission of its issuer by `authorities` through `trust`, and those of the query's format
+/// and type it excludes, in the order of `instances`.
 fn answering<C: MatchCredential + Clone>(
     query: &CredentialQuery,
     instances: &[&C],
-) -> Result<Vec<(C, Claims)>, PointerError> {
-    instances
-        .iter()
-        .map(|&credential| {
-            let claims = claims(query, credential)?;
-            Ok(claims.map(|claims| (credential.clone(), claims)))
-        })
-        .flatten_ok()
-        .try_collect()
+    authorities: &QueryAuthorities,
+    trust: &C::Trust,
+) -> Matched<C, Claims> {
+    let mut matched = Matched::new();
+    for &credential in instances {
+        match claims(query, credential) {
+            Ok(Some(claims)) => matched.admit(credential.clone(), claims, authorities, trust),
+            Ok(None) => {}
+            Err(error) => matched.excluded.push(Excluded {
+                credential: credential.clone(),
+                reason: Exclusion::ClaimPath(error),
+            }),
+        }
+    }
+    matched
 }
 
 /// The claims `query` selects in `credential`, when the credential matches the query's format
@@ -310,11 +330,12 @@ fn answering<C: MatchCredential + Clone>(
 ///
 /// # Errors
 ///
-/// [`PointerError`] for a selected claims path that is no pointer.
+/// [`PathError`]: the processing of a claims path in `credential` gives an error other than an
+/// empty selection.
 fn claims<C: MatchCredential>(
     query: &CredentialQuery,
     credential: &C,
-) -> Result<Option<Claims>, PointerError> {
+) -> Result<Option<Claims>, PathError> {
     let holder_binding = query.holder_binding();
     let Some(format) = asked_format(query, credential) else {
         return Ok(None);
@@ -332,15 +353,11 @@ fn claims<C: MatchCredential>(
         id: CredentialRef::new(&credential.entry().credential_id().to_string()),
         format: CredentialFormat::new(format.identifier()),
     };
-    let Some(selected) = select_claims(query, &held) else {
-        return Ok(None);
-    };
-    let pointers = selected
-        .into_iter()
-        .map(|claim| ClaimPointer::parse(claim.into_path()))
-        .try_collect()?;
-    Ok(Some(Claims {
-        pointers,
+    Ok(select_claims(query, &held)?.map(|selected| Claims {
+        pointers: selected
+            .into_iter()
+            .map(|claim| claim.into_path())
+            .collect(),
         holder_binding,
     }))
 }
@@ -380,7 +397,7 @@ impl<C: MatchCredential> siros_dcql::Credential for Held<'_, C> {
         &self.format
     }
 
-    fn claim(&self, path: &[PathComponent]) -> Result<Vec<Value>, PathError> {
+    fn claim(&self, path: &ClaimPath) -> Result<Vec<Value>, PathError> {
         self.credential.claim_values(path)
     }
 
@@ -407,8 +424,11 @@ pub struct Answers<'r, C: MatchCredential, R> {
 
 /// What the matching gives a Credential Query.
 enum QueryOutcome<C: MatchCredential, R> {
-    /// The credentials that disclose the claims it asks.
-    Claims(Vec<Candidate<C>>),
+    /// The credentials that disclose the claims it asks, and those it excludes.
+    Claims {
+        candidates: Vec<Candidate<C>>,
+        excluded: Vec<Excluded<C, R>>,
+    },
     /// The nym_auth query of a `zkp_req` query, the credentials that answer an option, and
     /// those that answer none.
     Proof {
@@ -428,10 +448,36 @@ pub struct Candidate<C: MatchCredential> {
     admission: C::Admission,
 }
 
-/// A credential that matched a `zkp_req` query and answers none of its options, and why.
-pub struct Excluded<C, R> {
+/// A credential of a query's format and type that answers it not, and why.
+pub struct Excluded<C: MatchCredential, R> {
     credential: C,
-    reason: R,
+    reason: Exclusion<C::Unadmitted, R>,
+}
+
+/// Why a credential of a query's format and type answers it not. `U` is why the query's
+/// authorities admit its issuer not, `R` why it answers no option of a `zkp_req` query.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Exclusion<U, R> {
+    /// The query's `trusted_authorities` admit its issuer not (TR3).
+    Unadmitted(U),
+    /// Its claims path processing gives an error (OpenID4VP 1.0, Sections 7.1.1 and 7.2.1).
+    ClaimPath(PathError),
+    /// It answers no option of the `zkp_req` query.
+    Unproven(R),
+}
+
+impl<C: MatchCredential> Excluded<C, Infallible> {
+    /// The exclusion, before the `zkp_req` tests, among the exclusions of any `R`.
+    fn widen<R>(self) -> Excluded<C, R> {
+        Excluded {
+            credential: self.credential,
+            reason: match self.reason {
+                Exclusion::Unadmitted(refusal) => Exclusion::Unadmitted(refusal),
+                Exclusion::ClaimPath(error) => Exclusion::ClaimPath(error),
+                Exclusion::Unproven(never) => match never {},
+            },
+        }
+    }
 }
 
 impl<'r, C: MatchCredential, R> Answered<'r, C, R> {
@@ -480,7 +526,9 @@ impl<'r, C: MatchCredential, R> Answers<'r, C, R> {
     /// The credentials that answer it, in the order of the wallet's credentials.
     pub fn candidates(&self) -> &[Candidate<C>] {
         match &self.outcome {
-            QueryOutcome::Claims(candidates) | QueryOutcome::Proof { candidates, .. } => candidates,
+            QueryOutcome::Claims { candidates, .. } | QueryOutcome::Proof { candidates, .. } => {
+                candidates
+            }
             QueryOutcome::Refused(_) => &[],
         }
     }
@@ -494,7 +542,7 @@ impl<'r, C: MatchCredential, R> Answers<'r, C, R> {
     pub fn zkp(&self) -> Option<&ZkpQuery> {
         match &self.outcome {
             QueryOutcome::Proof { zkp, .. } => Some(zkp),
-            QueryOutcome::Claims(_) | QueryOutcome::Refused(_) => None,
+            QueryOutcome::Claims { .. } | QueryOutcome::Refused(_) => None,
         }
     }
 
@@ -502,15 +550,17 @@ impl<'r, C: MatchCredential, R> Answers<'r, C, R> {
     pub fn refusal(&self) -> Option<&QueryRefusal> {
         match &self.outcome {
             QueryOutcome::Refused(refusal) => Some(refusal),
-            QueryOutcome::Claims(_) | QueryOutcome::Proof { .. } => None,
+            QueryOutcome::Claims { .. } | QueryOutcome::Proof { .. } => None,
         }
     }
 
-    /// The credentials that matched a `zkp_req` query and answer none of its options.
+    /// The credentials of the query's format and type that answer it not, and why.
     pub fn excluded(&self) -> &[Excluded<C, R>] {
         match &self.outcome {
-            QueryOutcome::Proof { excluded, .. } => excluded,
-            QueryOutcome::Claims(_) | QueryOutcome::Refused(_) => &[],
+            QueryOutcome::Claims { excluded, .. } | QueryOutcome::Proof { excluded, .. } => {
+                excluded
+            }
+            QueryOutcome::Refused(_) => &[],
         }
     }
 }
@@ -532,14 +582,14 @@ impl<C: MatchCredential> Candidate<C> {
     }
 }
 
-impl<C, R> Excluded<C, R> {
+impl<C: MatchCredential, R> Excluded<C, R> {
     /// The credential.
     pub fn credential(&self) -> &C {
         &self.credential
     }
 
-    /// Why it answers no option.
-    pub fn reason(&self) -> &R {
+    /// Why it answers the query not.
+    pub fn reason(&self) -> &Exclusion<C::Unadmitted, R> {
         &self.reason
     }
 }

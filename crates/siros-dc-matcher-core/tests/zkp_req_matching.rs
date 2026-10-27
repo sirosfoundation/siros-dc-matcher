@@ -75,13 +75,11 @@ fn run(db: &CredentialDatabase, request: &[u8]) -> Outcome {
     let Some(context) = UnverifiedRequest::first_registered(request, &registered) else {
         return none;
     };
-    let Some(query) = context.query().matching_query() else {
-        return none;
-    };
+    let query = context.query().matching_query();
     let held = credentials(db);
     let policy =
         ProfilePolicy::new(&db.profile).with_context(context.query(), context.client_metadata());
-    let result = execute(&query, &held, &policy);
+    let result = execute(query, &held, &policy);
     let Some(matched) = result.query("nym") else {
         return none;
     };

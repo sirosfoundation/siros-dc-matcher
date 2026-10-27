@@ -1,4 +1,5 @@
-//! The query model's parse (§6.1–6.3): defaults, tolerated deviations, and the identifier rules.
+//! The query model's parse (§6.1–6.3): defaults, tolerated deviations, and the rules it
+//! refuses.
 
 // `expect` alongside `unwrap`: a test that states why it expects to succeed
 // says what broke when it stops succeeding.
@@ -6,8 +7,8 @@
 
 use serde_json::{json, Value};
 use siros_dcql::{
-    DcqlQuery, HolderBinding, Multiplicity, QueryError, QueryId, QueryIdError, SetRequirement,
-    TrustedAuthorityError,
+    ClaimPathError, DcqlQuery, FormFault, HolderBinding, Member, Multiplicity, Position,
+    QueryError, QueryId, QueryIdError, SetRequirement, TrustedAuthorityError,
 };
 
 /// Defaults the spec states explicitly, all of which change behaviour if
@@ -125,17 +126,59 @@ fn credential_ids_follow_section_6_1() {
     }
 }
 
-/// A `credential_sets` option naming a query that does not exist is not
-/// fatal either: an option the wallet cannot satisfy is one it does not
-/// offer, which §6.4 already handles.
+/// Whether an error is the one a row expects.
+type Expected = fn(&QueryError) -> bool;
+
+/// The structural rules of §6.1, §6.2, §6.4.1, §7 and §7.2.1. One rule per row.
 #[test]
-fn a_dangling_credential_set_reference_is_tolerated() {
-    let q = DcqlQuery::from_json(
-        r#"{"credentials":[{"id":"pid","format":"mso_mdoc"}],
-            "credential_sets":[{"options":[["pid"],["nonexistent"]]}]}"#,
-    )
-    .expect("a dangling reference is an option, not a contradiction");
-    assert_eq!(q.credential_sets().map(<[_]>::len), Some(1));
+fn the_parse_refuses_what_section_6_forbids() {
+    let cases: [(&str, Expected); 6] = [
+        (r#"{"credentials":[]}"#, |e| {
+            matches!(
+                e,
+                QueryError::Form {
+                    member: Member::Credentials,
+                    fault: FormFault::Empty
+                }
+            )
+        }),
+        (
+            r#"{"credentials":[{"id":"pid","format":"dc+sd-jwt",
+                "claims":[{"id":"a","path":["given_name"]}],"claim_sets":[["a"],["b"]]}]}"#,
+            |e| {
+                matches!(e, QueryError::UnknownClaimId { credential, claim }
+                    if credential == "pid" && claim == "b")
+            },
+        ),
+        (
+            r#"{"credentials":[{"id":"pid","format":"mso_mdoc"}],
+                "credential_sets":[{"options":[["pid"],["nonexistent"]]}]}"#,
+            |e| matches!(e, QueryError::UnknownCredentialId(id) if id == "nonexistent"),
+        ),
+        (
+            r#"{"credentials":[{"id":"pid","format":"dc+sd-jwt","claim_sets":[[]]}]}"#,
+            |e| matches!(e, QueryError::ClaimSetsWithoutClaims(id) if id == "pid"),
+        ),
+        (
+            r#"{"credentials":[{"id":"pid","format":"dc+sd-jwt","claims":[{"path":[]}]}]}"#,
+            |e| {
+                matches!(e, QueryError::ClaimPath { credential, claim, error: ClaimPathError::Empty }
+                    if credential == "pid" && *claim == Position::new(0))
+            },
+        ),
+        (
+            r#"{"credentials":[{"id":"mdl","format":"mso_mdoc",
+                "claims":[{"path":["org.iso.18013.5.1","given_name"]},{"path":["org.iso.18013.5.1.given_name"]}]}]}"#,
+            |e| {
+                matches!(e, QueryError::MdocPath { credential, claim }
+                    if credential == "mdl" && *claim == Position::new(1))
+            },
+        ),
+    ];
+    for (json, refused) in cases {
+        let error = DcqlQuery::from_json(json).expect_err(json);
+        assert!(refused(&error), "{json}: {error:?}");
+    }
 }
 
 /// `purpose` is why the verifier wants a combination, and the wallet's
@@ -196,8 +239,11 @@ fn realistic_query_round_trips() {
     let q = DcqlQuery::from_json(json).unwrap();
     let c = &q.credentials()[0];
     assert_eq!(c.claims()[0].values().unwrap()[0], Value::Bool(true));
-    assert_eq!(c.claim_sets().unwrap()[0], vec!["a"]);
-    assert_eq!(c.claim("a").unwrap().path().len(), 2);
+    assert_eq!(
+        c.claim_sets().unwrap()[0].ids().collect::<Vec<_>>(),
+        vec!["a"]
+    );
+    assert_eq!(c.claim("a").unwrap().path().components().len(), 2);
 
     let back: DcqlQuery = serde_json::from_str(&serde_json::to_string(&q).unwrap()).unwrap();
     assert_eq!(back, q);
@@ -221,19 +267,27 @@ fn trusted_authorities_follow_section_6_1_1() {
         (json!(["aki"]), Some(TrustedAuthorityError::EntryNotObject)),
         (
             json!([{"values": ["a"]}]),
-            Some(TrustedAuthorityError::Type),
+            Some(TrustedAuthorityError::TypeAbsent),
+        ),
+        (
+            json!([{"type": 1, "values": ["a"]}]),
+            Some(TrustedAuthorityError::TypeNotString),
         ),
         (
             json!([{"type": "aki"}]),
-            Some(TrustedAuthorityError::Values),
+            Some(TrustedAuthorityError::ValuesAbsent),
+        ),
+        (
+            json!([{"type": "aki", "values": "a"}]),
+            Some(TrustedAuthorityError::ValuesNotArray),
         ),
         (
             json!([{"type": "aki", "values": []}]),
-            Some(TrustedAuthorityError::Values),
+            Some(TrustedAuthorityError::ValuesEmpty),
         ),
         (
-            json!([{"type": "aki", "values": [1]}]),
-            Some(TrustedAuthorityError::Values),
+            json!([{"type": "aki", "values": ["a", 1]}]),
+            Some(TrustedAuthorityError::ValueNotString(Position::new(1))),
         ),
     ];
     for (authorities, expected) in cases {

@@ -2,7 +2,7 @@
 //! RFC 9901, Section 7.2).
 
 use rustc_hash::FxHashSet;
-use siros_dcql::{resolve, PathComponent, PathError};
+use siros_dcql::{resolve, ClaimPath, PathError};
 
 use crate::key_binding::Presentation;
 use crate::node::{present, Shape};
@@ -22,15 +22,12 @@ impl SdJwt {
     ///
     /// # Errors
     ///
-    /// [`PathError`]: a pointer is empty, applies a component to the wrong kind of value, or
-    /// selects no present claim.
-    pub fn select<P: AsRef<[PathComponent]>>(
-        &self,
-        pointers: &[P],
-    ) -> Result<Presentation, PathError> {
+    /// [`PathError`]: a pointer applies a component to the wrong kind of value, or selects no
+    /// present claim.
+    pub fn select(&self, pointers: &[ClaimPath]) -> Result<Presentation, PathError> {
         let mut chosen = Chosen::default();
         for pointer in pointers {
-            for target in resolve(self.root(), pointer.as_ref())? {
+            for target in resolve(self.root(), pointer)? {
                 for disclosure in target.path() {
                     chosen.add(disclosure);
                 }

@@ -212,7 +212,7 @@ pub fn match_dc_api_request(
     // declined. One reader, or they drift again.
     let registered = |label: &str| db.profile.parser_for(label).is_some();
     let found = UnverifiedRequest::first_registered(request_json.as_bytes(), &registered)
-        .and_then(|unverified| Some((unverified.query().matching_query()?, unverified)));
+        .map(|unverified| (unverified.query().matching_query().clone(), unverified));
     let (query, unverified) = match found {
         Some(found) => found,
         None => {
@@ -281,25 +281,13 @@ pub fn match_dcql_with_context(
         .map(|text| serde_json::from_str::<serde_json::Value>(&text).map_err(request_err))
         .transpose()?;
 
-    let strict = DcqlQuery::from_json(&dcql_json);
-    let unverified = UnverifiedQuery::parse(raw).map_err(|e| {
-        request_err(
-            strict
-                .as_ref()
-                .err()
-                .map_or_else(|| e.reason(), ToString::to_string),
-        )
-    })?;
-    let query = match strict {
-        Ok(query) => query,
-        // The identifier checks `from_json` makes still apply to anything that
-        // is DCQL; only a `zkp_req` query DCQL cannot represent is let past.
-        Err(e) if unverified.typed().is_some() => return Err(request_err(e)),
-        // The query DCQL parses without the `zkp_req` query's `claims` is parsed, with the
-        // same identifier checks.
-        Err(e) => unverified.matching_query().ok_or_else(|| request_err(&e))?,
-    };
-    Ok(evaluate(&db, &query, &unverified, client_metadata.as_ref()))
+    let unverified = UnverifiedQuery::parse(raw).map_err(|e| request_err(e.reason()))?;
+    Ok(evaluate(
+        &db,
+        unverified.matching_query(),
+        &unverified,
+        client_metadata.as_ref(),
+    ))
 }
 
 fn decode(blob: &[u8]) -> Result<CredentialDatabase, MatchError> {

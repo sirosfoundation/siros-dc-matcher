@@ -3,7 +3,7 @@
 use std::borrow::Cow;
 use std::fmt;
 
-use siros_dcql::foreign_character;
+use siros_dcql::{QueryId, QueryIdError};
 
 /// Declares an identifier a Verifier or a system rulebook writes, of any text: its role is its
 /// type. A constant of the rulebook is a `from_static`.
@@ -140,10 +140,10 @@ impl ReturnHandle {
     ///
     /// [`ReturnHandleError`]: an empty text, or one with another character.
     pub fn parse(text: &str) -> Result<Self, ReturnHandleError> {
-        match foreign_character(text) {
-            Some(c) => Err(ReturnHandleError::Character(c)),
-            None if text.is_empty() => Err(ReturnHandleError::Empty),
-            None => Ok(Self(text.to_owned())),
+        match QueryId::parse(text) {
+            Ok(id) => Ok(Self(id.into())),
+            Err(QueryIdError::Empty) => Err(ReturnHandleError::Empty),
+            Err(QueryIdError::Character(c)) => Err(ReturnHandleError::Character(c)),
         }
     }
 

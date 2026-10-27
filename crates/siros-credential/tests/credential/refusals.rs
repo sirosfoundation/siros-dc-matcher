@@ -3,32 +3,20 @@
 
 use serde_json::{json, Value};
 use siros_codec::cbor::Value as Cbor;
-use siros_credential::{ClaimPointer, Credential};
-use siros_dcql::PathComponent;
+use siros_credential::Credential;
 use siros_wallet_state::WalletState;
 
-use crate::common::{disclosure, entry, mdoc, sd_jwt, sd_jwt_text, state, tdate};
+use crate::common::{
+    disclosure, entry, mdoc, mdoc_chained, sd_jwt, sd_jwt_headed, sd_jwt_text, state, tdate,
+};
 
-enum Input {
-    /// An `S`, parsed, and each of its credentials read.
-    State(String),
-    /// Pointer components.
-    Pointer(Vec<PathComponent>),
-}
-
-fn outcome(input: &Input) -> Result<(), &'static str> {
-    match input {
-        Input::State(text) => {
-            let state = WalletState::parse(text).map_err(|e| e.code())?;
-            for entry in state.credentials() {
-                Credential::parse(entry).map_err(|e| e.code())?;
-            }
-            Ok(())
-        }
-        Input::Pointer(components) => ClaimPointer::parse(components.clone())
-            .map(|_| ())
-            .map_err(|e| e.code()),
+/// The outcome of parsing the `S` `text` and reading each of its credentials.
+fn outcome(text: &str) -> Result<(), &'static str> {
+    let state = WalletState::parse(text).map_err(|e| e.code())?;
+    for entry in state.credentials() {
+        Credential::parse(entry).map_err(|e| e.code())?;
     }
+    Ok(())
 }
 
 /// The payload of an honest SD-JWT VC, with `given_name` selectively disclosed.
@@ -104,9 +92,9 @@ fn each_rule_refuses_its_input() {
     };
 
     let accepted = [
-        Input::State(edited_state(|_| {})),
-        Input::State(entry_state(&data, |_| {})),
-        Input::State(mdoc_state(vec![
+        edited_state(|_| {}),
+        entry_state(&data, |_| {}),
+        mdoc_state(vec![
             ("given_name", Cbor::text("Ada")),
             ("issue_date", full_date("2024-02-29")),
             ("expiry_date", tdate("2027-01-01T00:00:00Z")),
@@ -117,230 +105,206 @@ fn each_rule_refuses_its_input() {
             ("portrait", Cbor::Bytes(vec![0xff, 0xd8])),
             ("age_in_years", Cbor::Unsigned(40)),
             ("age_over_18", Cbor::Bool(true)),
-        ])),
+        ]),
     ];
     for input in &accepted {
         assert_eq!(outcome(input), Ok(()));
     }
 
-    let rows: Vec<(&str, &str, Input)> = vec![
+    let rows: Vec<(&str, &str, String)> = vec![
         // W1
-        (
-            "S is an array",
-            "state_malformed",
-            Input::State("[]".into()),
-        ),
+        ("S is an array", "state_malformed", "[]".into()),
         (
             "no schemaVersion: version 1",
             "schema_version_unsupported",
-            Input::State(edited_state(|s| {
-                drop(s.as_object_mut().unwrap().remove("schemaVersion"))
-            })),
+            edited_state(|s| drop(s.as_object_mut().unwrap().remove("schemaVersion"))),
         ),
         (
             "schemaVersion 2",
             "schema_version_unsupported",
-            Input::State(edited_state(|s| s["schemaVersion"] = json!(2))),
+            edited_state(|s| s["schemaVersion"] = json!(2)),
         ),
         // W2
         (
             "no credentials",
             "credentials_malformed",
-            Input::State(edited_state(|s| {
-                drop(s.as_object_mut().unwrap().remove("credentials"))
-            })),
+            edited_state(|s| drop(s.as_object_mut().unwrap().remove("credentials"))),
         ),
         (
             "a credential entry is a string",
             "credential_entry_malformed",
-            Input::State(edited_state(|s| s["credentials"] = json!(["entry"]))),
+            edited_state(|s| s["credentials"] = json!(["entry"])),
         ),
         (
             "no kid",
             "credential_member_malformed",
-            Input::State(entry_state(&data, |e| {
-                drop(e.as_object_mut().unwrap().remove("kid"))
-            })),
+            entry_state(&data, |e| drop(e.as_object_mut().unwrap().remove("kid"))),
         ),
         (
             "a negative credentialId",
             "credential_member_malformed",
-            Input::State(entry_state(&data, |e| e["credentialId"] = json!(-1))),
+            entry_state(&data, |e| e["credentialId"] = json!(-1)),
         ),
         (
             "a credentialId of 2^64",
             "credential_member_malformed",
-            Input::State(entry_state(&data, |e| {
+            entry_state(&data, |e| {
                 e["credentialId"] = serde_json::from_str("18446744073709551616").unwrap()
-            })),
+            }),
         ),
         (
             "a batchId as a string",
             "credential_member_malformed",
-            Input::State(entry_state(&data, |e| e["batchId"] = json!("1"))),
+            entry_state(&data, |e| e["batchId"] = json!("1")),
         ),
         (
             "a repeated credentialId",
             "credential_id_repeated",
-            Input::State(state(
+            state(
                 vec![
                     entry(1, 1, 0, "dc+sd-jwt", &data),
                     entry(1, 1, 1, "dc+sd-jwt", &data),
                 ],
                 vec![],
-            )),
+            ),
         ),
         (
             "metadata as an object",
             "metadata_malformed",
-            Input::State(entry_state(&data, |e| {
-                e["metadata"] = json!({"type": "a", "value": 1})
-            })),
+            entry_state(&data, |e| e["metadata"] = json!({"type": "a", "value": 1})),
         ),
         (
             "metadata of an empty type",
             "metadata_malformed",
-            Input::State(entry_state(&data, |e| {
-                e["metadata"] = json!([{"type": "", "value": 1}])
-            })),
+            entry_state(&data, |e| e["metadata"] = json!([{"type": "", "value": 1}])),
         ),
         (
             "metadata without a value",
             "metadata_malformed",
-            Input::State(entry_state(&data, |e| {
-                e["metadata"] = json!([{"type": "a"}])
-            })),
+            entry_state(&data, |e| e["metadata"] = json!([{"type": "a"}])),
         ),
         // W3
         (
             "no keypairs",
             "keypairs_malformed",
-            Input::State(edited_state(|s| {
-                drop(s.as_object_mut().unwrap().remove("keypairs"))
-            })),
+            edited_state(|s| drop(s.as_object_mut().unwrap().remove("keypairs"))),
         ),
         (
             "a presentation without audience",
             "presentations_malformed",
-            Input::State(edited_state(|s| {
+            edited_state(|s| {
                 let mut p = presentation();
                 drop(p.as_object_mut().unwrap().remove("audience"));
                 s["presentations"] = json!([p]);
-            })),
+            }),
         ),
         (
             "a presentation after 9999",
             "presentations_malformed",
-            Input::State(edited_state(|s| {
+            edited_state(|s| {
                 let mut p = presentation();
                 p["presentationTimestampSeconds"] = json!(253_402_300_800_i64);
                 s["presentations"] = json!([p]);
-            })),
+            }),
         ),
         // C1
         (
             "format jwt_vc_json",
             "format_unsupported",
-            Input::State(state(vec![entry(1, 1, 0, "jwt_vc_json", &data)], vec![])),
+            state(vec![entry(1, 1, 0, "jwt_vc_json", &data)], vec![]),
         ),
         (
             "an SD-JWT without a signature",
             "issuer_jwt_malformed",
-            Input::State(state(
+            state(
                 vec![entry(1, 1, 0, "vc+sd-jwt", "eyJhbGciOiJFUzI1NiJ9.e30~")],
                 vec![],
-            )),
+            ),
         ),
         (
             "an mdoc that is not base64url",
             "encoding",
-            Input::State(state(vec![entry(1, 1, 0, "mso_mdoc", "a+b")], vec![])),
+            state(vec![entry(1, 1, 0, "mso_mdoc", "a+b")], vec![]),
         ),
         // SD-JWT VC
         (
             "no vct",
             "vct_malformed",
-            Input::State(vc_state(
+            vc_state(
                 &with(&|p| drop(p.as_object_mut().unwrap().remove("vct"))),
                 &[&given_name],
-            )),
+            ),
         ),
         (
             "vct a number",
             "vct_malformed",
-            Input::State(vc_state(&with(&|p| p["vct"] = json!(1)), &[&given_name])),
+            vc_state(&with(&|p| p["vct"] = json!(1)), &[&given_name]),
         ),
         (
             "vct selectively disclosed",
             "claim_selectively_disclosed",
-            Input::State(vc_state(
+            vc_state(
                 &with(&|p| {
                     drop(p.as_object_mut().unwrap().remove("vct"));
                     p["_sd"] = json!([given_name_digest, vct_digest]);
                 }),
                 &[&given_name, &vct],
-            )),
+            ),
         ),
         (
             "a sub-claim of cnf selectively disclosed",
             "claim_selectively_disclosed",
-            Input::State(vc_state(
+            vc_state(
                 &with(&|p| p["cnf"] = json!({"_sd": [jwk_digest]})),
                 &[&given_name, &jwk],
-            )),
+            ),
         ),
         (
             "cnf a string",
             "cnf_malformed",
-            Input::State(vc_state(
-                &with(&|p| p["cnf"] = json!("key-1")),
-                &[&given_name],
-            )),
+            vc_state(&with(&|p| p["cnf"] = json!("key-1")), &[&given_name]),
         ),
         (
             "cnf without jwk",
             "holder_key_jwk",
-            Input::State(vc_state(
+            vc_state(
                 &with(&|p| p["cnf"] = json!({"kid": "key-1"})),
                 &[&given_name],
-            )),
+            ),
         ),
         (
             "cnf.jwk of another curve",
             "holder_key_type",
-            Input::State(vc_state(
+            vc_state(
                 &with(&|p| p["cnf"]["jwk"]["crv"] = json!("P-384")),
                 &[&given_name],
-            )),
+            ),
         ),
         (
             "cnf.jwk with a coordinate not of 32 bytes",
             "holder_key_coordinate",
-            Input::State(vc_state(
+            vc_state(
                 &with(&|p| p["cnf"]["jwk"]["x"] = json!("AQ")),
                 &[&given_name],
-            )),
+            ),
         ),
         (
             "nbf a string",
             "numeric_date_malformed",
-            Input::State(vc_state(
-                &with(&|p| p["nbf"] = json!("1700000000")),
-                &[&given_name],
-            )),
+            vc_state(&with(&|p| p["nbf"] = json!("1700000000")), &[&given_name]),
         ),
         (
             "exp after 9999",
             "numeric_date_malformed",
-            Input::State(vc_state(
+            vc_state(
                 &with(&|p| p["exp"] = json!(253_402_300_800.5)),
                 &[&given_name],
-            )),
+            ),
         ),
         (
             "a number beyond f64",
             "issuer_jwt_malformed",
-            Input::State(state(
+            state(
                 vec![entry(
                     1,
                     1,
@@ -352,47 +316,77 @@ fn each_rule_refuses_its_input() {
                     ),
                 )],
                 vec![],
-            )),
+            ),
+        ),
+        // TR2
+        (
+            "an x5c certificate that is no base64",
+            "issuer_jwt_x5c_malformed",
+            state(
+                vec![entry(
+                    1,
+                    1,
+                    0,
+                    "dc+sd-jwt",
+                    &sd_jwt_headed(
+                        &json!({"alg": "ES256", "typ": "dc+sd-jwt", "x5c": ["!"]}),
+                        &honest.to_string(),
+                        &[&given_name],
+                    ),
+                )],
+                vec![],
+            ),
+        ),
+        (
+            "an x5chain certificate that is no DER certificate",
+            "certificate_der",
+            state(
+                vec![entry(
+                    1,
+                    1,
+                    0,
+                    "mso_mdoc",
+                    &mdoc_chained(
+                        vec![("given_name", Cbor::text("Ada"))],
+                        valid.0,
+                        valid.1,
+                        b"no certificate",
+                    ),
+                )],
+                vec![],
+            ),
         ),
         // C2
         (
             "a full-date of 2023-02-29",
             "full_date_malformed",
-            Input::State(mdoc_state(vec![("issue_date", full_date("2023-02-29"))])),
+            mdoc_state(vec![("issue_date", full_date("2023-02-29"))]),
         ),
         (
             "a tdate with a fraction of a second",
             "tdate_malformed",
-            Input::State(mdoc_state(vec![(
-                "expiry_date",
-                tdate("2027-01-01T00:00:00.5Z"),
-            )])),
+            mdoc_state(vec![("expiry_date", tdate("2027-01-01T00:00:00.5Z"))]),
         ),
         (
             "a value under tag 24",
             "claim_tag_unsupported",
-            Input::State(mdoc_state(vec![(
+            mdoc_state(vec![(
                 "portrait",
                 Cbor::Tag(24, Box::new(Cbor::Bytes(vec![0xf6]))),
-            )])),
+            )]),
         ),
         (
             "an integer map key inside an array",
             "map_key_not_text",
-            Input::State(mdoc_state(vec![(
-                "driving_privileges",
-                privileges(Cbor::Unsigned(1)),
-            )])),
+            mdoc_state(vec![("driving_privileges", privileges(Cbor::Unsigned(1)))]),
         ),
         (
             "undefined",
             "claim_undefined",
-            Input::State(mdoc_state(vec![("given_name", Cbor::Encoded(vec![0xf7]))])),
+            mdoc_state(vec![("given_name", Cbor::Encoded(vec![0xf7]))]),
         ),
-        // C3
-        ("an empty pointer", "pointer_empty", Input::Pointer(vec![])),
     ];
-    for (case, code, input) in rows {
-        assert_eq!(outcome(&input), Err(code), "{case}");
+    for (case, code, text) in rows {
+        assert_eq!(outcome(&text), Err(code), "{case}");
     }
 }

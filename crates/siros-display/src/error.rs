@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use siros_dcql::PathError;
+use siros_dcql::{ClaimPathError, PathError};
 
 use crate::locale::LocaleError;
 use crate::text::TextError;
@@ -42,8 +42,8 @@ pub enum DisplayError {
     Colour,
     /// A `claims` array, a claim description or one of its `display` entries breaks its rules.
     Claims(EntryFault),
-    /// A claim `path` is no non-empty array of strings, nulls and non-negative integers.
-    ClaimPath,
+    /// A claim `path` is no claims path pointer.
+    ClaimPath(ClaimPathError),
     /// Two claims descriptions address the same claim (OpenID4VCI 1.0, Appendix B.3).
     ClaimRepeated,
     /// Two claims descriptions disagree on whether a claim is an object or an array, or address
@@ -124,7 +124,7 @@ impl DisplayError {
             Self::Logo(_) => "logo_malformed",
             Self::Colour => "colour_malformed",
             Self::Claims(_) => "claims_malformed",
-            Self::ClaimPath => "claim_path_malformed",
+            Self::ClaimPath(_) => "claim_path_malformed",
             Self::ClaimRepeated => "claim_repeated",
             Self::ClaimContradictory => "claim_contradictory",
             Self::Vct => "vct_malformed",

@@ -14,6 +14,5 @@ rust-version.workspace = true
 # This crate is published to crates.io and MUST NOT depend on any other crate
 # in this workspace. CI enforces it with `cargo publish --dry-run`.
 [dependencies]
-rustc-hash = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

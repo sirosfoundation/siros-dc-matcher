@@ -3,7 +3,7 @@
 use serde_json::{json, Value};
 use siros_codec::base64url;
 use siros_codec::date::DateTime;
-use siros_dcql::PathComponent;
+use siros_dcql::ClaimPath;
 use siros_sdjwt::{Audience, ClaimValue, Element, KbNonce, KeyBindingError, NumericDate, SdJwt};
 
 use crate::common::{compact, decoy, disclosure, issued};
@@ -29,7 +29,7 @@ fn labels(presentation: &str) -> Vec<String> {
 }
 
 fn outcome(sd_jwt: &SdJwt, pointers: &str) -> Result<Vec<String>, &'static str> {
-    let pointers: Vec<Vec<PathComponent>> = serde_json::from_str(pointers).unwrap();
+    let pointers: Vec<ClaimPath> = serde_json::from_str(pointers).unwrap();
     sd_jwt
         .select(&pointers)
         .map(|p| labels(p.as_str()))
@@ -42,7 +42,7 @@ fn outcome(sd_jwt: &SdJwt, pointers: &str) -> Result<Vec<String>, &'static str> 
 #[test]
 fn selection() {
     let a3 = SdJwt::parse(&issued("a3")).unwrap();
-    let rows: [(&str, Result<&[&str], &str>); 8] = [
+    let rows: [(&str, Result<&[&str], &str>); 7] = [
         ("[]", Ok(&[])),
         (
             r#"[["place_of_birth", "locality"]]"#,
@@ -69,7 +69,6 @@ fn selection() {
             ]),
         ),
         (r#"[["nationalities", null]]"#, Ok(&["nationalities"])),
-        ("[[]]", Err("path_malformed")),
         (r#"[["address", 0]]"#, Err("path_type_mismatch")),
         (r#"[["birth_middle_name"]]"#, Err("path_selects_nothing")),
     ];
@@ -141,7 +140,7 @@ fn key_binding_claims() {
     let aud = Audience::new("x509_san_dns:client.example.org");
     let nonce = KbNonce::new("n-0S6_WzA2Mj");
     for (extra, expected) in rows {
-        let presentation = a3.select::<Vec<PathComponent>>(&[]).unwrap();
+        let presentation = a3.select(&[]).unwrap();
         let binding = presentation.key_binding(iat, &aud, &nonce, &extra);
         let binding = match (binding, expected) {
             (Ok(binding), Ok(())) => binding,

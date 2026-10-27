@@ -1,15 +1,16 @@
-//! A1's trust rule: a credential whose issuer the query's `trusted_authorities` do not admit
-//! matches nothing (TR3).
+//! A1's trust rule: a credential whose issuer the query's `trusted_authorities` admit not
+//! matches nothing, and a malformed `aki` value makes the request invalid (TR3).
 
 use serde_json::json;
 use siros_codec::base64url;
 use siros_codec::cbor::Value as Cbor;
-use siros_trust::{Certificate, TrustStore};
+use siros_presentation::{Failure, PresentationError, QueryRefusal};
+use siros_trust::{AkiError, AuthorityError, Certificate, TrustStore};
 use siros_wallet_state::CredentialId;
 use siros_zkp_req_nym_auth::testing::Issuer;
 
 use crate::verifier::{redirect_unsigned, NONCE, STATE};
-use crate::wallet::{base64, mdoc_by, ready, sd_jwt_x5c, Held, Wallet, MDL, MDL_NS, VCT};
+use crate::wallet::{base64, mdoc_by, ready, sd_jwt, sd_jwt_x5c, Held, Wallet, MDL, MDL_NS, VCT};
 
 const LIST: &str = "https://tl.example/eu";
 
@@ -77,5 +78,44 @@ fn the_plan_offers_only_the_credentials_whose_issuer_the_query_admits() {
             ("pid".to_owned(), vec![CredentialId::new(1)]),
             ("mdl".to_owned(), vec![CredentialId::new(3)])
         ]]
+    );
+}
+
+/// One Credential Query with a malformed `aki` value refuses the whole request
+/// (`invalid_request`), though another option of its credential set answers.
+#[test]
+fn a_malformed_aki_value_refuses_the_request() {
+    let claims = [("given_name", json!("Erika"))];
+    let wallet = Wallet::new(vec![Held::new(1, "dc+sd-jwt", sd_jwt(VCT, &claims))]);
+    let request = redirect_unsigned(&json!({
+        "response_type": "vp_token", "response_mode": "direct_post", "nonce": NONCE,
+        "state": STATE,
+        "dcql_query": {
+            "credentials": [
+                {"id": "bad", "format": "dc+sd-jwt", "meta": {"vct_values": [VCT]},
+                    "trusted_authorities": [{"type": "aki", "values": ["!"]}],
+                    "claims": [{"path": ["given_name"]}]},
+                {"id": "good", "format": "dc+sd-jwt", "meta": {"vct_values": [VCT]},
+                    "claims": [{"path": ["given_name"]}]}
+            ],
+            "credential_sets": [{"options": [["bad"], ["good"]]}]
+        }
+    }));
+    let fetches = wallet.fetches(&request);
+    let error = ready(&wallet.input(&request, &fetches))
+        .map(drop)
+        .expect_err("an invalid Credential Query refuses the request");
+    assert!(
+        matches!(
+            &error,
+            PresentationError::NoOffer(Failure::Refused {
+                query,
+                refusal: QueryRefusal::Authorities(AuthorityError::Aki {
+                    error: AkiError::Base64url(_),
+                    ..
+                }),
+            }) if query == "bad"
+        ),
+        "{error:?}"
     );
 }

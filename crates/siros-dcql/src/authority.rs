@@ -3,48 +3,23 @@
 
 use core::fmt;
 
-use serde::{de, Deserialize, Deserializer, Serialize};
+use serde::Serialize;
 use serde_json::Value;
 
-/// The `type` of a trusted authority, as the Verifier sends it: `aki`, `etsi_tl`,
-/// `openid_federation`, or a type of a later version.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
-#[serde(transparent)]
-pub struct AuthorityType(String);
+use crate::meta::text_value;
+use crate::query::Position;
 
-impl AuthorityType {
-    /// The type `text`.
-    #[must_use]
-    pub fn new(text: &str) -> Self {
-        Self(text.to_owned())
-    }
+text_value!(
+    /// The `type` of a trusted authority, as the Verifier sends it: `aki`, `etsi_tl`,
+    /// `openid_federation`, or a type of a later version.
+    AuthorityType
+);
 
-    /// The type, as sent.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-/// A value of a trusted authority, as the Verifier sends it: what identifies the authority
-/// within its `type`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
-#[serde(transparent)]
-pub struct AuthorityValue(String);
-
-impl AuthorityValue {
-    /// The value `text`.
-    #[must_use]
-    pub fn new(text: &str) -> Self {
-        Self(text.to_owned())
-    }
-
-    /// The value, as sent.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
+text_value!(
+    /// A value of a trusted authority, as the Verifier sends it: what identifies the authority
+    /// within its `type`.
+    AuthorityValue
+);
 
 /// An entry of `trusted_authorities`: a `type` and its `values`, at least one.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -95,53 +70,59 @@ impl TrustedAuthorities {
     }
 }
 
-impl<'de> Deserialize<'de> for TrustedAuthorities {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Self::parse(&Value::deserialize(deserializer)?).map_err(de::Error::custom)
-    }
-}
-
 impl TrustedAuthority {
     fn parse(entry: &Value) -> Result<Self, TrustedAuthorityError> {
         let entry = entry
             .as_object()
             .ok_or(TrustedAuthorityError::EntryNotObject)?;
-        let Some(Value::String(kind)) = entry.get("type") else {
-            return Err(TrustedAuthorityError::Type);
+        let kind = match entry.get("type") {
+            Some(Value::String(kind)) => AuthorityType::new(kind),
+            Some(_) => return Err(TrustedAuthorityError::TypeNotString),
+            None => return Err(TrustedAuthorityError::TypeAbsent),
         };
-        let Some(Value::Array(values)) = entry.get("values") else {
-            return Err(TrustedAuthorityError::Values);
+        let values = match entry.get("values") {
+            Some(Value::Array(values)) => values,
+            Some(_) => return Err(TrustedAuthorityError::ValuesNotArray),
+            None => return Err(TrustedAuthorityError::ValuesAbsent),
         };
-        let mut parsed = Vec::with_capacity(values.len());
-        for value in values {
-            let Value::String(value) = value else {
-                return Err(TrustedAuthorityError::Values);
-            };
-            parsed.push(AuthorityValue::new(value));
+        if values.is_empty() {
+            return Err(TrustedAuthorityError::ValuesEmpty);
         }
-        if parsed.is_empty() {
-            return Err(TrustedAuthorityError::Values);
-        }
-        Ok(Self {
-            kind: AuthorityType::new(kind),
-            values: parsed,
-        })
+        let values = values
+            .iter()
+            .enumerate()
+            .map(|(position, value)| match value {
+                Value::String(value) => Ok(AuthorityValue::new(value)),
+                _ => Err(TrustedAuthorityError::ValueNotString(Position::new(
+                    position,
+                ))),
+            })
+            .collect::<Result<_, _>>()?;
+        Ok(Self { kind, values })
     }
 }
 
 /// Why a `trusted_authorities` member breaks §6.1.1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TrustedAuthorityError {
-    /// The member is not an array.
+    /// The member is no array.
     NotArray,
     /// The array is empty.
     Empty,
-    /// An entry is not an object.
+    /// An entry is no object.
     EntryNotObject,
-    /// An entry's `type` is missing or not a string.
-    Type,
-    /// An entry's `values` is missing, empty, or holds something other than strings.
-    Values,
+    /// An entry has no `type`.
+    TypeAbsent,
+    /// An entry's `type` is no string.
+    TypeNotString,
+    /// An entry has no `values`.
+    ValuesAbsent,
+    /// An entry's `values` is no array.
+    ValuesNotArray,
+    /// An entry's `values` is empty.
+    ValuesEmpty,
+    /// The entry of an entry's `values` at this position is no string.
+    ValueNotString(Position),
 }
 
 impl TrustedAuthorityError {
@@ -152,8 +133,11 @@ impl TrustedAuthorityError {
             Self::NotArray => "trusted_authorities_not_array",
             Self::Empty => "trusted_authorities_empty",
             Self::EntryNotObject => "trusted_authority_not_object",
-            Self::Type => "trusted_authority_type",
-            Self::Values => "trusted_authority_values",
+            Self::TypeAbsent | Self::TypeNotString => "trusted_authority_type",
+            Self::ValuesAbsent
+            | Self::ValuesNotArray
+            | Self::ValuesEmpty
+            | Self::ValueNotString(_) => "trusted_authority_values",
         }
     }
 }

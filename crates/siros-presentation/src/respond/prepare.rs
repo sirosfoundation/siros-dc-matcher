@@ -219,7 +219,7 @@ impl<'p, 'a> Chosen<'p, 'a> {
             .pointers()
             .iter()
             .map(|pointer| {
-                let (name_space, identifier) = mdoc_components(pointer.components())?;
+                let (name_space, identifier) = mdoc_components(pointer)?;
                 Ok::<_, PresentationError>(ElementId {
                     name_space,
                     identifier,

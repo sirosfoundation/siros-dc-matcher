@@ -164,6 +164,11 @@ fn planned<'a>(input: &PlanInput<'a>) -> Result<Step<Planned<'a>>, PresentationE
 /// `now` (C4) whose issuer the query's `trusted_authorities` admit against the trust store at
 /// `now` (TR3). Each `zkp_req` candidate answers the first option its tests pass; `policy` says
 /// whether the request meets the nym_auth policy.
+///
+/// # Errors
+///
+/// [`PresentationError::NoOffer`] when a Credential Query makes the request invalid, and the
+/// error of a request whose query as sent lacks a parsed Credential Query.
 fn answered<'a>(
     input: &PlanInput<'a>,
     policy: Result<(), RequestRefusal>,
@@ -188,9 +193,13 @@ fn answered<'a>(
         input.now.date(),
         policy,
     );
-    Ok(matching.answer(|credential, issuer, zkp| {
+    let answered = matching.answer(|credential, issuer, zkp| {
         proof::first_answered(credential, issuer, zkp, input.now)
-    }))
+    });
+    match answered.invalid_request() {
+        Some(failure) => Err(failure.into()),
+        None => Ok(answered),
+    }
 }
 
 /// The offers of `answered` whose credentials bind every entry of `transactions` (T4).

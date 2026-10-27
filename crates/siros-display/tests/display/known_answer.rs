@@ -9,8 +9,8 @@
 
 use serde_json::{json, Value};
 use siros_codec::base64url;
-use siros_credential::{ClaimPointer, Credential};
-use siros_dcql::PathComponent;
+use siros_credential::Credential;
+use siros_dcql::{ClaimPath, PathComponent};
 use siros_display::{DisplayCache, DisplayValue, IssuerMetadata, Locale};
 use siros_wallet_state::WalletState;
 
@@ -137,8 +137,8 @@ fn credential() -> Credential {
     Credential::parse(&state.credentials()[0]).unwrap()
 }
 
-fn pointer(keys: &[&str]) -> ClaimPointer {
-    ClaimPointer::parse(
+fn pointer(keys: &[&str]) -> ClaimPath {
+    ClaimPath::new(
         keys.iter()
             .map(|k| PathComponent::Key((*k).into()))
             .collect(),

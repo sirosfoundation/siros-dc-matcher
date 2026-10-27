@@ -10,6 +10,7 @@ use siros_mdoc::DisclosureError;
 use siros_oid4vp::{ErrorCode, HttpsUrl, ResponseError};
 use siros_sdjwt::KeyBindingError;
 use siros_transaction_data::TransactionDataError;
+use siros_trust::{ChainRefusal, Unadmitted};
 use siros_wallet_state::KeyId;
 use siros_zkp_req_nym_auth::policy::RequestRefusal;
 use siros_zkp_req_nym_auth::presenter::{ProveError, Unanswerable};
@@ -26,7 +27,7 @@ pub enum PresentationError {
     /// A Credential Query of the request breaks a rule (`invalid_request`).
     Asked(AskedError),
     /// The wallet has no offer for the request, and why.
-    NoOffer(Failure<Unproven>),
+    NoOffer(Failure<Unadmitted<ChainRefusal>, Unproven>),
     /// An entry of `transaction_data`, or its binding to an offer, breaks a rule. The code is
     /// its own.
     TransactionData(TransactionDataError),
@@ -245,7 +246,7 @@ macro_rules! causes {
 
 causes! {
     AskedError => Asked,
-    Failure<Unproven> => NoOffer,
+    Failure<Unadmitted<ChainRefusal>, Unproven> => NoOffer,
     TransactionDataError => TransactionData,
     DisplayError => Display,
     DigestError => Digest,

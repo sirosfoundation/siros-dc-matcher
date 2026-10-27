@@ -1,15 +1,11 @@
 //! The text values a Credential Query's `format` and `meta` name (§6.1; OpenID4VP 1.0,
 //! Appendix B), and the wallet's reference to a credential it holds.
 
-use core::fmt;
-
-use serde::{Deserialize, Serialize};
-
 /// Declares a text value of any content whose role is its type.
 macro_rules! text_value {
     ($(#[$doc:meta])* $name:ident) => {
         $(#[$doc])*
-        #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        #[derive(Debug, Clone, PartialEq, Eq, Hash, ::serde::Serialize, ::serde::Deserialize)]
         #[serde(transparent)]
         pub struct $name(String);
 
@@ -45,13 +41,15 @@ macro_rules! text_value {
             }
         }
 
-        impl fmt::Display for $name {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        impl ::core::fmt::Display for $name {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
                 f.write_str(&self.0)
             }
         }
     };
 }
+
+pub(crate) use text_value;
 
 text_value!(
     /// A Credential Format Identifier (§6.1 `format`), such as `mso_mdoc` or `dc+sd-jwt`

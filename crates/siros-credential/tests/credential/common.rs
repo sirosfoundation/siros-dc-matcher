@@ -75,9 +75,18 @@ pub fn sd_jwt(payload: &Value, disclosures: &[&str]) -> String {
 
 /// The compact SD-JWT of the payload text `payload` and `disclosures`.
 pub fn sd_jwt_text(payload: &str, disclosures: &[&str]) -> String {
+    sd_jwt_headed(
+        &json!({"alg": "ES256", "typ": "dc+sd-jwt"}),
+        payload,
+        disclosures,
+    )
+}
+
+/// The compact SD-JWT of the header `header`, the payload text `payload` and `disclosures`.
+pub fn sd_jwt_headed(header: &Value, payload: &str, disclosures: &[&str]) -> String {
     let mut out = format!(
         "{}.{}.{}~",
-        base64url::encode(br#"{"alg":"ES256","typ":"dc+sd-jwt"}"#).into_string(),
+        base64url::encode(header.to_string().as_bytes()).into_string(),
         base64url::encode(payload.as_bytes()).into_string(),
         base64url::encode(&[7; 64]).into_string(),
     );
@@ -105,8 +114,19 @@ fn tagged_bytes(item: &Cbor) -> Cbor {
 }
 
 /// Base64url of an `IssuerSigned` whose MSO lists the digests of `elements`, all in
-/// [`NAME_SPACE`], and is valid from `valid_from` until `valid_until`.
+/// [`NAME_SPACE`], and is valid from `valid_from` until `valid_until`, with the issuer chain
+/// [`ISSUER`].
 pub fn mdoc(elements: Vec<(&str, Cbor)>, valid_from: &str, valid_until: &str) -> String {
+    mdoc_chained(elements, valid_from, valid_until, ISSUER)
+}
+
+/// [`mdoc`] with the `x5chain` certificate `chain`.
+pub fn mdoc_chained(
+    elements: Vec<(&str, Cbor)>,
+    valid_from: &str,
+    valid_until: &str,
+    chain: &[u8],
+) -> String {
     let items: Vec<Cbor> = elements
         .into_iter()
         .zip(0..)
@@ -160,7 +180,7 @@ pub fn mdoc(elements: Vec<(&str, Cbor)>, valid_from: &str, valid_until: &str) ->
     ]);
     let issuer_auth = Cbor::Array(vec![
         Cbor::Bytes(vec![0xa1, 0x01, 0x26]),
-        Cbor::Map(vec![(Cbor::Unsigned(33), Cbor::Bytes(ISSUER.to_vec()))]),
+        Cbor::Map(vec![(Cbor::Unsigned(33), Cbor::Bytes(chain.to_vec()))]),
         Cbor::Bytes(tagged_bytes(&mso).encode()),
         Cbor::Bytes(vec![0; 64]),
     ]);

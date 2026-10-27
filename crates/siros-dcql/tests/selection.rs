@@ -8,7 +8,7 @@
 mod support;
 
 use serde_json::json;
-use siros_dcql::{execute, ExactFormat};
+use siros_dcql::{execute, ComponentIndex, ExactFormat, PathError};
 use support::{pid, query, satisfiable, JsonCredential};
 
 /// §6.4.1 — "If the Wallet cannot deliver all claims requested by the
@@ -199,24 +199,6 @@ fn an_optional_credential_set_does_not_block_the_request() {
     assert!(!r.query("b").unwrap().is_satisfied());
 }
 
-/// §6.4.1 — "`claim_sets` MUST NOT be present if `claims` is absent." The
-/// verifier asked for a combination of claims it never listed, so what it
-/// wants cannot be determined and nothing is offered.
-#[test]
-fn claim_sets_without_claims_matches_nothing() {
-    let q = query(
-        r#"{"credentials":[{"id":"c","format":"dc+sd-jwt","meta":{},
-             "claim_sets":[["nonexistent"]]}]}"#,
-    );
-    let creds = [pid(json!({"given_name": "Erika"}))];
-
-    assert!(execute(&q, &creds, &ExactFormat)
-        .query("c")
-        .unwrap()
-        .candidates()
-        .is_empty());
-}
-
 /// §6.1 — "Multiple Credential Queries in a request MAY request a
 /// presentation of the same Credential."
 #[test]
@@ -269,10 +251,11 @@ fn all_qualifying_credentials_are_returned_as_candidates() {
     assert_eq!(ids, ["pid-1", "pid-2"], "the mdoc has the wrong format");
 }
 
-/// A path whose *type* is wrong for the credential aborts resolution (§7.1.1),
-/// which must disqualify the credential rather than propagate as a panic.
+/// A path whose *type* is wrong for the credential aborts processing with an error (§7.1.1):
+/// the credential answers nothing, and the query's refusals carry the error. With
+/// `claim_sets`, the next option still answers.
 #[test]
-fn a_type_mismatched_path_disqualifies_without_panicking() {
+fn a_type_mismatched_path_refuses_the_credential_with_its_error() {
     let q = query(
         r#"{"credentials":[{"id":"c","format":"dc+sd-jwt","meta":{},
              "claims":[{"path":["given_name","first"]}]}]}"#,
@@ -280,8 +263,34 @@ fn a_type_mismatched_path_disqualifies_without_panicking() {
     let creds = [pid(json!({"given_name": "Erika"}))];
 
     let r = execute(&q, &creds, &ExactFormat);
-    assert!(r.query("c").unwrap().candidates().is_empty());
+    let c = r.query("c").unwrap();
+    assert!(c.candidates().is_empty());
+    let refusals: Vec<_> = c
+        .refusals()
+        .iter()
+        .map(|refusal| (refusal.credential_id().as_str(), refusal.error().clone()))
+        .collect();
+    assert_eq!(
+        refusals,
+        [(
+            "pid-1",
+            PathError::TypeMismatch {
+                at: ComponentIndex::new(1)
+            }
+        )]
+    );
     assert!(!satisfiable(&r));
+
+    let q = query(
+        r#"{"credentials":[{"id":"c","format":"dc+sd-jwt","meta":{},
+             "claims":[{"id":"bad","path":["given_name","first"]},
+                       {"id":"good","path":["given_name"]}],
+             "claim_sets":[["bad"],["good"]]}]}"#,
+    );
+    let r = execute(&q, &creds, &ExactFormat);
+    let c = r.query("c").unwrap();
+    assert_eq!(c.candidates()[0].claims()[0].claim_id().unwrap(), "good");
+    assert!(c.refusals().is_empty());
 }
 
 /// An empty wallet satisfies nothing, and must not be reported otherwise.
@@ -293,17 +302,6 @@ fn an_empty_wallet_satisfies_nothing() {
     let r = execute(&q, &creds, &ExactFormat);
     assert!(!satisfiable(&r));
     assert!(r.query("c").unwrap().candidates().is_empty());
-}
-
-/// §6 — `credentials` is REQUIRED and non-empty, but parsing does not enforce
-/// it and every set check is vacuously true over an empty set. Without a
-/// guard, an empty query reports as satisfiable and the picker offers an entry
-/// backed by nothing.
-#[test]
-fn an_empty_query_is_not_satisfiable() {
-    let q = query(r#"{"credentials":[]}"#);
-    let creds = [pid(json!({"given_name": "Erika"}))];
-    assert!(!satisfiable(&execute(&q, &creds, &ExactFormat)));
 }
 
 /// A request whose sets are all optional passes "all required sets satisfied"

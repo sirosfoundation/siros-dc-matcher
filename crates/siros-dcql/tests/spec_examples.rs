@@ -9,8 +9,8 @@
 
 use serde_json::{json, Value};
 use siros_dcql::{
-    execute, CredentialFormat, CredentialRef, CryptographicBinding, DcqlQuery, ExactFormat,
-    PathComponent, PathError, QueryResult, Satisfaction, SetRequirement,
+    execute, ClaimPath, CredentialFormat, CredentialRef, CryptographicBinding, DcqlQuery,
+    ExactFormat, PathComponent, PathError, QueryResult, Satisfaction, SetRequirement,
 };
 
 /// Whether the wallet can satisfy the request.
@@ -41,7 +41,7 @@ impl siros_dcql::Credential for Mdoc {
     fn format(&self) -> &CredentialFormat {
         &self.format
     }
-    fn claim(&self, path: &[PathComponent]) -> Result<Vec<Value>, PathError> {
+    fn claim(&self, path: &ClaimPath) -> Result<Vec<Value>, PathError> {
         let (ns, element) = siros_dcql::mdoc_components(path)?;
         self.namespaces
             .get(ns)
@@ -69,7 +69,7 @@ impl siros_dcql::Credential for Json {
     fn format(&self) -> &CredentialFormat {
         &self.format
     }
-    fn claim(&self, path: &[PathComponent]) -> Result<Vec<Value>, PathError> {
+    fn claim(&self, path: &ClaimPath) -> Result<Vec<Value>, PathError> {
         siros_dcql::resolve_json(&self.body, path).map(|v| v.into_iter().cloned().collect())
     }
     /// The spec's own vectors are all holder-bound credentials.
@@ -101,7 +101,7 @@ fn body_satisfying(claims: &[siros_dcql::ClaimsQuery]) -> Value {
             .as_ref()
             .and_then(|v| v.first().cloned())
             .unwrap_or_else(|| json!("value"));
-        insert_at(&mut root, claim.path(), leaf);
+        insert_at(&mut root, claim.path().components(), leaf);
     }
     root
 }
@@ -217,7 +217,7 @@ fn claims_alternatives_takes_the_verifiers_first_choice() {
 fn complex_mdoc_resolves_dotted_namespaces() {
     let q = vector("complex_mdoc");
     let first = &q.credentials()[0];
-    let path = &first.claims()[0].path();
+    let path = first.claims()[0].path().components();
     assert_eq!(
         path.len(),
         2,
@@ -280,7 +280,11 @@ fn value_matching_vector_accepts_only_the_listed_value() {
         .find(|c| c.values().is_some())
         .expect("the vector restricts at least one value");
     let mut body = body_satisfying(cq.claims());
-    insert_at(&mut body, restricted.path(), json!("definitely-not-it"));
+    insert_at(
+        &mut body,
+        restricted.path().components(),
+        json!("definitely-not-it"),
+    );
 
     let wrong = [json_cred("c", cq.format().as_str(), body)];
     assert!(!execute(&q, &wrong, &ExactFormat)

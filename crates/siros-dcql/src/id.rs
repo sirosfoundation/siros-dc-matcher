@@ -119,12 +119,11 @@ macro_rules! identifier {
     };
 }
 
-/// The first character of `text` that is not an ASCII letter, a digit, `_` or `-`: the
-/// identifier alphabet of §6.1 and §6.3. One function for every identifier type, so that
+/// The first character of `text` outside the identifier alphabet of §6.1 and §6.3: ASCII
+/// letters, digits, `_` and `-`. One function for every identifier type, so that
 /// `matcher.wasm` holds its code once.
 #[inline(never)]
-#[must_use]
-pub fn foreign_character(text: &str) -> Option<char> {
+fn foreign_character(text: &str) -> Option<char> {
     text.chars()
         .find(|c| !(c.is_ascii_alphanumeric() || *c == '_' || *c == '-'))
 }

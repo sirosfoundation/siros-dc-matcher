@@ -1,4 +1,4 @@
-//! Why a credential, a pointer or a validity witness is refused. Each error has a stable code.
+//! Why a credential or a validity witness is refused. Each error has a stable code.
 
 use std::fmt;
 
@@ -180,31 +180,6 @@ impl From<MdocError> for CredentialError {
         Self::Mdoc(e)
     }
 }
-
-/// Why components are no claims path pointer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum PointerError {
-    /// A claims path pointer is a non-empty array (OpenID4VP 1.0, Section 7).
-    Empty,
-}
-
-impl PointerError {
-    /// A stable identifier.
-    #[must_use]
-    pub fn code(&self) -> &'static str {
-        match self {
-            Self::Empty => "pointer_empty",
-        }
-    }
-}
-
-impl fmt::Display for PointerError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
-
-impl std::error::Error for PointerError {}
 
 /// Why a credential is not usable at a given time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
