@@ -19,10 +19,6 @@ use wasmtime::{Caller, Engine, Extern, Linker, Memory, Module, Store};
 use wasmtime_wasi::preview1::{self, WasiP1Ctx};
 use wasmtime_wasi::WasiCtxBuilder;
 
-/// Environment variable naming a local matcher binary to use as a
-/// differential-testing oracle. Tests skip when it is unset.
-pub const ORACLE_ENV: &str = "MULTIPAZ_MATCHER_WASM";
-
 /// What the host offers a matcher on one invocation.
 #[derive(Debug, Clone, Default)]
 pub struct Invocation {

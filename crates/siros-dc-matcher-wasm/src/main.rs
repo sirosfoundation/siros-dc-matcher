@@ -54,14 +54,11 @@ use siros_dc_matcher_core::evaluator::{credentials, resolve, ProfilePolicy};
 use siros_dcql::execute;
 use siros_oid4vp::{diagnose, UnverifiedRequest};
 
-/// Prefix for the per-entry set ids.
+/// Prefix of the set ids: combination `n` is the set `siros-n`.
 ///
-/// A set is a group of entries the picker selects *together*, so candidates
-/// for the same query — which are alternatives the user chooses between — must
-/// not share one. Each entry gets its own single-member set.
-///
-/// Real multi-credential sets arrive with DCQL `credential_sets` combinations
-/// in Phase 5, where a set genuinely means "these, together".
+/// A set is a group of entries the picker selects *together*. Each set holds
+/// the members of one combination, which the user presents as a unit; the
+/// alternative combinations are separate sets.
 const SET_PREFIX: &str = "siros";
 
 /// How many combinations to offer at most.
