@@ -3,21 +3,21 @@
 
 use std::fmt;
 
-use serde::de::{Deserializer, MapAccess, Visitor};
-use serde_json::Value;
-
+use siros_codec::json::{Json, JsonFault, ReadFault};
 use siros_codec::{base64url, Base64Error};
 use siros_dcql::{Multiplicity, QueryId};
 
 use crate::ids::PresentationIndex;
 
 /// Why a `vp_token` gives no presentations for a query.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VpTokenError {
-    /// The text is not one JSON object.
-    NotObject(serde_json::Error),
-    /// The object repeats a member name.
-    DuplicateMember,
+    /// The text is no JSON value the strict reader holds.
+    NotJson(ReadFault),
+    /// The JSON value is no object.
+    NotObject,
+    /// An object repeats this member name.
+    DuplicateMember(String),
     /// The object has no entry for the query's `id`.
     QueryIdMissing,
     /// The entry is not an array.
@@ -45,8 +45,8 @@ impl VpTokenError {
     #[must_use]
     pub fn code(&self) -> &'static str {
         match self {
-            Self::NotObject(_) => "response_not_object",
-            Self::DuplicateMember => "duplicate_member",
+            Self::NotJson(_) | Self::NotObject => "response_not_object",
+            Self::DuplicateMember(_) => "duplicate_member",
             Self::QueryIdMissing => "query_id_missing",
             Self::NotArray => "presentations_not_array",
             Self::Empty => "presentations_empty",
@@ -66,36 +66,16 @@ impl fmt::Display for VpTokenError {
 impl std::error::Error for VpTokenError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::NotObject(error) => Some(error),
+            Self::NotJson(fault) => Some(fault),
             Self::NotBase64url { error, .. } => Some(error),
-            Self::DuplicateMember
+            Self::NotObject
+            | Self::DuplicateMember(_)
             | Self::QueryIdMissing
             | Self::NotArray
             | Self::Empty
             | Self::MultipleNotAllowed
             | Self::NotString { .. } => None,
         }
-    }
-}
-
-/// The members of a JSON object in their order, repeated names kept.
-struct Members(Vec<(String, Value)>);
-
-struct MembersVisitor;
-
-impl<'de> Visitor<'de> for MembersVisitor {
-    type Value = Members;
-
-    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("a JSON object")
-    }
-
-    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Members, A::Error> {
-        let mut members = Vec::new();
-        while let Some(entry) = map.next_entry::<String, Value>()? {
-            members.push(entry);
-        }
-        Ok(Members(members))
     }
 }
 
@@ -110,24 +90,20 @@ pub fn presentations_of(
     query_id: &QueryId,
     multiplicity: Multiplicity,
 ) -> Result<Vec<Vec<u8>>, VpTokenError> {
-    let mut deserializer = serde_json::Deserializer::from_str(vp_token);
-    let Members(members) = deserializer
-        .deserialize_map(MembersVisitor)
-        .map_err(VpTokenError::NotObject)?;
-    deserializer.end().map_err(VpTokenError::NotObject)?;
-    let repeated = members
-        .iter()
-        .enumerate()
-        .any(|(i, (name, _))| members.iter().skip(i + 1).any(|(other, _)| other == name));
-    if repeated {
-        return Err(VpTokenError::DuplicateMember);
-    }
+    let members = match Json::parse_unique(vp_token.as_bytes()) {
+        Ok(Json::Object(members)) => members,
+        Ok(_) => return Err(VpTokenError::NotObject),
+        Err(JsonFault::Read(fault)) => return Err(VpTokenError::NotJson(fault)),
+        Err(JsonFault::RepeatedMember(name)) => return Err(VpTokenError::DuplicateMember(name)),
+    };
     let entry = members
         .iter()
         .find(|(name, _)| query_id == name)
         .map(|(_, value)| value)
         .ok_or(VpTokenError::QueryIdMissing)?;
-    let list = entry.as_array().ok_or(VpTokenError::NotArray)?;
+    let Json::Array(list) = entry else {
+        return Err(VpTokenError::NotArray);
+    };
     match (list.len(), multiplicity) {
         (0, _) => return Err(VpTokenError::Empty),
         (1, _) | (_, Multiplicity::Several) => {}
@@ -137,7 +113,9 @@ pub fn presentations_of(
         .enumerate()
         .map(|(index, p)| {
             let index = PresentationIndex::new(index);
-            let text = p.as_str().ok_or(VpTokenError::NotString { index })?;
+            let Json::String(text) = p else {
+                return Err(VpTokenError::NotString { index });
+            };
             base64url::decode(text).map_err(|error| VpTokenError::NotBase64url { index, error })
         })
         .collect()

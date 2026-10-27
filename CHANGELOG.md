@@ -243,7 +243,11 @@ against the 307,200-byte budget (303,914 before).
   adds the repeated member name (`JsonFault`). `siros-transaction-data` reads its entries and
   metadata documents with it: its own reader, `JsonError` and `MAX_DEPTH` are gone,
   `TransactionDataError::NotJson` and `MetadataNotJson` hold the `JsonFault`, and
-  `TransactionDataError` loses `Copy`; the codes are unchanged. A part of an SD-JWT nested
+  `TransactionDataError` loses `Copy`; the codes are unchanged. `siros-zkp-req`'s `vp_token`
+  reading (`presentations_of`, `VpTokenError`) moves behind its feature `vp-token`, which
+  enables the reader: `VpTokenError::NotObject` splits into `NotJson` (the `ReadFault`) and
+  `NotObject`, `DuplicateMember` names the member, and a member repeated at any level of the
+  `vp_token` refuses it; the codes are unchanged. A part of an SD-JWT nested
   deeper than 64 levels is a JSON fault of that part; `claims_too_deep` covers 33 to 64 levels.
 - **BREAKING (Rust API):** refusals keep their causes. `IntakeError::DcqlQueryInvalid` holds
   the `QueryError`, a form parameter that is no JSON is `IntakeError::ParameterNotJson`, a DC

@@ -1409,7 +1409,6 @@ dependencies = [
 name = "siros-zkp-req"
 version = "0.11.0"
 dependencies = [
- "serde",
  "serde_json",
  "siros-codec",
  "siros-dcql",

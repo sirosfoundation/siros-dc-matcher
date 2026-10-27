@@ -13,7 +13,7 @@
 //! | [`select`] | The usable pair of a system and a proof backend | Section 1.3 |
 //! | [`presentation`] | `ZkpPresentation`, the backends' `Proof`, the `vp_token` | Sections 3, 4, 6.1 |
 //! | [`structure`] | The Verifier's checks of a presentation, steps 1 to 5 | Section 4.1 |
-//! | [`vp_token`] | The presentations of a query in a JSON `vp_token` | Section 6.1 |
+//! | `vp_token` (feature `vp-token`) | The presentations of a query in a JSON `vp_token` | Section 6.1 |
 //! | [`outcome`] | The error codes and the request rules | Section 5 |
 //!
 //! A function catalogue, such as `siros-zkp-req-nym-auth`, adds its functions and systems.
@@ -40,6 +40,7 @@ pub mod presentation;
 pub mod query;
 pub mod select;
 pub mod structure;
+#[cfg(feature = "vp-token")]
 pub mod vp_token;
 
 pub use formats::ZkpFormats;
@@ -57,4 +58,5 @@ pub use presentation::{
 pub use query::{CredentialType, QueryOption, ReqItem, ReqSets, ZkpReqQuery};
 pub use select::{usable_backend, PairRefusal, System};
 pub use structure::{answered_option, StructureRejection};
+#[cfg(feature = "vp-token")]
 pub use vp_token::{presentations_of, VpTokenError};
