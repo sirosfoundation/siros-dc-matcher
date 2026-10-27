@@ -1,5 +1,7 @@
 //! The tokenizer of CSS Syntax Module Level 3, Section 4: the input preprocessed (Section 3.3),
-//! comments consumed, escapes decoded, strings, url tokens and functions told apart.
+//! comments consumed, escapes decoded, strings, url tokens and functions told apart. It also
+//! reads the unicode-range token of the 2014 Candidate Recommendation (Section 4.3.7), which
+//! WebKit keeps: a `url(` after one is a url token there.
 
 /// A token of Section 4. Numbers keep no value: the check reads names, strings and URLs.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,6 +16,7 @@ pub(super) enum Token {
     BadUrl,
     Delim,
     Numeric,
+    UnicodeRange,
     Whitespace,
     Cdo,
     Cdc,
@@ -123,12 +126,53 @@ impl Input {
                 self.at -= 1;
                 self.numeric()
             }
-            c if ident_start(c) => {
-                self.at -= 1;
-                self.ident_like()
-            }
+            c if ident_start(c) => self.ident_or_range(c),
             _ => Token::Delim,
         })
+    }
+
+    /// The token at the name-start code point `c`, just consumed: a unicode-range token at `U+`
+    /// and a hex digit or `?`, else an ident-like token.
+    fn ident_or_range(&mut self, c: char) -> Token {
+        let range = matches!(c, 'u' | 'U')
+            && self.peek(0) == Some('+')
+            && self
+                .peek(1)
+                .is_some_and(|c| c.is_ascii_hexdigit() || c == '?');
+        if range {
+            self.at += 1;
+            self.unicode_range();
+            Token::UnicodeRange
+        } else {
+            self.at -= 1;
+            self.ident_like()
+        }
+    }
+
+    /// Consumes a unicode-range token after its `U+`: up to 6 hex digits, then `?` up to 6 code
+    /// points, or else a `-` and up to 6 hex digits of the range's end.
+    fn unicode_range(&mut self) {
+        let digits = self.hex_run(6);
+        self.at += digits;
+        let mut questions = 0;
+        while digits + questions < 6 && self.peek(questions) == Some('?') {
+            questions += 1;
+        }
+        self.at += questions;
+        if questions == 0
+            && self.peek(0) == Some('-')
+            && self.peek(1).is_some_and(|c| c.is_ascii_hexdigit())
+        {
+            self.at += 1;
+            self.at += self.hex_run(6);
+        }
+    }
+
+    /// The count of hex digits from here, at most `most`.
+    fn hex_run(&self, most: usize) -> usize {
+        (0..most)
+            .take_while(|&ahead| self.peek(ahead).is_some_and(|c| c.is_ascii_hexdigit()))
+            .count()
     }
 
     /// Consumes the comments here (Section 4.3.2); an unterminated one runs to the end.

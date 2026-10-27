@@ -4,21 +4,23 @@
 
 use serde_json::json;
 use siros_transaction_data::{
-    CssFault, DataFault, Dimensions, FontFault, ImageFault, Incompatibility, IntegrityFault,
-    Location, LocationStep, SvgFault, MAX_DEPTH, MAX_RESOURCES,
+    CssFault, DataFault, Dimensions, ImageFault, Incompatibility, IntegrityFault, Location,
+    LocationStep, SvgFault, MAX_DEPTH,
 };
 
 use crate::common::{
-    b64, configured, credential, entries, ok, png, query, rows, sri, Documents, Host, Shown, CARD,
+    b64, configured, credential, entries, png, query, rows, Documents, Host, Shown, CARD,
 };
 
 const TYPE: &str = "urn:paso:sca:com.example:logo:1";
 const SVG: &str = "http://www.w3.org/2000/svg";
 const XHTML: &str = "http://www.w3.org/1999/xhtml";
 const XML: &str = "http://www.w3.org/XML/1998/namespace";
+const SODIPODI: &str = "http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd";
+const RDF: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
 
 /// An SVG document of 10 by 10 holding `inner`.
-fn svg(inner: &str) -> String {
+pub(crate) fn svg(inner: &str) -> String {
     format!(
         r#"<svg xmlns="{SVG}" xmlns:xlink="http://www.w3.org/1999/xlink" width="10" height="10">{inner}</svg>"#
     )
@@ -26,7 +28,7 @@ fn svg(inner: &str) -> String {
 
 /// The rows the card shows for an SVG logo of `document`, the host answering fetches with
 /// `documents`.
-fn outcome(document: &str, documents: Documents) -> Shown {
+pub(crate) fn outcome(document: &str, documents: Documents) -> Shown {
     let definition = json!({"claims": [
         {"path": ["logo"], "value_type": "image", "display": [{"locale": "en", "name": "Logo"}]}
     ]});
@@ -38,12 +40,12 @@ fn outcome(document: &str, documents: Documents) -> Shown {
     rows(&host, &entries[0], &credential(CARD, &[]))
 }
 
-fn refused(fault: SvgFault) -> Shown {
+pub(crate) fn refused(fault: SvgFault) -> Shown {
     let logo = Location::new(vec![LocationStep::Key("logo".to_owned())]);
     Err(Incompatibility::Image(logo, ImageFault::Svg(fault)))
 }
 
-fn shown() -> Shown {
+pub(crate) fn shown() -> Shown {
     Ok(vec![("Logo".to_owned(), "<image Svg>".to_owned())])
 }
 
@@ -51,7 +53,7 @@ fn element(namespace: &str, name: &str) -> SvgFault {
     SvgFault::Element(Some(namespace.to_owned()), name.to_owned())
 }
 
-fn unpinned(url: &str) -> SvgFault {
+pub(crate) fn unpinned(url: &str) -> SvgFault {
     SvgFault::ReferenceUnpinned(url.to_owned())
 }
 
@@ -64,13 +66,13 @@ fn attribute(element: &str, namespace: Option<&str>, name: &str) -> SvgFault {
 }
 
 /// A Data URL of `bytes` in base64, of `media_type`.
-fn data(media_type: &str, bytes: &[u8]) -> String {
+pub(crate) fn data(media_type: &str, bytes: &[u8]) -> String {
     format!("data:{media_type};base64,{}", b64(bytes))
 }
 
 /// A WOFF2 font of one table: its header, a directory entry for `cmap` of 4 bytes, and 4 bytes
 /// of compressed data.
-fn woff2() -> Vec<u8> {
+pub(crate) fn woff2() -> Vec<u8> {
     let mut font = b"wOF2".to_vec();
     font.extend_from_slice(&[0, 1, 0, 0]); // flavor: TrueType outlines
     font.extend_from_slice(&54_u32.to_be_bytes()); // length
@@ -246,7 +248,40 @@ fn each_vector_outside_the_subset_is_refused() {
         (
             "a link to javascript:",
             svg(r#"<a href="javascript:alert(1)"><rect width="1" height="1"/></a>"#),
-            element(SVG, "a"),
+            SvgFault::ReferenceNotHttps("javascript:alert(1)".to_owned()),
+        ),
+        (
+            "a link to an unpinned page",
+            svg(&format!(
+                r#"<a href="{x}"><rect width="1" height="1"/></a>"#
+            )),
+            unpinned(x),
+        ),
+        (
+            "an image inside editing data",
+            svg(&format!(
+                r#"<sodipodi:namedview xmlns:sodipodi="{SODIPODI}"><image href="{x}"/></sodipodi:namedview>"#
+            )),
+            unpinned(x),
+        ),
+        (
+            "an href on editing data",
+            svg(&format!(
+                r#"<sodipodi:namedview xmlns:sodipodi="{SODIPODI}" href="{x}"/>"#
+            )),
+            attribute("namedview", None, "href"),
+        ),
+        (
+            "RDF outside metadata",
+            svg(&format!(r#"<rdf:RDF xmlns:rdf="{RDF}"/>"#)),
+            element(RDF, "RDF"),
+        ),
+        (
+            "XHTML inside metadata",
+            svg(&format!(
+                r#"<metadata><img xmlns="{XHTML}" src="{x}"/></metadata>"#
+            )),
+            element(XHTML, "img"),
         ),
         (
             "feImage",
@@ -318,6 +353,11 @@ fn each_vector_outside_the_subset_is_refused() {
         (
             "image() of CSS Images 4",
             svg(&format!(r#"<rect style="fill:image('{x}')"/>"#)),
+            unpinned(x),
+        ),
+        (
+            "url( after a unicode-range, a url token in WebKit",
+            svg(&format!(r#"<rect style="fill:U+1url({x})"/>"#)),
             unpinned(x),
         ),
         (
@@ -489,142 +529,5 @@ fn nesting_is_bounded_before_the_parse() {
     assert_eq!(
         outcome(&nested(MAX_DEPTH), Vec::new()),
         refused(SvgFault::Nesting)
-    );
-}
-
-/// A logo as a drawing program exports it: an XML declaration, a style sheet of classes, a
-/// gradient the classes paint with, text, and custom data.
-#[test]
-fn an_exported_logo_is_shown() {
-    let logo = r##"<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 120 40" width="120" height="40">
-  <defs>
-    <style>
-      .cls-1 { fill: url(#gradient); }
-      .cls-2 { fill: #1d1d1b; font-family: Helvetica, Arial, sans-serif; font-size: 18px; }
-      @media (prefers-color-scheme: dark) { .cls-2 { fill: rgb(240 240 240 / 90%); } }
-    </style>
-    <linearGradient id="gradient" x1="0" y1="0" x2="1" y2="1" gradientUnits="objectBoundingBox">
-      <stop offset="0" stop-color="#0057b8"/>
-      <stop offset="1" stop-color="#ffd700"/>
-    </linearGradient>
-  </defs>
-  <title>Shop</title>
-  <!-- Layer 1 -->
-  <g id="Layer_1" data-name="Layer 1">
-    <circle class="cls-1" cx="20" cy="20" r="18"/>
-    <text class="cls-2" x="44" y="26" xml:space="preserve">Shop</text>
-    <path d="M40 34h70" stroke="#1d1d1b" stroke-width="2" transform="translate(0 1)"/>
-  </g>
-</svg>"##;
-    assert_eq!(outcome(logo, Vec::new()), shown());
-}
-
-/// A pinned resource passes when it is a PNG or JPEG image or a font whose header reads, and is
-/// refused when it is an SVG document, a style sheet, or a font whose directory does not read.
-/// The wallet fetches each URL once, checks it against every integrity value the document gives
-/// it, and fetches at most `MAX_RESOURCES` URLs.
-#[test]
-fn resources_pass_by_their_content() {
-    let pinned = |url: &str, body: &[u8]| format!("{url}#{}", sri(body).replace('=', "%3D"));
-    let face = |source: &str| {
-        svg(&format!(
-            "<style>@font-face{{font-family:x;src:url({source})}}</style>"
-        ))
-    };
-    let font = "https://cdn.example/f.woff2";
-    let woff2 = woff2();
-    assert_eq!(
-        outcome(
-            &face(&pinned(font, &woff2)),
-            vec![(font.to_owned(), ok(&woff2))]
-        ),
-        shown()
-    );
-    assert_eq!(
-        outcome(&face(&data("font/woff2", &woff2)), Vec::new()),
-        shown(),
-        "a Data URL font"
-    );
-    let otto_svg = br#"OTTO<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>"#;
-    assert_eq!(
-        outcome(
-            &face(&pinned(font, otto_svg)),
-            vec![(font.to_owned(), ok(otto_svg))]
-        ),
-        refused(SvgFault::ResourceFont(
-            font.to_owned(),
-            FontFault::Truncated
-        ))
-    );
-
-    let inner = br#"<svg xmlns="http://www.w3.org/2000/svg"><rect style="fill:url(https://evil.example/leak.png)"/></svg>"#;
-    let sheet = b"rect{fill:url(https://evil.example/leak.png)}";
-    for (url, body) in [
-        ("https://img.example/n.svg", inner.as_slice()),
-        ("https://img.example/s.css", sheet.as_slice()),
-    ] {
-        let document = svg(&format!(
-            r#"<image width="1" height="1" href="{}"/>"#,
-            pinned(url, body)
-        ));
-        assert_eq!(
-            outcome(&document, vec![(url.to_owned(), ok(body))]),
-            refused(SvgFault::ResourceType(url.to_owned())),
-            "{url}"
-        );
-    }
-
-    let url = "https://img.example/a.png";
-    let part = png(1, 1);
-    let digest = sri(&part);
-    // The fragment with its character at `at` percent-encoded.
-    let spelled = |at: usize| -> String {
-        digest
-            .char_indices()
-            .map(|(i, c)| {
-                if i == at {
-                    format!("%{:02X}", u32::from(c))
-                } else {
-                    c.to_string()
-                }
-            })
-            .collect()
-    };
-    let spellings: String = std::iter::once(format!(" {url}#{digest}"))
-        .chain((0..MAX_RESOURCES).map(|at| format!("{url}#{}", spelled(at))))
-        .map(|reference| format!(r#"<image width="1" height="1" href="{reference}"/>"#))
-        .collect();
-    assert_eq!(
-        outcome(&svg(&spellings), vec![(url.to_owned(), ok(&part))]),
-        shown(),
-        "one URL, its fragment spelled {} ways",
-        MAX_RESOURCES + 1
-    );
-    let other = pinned(url, b"other");
-    let both = svg(&format!(
-        r#"<image width="1" height="1" href="{}"/><image width="1" height="1" href="{other}"/>"#,
-        pinned(url, &part)
-    ));
-    assert_eq!(
-        outcome(&both, vec![(url.to_owned(), ok(&part))]),
-        refused(SvgFault::ReferenceIntegrity(
-            other,
-            IntegrityFault::Mismatch
-        ))
-    );
-
-    let images: String = (0..=MAX_RESOURCES)
-        .map(|i| {
-            let url = format!("https://img.example/{i}.png");
-            format!(
-                r#"<image width="1" height="1" href="{}"/>"#,
-                pinned(&url, &[0])
-            )
-        })
-        .collect();
-    assert_eq!(
-        outcome(&svg(&images), Vec::new()),
-        refused(SvgFault::TooManyResources(MAX_RESOURCES + 1))
     );
 }

@@ -5,6 +5,7 @@ mod definition;
 mod image;
 mod payload;
 mod request;
+mod resources;
 mod signed;
-mod svg;
+pub(crate) mod svg;
 mod ts12;

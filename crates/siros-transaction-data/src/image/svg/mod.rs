@@ -11,7 +11,7 @@ mod allow;
 mod markup;
 mod resource;
 
-use roxmltree::{Document as Xml, Node, NodeType, ParsingOptions};
+use roxmltree::{Attribute, Document as Xml, Node, NodeType, ParsingOptions};
 use siros_oid4vp::HttpsUrl;
 
 use super::css::{self, CssFault};
@@ -169,46 +169,49 @@ fn references(document: &Xml<'_>) -> Result<Vec<String>, SvgFault> {
     Ok(found)
 }
 
+/// What an element of a document is to the subset.
+#[derive(Clone, Copy)]
+enum Kind {
+    /// An element of the subset, with the attributes of its own.
+    Svg(&'static [&'static str]),
+    /// Editing data, or RDF inside a `metadata` element, which renderers ignore.
+    Inert,
+}
+
+/// The kind of the element `node`.
+///
+/// # Errors
+///
+/// [`SvgFault::Element`] for an element outside the subset.
+fn kind(node: Node<'_, '_>) -> Result<Kind, SvgFault> {
+    let tag = node.tag_name();
+    match (tag.namespace(), allow::attributes(tag.name())) {
+        (Some(allow::SVG), Some(own)) => Ok(Kind::Svg(own)),
+        (Some(namespace), _) if allow::editor(namespace) => Ok(Kind::Inert),
+        (Some(namespace), _) if allow::metadata(namespace) && node.ancestors().any(is_metadata) => {
+            Ok(Kind::Inert)
+        }
+        (namespace, _) => Err(SvgFault::Element(
+            namespace.map(str::to_owned),
+            tag.name().to_owned(),
+        )),
+    }
+}
+
+/// Whether `node` is a `metadata` element of the SVG namespace.
+fn is_metadata(node: Node<'_, '_>) -> bool {
+    node.tag_name().namespace() == Some(allow::SVG) && node.tag_name().name() == "metadata"
+}
+
 /// The URLs of the element `node`, checked against the subset.
 fn element(node: Node<'_, '_>) -> Result<Vec<String>, SvgFault> {
-    let tag = node.tag_name();
-    let name = tag.name();
-    let own = match (tag.namespace(), allow::attributes(name)) {
-        (Some(allow::SVG), Some(own)) => own,
-        (namespace, _) => {
-            return Err(SvgFault::Element(
-                namespace.map(str::to_owned),
-                name.to_owned(),
-            ))
-        }
-    };
+    let kind = kind(node)?;
+    let name = node.tag_name().name();
     let mut found = Vec::new();
     for attribute in node.attributes() {
-        let refused = || SvgFault::Attribute {
-            element: name.to_owned(),
-            namespace: attribute.namespace().map(str::to_owned),
-            name: attribute.name().to_owned(),
-        };
-        match (attribute.namespace(), attribute.name()) {
-            (Some(allow::XLINK), "href") | (None, "href") => {
-                if !allow::HREF.contains(&name) {
-                    return Err(refused());
-                }
-                found.push(attribute.value().to_owned());
-            }
-            (Some(allow::XML), "space" | "lang") => {}
-            (None, "style") => found.extend(css::urls(attribute.value()).map_err(SvgFault::Css)?),
-            // Custom data, which no renderer reads (SVG 2, Section 1.9).
-            (None, data) if data.starts_with("data-") => {}
-            (None, attribute_name) if allow::takes(name, own, attribute_name) => {
-                if allow::PRESENTATION.contains(&attribute_name) {
-                    found.extend(css::urls(attribute.value()).map_err(SvgFault::Css)?);
-                }
-            }
-            _ => return Err(refused()),
-        }
+        found.extend(self::attribute(kind, name, &attribute)?);
     }
-    if name == "style" {
+    if matches!(kind, Kind::Svg(_)) && name == "style" {
         let mut sheet = String::new();
         for child in node.children() {
             match (child.node_type(), child.text()) {
@@ -219,6 +222,51 @@ fn element(node: Node<'_, '_>) -> Result<Vec<String>, SvgFault> {
         found.extend(css::urls(&sheet).map_err(SvgFault::Css)?);
     }
     Ok(found)
+}
+
+/// The URLs of `attribute` of an element of the name `element` and of `kind`, checked against
+/// the subset.
+fn attribute(
+    kind: Kind,
+    element: &str,
+    attribute: &Attribute<'_, '_>,
+) -> Result<Vec<String>, SvgFault> {
+    let refused = || SvgFault::Attribute {
+        element: element.to_owned(),
+        namespace: attribute.namespace().map(str::to_owned),
+        name: attribute.name().to_owned(),
+    };
+    let scanned = |value: &str| css::urls(value).map_err(SvgFault::Css);
+    match (attribute.namespace(), attribute.name()) {
+        (Some(allow::XLINK), "href") | (None, "href") => match kind {
+            Kind::Svg(_) if allow::HREF.contains(&element) => {
+                Ok(vec![attribute.value().to_owned()])
+            }
+            Kind::Svg(_) | Kind::Inert => Err(refused()),
+        },
+        (Some(allow::XLINK), "title") | (Some(allow::XML), "space" | "lang" | "id") => {
+            Ok(Vec::new())
+        }
+        (Some(namespace), _) if allow::editor(namespace) => Ok(Vec::new()),
+        (Some(namespace), _) if matches!(kind, Kind::Inert) && allow::metadata(namespace) => {
+            Ok(Vec::new())
+        }
+        (None, "style") => scanned(attribute.value()),
+        // Custom data and accessibility states, which no renderer draws (SVG 2, Section 1.9).
+        (None, name) if name.starts_with("data-") || name.starts_with("aria-") => Ok(Vec::new()),
+        (None, name) => {
+            let taken = match kind {
+                Kind::Svg(own) => allow::takes(element, own, name),
+                Kind::Inert => true,
+            };
+            match (taken, allow::PRESENTATION.contains(&name)) {
+                (false, _) => Err(refused()),
+                (true, true) => scanned(attribute.value()),
+                (true, false) => Ok(Vec::new()),
+            }
+        }
+        (Some(_), _) => Err(refused()),
+    }
 }
 
 /// The pixels of an SVG length attribute in an absolute unit, rounded up; `None` for an absent

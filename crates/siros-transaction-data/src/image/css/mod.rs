@@ -181,6 +181,7 @@ pub(super) fn urls(css: &str) -> Result<Vec<String>, CssFault> {
             | Token::String(_)
             | Token::Delim
             | Token::Numeric
+            | Token::UnicodeRange
             | Token::Whitespace
             | Token::Cdo
             | Token::Cdc

@@ -1,9 +1,11 @@
 //! The static SVG subset the wallet shows: the elements of the SVG namespace that draw shapes,
-//! text, paint servers, clips, masks, markers and filters without a resource of their own,
-//! each with its attributes. Script, animation, `set`, `foreignObject`, fonts, links and every
-//! other namespace are outside it, and so are attributes outside each element's set but
-//! `data-*`. The sets follow svg-hush's allowlist (Cloudflare) and usvg's static subset,
-//! without what draws from another document.
+//! text, paint servers, clips, masks, markers and filters without a resource of their own, with
+//! links, `switch` and `metadata`, each with its attributes. Drawing programs' editing data
+//! passes: the elements and attributes of their namespaces, and RDF metadata inside `metadata`.
+//! Script, animation, `set`, `foreignObject`, `feImage`, fonts, XHTML and every other namespace
+//! are outside it, and so are attributes outside each element's set but `data-*` and `aria-*`.
+//! The sets follow svg-hush's allowlist (Cloudflare) and usvg's static subset, without what
+//! draws from another document.
 
 /// The SVG namespace.
 pub(super) const SVG: &str = "http://www.w3.org/2000/svg";
@@ -11,24 +13,61 @@ pub(super) const SVG: &str = "http://www.w3.org/2000/svg";
 /// The XLink namespace, whose `href` is a plain `href`.
 pub(super) const XLINK: &str = "http://www.w3.org/1999/xlink";
 
-/// The XML namespace, whose `space` and `lang` pass.
+/// The XML namespace, whose `space`, `lang` and `id` pass.
 pub(super) const XML: &str = "http://www.w3.org/XML/1998/namespace";
 
-/// The attributes every element of the subset takes.
-const CORE: [&str; 4] = ["id", "class", "style", "lang"];
+/// The namespaces of drawing programs' editing data, which renderers ignore: Inkscape,
+/// Sodipodi, Affinity (Serif) and CorelDRAW. Their elements and attributes pass.
+const EDITORS: [&str; 4] = [
+    "http://www.inkscape.org/namespaces/inkscape",
+    "http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd",
+    "http://www.serif.com/",
+    "http://www.corel.com/coreldraw/odm/2003",
+];
 
-/// The presentation attributes (SVG 2, Section 6.6), every element's; their values are CSS.
-pub(super) const PRESENTATION: [&str; 54] = [
+/// The vocabularies of the RDF inside a `metadata` element: RDF, Dublin Core and Creative
+/// Commons, in its current and its former namespace. There, their elements and attributes pass.
+const METADATA: [&str; 4] = [
+    "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+    "http://purl.org/dc/elements/1.1/",
+    "http://creativecommons.org/ns#",
+    "http://web.resource.org/cc/",
+];
+
+/// The attributes every element of the subset takes: the core attributes, the ARIA role and
+/// focus attributes, and the conditional processing attributes, which select among the children
+/// of a `switch` (SVG 1.1, Section 5.8).
+const CORE: [&str; 10] = [
+    "id",
+    "class",
+    "style",
+    "lang",
+    "role",
+    "tabindex",
+    "focusable",
+    "systemLanguage",
+    "requiredFeatures",
+    "requiredExtensions",
+];
+
+/// The presentation attributes, every element's; their values are CSS: those of SVG 1.1,
+/// Appendix M.2, but `color-profile`, whose IRI value stands outside a CSS `url()`, and those
+/// SVG 2, Section 6.6, adds.
+pub(super) const PRESENTATION: [&str; 64] = [
     "alignment-baseline",
     "baseline-shift",
+    "clip",
     "clip-path",
     "clip-rule",
     "color",
     "color-interpolation",
     "color-interpolation-filters",
+    "color-rendering",
+    "cursor",
     "direction",
     "display",
     "dominant-baseline",
+    "enable-background",
     "fill",
     "fill-opacity",
     "fill-rule",
@@ -42,8 +81,11 @@ pub(super) const PRESENTATION: [&str; 54] = [
     "font-style",
     "font-variant",
     "font-weight",
+    "glyph-orientation-horizontal",
+    "glyph-orientation-vertical",
     "image-rendering",
     "isolation",
+    "kerning",
     "letter-spacing",
     "lighting-color",
     "marker-end",
@@ -55,6 +97,7 @@ pub(super) const PRESENTATION: [&str; 54] = [
     "opacity",
     "overflow",
     "paint-order",
+    "pointer-events",
     "shape-rendering",
     "stop-color",
     "stop-opacity",
@@ -73,10 +116,13 @@ pub(super) const PRESENTATION: [&str; 54] = [
     "unicode-bidi",
     "vector-effect",
     "visibility",
+    "word-spacing",
+    "writing-mode",
 ];
 
 /// The elements that take an `href`, a URL position.
-pub(super) const HREF: [&str; 6] = [
+pub(super) const HREF: [&str; 7] = [
+    "a",
     "image",
     "linearGradient",
     "pattern",
@@ -85,11 +131,31 @@ pub(super) const HREF: [&str; 6] = [
     "use",
 ];
 
+/// The filter primitives but `feImage`, which take the primitive attributes.
+const PRIMITIVES: [&str; 16] = [
+    "feBlend",
+    "feColorMatrix",
+    "feComponentTransfer",
+    "feComposite",
+    "feConvolveMatrix",
+    "feDiffuseLighting",
+    "feDisplacementMap",
+    "feDropShadow",
+    "feFlood",
+    "feGaussianBlur",
+    "feMerge",
+    "feMorphology",
+    "feOffset",
+    "feSpecularLighting",
+    "feTile",
+    "feTurbulence",
+];
+
 /// The filter primitives' own attributes.
 const PRIMITIVE: [&str; 6] = ["x", "y", "width", "height", "result", "in"];
 
 /// Each element of the subset with the attributes of its own.
-const ELEMENTS: [(&str, &[&str]); 38] = [
+const ELEMENTS: [(&str, &[&str]); 51] = [
     (
         "svg",
         &[
@@ -101,10 +167,16 @@ const ELEMENTS: [(&str, &[&str]); 38] = [
             "preserveAspectRatio",
             "version",
             "baseProfile",
+            "contentScriptType",
+            "contentStyleType",
+            "zoomAndPan",
         ],
     ),
     ("g", &["transform"]),
+    ("switch", &["transform"]),
+    ("a", &["href", "target", "transform"]),
     ("defs", &[]),
+    ("metadata", &[]),
     ("title", &[]),
     ("desc", &[]),
     ("style", &["type", "media"]),
@@ -255,6 +327,28 @@ const ELEMENTS: [(&str, &[&str]); 38] = [
     ("feColorMatrix", &["type", "values"]),
     ("feComponentTransfer", &[]),
     ("feComposite", &["in2", "operator", "k1", "k2", "k3", "k4"]),
+    (
+        "feConvolveMatrix",
+        &[
+            "order",
+            "kernelMatrix",
+            "divisor",
+            "bias",
+            "targetX",
+            "targetY",
+            "edgeMode",
+            "kernelUnitLength",
+            "preserveAlpha",
+        ],
+    ),
+    (
+        "feDiffuseLighting",
+        &["surfaceScale", "diffuseConstant", "kernelUnitLength"],
+    ),
+    (
+        "feDisplacementMap",
+        &["in2", "scale", "xChannelSelector", "yChannelSelector"],
+    ),
     ("feDropShadow", &["dx", "dy", "stdDeviation"]),
     ("feFlood", &[]),
     (
@@ -271,8 +365,38 @@ const ELEMENTS: [(&str, &[&str]); 38] = [
     ),
     ("feGaussianBlur", &["stdDeviation", "edgeMode"]),
     ("feMerge", &[]),
-    ("feMergeNode", &[]),
+    ("feMergeNode", &["in"]),
+    ("feMorphology", &["operator", "radius"]),
     ("feOffset", &["dx", "dy"]),
+    (
+        "feSpecularLighting",
+        &[
+            "surfaceScale",
+            "specularConstant",
+            "specularExponent",
+            "kernelUnitLength",
+        ],
+    ),
+    ("feTile", &[]),
+    (
+        "feTurbulence",
+        &["baseFrequency", "numOctaves", "seed", "stitchTiles", "type"],
+    ),
+    ("feDistantLight", &["azimuth", "elevation"]),
+    ("fePointLight", &["x", "y", "z"]),
+    (
+        "feSpotLight",
+        &[
+            "x",
+            "y",
+            "z",
+            "pointsAtX",
+            "pointsAtY",
+            "pointsAtZ",
+            "specularExponent",
+            "limitingConeAngle",
+        ],
+    ),
 ];
 
 /// The transfer functions, which take the attributes of `feFuncA`.
@@ -294,11 +418,18 @@ pub(super) fn attributes(element: &str) -> Option<&'static [&'static str]> {
 
 /// Whether the element `element` of the subset takes the attribute `name` of no namespace.
 pub(super) fn takes(element: &str, own: &[&str], name: &str) -> bool {
-    let primitive =
-        element.starts_with("fe") && !element.starts_with("feFunc") && element != "feMergeNode";
     CORE.contains(&name)
         || PRESENTATION.contains(&name)
         || own.contains(&name)
-        || (primitive && PRIMITIVE.contains(&name))
-        || (element == "feMergeNode" && name == "in")
+        || (PRIMITIVES.contains(&element) && PRIMITIVE.contains(&name))
+}
+
+/// Whether `namespace` is that of a drawing program's editing data.
+pub(super) fn editor(namespace: &str) -> bool {
+    EDITORS.contains(&namespace)
+}
+
+/// Whether `namespace` is a vocabulary of the RDF inside a `metadata` element.
+pub(super) fn metadata(namespace: &str) -> bool {
+    METADATA.contains(&namespace)
 }
