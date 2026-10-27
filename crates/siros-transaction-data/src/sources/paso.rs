@@ -1,38 +1,35 @@
-//! The signed credential metadata JWT of a PaSO Credential (PaSO Proof Metadata, Sections 4 and
-//! 7): fetched through the host from the configuration's `credential_metadata_uri`, verified each
-//! time it is loaded (Section 6), its `credential_metadata_uri` claim the URL fetched (Section 8),
-//! and read into a definition per transaction data type.
+//! The signed credential metadata JWT of a PaSO Credential (PaSO Proof Metadata, Sections 4, 7
+//! and 8): the one the host holds for the credential's configuration, verified each time it is
+//! loaded (Section 6), and read into a definition per transaction data type. The host admits a
+//! JWT it fetched with [`HeldJwt::verify_fetched`].
 
-use std::str::Utf8Error;
-
+use siros_codec::date::DateTime;
+use siros_codec::member::MemberFault;
 use siros_credential::Credential;
-use siros_display::Locale;
-use siros_oid4vp::{BodyLimit, Fetch, HttpsUrl, MediaType};
+use siros_oid4vp::HttpsUrl;
+use siros_trust::TrustStore;
 
+use super::held::{HeldJwt, HeldMetadata, Renewal};
 use super::signed::{self, MetadataClaim, SignedFault, Verifier};
-use crate::definition::{Definition, DefinitionError};
-use crate::fetched::{FetchFault, Step};
+use crate::definition::{Definition, DefinitionError, LabelRules};
 use crate::json;
-use crate::type_id::TypeId;
+use crate::type_id::{EmptyTypeId, TypeId};
 
 /// The `typ` of a signed credential metadata JWT (Section 4).
 const TYP: &str = "credential-metadata+jwt";
-
-/// The largest signed credential metadata JWT read.
-const MAX_JWT: BodyLimit = BodyLimit::bytes(256 * 1024);
 
 /// Why a credential's signed credential metadata is invalid. The credential is then excluded
 /// from PaSO processing (Section 7).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CredentialMetadataFault {
-    /// The host gave no JWT.
-    Fetch(FetchFault),
-    /// The JWT's bytes are no UTF-8 text.
-    NotUtf8(Utf8Error),
+    /// The host holds no JWT for the credential's configuration.
+    NotHeld,
     /// The JWT is invalid (Section 7).
     Invalid(SignedFault),
+    /// `transaction_data_types` has a member with an empty name.
+    TypeEmpty,
     /// The JWT's `credential_metadata_uri` claim holds this text, which differs from the URL
-    /// the JWT was fetched from (Section 8).
+    /// the host fetched the JWT from (Section 8).
     UriMismatch(String),
 }
 
@@ -41,9 +38,9 @@ impl CredentialMetadataFault {
     #[must_use]
     pub fn code(&self) -> &'static str {
         match self {
-            Self::Fetch(fault) => fault.code(),
-            Self::NotUtf8(_) => "credential_metadata_not_utf8",
+            Self::NotHeld => "credential_metadata_not_held",
             Self::Invalid(fault) => fault.code(),
+            Self::TypeEmpty => "credential_metadata_type_empty",
             Self::UriMismatch(_) => "credential_metadata_uri_mismatch",
         }
     }
@@ -56,57 +53,19 @@ impl std::error::Error for CredentialMetadataFault {}
 /// The transaction data types of a verified signed credential metadata JWT, each with its
 /// definition or why the definition breaks Section 3.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct CredentialMetadata(Vec<(String, Result<Definition, DefinitionError>)>);
+pub(crate) struct CredentialMetadata(Vec<(TypeId, Result<Definition, DefinitionError>)>);
 
 impl CredentialMetadata {
-    /// The signed credential metadata of `credential` at `uri` in `language`, verified (Section
-    /// 7); the fetch of the JWT, with `Accept: application/jwt` and `Accept-Language` (Section
-    /// 2), or of the issuer's key set while the host has not given it.
+    /// The signed credential metadata the host holds for `credential`, verified (Section 7).
     pub(crate) fn load(
-        uri: &HttpsUrl,
-        language: &Locale,
         credential: &Credential,
         verifier: Verifier<'_>,
-    ) -> Result<Step<Self>, CredentialMetadataFault> {
-        let fetch = Fetch::get(uri.clone(), MediaType::JWT, MAX_JWT).in_language(language.clone());
-        let body = match verifier
-            .fetched
-            .body_of(fetch)
-            .map_err(CredentialMetadataFault::Fetch)?
-        {
-            Step::Fetch(fetch) => return Ok(Step::Fetch(fetch)),
-            Step::Done(body) => body,
-        };
-        let text = std::str::from_utf8(body).map_err(CredentialMetadataFault::NotUtf8)?;
-        let invalid = CredentialMetadataFault::Invalid;
-        let mut claims =
-            match signed::verify(text.trim(), TYP, credential, verifier).map_err(invalid)? {
-                Step::Fetch(fetch) => return Ok(Step::Fetch(fetch)),
-                Step::Done(claims) => claims,
-            };
-        let served_from = signed::text_claim(&mut claims, MetadataClaim::CredentialMetadataUri)
-            .map_err(invalid)?;
-        if served_from != uri.as_str() {
-            return Err(CredentialMetadataFault::UriMismatch(served_from));
-        }
-        let member = |claim: MetadataClaim| {
-            move |fault| CredentialMetadataFault::Invalid(SignedFault::Claim(claim, fault))
-        };
-        let mut metadata = claims
-            .require(MetadataClaim::CredentialMetadata.as_str())
-            .and_then(json::object)
-            .map_err(member(MetadataClaim::CredentialMetadata))?;
-        let types = metadata
-            .require(MetadataClaim::TransactionDataTypes.as_str())
-            .and_then(json::object)
-            .map_err(member(MetadataClaim::TransactionDataTypes))?;
-        Ok(Step::Done(Self(
-            types
-                .rest()
-                .into_iter()
-                .map(|(name, value)| (name, Definition::parse(value)))
-                .collect(),
-        )))
+    ) -> Result<Self, CredentialMetadataFault> {
+        let jwt = verifier
+            .held
+            .jwt(credential)
+            .ok_or(CredentialMetadataFault::NotHeld)?;
+        verified(jwt, credential, verifier).map(|(metadata, _)| metadata)
     }
 
     /// The definition of `type_id`, when the metadata lists the type.
@@ -116,7 +75,82 @@ impl CredentialMetadata {
     ) -> Option<&Result<Definition, DefinitionError>> {
         self.0
             .iter()
-            .find(|(name, _)| name == type_id.as_str())
+            .find(|(listed, _)| listed == type_id)
             .map(|(_, definition)| definition)
     }
+}
+
+impl HeldJwt {
+    /// The JWT `jwt` the host fetched for `credential`'s configuration, `served_from` the URL
+    /// it answered from after redirects: verified (Section 7), its `credential_metadata_uri`
+    /// `served_from` (Section 8). `held` holds the issuer's key set when the credential carries
+    /// no `x5c` chain.
+    ///
+    /// # Errors
+    ///
+    /// [`CredentialMetadataFault`]: why the JWT is invalid. The host keeps the JWT it held.
+    pub fn verify_fetched(
+        jwt: String,
+        served_from: &HttpsUrl,
+        credential: &Credential,
+        trust: &TrustStore,
+        held: &HeldMetadata,
+        now: DateTime,
+    ) -> Result<(Self, Renewal), CredentialMetadataFault> {
+        let verifier = Verifier { trust, held, now };
+        let (_, renewal) = verified(&jwt, credential, verifier)?;
+        if renewal.from != *served_from {
+            return Err(CredentialMetadataFault::UriMismatch(
+                renewal.from.as_str().to_owned(),
+            ));
+        }
+        let (Some(issuer), Some(configuration)) =
+            (credential.issuer(), credential.configuration_id())
+        else {
+            return Err(CredentialMetadataFault::Invalid(SignedFault::Issuer));
+        };
+        Ok((
+            Self::new(issuer.clone(), configuration.clone(), jwt),
+            renewal,
+        ))
+    }
+}
+
+/// The metadata of the JWT `jwt` for `credential`, verified (Section 7), and how the host
+/// renews it.
+fn verified(
+    jwt: &str,
+    credential: &Credential,
+    verifier: Verifier<'_>,
+) -> Result<(CredentialMetadata, Renewal), CredentialMetadataFault> {
+    let invalid = CredentialMetadataFault::Invalid;
+    let signed::Verified {
+        mut claims,
+        expires,
+    } = signed::verify(jwt.trim(), TYP, credential, verifier).map_err(invalid)?;
+    let uri =
+        signed::text_claim(&mut claims, MetadataClaim::CredentialMetadataUri).map_err(invalid)?;
+    let from = HttpsUrl::parse(&uri).ok_or(CredentialMetadataFault::Invalid(
+        SignedFault::Claim(MetadataClaim::CredentialMetadataUri, MemberFault::WrongType),
+    ))?;
+    let member = |claim: MetadataClaim| {
+        move |fault| CredentialMetadataFault::Invalid(SignedFault::Claim(claim, fault))
+    };
+    let mut metadata = claims
+        .require(MetadataClaim::CredentialMetadata.as_str())
+        .and_then(json::object)
+        .map_err(member(MetadataClaim::CredentialMetadata))?;
+    let types = metadata
+        .require(MetadataClaim::TransactionDataTypes.as_str())
+        .and_then(json::object)
+        .map_err(member(MetadataClaim::TransactionDataTypes))?
+        .rest()
+        .into_iter()
+        .map(|(name, value)| {
+            let type_id =
+                TypeId::parse(&name).map_err(|EmptyTypeId| CredentialMetadataFault::TypeEmpty)?;
+            Ok((type_id, Definition::parse(value, LabelRules::Paso)))
+        })
+        .collect::<Result<Vec<_>, CredentialMetadataFault>>()?;
+    Ok((CredentialMetadata(types), Renewal { expires, from }))
 }

@@ -13,12 +13,15 @@ use siros_codec::date::DateTime;
 use siros_credential::Credential;
 use siros_dcql::DcqlQuery;
 use siros_display::{DisplayCache, IssuerMetadata, Locale};
-use siros_oid4vp::{FetchResponse, HttpStatus, RequestSignature, TransactionDataItem};
+use siros_oid4vp::{
+    Fetch, FetchResponse, HttpStatus, HttpsUrl, RequestSignature, TransactionDataItem,
+};
 use siros_transaction_data::{
-    Configuration, Context, Entry, EntryPosition, Fetched, Selection, Step,
+    Configuration, Context, Entry, EntryPosition, Fetched, HeldDocument, HeldJwt, HeldMetadata,
+    RowValue, Segment, Selection, ShownLabel, Step, TransactionView,
 };
 use siros_trust::TrustStore;
-use siros_wallet_state::WalletState;
+use siros_wallet_state::{ConfigurationId, IssuerIdentifier, WalletState};
 use x509_cert::builder::{Builder, CertificateBuilder, Profile};
 use x509_cert::der::asn1::GeneralizedTime;
 use x509_cert::der::Encode;
@@ -28,7 +31,7 @@ use x509_cert::serial_number::SerialNumber;
 use x509_cert::spki::SubjectPublicKeyInfoOwned;
 use x509_cert::time::{Time, Validity};
 
-/// The documents the host serves, by URL.
+/// The images the host answers fetches with, by URL.
 pub type Documents = Vec<(String, FetchResponse)>;
 
 /// The rows a card shows, label and value, or why it takes no entry.
@@ -249,13 +252,18 @@ pub fn ok(body: &[u8]) -> FetchResponse {
     FetchResponse::new(HttpStatus::OK, None, body.to_vec())
 }
 
-/// What the host gives the selection: trust, display metadata, configuration, the documents it
-/// answers fetches with, the wallet's language and whether the request is signed.
+/// What the host gives the selection: trust, display metadata, configuration, the metadata it
+/// holds, the images it answers fetches with, the wallet's language and whether the request is
+/// signed.
 pub struct Host {
     pub trust: TrustStore,
     pub display: DisplayCache,
     pub configuration: Configuration,
-    pub documents: Documents,
+    /// The documents the host holds, by URL.
+    pub held: Vec<(String, Vec<u8>)>,
+    /// The signed credential metadata JWT the host holds for the card's configuration.
+    pub credential_metadata: Option<String>,
+    pub images: Documents,
     pub language: Locale,
     pub signature: RequestSignature,
 }
@@ -268,7 +276,9 @@ impl Host {
             trust: TrustStore::parse("[]").unwrap(),
             display: display(None),
             configuration: Configuration::parse(&configuration.to_string()).unwrap(),
-            documents: Vec::new(),
+            held: Vec::new(),
+            credential_metadata: None,
+            images: Vec::new(),
             language: Locale::parse("en").unwrap(),
             signature: RequestSignature::Signed,
         }
@@ -280,17 +290,53 @@ impl Host {
         self
     }
 
-    /// What `credential` takes of `entries`, each fetch answered from the documents, a URL
+    /// The metadata the host holds.
+    pub fn metadata(&self) -> HeldMetadata {
+        let jwts = self
+            .credential_metadata
+            .iter()
+            .map(|jwt| {
+                HeldJwt::new(
+                    IssuerIdentifier::parse(ISSUER).unwrap(),
+                    ConfigurationId::parse("card").unwrap(),
+                    jwt.clone(),
+                )
+            })
+            .collect();
+        let documents = self
+            .held
+            .iter()
+            .map(|(url, body)| HeldDocument::new(HttpsUrl::parse(url).unwrap(), body.clone()))
+            .collect();
+        HeldMetadata::new(jwts, documents).unwrap()
+    }
+
+    /// What `credential` takes of `entries`, each image fetch answered from the images, a URL
     /// without one with `404`.
     pub fn select(
         &self,
         entries: &[&Entry],
         credential: &Credential,
     ) -> Result<Selection, siros_transaction_data::TransactionDataError> {
+        self.select_fetching(entries, credential).0
+    }
+
+    /// [`Host::select`], and each fetch the selection asked for.
+    pub fn select_fetching(
+        &self,
+        entries: &[&Entry],
+        credential: &Credential,
+    ) -> (
+        Result<Selection, siros_transaction_data::TransactionDataError>,
+        Vec<Fetch>,
+    ) {
+        let held = self.metadata();
         let mut fetched = Fetched::new();
+        let mut fetches = Vec::new();
         loop {
             let context = Context {
                 trust: &self.trust,
+                held: &held,
                 fetched: &fetched,
                 display: &self.display,
                 configuration: &self.configuration,
@@ -298,12 +344,14 @@ impl Host {
                 signature: self.signature,
                 now: now(),
             };
-            let fetch = match context.first_match(entries, credential)? {
-                Step::Done(selection) => return Ok(selection),
-                Step::Fetch(fetch) => fetch,
+            let fetch = match context.first_match(entries, credential) {
+                Ok(Step::Done(selection)) => return (Ok(selection), fetches),
+                Ok(Step::Fetch(fetch)) => fetch,
+                Err(error) => return (Err(error), fetches),
             };
+            fetches.push(fetch.clone());
             let response = self
-                .documents
+                .images
                 .iter()
                 .find(|(url, _)| url == fetch.url().as_str())
                 .map(|(_, response)| response.clone())
@@ -311,6 +359,22 @@ impl Host {
             assert!(fetched.insert_first(&fetch, response).is_ok());
         }
     }
+}
+
+/// The text of `label`, each value as the payload writes it.
+pub fn text(label: &ShownLabel) -> String {
+    segments(label.segments())
+}
+
+/// The text of `segments`, each value as the payload writes it.
+fn segments(segments: &[Segment]) -> String {
+    segments
+        .iter()
+        .map(|segment| match segment {
+            Segment::Text(text) => text.clone(),
+            Segment::Value(value) => value.text(),
+        })
+        .collect()
 }
 
 /// A host configuration entry: `definition` for the type `type_id` of credentials of `vct`.
@@ -484,21 +548,25 @@ pub fn ts12_payload(transaction_type: &str, payload: &str) -> Result<(), &'stati
 /// The rows `host` shows for the entry `credential` takes of `entry`, each label with its value
 /// as text, or why the credential takes none.
 pub fn rows(host: &Host, entry: &Entry, credential: &Credential) -> Shown {
-    use siros_transaction_data::RowValue;
     match host.select(&[entry], credential).unwrap() {
-        Selection::Takes(taken) => Ok(taken
-            .view()
-            .rows()
-            .iter()
-            .map(|row| {
-                let value = match row.value() {
-                    RowValue::Value(value) => value.text(),
-                    RowValue::LabelOnly => "-".to_owned(),
-                    RowValue::Image(image) => format!("<image {:?}>", image.format()),
-                };
-                (row.label().text().to_owned(), value)
-            })
-            .collect()),
+        Selection::Takes(taken) => Ok(view_rows(taken.view())),
         Selection::Excluded(mut causes) => Err(causes.remove(0).1),
     }
+}
+
+/// Each label of `view`'s rows with its value as text: `-` for `label_only`, the format of an
+/// image, each value of a template as the payload writes it.
+pub fn view_rows(view: &TransactionView) -> Vec<(String, String)> {
+    view.rows()
+        .iter()
+        .map(|row| {
+            let value = match row.value() {
+                RowValue::Value(value) => value.text(),
+                RowValue::Template(interpolated) => segments(interpolated.segments()),
+                RowValue::LabelOnly => "-".to_owned(),
+                RowValue::Image(image) => format!("<image {:?}>", image.format()),
+            };
+            (text(row.label()), value)
+        })
+        .collect()
 }

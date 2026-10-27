@@ -1,6 +1,6 @@
 //! The SD-JWT VC Type Metadata of an SCA Attestation (EC TS12 v1.0.1, Sections 3 and 4.1): the
-//! document at the credential's `vct` and the documents it references, each a host fetch (T7,
-//! H1), read into definitions.
+//! document at the credential's `vct` and the documents it references, each one the host holds,
+//! read into definitions.
 
 use std::str::Utf8Error;
 
@@ -8,17 +8,14 @@ use siros_codec::json::{Json, JsonFault};
 use siros_codec::member::MemberFault;
 use siros_credential::{Credential, Format, TypedValue};
 use siros_dcql::{ClaimPath, PathError};
-use siros_oid4vp::{BodyLimit, HttpsUrl, MediaType};
+use siros_oid4vp::HttpsUrl;
 
+use super::held::HeldMetadata;
 use super::ts12_map;
 use crate::definition::{Definition, DefinitionError};
-use crate::fetched::{FetchFault, Fetched, Step};
 use crate::integrity::{Integrity, IntegrityFault};
 use crate::json::{self, Fields};
 use crate::type_id::{Ts12Type, TypeId};
-
-/// The largest metadata document read.
-const MAX_DOCUMENT: BodyLimit = BodyLimit::bytes(256 * 1024);
 
 /// The `category` of an SCA Attestation (Section 3).
 const SCA_CATEGORY: &str = "urn:eu:europa:ec:eudi:sua:sca";
@@ -42,8 +39,6 @@ pub enum Ts12Member {
     UiLabels,
     /// A claim's `path`.
     Path,
-    /// A claim's `visualisation`.
-    Visualisation,
     /// A claim's `display`.
     Display,
     /// A display entry's `lang` or `locale`.
@@ -58,10 +53,12 @@ pub enum Ts12Member {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Ts12Fault {
     /// The credential's `vct#integrity` or a `transaction_data_types[…]#integrity` claim is no
-    /// integrity metadata this wallet reads (SD-JWT VC, Section 7).
-    Pin(IntegrityFault),
-    /// A fetch gave no document.
-    Fetch(FetchFault),
+    /// integrity metadata this wallet reads (SD-JWT VC, Section 7): its claims path processing
+    /// gives this error, or its value does not read.
+    Pin(Result<IntegrityFault, PathError>),
+    /// The credential pins a document the host does not hold: its Type Metadata, or a
+    /// document an entry references.
+    NotHeld(HttpsUrl),
     /// A document's bytes are no UTF-8 text.
     NotUtf8(Utf8Error),
     /// A document's text is no JSON document the strict reader holds.
@@ -85,10 +82,6 @@ pub enum Ts12Fault {
     SchemaMismatch(Ts12Type),
     /// A claim's `path` is not rooted at `payload` (Section 2.3).
     PathOutsidePayload,
-    /// A `visualisation` is no integer from 1 to 4 (Section 3.3.2).
-    Visualisation,
-    /// A UI element's value is longer than Section 3.3.3 allows: the element and the length.
-    LabelLength(&'static str, usize),
     /// The catalogue has no `affirmative_action_label` (Section 3.3.3).
     AffirmativeAbsent,
     /// The mapped definition breaks PaSO Proof Metadata, Section 3.
@@ -101,7 +94,7 @@ impl Ts12Fault {
     pub fn code(&self) -> &'static str {
         match self {
             Self::Pin(_) => "type_metadata_pin_malformed",
-            Self::Fetch(fault) => fault.code(),
+            Self::NotHeld(_) => "type_metadata_not_held",
             Self::NotUtf8(_) | Self::NotJson(_) | Self::Member(..) | Self::OneOf(_) => {
                 "type_metadata_malformed"
             }
@@ -112,8 +105,6 @@ impl Ts12Fault {
             Self::SchemaUnknown(_) => "type_metadata_schema_unknown",
             Self::SchemaMismatch(_) => "type_metadata_schema_mismatch",
             Self::PathOutsidePayload => "type_metadata_path_outside_payload",
-            Self::Visualisation => "type_metadata_visualisation",
-            Self::LabelLength(..) => "type_metadata_label_length",
             Self::AffirmativeAbsent => "type_metadata_affirmative_absent",
             Self::Definition(error) => error.code(),
         }
@@ -124,8 +115,8 @@ siros_codec::display_code!(Ts12Fault);
 
 impl std::error::Error for Ts12Fault {}
 
-/// The type metadata of an SCA Attestation: its `transaction_data_types` entries. A credential
-/// of another category has none (Section 3.2, step 1).
+/// The type metadata of an SCA Attestation: its `transaction_data_types` entries, every type
+/// the credential supports (Section 3.2, steps 1 and 2).
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct TypeMetadata(Vec<(String, Json)>);
 
@@ -136,26 +127,22 @@ enum Document {
 }
 
 impl TypeMetadata {
-    /// The type metadata of `credential`, an SD-JWT VC: the document at its `vct` (SD-JWT VC,
-    /// Section 6.3.1); the fetch while the host has not given it. A `vct` that is no `https` URL
-    /// locates no document, and a response other than 200 leaves it absent, unless
-    /// `vct#integrity` pins one.
+    /// The SCA type metadata of `credential`, an SD-JWT VC: the document at its `vct` (SD-JWT
+    /// VC, Section 6.3.1), as the host holds it, when its `category` is the SCA one and it has
+    /// `transaction_data_types`. A `vct` that is no `https` URL locates no document; without
+    /// the document there is no type metadata, unless `vct#integrity` pins one.
     pub(crate) fn load(
         credential: &Credential,
-        fetched: &Fetched,
-    ) -> Result<Step<Option<Self>>, Ts12Fault> {
-        if credential.format() != Format::SdJwtVc {
-            return Ok(Step::Done(None));
-        }
-        let Some(url) = HttpsUrl::parse(credential.credential_type().as_str()) else {
-            return Ok(Step::Done(None));
+        held: &HeldMetadata,
+    ) -> Result<Option<Self>, Ts12Fault> {
+        let Some(url) = vct_url(credential) else {
+            return Ok(None);
         };
         let pin = pin(credential, "vct#integrity")?;
-        let body = match fetched.body(&url, MediaType::JSON, MAX_DOCUMENT) {
-            Ok(Step::Fetch(fetch)) => return Ok(Step::Fetch(fetch)),
-            Ok(Step::Done(body)) => body,
-            Err(FetchFault::Status(_)) if pin.is_none() => return Ok(Step::Done(None)),
-            Err(fault) => return Err(Ts12Fault::Fetch(fault)),
+        let body = match (held.document(&url), &pin) {
+            (Some(body), _) => body,
+            (None, None) => return Ok(None),
+            (None, Some(_)) => return Err(Ts12Fault::NotHeld(url)),
         };
         let mut fields = json::object(document_of(body, pin.as_ref())?)
             .map_err(|fault| Ts12Fault::Member(Ts12Member::Vct, fault))?;
@@ -170,29 +157,64 @@ impl TypeMetadata {
         let types = fields
             .optional("transaction_data_types", json::object)
             .map_err(|fault| Ts12Fault::Member(Ts12Member::TransactionDataTypes, fault))?;
-        let entries = match (category.as_deref(), types) {
-            (Some(SCA_CATEGORY), Some(types)) => types.rest(),
-            _ => Vec::new(),
+        Ok(match (category.as_deref(), types) {
+            (Some(SCA_CATEGORY), Some(types)) => Some(Self(types.rest())),
+            _ => None,
+        })
+    }
+
+    /// The URLs of the documents of `credential`'s type metadata: the document at its `vct`,
+    /// and, once the host holds that, each document its entries reference.
+    ///
+    /// # Errors
+    ///
+    /// [`Ts12Fault`] for held type metadata that does not read.
+    pub(crate) fn documents(
+        credential: &Credential,
+        held: &HeldMetadata,
+    ) -> Result<Vec<HttpsUrl>, Ts12Fault> {
+        let Some(url) = vct_url(credential) else {
+            return Ok(Vec::new());
         };
-        Ok(Step::Done(Some(Self(entries))))
+        let mut urls = vec![url.clone()];
+        if held.document(&url).is_none() {
+            return Ok(urls);
+        }
+        let Some(metadata) = Self::load(credential, held)? else {
+            return Ok(urls);
+        };
+        for (_, entry) in &metadata.0 {
+            for member in ["claims_uri", "ui_labels_uri"] {
+                if let Some(Json::String(text)) = entry.member(member) {
+                    urls.push(
+                        HttpsUrl::parse(text)
+                            .ok_or_else(|| Ts12Fault::DocumentNotHttps(text.clone()))?,
+                    );
+                }
+            }
+        }
+        Ok(urls)
     }
 
     /// The definition of `type_id` and the built-in schema its payloads follow, when the
-    /// metadata lists the type; the fetch of a referenced document while the host has not
-    /// given it.
+    /// metadata lists the type.
     pub(crate) fn definition(
         &self,
         type_id: &TypeId,
         credential: &Credential,
-        fetched: &Fetched,
-    ) -> Option<Result<Step<(Definition, Ts12Type)>, Ts12Fault>> {
+        held: &HeldMetadata,
+    ) -> Option<Result<(Definition, Ts12Type), Ts12Fault>> {
         let (_, entry) = self.0.iter().find(|(name, _)| name == type_id.as_str())?;
-        Some(entry_definition(
-            type_id,
-            entry.clone(),
-            credential,
-            fetched,
-        ))
+        Some(entry_definition(type_id, entry.clone(), credential, held))
+    }
+}
+
+/// The URL of the Type Metadata of `credential`: its `vct`, when the credential is an SD-JWT
+/// VC and the `vct` an `https` URL.
+fn vct_url(credential: &Credential) -> Option<HttpsUrl> {
+    match credential.format() {
+        Format::SdJwtVc => HttpsUrl::parse(credential.credential_type().as_str()),
+        Format::Mdoc => None,
     }
 }
 
@@ -201,8 +223,8 @@ fn entry_definition(
     type_id: &TypeId,
     entry: Json,
     credential: &Credential,
-    fetched: &Fetched,
-) -> Result<Step<(Definition, Ts12Type)>, Ts12Fault> {
+    held: &HeldMetadata,
+) -> Result<(Definition, Ts12Type), Ts12Fault> {
     let mut fields =
         json::object(entry).map_err(|fault| Ts12Fault::Member(Ts12Member::Entry, fault))?;
     let schema = schema(type_id, &mut fields)?;
@@ -220,16 +242,8 @@ fn entry_definition(
         Ts12Member::UiLabels,
         credential,
     )?;
-    let claims = match resolve(claims, fetched)? {
-        Step::Fetch(fetch) => return Ok(Step::Fetch(fetch)),
-        Step::Done(claims) => claims,
-    };
-    let labels = match resolve(labels, fetched)? {
-        Step::Fetch(fetch) => return Ok(Step::Fetch(fetch)),
-        Step::Done(labels) => labels,
-    };
-    let definition = ts12_map::definition(claims, labels)?;
-    Ok(Step::Done((definition, schema)))
+    let definition = ts12_map::definition(resolve(claims, held)?, resolve(labels, held)?)?;
+    Ok((definition, schema))
 }
 
 /// The built-in schema `schema` or `schema_uri` names (Sections 3.2 and 4.1), one of the two:
@@ -279,19 +293,15 @@ fn source(
     }
 }
 
-/// The JSON value of `document`; the fetch of a referenced one while the host has not given
-/// it.
-fn resolve(document: Document, fetched: &Fetched) -> Result<Step<Json>, Ts12Fault> {
+/// The JSON value of `document`: inline, or held for its URL.
+fn resolve(document: Document, held: &HeldMetadata) -> Result<Json, Ts12Fault> {
     match document {
-        Document::Inline(value) => Ok(Step::Done(value)),
+        Document::Inline(value) => Ok(value),
         Document::Referenced(url, pin) => {
-            match fetched
-                .body(&url, MediaType::JSON, MAX_DOCUMENT)
-                .map_err(Ts12Fault::Fetch)?
-            {
-                Step::Fetch(fetch) => Ok(Step::Fetch(fetch)),
-                Step::Done(body) => document_of(body, pin.as_ref()).map(Step::Done),
-            }
+            let body = held
+                .document(&url)
+                .ok_or_else(|| Ts12Fault::NotHeld(url.clone()))?;
+            document_of(body, pin.as_ref())
         }
     }
 }
@@ -309,7 +319,10 @@ fn document_of(body: &[u8], pin: Option<&Integrity>) -> Result<Json, Ts12Fault> 
 fn pin(credential: &Credential, name: &str) -> Result<Option<Integrity>, Ts12Fault> {
     match credential.claims(&ClaimPath::key(name)).as_deref() {
         Err(PathError::Empty) => Ok(None),
-        Ok([TypedValue::Text(text)]) => Integrity::parse(text).map(Some).map_err(Ts12Fault::Pin),
-        Ok(_) | Err(_) => Err(Ts12Fault::Pin(IntegrityFault::Malformed)),
+        Err(error) => Err(Ts12Fault::Pin(Err(error.clone()))),
+        Ok([TypedValue::Text(text)]) => Integrity::parse(text)
+            .map(Some)
+            .map_err(|fault| Ts12Fault::Pin(Ok(fault))),
+        Ok(_) => Err(Ts12Fault::Pin(Ok(IntegrityFault::Malformed))),
     }
 }

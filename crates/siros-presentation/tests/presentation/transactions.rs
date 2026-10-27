@@ -1,7 +1,7 @@
 //! Transaction data in the plan (PaSO Core, Section 7.4; OpenID4VP 1.0, Sections 5.1 and 8.5):
-//! the honest path from signed credential metadata to the KB-JWT, the next entry for a credential
-//! that supports no type of the first, and a refusal per plan rule with the error the verifier
-//! receives.
+//! the honest path from signed credential metadata to the KB-JWT, Annex A.5's offers, the next
+//! entry for a credential that supports no type of the first, and a refusal per plan rule with
+//! the error the verifier receives.
 
 use p256::ecdsa::signature::Signer;
 use p256::ecdsa::Signature;
@@ -9,19 +9,20 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use siros_codec::base64url;
 use siros_display::{DisplayCache, IssuerMetadata};
-use siros_oid4vp::{ErrorCode, FetchResponse, HttpStatus, MediaType};
-use siros_presentation::{plan, Fetches, PlanStep, PresentationError};
+use siros_oid4vp::ErrorCode;
+use siros_presentation::{Fetches, PresentationError};
 use siros_transaction_data::{
-    EntryPosition, Exclusion, Incompatibility, Location, LocationStep, PayloadFault, RowValue,
-    SourceKind, TransactionDataError, UnsignedWarning,
+    Configuration, EntryPosition, Exclusion, HeldJwt, HeldMetadata, Incompatibility, Location,
+    LocationStep, PayloadFault, RowValue, SourceKind, TransactionDataError, UnsignedWarning,
 };
 use siros_trust::TrustStore;
+use siros_wallet_state::{ConfigurationId, IssuerIdentifier};
 use siros_zkp_req_nym_auth::testing::Issuer;
 
 use crate::verifier::{
     b64, client_metadata, dc_api_signed, dc_api_unsigned, decrypt_jwe, NONCE, NOW,
 };
-use crate::wallet::{base64, ready, respond, sd_jwt_x5c, Held, Wallet, VCT};
+use crate::wallet::{base64, label_text, ready, respond, sd_jwt, sd_jwt_x5c, Held, Wallet, VCT};
 
 const APPROVAL: &str = "urn:paso:sca:com.example:approval:1";
 const METADATA_URI: &str = "https://issuer.example/metadata/pid";
@@ -44,7 +45,7 @@ fn entry(type_id: &str, query: &str, payload: Value) -> String {
 
 /// The signed credential metadata JWT of [`VCT`] (PaSO Proof Metadata, Section 4) defining
 /// [`APPROVAL`], which `signer` signs.
-fn credential_metadata(signer: &Issuer) -> FetchResponse {
+fn credential_metadata(signer: &Issuer) -> String {
     let header =
         json!({"alg": "ES256", "typ": "credential-metadata+jwt", "x5c": [base64(&signer.der)]});
     let claims = json!({
@@ -58,17 +59,12 @@ fn credential_metadata(signer: &Issuer) -> FetchResponse {
         b64(claims.to_string().as_bytes())
     );
     let signature: Signature = signer.key.sign(input.as_bytes());
-    let jwt = format!("{input}.{}", b64(&signature.to_bytes()));
-    FetchResponse::new(
-        HttpStatus::OK,
-        Some("application/jwt".into()),
-        jwt.into_bytes(),
-    )
+    format!("{input}.{}", b64(&signature.to_bytes()))
 }
 
 /// A wallet holding one PID of a Document Signer under a trusted root, whose issuer metadata
-/// names [`METADATA_URI`], and whose host serves there the credential metadata the Document
-/// Signer signs.
+/// names [`METADATA_URI`], and whose host holds the credential metadata the Document Signer
+/// signs.
 fn paso_wallet() -> Wallet {
     let root = Issuer::root(0x71, "Bank root");
     let signer = root.sign_child(0x72, "Bank Document Signer");
@@ -89,9 +85,12 @@ fn paso_wallet() -> Wallet {
     });
     let metadata = IssuerMetadata::merge(&issuer, "example", None).unwrap();
     wallet.display = DisplayCache::new(vec![metadata], Vec::new()).unwrap();
-    wallet
-        .documents
-        .push((METADATA_URI.to_owned(), credential_metadata(&signer)));
+    let jwt = HeldJwt::new(
+        IssuerIdentifier::parse("https://issuer.example").unwrap(),
+        ConfigurationId::parse("example").unwrap(),
+        credential_metadata(&signer),
+    );
+    wallet.metadata = HeldMetadata::new(vec![jwt], Vec::new()).unwrap();
     wallet
 }
 
@@ -125,33 +124,26 @@ fn signed_credential_metadata_binds_the_entry_into_the_kb_jwt() {
     let wallet = paso_wallet();
     let approval = entry(APPROVAL, "pid", json!({"what": "Pay 10.00 EUR"}));
     let request = dc_api_signed(&params(&[("pid", VCT)], std::slice::from_ref(&approval)));
-    // Proof Metadata, Section 2: the fetch accepts the JWT, in the wallet's language.
+    // The signed credential metadata is the host's input: the plan fetches nothing (Proof
+    // Metadata, Sections 6 and 8).
     let none = Fetches::new();
-    let first = plan(&wallet.input(&request, &none)).unwrap();
-    let PlanStep::Fetch(fetch) = first else {
-        panic!("the plan fetches the credential metadata first")
-    };
-    assert_eq!(fetch.url().as_str(), METADATA_URI);
-    assert_eq!(fetch.accept(), MediaType::JWT);
-    assert_eq!(fetch.accept_language(), Some(&wallet.language));
-    let fetches = wallet.fetches(&request);
-    let input = wallet.input(&request, &fetches);
+    let input = wallet.input(&request, &none);
     let planned = ready(&input).unwrap();
     let card = &planned.view().offers()[0].members()[0].credentials()[0];
     let view = card.transaction().unwrap().view();
     assert_eq!(view.source(), SourceKind::CredentialMetadata);
     assert_eq!(view.unsigned_warning(), UnsignedWarning::NotNeeded);
-    let rows: Vec<(&str, String)> = view
+    let rows: Vec<(String, String)> = view
         .rows()
         .iter()
         .map(|row| match row.value() {
-            RowValue::Value(value) => (row.label().text(), value.text()),
+            RowValue::Value(value) => (label_text(row.label()), value.text()),
             other => panic!("{other:?}"),
         })
         .collect();
-    assert_eq!(rows, [("What", "Pay 10.00 EUR".to_owned())]);
+    assert_eq!(rows, [("What".to_owned(), "Pay 10.00 EUR".to_owned())]);
     assert_eq!(
-        view.affirmative_action_label().map(|label| label.text()),
+        view.affirmative_action_label().map(label_text).as_deref(),
         Some("Approve")
     );
 
@@ -165,6 +157,80 @@ fn signed_credential_metadata_binds_the_entry_into_the_kb_jwt() {
     for absent in ["transaction_data_hashes_alg", "jti", "response_mode", "amr"] {
         assert!(claims.get(absent).is_none(), "{absent}");
     }
+}
+
+/// PaSO Core, Annex A.5 through the plan: four offers, each with one of the two payment
+/// credentials, which binds the entry naming its query (Section 7.4.2).
+#[test]
+fn annex_a5_offers_bind_each_credential_its_entry() {
+    const CARD: &str = "https://bank.example/sca/card";
+    const ACCOUNT: &str = "https://bank.example/sca/account";
+    const PID: &str = "https://credentials.example/pid";
+    let names = [
+        ("given_name", json!("Erika")),
+        ("family_name", json!("Mustermann")),
+    ];
+    let mut wallet = Wallet::new(vec![
+        Held::new(1, "dc+sd-jwt", sd_jwt(CARD, &[])),
+        Held::new(2, "dc+sd-jwt", sd_jwt(ACCOUNT, &[])),
+        Held::new(3, "dc+sd-jwt", sd_jwt(PID, &names)),
+    ]);
+    let metadata: Value = serde_json::from_str(include_str!(
+        "../../../siros-transaction-data/tests/vectors/paso/metadata-a2-payload.json"
+    ))
+    .unwrap();
+    let payment = "urn:paso:sca:global:payment:1";
+    let definition = &metadata["credential_metadata"]["transaction_data_types"][payment];
+    let configured =
+        json!([{"type": payment, "vct_values": [CARD, ACCOUNT], "definition": definition}]);
+    wallet.configuration = Configuration::parse(&configured.to_string()).unwrap();
+    let a5: Value = serde_json::from_str(include_str!(
+        "../../../siros-transaction-data/tests/vectors/paso/core-a5-request.json"
+    ))
+    .unwrap();
+    let entries: Vec<Value> = serde_json::from_str(include_str!(
+        "../../../siros-transaction-data/tests/vectors/paso/core-a5-entries.json"
+    ))
+    .unwrap();
+    let transaction_data: Vec<String> = entries
+        .iter()
+        .map(|entry| b64(entry.to_string().as_bytes()))
+        .collect();
+    let request = dc_api_signed(&json!({
+        "response_type": "vp_token", "response_mode": "dc_api.jwt", "nonce": NONCE,
+        "client_metadata": client_metadata(), "transaction_data": transaction_data,
+        "dcql_query": a5["dcql_query"]
+    }));
+    let fetches = wallet.fetches(&request);
+    let planned = ready(&wallet.input(&request, &fetches)).unwrap();
+    let offers: Vec<Vec<(String, Option<usize>)>> = planned
+        .view()
+        .offers()
+        .iter()
+        .map(|offer| {
+            offer
+                .members()
+                .iter()
+                .map(|member| {
+                    let [credential] = member.credentials() else {
+                        panic!("one credential per member")
+                    };
+                    let bound = credential.transaction().map(|t| t.entry().value());
+                    (member.query_id().as_str().to_owned(), bound)
+                })
+                .collect()
+        })
+        .collect();
+    let member = |query: &str, bound: Option<usize>| (query.to_owned(), bound);
+    assert_eq!(
+        offers,
+        [
+            vec![member("sca_card", Some(0)), member("pid", None)],
+            vec![member("sca_card", Some(0))],
+            vec![member("sca_account", Some(1)), member("pid", None)],
+            vec![member("sca_account", Some(1))],
+        ]
+    );
 }
 
 /// OpenID4VP 1.0, Section 5.1, under PaSO's first match: an entry of a type no source defines
@@ -207,7 +273,7 @@ fn each_plan_rule_refuses_the_request() {
             )),
             TransactionDataError::TypeUnknown(
                 EntryPosition::new(0),
-                excluded(Incompatibility::TypeUnsupported),
+                excluded(Incompatibility::TypeUndeclared),
             ),
             ErrorCode::InvalidTransactionData,
         ),

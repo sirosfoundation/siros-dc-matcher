@@ -12,6 +12,11 @@ siros_codec::position!(
     pub ClaimIndex
 );
 
+siros_codec::text_value!(
+    /// The identifier of a UI element: a member name of `ui_labels` (Section 3.2).
+    UiElementKey
+);
+
 /// A member of a definition, a claim or a localised entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DefinitionMember {
@@ -33,8 +38,8 @@ pub enum DefinitionMember {
     Locale,
     /// A `display` entry's `name`.
     Name,
-    /// A `display` entry's `display_type`, or a `ui_labels` entry's `value_type`.
-    Format,
+    /// A `display` entry's `display_type`.
+    DisplayType,
     /// A `ui_labels` entry's `value`.
     Value,
     /// A `display` entry's `description` (EC TS12 v1.0.1, Section 2.3).
@@ -55,7 +60,7 @@ impl DefinitionMember {
             Self::Visualisation => "visualisation",
             Self::Locale => "locale",
             Self::Name => "name",
-            Self::Format => "display_type",
+            Self::DisplayType => "display_type",
             Self::Value => "value",
             Self::Description => "description",
         }
@@ -76,7 +81,7 @@ pub enum DefinitionError {
     /// The claim at this position has the `path` of an earlier one (Section 3.3).
     PathRepeated(ClaimIndex),
     /// The `ui_labels` array of this UI element breaks a rule.
-    UiElement(String, LabelsFault),
+    UiElement(UiElementKey, LabelsFault),
 }
 
 /// Why a claim metadata object breaks Sections 3.1 and 3.3.
@@ -124,8 +129,9 @@ pub enum EntryFault {
     Locale(LocaleError),
     /// The label or the description breaks a character or length rule (Section 3.3).
     Text(DefinitionMember, TextFault),
-    /// `display_type` or `value_type` is none of `mini_markdown` and `template:mini_markdown`
-    /// (Section 3.3).
+    /// A `ui_labels` entry's `value_type` is none of `mini_markdown` and
+    /// `template:mini_markdown` (Section 3.3). A `display` entry with such a `display_type` is
+    /// left out of its array (PaSO View, Section 3).
     Format(String),
     /// A `security_hint` entry carries a `value_type` (Section 3.3).
     HintFormat,

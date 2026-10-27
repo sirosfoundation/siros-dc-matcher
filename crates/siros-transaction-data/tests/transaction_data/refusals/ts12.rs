@@ -1,14 +1,19 @@
 //! TS12 v1.0.1 type metadata as a source (Sections 3, 3.3 and 4.1; SD-JWT VC, Sections 6 and
-//! 7), and the TS12 rendering rules of Section 3.3.1: a row per rule.
+//! 7), the TS12 rendering rules of Section 3.3.1, and TS12 logos: a row per rule.
 
 use serde_json::{json, Value};
-use siros_oid4vp::HttpStatus;
+use siros_codec::member::ArrayIndex;
+use siros_oid4vp::HttpsUrl;
 use siros_transaction_data::{
-    FetchFault, Incompatibility, IntegrityFault, Location, LocationStep, Prominence, RenderFault,
-    Selection, Ts12Fault, Ts12Member, Ts12Type,
+    ClaimFault, ClaimIndex, DefinitionError, DefinitionMember, EntryFault, ImageFault,
+    Incompatibility, IntegrityFault, LabelsFault, Location, LocationStep, Prominence, RenderFault,
+    Selection, SourceKind, TextFault, Ts12Fault, Ts12Member, Ts12Type, UiElementKey,
 };
 
-use crate::common::{credential_with, entries, ok, query, sri, Documents, Host, PAYMENT};
+use crate::common::{configured, credential_with, entries, query, sri, text, Host, PAYMENT};
+
+/// The documents the host holds, by URL.
+type Held = Vec<(String, Vec<u8>)>;
 
 const VCT: &str = "https://pay.example/card";
 const CLAIMS_URI: &str = "https://pay.example/claims.json";
@@ -51,11 +56,11 @@ fn document(payment: Value) -> Value {
            "transaction_data_types": {PAYMENT: payment}})
 }
 
-/// What the card of the claims `extra` takes of a payment of `payload`, the host serving
+/// What the card of the claims `extra` takes of a payment of `payload`, the host holding
 /// `documents`.
-fn outcome(payload: &Value, extra: &Value, documents: Documents) -> Selection {
+fn outcome(payload: &Value, extra: &Value, documents: Held) -> Selection {
     let mut host = Host::new(json!([]));
-    host.documents = documents;
+    host.held = documents;
     let entry = json!({"type": PAYMENT, "credential_ids": ["pay"],
                        "transaction_data_hashes_alg": ["sha-256"], "payload": payload});
     let entries = entries(&[entry.to_string()], &query(&["pay"], VCT));
@@ -68,8 +73,8 @@ fn payment() -> Value {
            "amount": 9.25})
 }
 
-fn served(document: &Value) -> Documents {
-    vec![(VCT.to_owned(), ok(document.to_string().as_bytes()))]
+fn served(document: &Value) -> Held {
+    vec![(VCT.to_owned(), document.to_string().into_bytes())]
 }
 
 fn fault(fault: Ts12Fault) -> Option<Incompatibility> {
@@ -93,11 +98,12 @@ fn each_type_metadata_rule_is_refused_alone() {
     ));
     let with_claims = |text: &str| {
         let mut documents = served(&referenced);
-        documents.push((CLAIMS_URI.to_owned(), ok(text.as_bytes())));
+        documents.push((CLAIMS_URI.to_owned(), text.as_bytes().to_vec()));
         documents
     };
     let none = json!({});
-    let rows: Vec<(&str, Value, Documents, Option<Incompatibility>)> = vec![
+    let definition = |error| fault(Ts12Fault::Definition(error));
+    let rows: Vec<(&str, Value, Held, Option<Incompatibility>)> = vec![
         ("honest type metadata", none.clone(), served(&honest), None),
         (
             "no schema",
@@ -176,7 +182,7 @@ fn each_type_metadata_rule_is_refused_alone() {
             "a document vct#integrity pins, absent",
             json!({"vct#integrity": sri(b"{}")}),
             vec![],
-            fault(Ts12Fault::Fetch(FetchFault::Status(HttpStatus::new(404)))),
+            fault(Ts12Fault::NotHeld(HttpsUrl::parse(VCT).unwrap())),
         ),
         (
             "no document: no source",
@@ -206,7 +212,10 @@ fn each_type_metadata_rule_is_refused_alone() {
             served(&document(payment_type(
                 json!({"claims": [{"path": ["payload", "amount"], "visualisation": 5}]}),
             ))),
-            fault(Ts12Fault::Visualisation),
+            definition(DefinitionError::Claim(
+                ClaimIndex::new(0),
+                ClaimFault::Visualisation,
+            )),
         ),
         (
             "both lang and locale",
@@ -224,7 +233,46 @@ fn each_type_metadata_rule_is_refused_alone() {
                 json!({"ui_labels": {"affirmative_action_label":
                 [{"lang": "en", "value": "Confirm this payment to the shop"}]}}),
             ))),
-            fault(Ts12Fault::LabelLength("affirmative_action_label", 32)),
+            definition(DefinitionError::UiElement(
+                UiElementKey::new("affirmative_action_label"),
+                LabelsFault::Entry(
+                    ArrayIndex::new(0),
+                    EntryFault::Text(DefinitionMember::Value, TextFault::TooLong(32)),
+                ),
+            )),
+        ),
+        (
+            "a security_hint of 200 characters (Section 3.3.3)",
+            none.clone(),
+            served(&document(payment_type(json!({"ui_labels": {
+                "affirmative_action_label": [{"lang": "en", "value": "Confirm"}],
+                "security_hint": [{"lang": "en", "value": "h".repeat(200)}]}})))),
+            None,
+        ),
+        (
+            "a claim label of 70 characters",
+            none.clone(),
+            served(&document(payment_type(json!({"claims": [
+                claim(&["transaction_id"], "Transaction ID"),
+                claim(&["payee", "name"], &"P".repeat(70)),
+                claim(&["payee", "id"], "Payee ID"),
+                claim(&["currency"], "Currency"),
+                claim(&["amount"], "Amount")
+            ]})))),
+            None,
+        ),
+        (
+            "a description over two lines",
+            none.clone(),
+            served(&document(payment_type(json!({"claims": [
+                claim(&["transaction_id"], "Transaction ID"),
+                {"path": ["payload", "payee", "name"], "display":
+                    [{"lang": "en", "label": "Payee", "description": "Line one\nLine two"}]},
+                claim(&["payee", "id"], "Payee ID"),
+                claim(&["currency"], "Currency"),
+                claim(&["amount"], "Amount")
+            ]})))),
+            None,
         ),
         (
             "no affirmative_action_label (Section 3.3.3)",
@@ -264,7 +312,7 @@ fn every_leaf_shows_unless_level_4() {
         .view()
         .rows()
         .iter()
-        .map(|row| (row.label().text().to_owned(), row.prominence()))
+        .map(|row| (text(row.label()), row.prominence()))
         .collect();
     assert_eq!(
         prominence,
@@ -284,5 +332,95 @@ fn every_leaf_shows_unless_level_4() {
         Some(Incompatibility::Render(RenderFault::LabelMissing(at(
             "transaction_id"
         ))))
+    );
+}
+
+/// A TS12 logo is a resolvable URL or a Data URL with no integrity value (Section 4.3.1): one that
+/// cannot be verified is left out of the view without a fetch, and the payment stays compatible
+/// (PaSO Proof SD-JWT-VC and SVG, Section 2).
+#[test]
+fn an_unverifiable_ts12_logo_is_left_out() {
+    let mut claims = claims();
+    claims
+        .as_array_mut()
+        .unwrap()
+        .push(claim(&["payee", "logo"], "Logo"));
+    let mut host = Host::new(json!([]));
+    host.held = served(&document(payment_type(json!({"claims": claims}))));
+    let logo = Location::new(vec![
+        LocationStep::Key("payee".to_owned()),
+        LocationStep::Key("logo".to_owned()),
+    ]);
+    for (url, cause) in [
+        ("https://shop.example/logo.png", ImageFault::IntegrityAbsent),
+        ("http://shop.example/logo.png", ImageFault::NotHttps),
+    ] {
+        let mut payload = payment();
+        payload["payee"]["logo"] = json!(url);
+        let entry = json!({"type": PAYMENT, "credential_ids": ["pay"],
+                           "transaction_data_hashes_alg": ["sha-256"], "payload": payload});
+        let entries = entries(&[entry.to_string()], &query(&["pay"], VCT));
+        let (selection, fetches) =
+            host.select_fetching(&[&entries[0]], &credential_with(VCT, &[], &json!({})));
+        assert_eq!(fetches, [], "{url}");
+        let Ok(Selection::Takes(taken)) = selection else {
+            panic!("{url}: {selection:?}")
+        };
+        assert_eq!(taken.view().rows().len(), 5, "{url}");
+        assert_eq!(
+            taken.view().absent_images(),
+            [(logo.clone(), cause)],
+            "{url}"
+        );
+    }
+}
+
+/// The TS12 rulebook requires `transaction_data_hashes_alg` whatever the type's key: a type
+/// SCA type metadata defines with a built-in schema (Section 4.2).
+#[test]
+fn a_ts12_rulebook_requires_the_hash_algorithms() {
+    let key = "https://standardsbody.org/eudiw-trx/payment";
+    let mut host = Host::new(json!([]));
+    host.held = served(
+        &json!({"vct": VCT, "category": "urn:eu:europa:ec:eudi:sua:sca",
+        "transaction_data_types": {key: payment_type(json!({}))}}),
+    );
+    let select = |alg: Option<Value>| {
+        let mut entry = json!({"type": key, "credential_ids": ["pay"], "payload": payment()});
+        if let Some(alg) = alg {
+            entry["transaction_data_hashes_alg"] = alg;
+        }
+        let entries = entries(&[entry.to_string()], &query(&["pay"], VCT));
+        host.select(&[&entries[0]], &credential_with(VCT, &[], &json!({})))
+            .unwrap()
+    };
+    assert!(matches!(
+        select(Some(json!(["sha-256"]))),
+        Selection::Takes(_)
+    ));
+    assert_eq!(cause(select(None)), Some(Incompatibility::HashesAlgAbsent));
+}
+
+/// The configuration serves only a credential without transaction metadata of its own: the SCA
+/// type metadata of a `vct` declares every type its credentials support (Section 3.2, step 2).
+#[test]
+fn the_configuration_serves_only_credentials_without_metadata() {
+    let limit = "urn:example:limit-change";
+    let definition = json!({"claims": [
+        {"path": ["action"], "display": [{"locale": "en", "name": "Action"}]}
+    ]});
+    let mut host = Host::new(json!([configured(limit, VCT, &definition)]));
+    let entry = json!({"type": limit, "credential_ids": ["pay"],
+                       "payload": {"action": "Raise limit"}});
+    let entries = entries(&[entry.to_string()], &query(&["pay"], VCT));
+    let card = credential_with(VCT, &[], &json!({}));
+    let Selection::Takes(taken) = host.select(&[&entries[0]], &card).unwrap() else {
+        panic!("a credential without type metadata takes the configured type")
+    };
+    assert_eq!(taken.view().source(), SourceKind::Configuration);
+    host.held = served(&document(payment_type(json!({}))));
+    assert_eq!(
+        cause(host.select(&[&entries[0]], &card).unwrap()),
+        Some(Incompatibility::TypeUndeclared)
     );
 }

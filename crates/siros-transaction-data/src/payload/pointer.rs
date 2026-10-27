@@ -1,6 +1,7 @@
 //! Locations in a payload, and the values a claims path pointer selects there with their
 //! locations (OpenID4VP 1.0, Section 7.1).
 
+use std::cmp::Ordering;
 use std::fmt;
 
 use siros_codec::json::Json;
@@ -13,6 +14,19 @@ pub enum Step {
     Key(String),
     /// An element position.
     Index(u64),
+}
+
+/// How what a claims path pointer addresses relates to a location.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum Reach {
+    /// The pointer addresses the location.
+    Addresses,
+    /// The pointer addresses an ancestor of the location.
+    Contains,
+    /// The location lies on the way to what the pointer addresses.
+    LeadsTo,
+    /// The pointer addresses neither the location, nor an ancestor, nor a descendant.
+    Apart,
 }
 
 /// The location of a value in a payload: the steps from the payload object to it.
@@ -54,28 +68,26 @@ impl Location {
         }
     }
 
-    /// Whether `components` addresses this location or one of its ancestors: each component
-    /// equals its step, `null` standing for any position.
-    pub(crate) fn covered_by(&self, components: &[PathComponent]) -> bool {
-        components.len() <= self.0.len()
-            && components.iter().zip(&self.0).all(|(c, s)| match (c, s) {
-                (PathComponent::Key(key), Step::Key(step)) => key == step,
-                (PathComponent::Index(index), Step::Index(step)) => index == step,
-                (PathComponent::Null, Step::Index(_)) => true,
-                (PathComponent::Key(_) | PathComponent::Index(_) | PathComponent::Null, _) => false,
-            })
+    /// How what `components` addresses relates to this location, `null` standing for any
+    /// position.
+    pub(crate) fn reach(&self, components: &[PathComponent]) -> Reach {
+        let along = components.iter().zip(&self.0).all(|(c, s)| match (c, s) {
+            (PathComponent::Key(key), Step::Key(step)) => key == step,
+            (PathComponent::Index(index), Step::Index(step)) => index == step,
+            (PathComponent::Null, Step::Index(_)) => true,
+            (PathComponent::Key(_) | PathComponent::Index(_) | PathComponent::Null, _) => false,
+        });
+        match (along, components.len().cmp(&self.0.len())) {
+            (false, _) => Reach::Apart,
+            (true, Ordering::Equal) => Reach::Addresses,
+            (true, Ordering::Less) => Reach::Contains,
+            (true, Ordering::Greater) => Reach::LeadsTo,
+        }
     }
 
-    /// Whether this location lies on the way to what `components` addresses: a strict prefix of
-    /// it, `null` standing for any position.
-    pub(crate) fn leads_to(&self, components: &[PathComponent]) -> bool {
-        self.0.len() < components.len()
-            && components.iter().zip(&self.0).all(|(c, s)| match (c, s) {
-                (PathComponent::Key(key), Step::Key(step)) => key == step,
-                (PathComponent::Index(index), Step::Index(step)) => index == step,
-                (PathComponent::Null, Step::Index(_)) => true,
-                (PathComponent::Key(_) | PathComponent::Index(_) | PathComponent::Null, _) => false,
-            })
+    /// The locations from the payload object to this one, shortest first, this one included.
+    pub(crate) fn prefixes(&self) -> impl Iterator<Item = Location> + '_ {
+        (1..=self.0.len()).map(|length| Self(self.0.iter().take(length).cloned().collect()))
     }
 
     /// The location of `components` with each `null` taking the next of `indices`; `None` when

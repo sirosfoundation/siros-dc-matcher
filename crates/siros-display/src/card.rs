@@ -53,12 +53,12 @@ impl DisplayCache {
     /// The card of `credential` in the wallet's `language`.
     ///
     /// [`lookup`] takes the entry from the `display` of the credential's Type Metadata, the
-    /// nearest type that has one (SD-JWT VC, Section 5.5.2). Without a type entry it takes it from
-    /// the `credential_metadata.display` of the credential's configuration, the fallback (D3,
-    /// OpenID4VCI 1.0, Section 12.2.4). The entry gives the title, logo and colours; without any
-    /// entry the title is the credential type. The issuer line is the
-    /// named entry of the Credential Issuer's `display` [`lookup`] takes, else the credential's
-    /// Credential Issuer Identifier.
+    /// nearest type that has one (SD-JWT VC, Section 5.5.2). Without a type entry for the
+    /// language it takes it from the `credential_metadata.display` of the credential's
+    /// configuration, the fallback (D3, OpenID4VCI 1.0, Section 12.2.4). The entry gives the
+    /// title, logo and colours; without any entry the title is the credential type. The issuer
+    /// line is the named entry of the Credential Issuer's `display` [`lookup`] takes, else the
+    /// credential's Credential Issuer Identifier.
     ///
     /// # Errors
     ///
@@ -71,10 +71,8 @@ impl DisplayCache {
             .into_iter()
             .find_map(TypeMetadata::display)
             .unwrap_or_default();
-        let entries = match type_display {
-            [] => issued.map(IssuerMetadata::display).unwrap_or_default(),
-            typed => typed,
-        };
+        let entry = lookup(language, type_display)
+            .or_else(|| issued.and_then(|metadata| lookup(language, metadata.display())));
         let issuer = match issued.and_then(|m| lookup(language, m.issuer_display())) {
             Some(named) => Some(named.text.clone()),
             None => credential
@@ -83,7 +81,7 @@ impl DisplayCache {
                 .transpose()
                 .map_err(DisplayError::Text)?,
         };
-        Ok(match lookup(language, entries) {
+        Ok(match entry {
             Some(entry) => Card {
                 title: entry.name.clone(),
                 issuer,

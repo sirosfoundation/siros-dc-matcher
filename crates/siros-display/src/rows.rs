@@ -67,9 +67,10 @@ impl DisplayCache {
     /// wallet's `language`.
     ///
     /// [`lookup`] takes a row's label from the nearest type of the credential's Type Metadata
-    /// with a labelled claim description that addresses the row's path. Without a type label it
-    /// takes it from the claims description of the credential's configuration that addresses the
-    /// path, the fallback (D3, OpenID4VCI 1.0, Section 12.2.4). Without any label it is the
+    /// with a labelled claim description that addresses the row's path. Without a type label
+    /// for the language it takes it from the claims description of the credential's
+    /// configuration that addresses the path, the fallback (D3, OpenID4VCI 1.0, Section
+    /// 12.2.4). Without any label it is the
     /// path's last key. A pointer with a `null` gives a [`DisplayValue::List`] of the values it selects. An
     /// object gives a [`DisplayValue::Group`] of rows, labelled at the member's path; an
     /// array's elements are at its path extended with `null`. A byte string shows its length
@@ -137,11 +138,8 @@ impl Labels<'_> {
                     .find_map(|claim| claim.labels.as_deref())
             })
             .unwrap_or_default();
-        let candidates = match types {
-            [] => issuer,
-            typed => typed,
-        };
-        if let Some(label) = lookup(self.language, candidates) {
+        if let Some(label) = lookup(self.language, types).or_else(|| lookup(self.language, issuer))
+        {
             return Ok(label.text.clone());
         }
         let key = path

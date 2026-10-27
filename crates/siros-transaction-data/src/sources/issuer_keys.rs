@@ -1,17 +1,14 @@
 //! The key set of an SD-JWT VC issuer, resolved through its JWT VC Issuer Metadata (SD-JWT VC,
-//! Section 4.3; draft-ietf-oauth-sd-jwt-vc, `/.well-known/jwt-vc-issuer`), each document a host
-//! fetch (H1).
+//! Section 4.3; draft-ietf-oauth-sd-jwt-vc, `/.well-known/jwt-vc-issuer`), each document one the
+//! host holds.
 
 use siros_codec::json::{Json, JsonFault};
-use siros_oid4vp::{BodyLimit, HttpsUrl, MediaType};
+use siros_oid4vp::HttpsUrl;
 use siros_wallet_state::IssuerIdentifier;
 
+use super::held::HeldMetadata;
 use super::jws::{JwkFault, VerifyingKey};
-use crate::fetched::{FetchFault, Fetched, Step};
 use crate::json;
-
-/// The largest issuer metadata or key set document read.
-const MAX_DOCUMENT: BodyLimit = BodyLimit::bytes(64 * 1024);
 
 /// The path segment the issuer metadata's well-known URL inserts after the authority.
 const WELL_KNOWN: &str = "/.well-known/jwt-vc-issuer";
@@ -21,8 +18,8 @@ const WELL_KNOWN: &str = "/.well-known/jwt-vc-issuer";
 pub enum KeySetFault {
     /// The Credential Issuer Identifier is no `https` URL.
     IssuerNotHttps,
-    /// A fetch gave no document.
-    Fetch(FetchFault),
+    /// The host holds no document of this URL.
+    NotHeld(HttpsUrl),
     /// A document is no JSON document the strict reader holds.
     Json(JsonFault),
     /// The issuer metadata names another `issuer`, or names its keys by both `jwks` and
@@ -42,7 +39,7 @@ impl KeySetFault {
     pub fn code(&self) -> &'static str {
         match self {
             Self::IssuerNotHttps => "key_set_issuer_not_https",
-            Self::Fetch(fault) => fault.code(),
+            Self::NotHeld(_) => "key_set_not_held",
             Self::Json(_) | Self::Metadata | Self::Keys => "key_set_malformed",
             Self::KidUnknown => "key_set_kid_unknown",
             Self::Key(fault) => fault.code(),
@@ -54,34 +51,13 @@ siros_codec::display_code!(KeySetFault);
 
 impl std::error::Error for KeySetFault {}
 
-/// The key of the key set of `issuer` that `kid` identifies; the fetch of the issuer metadata
-/// or of its `jwks_uri` while the host has not given it.
+/// The key of the key set of `issuer` that `kid` identifies.
 pub(crate) fn key(
     issuer: &IssuerIdentifier,
     kid: &str,
-    fetched: &Fetched,
-) -> Result<Step<VerifyingKey>, KeySetFault> {
-    let metadata_url = well_known(issuer).ok_or(KeySetFault::IssuerNotHttps)?;
-    let metadata = match document(&metadata_url, fetched)? {
-        Step::Fetch(fetch) => return Ok(Step::Fetch(fetch)),
-        Step::Done(document) => document,
-    };
-    let mut fields = json::object(metadata).map_err(|_| KeySetFault::Metadata)?;
-    match fields.take("issuer") {
-        Some(Json::String(named)) if named == issuer.as_str() => {}
-        _ => return Err(KeySetFault::Metadata),
-    }
-    let jwks = match (fields.take("jwks"), fields.take("jwks_uri")) {
-        (Some(jwks), None) => jwks,
-        (None, Some(Json::String(uri))) => {
-            let url = HttpsUrl::parse(&uri).ok_or(KeySetFault::Metadata)?;
-            match document(&url, fetched)? {
-                Step::Fetch(fetch) => return Ok(Step::Fetch(fetch)),
-                Step::Done(document) => document,
-            }
-        }
-        _ => return Err(KeySetFault::Metadata),
-    };
+    held: &HeldMetadata,
+) -> Result<VerifyingKey, KeySetFault> {
+    let jwks = key_set(issuer, held)?;
     let Some(Json::Array(keys)) = jwks.member("keys") else {
         return Err(KeySetFault::Keys);
     };
@@ -89,9 +65,66 @@ pub(crate) fn key(
         .iter()
         .find(|key| matches!(key.member("kid"), Some(Json::String(id)) if id == kid))
         .ok_or(KeySetFault::KidUnknown)?;
-    VerifyingKey::of_jwk(jwk)
-        .map(Step::Done)
-        .map_err(KeySetFault::Key)
+    VerifyingKey::of_jwk(jwk).map_err(KeySetFault::Key)
+}
+
+/// The URLs of the documents of `issuer`'s key set: its issuer metadata, and, once the host
+/// holds that, the `jwks_uri` it names.
+///
+/// # Errors
+///
+/// [`KeySetFault`] for an issuer whose metadata URL is unknown, or held metadata that does not
+/// read.
+pub(crate) fn documents(
+    issuer: &IssuerIdentifier,
+    held: &HeldMetadata,
+) -> Result<Vec<HttpsUrl>, KeySetFault> {
+    let metadata_url = well_known(issuer).ok_or(KeySetFault::IssuerNotHttps)?;
+    let mut urls = vec![metadata_url.clone()];
+    if held.document(&metadata_url).is_some() {
+        if let KeySetSource::Uri(url) = source(issuer, &metadata_url, held)? {
+            urls.push(url);
+        }
+    }
+    Ok(urls)
+}
+
+/// Where an issuer's metadata puts its key set.
+enum KeySetSource {
+    /// Inline, as `jwks`.
+    Inline(Json),
+    /// At this `jwks_uri`.
+    Uri(HttpsUrl),
+}
+
+/// The key set of `issuer`: its issuer metadata's `jwks`, or the document its `jwks_uri` names.
+fn key_set(issuer: &IssuerIdentifier, held: &HeldMetadata) -> Result<Json, KeySetFault> {
+    let metadata_url = well_known(issuer).ok_or(KeySetFault::IssuerNotHttps)?;
+    match source(issuer, &metadata_url, held)? {
+        KeySetSource::Inline(jwks) => Ok(jwks),
+        KeySetSource::Uri(url) => document(&url, held),
+    }
+}
+
+/// Where the issuer metadata of `issuer`, held for `metadata_url`, puts the key set.
+fn source(
+    issuer: &IssuerIdentifier,
+    metadata_url: &HttpsUrl,
+    held: &HeldMetadata,
+) -> Result<KeySetSource, KeySetFault> {
+    let mut fields =
+        json::object(document(metadata_url, held)?).map_err(|_| KeySetFault::Metadata)?;
+    match fields.take("issuer") {
+        Some(Json::String(named)) if named == issuer.as_str() => {}
+        _ => return Err(KeySetFault::Metadata),
+    }
+    match (fields.take("jwks"), fields.take("jwks_uri")) {
+        (Some(jwks), None) => Ok(KeySetSource::Inline(jwks)),
+        (None, Some(Json::String(uri))) => HttpsUrl::parse(&uri)
+            .map(KeySetSource::Uri)
+            .ok_or(KeySetFault::Metadata),
+        _ => Err(KeySetFault::Metadata),
+    }
 }
 
 /// The URL of the JWT VC Issuer Metadata of `issuer`: the well-known segment between its
@@ -109,15 +142,10 @@ fn well_known(issuer: &IssuerIdentifier) -> Option<HttpsUrl> {
     ))
 }
 
-/// The JSON document at `url`.
-fn document(url: &HttpsUrl, fetched: &Fetched) -> Result<Step<Json>, KeySetFault> {
-    match fetched
-        .body(url, MediaType::JSON, MAX_DOCUMENT)
-        .map_err(KeySetFault::Fetch)?
-    {
-        Step::Fetch(fetch) => Ok(Step::Fetch(fetch)),
-        Step::Done(body) => Json::parse_unique(body)
-            .map(Step::Done)
-            .map_err(KeySetFault::Json),
-    }
+/// The JSON document held for `url`.
+fn document(url: &HttpsUrl, held: &HeldMetadata) -> Result<Json, KeySetFault> {
+    let body = held
+        .document(url)
+        .ok_or_else(|| KeySetFault::NotHeld(url.clone()))?;
+    Json::parse_unique(body).map_err(KeySetFault::Json)
 }

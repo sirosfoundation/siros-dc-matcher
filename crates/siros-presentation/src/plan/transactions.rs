@@ -6,7 +6,7 @@ use itertools::Itertools;
 use siros_credential::{Credential, EntryRef, UsableCredential};
 use siros_dcql::QueryId;
 use siros_transaction_data::{
-    check_request, Context, Entry, EntryPosition, Exclusion, Selection, Step, Taken,
+    check_request, fetched, Context, Entry, EntryPosition, Exclusion, Selection, Step, Taken,
     TransactionDataError,
 };
 
@@ -104,6 +104,7 @@ impl<'a> Transactions<'a> {
         check_request(&entries, request.dcql_query(), request.signature())?;
         let context = Context {
             trust: input.trust,
+            held: input.held,
             fetched: input.fetches.fetched(),
             display: input.display,
             configuration: input.configuration,
@@ -132,7 +133,7 @@ impl<'a> Transactions<'a> {
             entries,
             candidacies,
         };
-        fetched!(transactions.known(answered, &context)?);
+        transactions.known(answered, &context)?;
         transactions.compatible_left()?;
         Ok(Step::Done(transactions))
     }
@@ -143,8 +144,8 @@ impl<'a> Transactions<'a> {
     fn known(
         &self,
         answered: &Wallet<'_>,
-        context: &Context<'_>,
-    ) -> Result<Step<()>, TransactionDataError> {
+        context: &Context<'a>,
+    ) -> Result<(), TransactionDataError> {
         for entry in &self.entries {
             let targets: Vec<&Candidacy> = self
                 .candidacies
@@ -161,14 +162,10 @@ impl<'a> Transactions<'a> {
             if served {
                 continue;
             }
-            let mut known = false;
-            for target in &targets {
-                match context.knows(entry, target.credential) {
-                    Step::Fetch(fetch) => return Ok(Step::Fetch(fetch)),
-                    Step::Done(knows) => known |= knows,
-                }
-            }
-            if !known {
+            if !targets
+                .iter()
+                .any(|target| context.knows(entry, target.credential))
+            {
                 let exclusions = targets.iter().filter_map(|c| c.exclusion()).collect();
                 return Err(TransactionDataError::TypeUnknown(
                     entry.position(),
@@ -176,7 +173,7 @@ impl<'a> Transactions<'a> {
                 ));
             }
         }
-        Ok(Step::Done(()))
+        Ok(())
     }
 
     /// Checks that a candidate takes an entry when some candidate is targeted (PaSO Core,

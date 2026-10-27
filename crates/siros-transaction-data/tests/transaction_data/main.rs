@@ -4,6 +4,7 @@ mod common;
 mod examples;
 mod fixtures;
 mod hashes;
+mod projection;
 mod refusals;
 mod schemas;
 mod selection;

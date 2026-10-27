@@ -1,26 +1,25 @@
 //! Discovery and validation (PaSO Core, Section 7.4.2): each candidate credential takes the
 //! first entry, in array order, that targets it, whose type it supports in the wallet's
-//! language, whose payload conforms, whose resources verify, and that renders in full. A
-//! credential with none is excluded.
+//! language, whose payload conforms, that renders within the cap, whose resources verify, and
+//! that renders in full. A credential with none is excluded.
 
 use siros_codec::date::DateTime;
-use siros_credential::{Credential, EntryRef, Format};
-use siros_display::{DisplayCache, Locale};
+use siros_credential::EntryRef;
 use siros_oid4vp::RequestSignature;
-use siros_trust::TrustStore;
 
-use crate::definition::DefinitionError;
+use crate::definition::{DefinitionError, Prominence};
 use crate::entry::Entry;
 use crate::error::{EntryPosition, TransactionDataError};
+use crate::fetched;
 use crate::fetched::{Fetched, Step};
+use crate::hash::AlgClaim;
 use crate::image::ImageFault;
-use crate::payload::{conform, Location, PayloadFault, ValueFault, Values};
-use crate::projection::Unmatched;
-use crate::render::{layout, RenderFault, Rendering};
-use crate::sources::{
-    Configuration, CredentialMetadataFault, Rulebook, Served, SignedFault, SourceKind, Sources,
-    Ts12Fault, Verifier,
-};
+use crate::payload::{conform, Location, PayloadFault, Typed, ValueFault, Values};
+use crate::projection::{Projected, Unmatched};
+use crate::render::{layout, Ready, RenderFault, Rendering, MAX_ITEMS};
+#[cfg(feature = "wallet")]
+use crate::sources::{CredentialMetadataFault, SignedFault, Ts12Fault};
+use crate::sources::{Rulebook, SourceKind};
 use crate::ts12::read::Ts12PayloadFault;
 use crate::ts12::Ts12Payload;
 use crate::view::TransactionView;
@@ -33,19 +32,29 @@ pub enum Incompatibility {
     Format,
     /// No source defines the entry's type for the credential.
     TypeUnsupported,
+    /// The credential's own metadata declares every type it supports, and not this one; the
+    /// configuration serves only credentials without metadata of their own (EC TS12 v1.0.1,
+    /// Section 3.2, step 2; PaSO Proof Metadata, Section 3).
+    TypeUndeclared,
     /// The entry's ad-hoc metadata JWT is invalid; no other source serves the entry (PaSO Proof
     /// Metadata, Section 5.3).
+    #[cfg(feature = "wallet")]
     AdHoc(SignedFault),
-    /// The credential's signed credential metadata is invalid, which excludes the credential
-    /// (PaSO Proof Metadata, Section 7).
+    /// The credential's signed credential metadata is not held or invalid, which excludes the
+    /// credential (PaSO Proof Metadata, Sections 3 and 7).
+    #[cfg(feature = "wallet")]
     CredentialMetadata(CredentialMetadataFault),
     /// The credential's TS12 type metadata gives no definition of the type.
+    #[cfg(feature = "wallet")]
     TypeMetadata(Ts12Fault),
     /// The definition of this source breaks PaSO Proof Metadata, Section 3, which makes the
     /// type unsupported by the credential (Section 3.3).
     Definition(SourceKind, DefinitionError),
     /// A localised array has no entry for the wallet's language (PaSO View, Section 4).
     Language(Unmatched),
+    /// The entry has no `transaction_data_hashes_alg`, which a TS12 rulebook requires (EC TS12
+    /// v1.0.1, Section 4.2).
+    HashesAlgAbsent,
     /// The payload does not conform to the definition.
     Payload(PayloadFault),
     /// The payload breaks the schema of its TS12 type.
@@ -65,16 +74,41 @@ impl Incompatibility {
         match self {
             Self::Format => "transaction_data_format_unsupported",
             Self::TypeUnsupported => "transaction_data_type_unsupported",
+            Self::TypeUndeclared => "transaction_data_type_undeclared",
+            #[cfg(feature = "wallet")]
             Self::AdHoc(fault) => fault.code(),
+            #[cfg(feature = "wallet")]
             Self::CredentialMetadata(fault) => fault.code(),
+            #[cfg(feature = "wallet")]
             Self::TypeMetadata(fault) => fault.code(),
             Self::Definition(_, error) => error.code(),
             Self::Language(unmatched) => unmatched.code(),
+            Self::HashesAlgAbsent => "transaction_data_hashes_alg_absent",
             Self::Payload(fault) => fault.code(),
             Self::Ts12Payload(fault) => fault.code(),
             Self::Ts12Value(_, fault) => fault.code(),
             Self::Image(_, fault) => fault.code(),
             Self::Render(fault) => fault.code(),
+        }
+    }
+
+    /// Whether a source defines the entry's type for the credential, though the entry is not
+    /// compatible: every cause but a format without transaction data and a type no source
+    /// declares (OpenID4VP 1.0, Section 5.1).
+    #[must_use]
+    pub fn type_defined(&self) -> bool {
+        match self {
+            Self::Format | Self::TypeUnsupported | Self::TypeUndeclared => false,
+            #[cfg(feature = "wallet")]
+            Self::AdHoc(_) | Self::CredentialMetadata(_) | Self::TypeMetadata(_) => true,
+            Self::Definition(..)
+            | Self::Language(_)
+            | Self::HashesAlgAbsent
+            | Self::Payload(_)
+            | Self::Ts12Payload(_)
+            | Self::Ts12Value(..)
+            | Self::Image(..)
+            | Self::Render(_) => true,
         }
     }
 }
@@ -83,29 +117,15 @@ siros_codec::display_code!(Incompatibility);
 
 impl std::error::Error for Incompatibility {}
 
-/// What the evaluation of an entry for a credential reads.
-#[derive(Clone, Copy)]
-pub struct Context<'c> {
-    /// The trust store (H4), against which `x5c` chains are validated.
-    pub trust: &'c TrustStore,
-    /// The host's responses to the fetches transaction data asked for.
-    pub fetched: &'c Fetched,
-    /// The display metadata the host holds, which locates signed credential metadata.
-    pub display: &'c DisplayCache,
-    /// The host's configured definitions.
-    pub configuration: &'c Configuration,
-    /// The wallet's language.
-    pub language: &'c Locale,
-    /// Whether the request arrived signed.
-    pub signature: RequestSignature,
-    /// The time.
-    pub now: DateTime,
-}
-
-/// Why an image is not ready: its fetch, or its fault.
-enum Unready {
-    Fetch(siros_oid4vp::Fetch),
-    Fault(ImageFault),
+/// What serves a credential's definitions: the wallet's sources, or the projections a credential
+/// was registered with.
+pub trait Definitions {
+    /// The definition of `entry`'s type for the credential, projected to the wallet's language.
+    ///
+    /// # Errors
+    ///
+    /// [`Incompatibility`]: why no definition serves the entry.
+    fn serve(&self, entry: &Entry) -> Result<Projected, Incompatibility>;
 }
 
 /// An entry a credential takes, with its view.
@@ -148,137 +168,128 @@ impl Taken {
     }
 }
 
-impl Context<'_> {
-    fn sources(&self) -> Sources<'_> {
-        Sources {
-            verifier: Verifier {
-                trust: self.trust,
-                fetched: self.fetched,
-                now: self.now,
-            },
-            display: self.display,
-            configuration: self.configuration,
-            language: self.language,
-        }
-    }
+/// What the first match reads beside a credential's definitions: the host's answers to the
+/// image fetches, whether the request arrived signed, and the time.
+#[derive(Debug, Clone, Copy)]
+pub struct Selector<'s> {
+    /// The host's responses to the image fetches transaction data asked for.
+    pub fetched: &'s Fetched,
+    /// Whether the request arrived signed.
+    pub signature: RequestSignature,
+    /// The time, against which a TS12 payload's dates are read.
+    pub now: DateTime,
+}
 
-    /// What `credential` takes of `entries`, those that target it in array order (Section 7.4.2,
-    /// steps 2 and 3). The step is a fetch while the host has not given a document.
+impl Selector<'_> {
+    /// What a credential whose definitions `definitions` serves takes of `entries`, those that
+    /// target it in array order (Section 7.4.2, steps 2 and 3). The step is a fetch while the
+    /// host has not given an image.
     ///
     /// # Errors
     ///
-    /// [`TransactionDataError::Unsigned`] when the request arrived unsigned and a PaSO source
-    /// serves an entry the credential would take (PaSO Core, Section 3).
+    /// [`TransactionDataError::Unsigned`] when the request arrived unsigned and PaSO metadata
+    /// serves an entry (PaSO Core, Section 3).
     pub fn first_match(
         &self,
         entries: &[&Entry],
-        credential: &Credential,
+        definitions: &impl Definitions,
     ) -> Result<Step<Selection>, TransactionDataError> {
         let mut causes = Vec::new();
         for entry in entries {
-            match self.evaluate(entry, credential)? {
-                Step::Fetch(fetch) => return Ok(Step::Fetch(fetch)),
-                Step::Done(Ok(view)) => {
-                    return Ok(Step::Done(Selection::Takes(Taken {
-                        entry: entry.position(),
-                        view,
-                    })))
+            let projected = match definitions.serve(entry) {
+                Ok(projected) => projected,
+                Err(cause) => {
+                    causes.push((entry.position(), cause));
+                    continue;
                 }
-                Step::Done(Err(cause)) => causes.push((entry.position(), cause)),
+            };
+            if self.signature == RequestSignature::Unsigned && projected.source().is_paso() {
+                return Err(TransactionDataError::Unsigned(entry.position()));
+            }
+            match self.view(entry, &projected) {
+                Ok(step) => {
+                    return Ok(step.map(|view| {
+                        Selection::Takes(Taken {
+                            entry: entry.position(),
+                            view,
+                        })
+                    }))
+                }
+                Err(cause) => causes.push((entry.position(), cause)),
             }
         }
         Ok(Step::Done(Selection::Excluded(causes)))
     }
 
-    /// Whether some source defines `entry`'s type for `credential` (OpenID4VP 1.0, Section
-    /// 5.1). The step is a fetch while the host has not given a document.
-    pub fn knows(&self, entry: &Entry, credential: &Credential) -> Step<bool> {
-        if credential.format() != Format::SdJwtVc {
-            return Step::Done(false);
-        }
-        match self.sources().serve(entry, credential) {
-            Ok(Step::Fetch(fetch)) => Step::Fetch(fetch),
-            Ok(Step::Done(_)) => Step::Done(true),
-            Err(_) => Step::Done(false),
-        }
-    }
-
-    /// The view of `entry` for `credential`, or why the entry is not compatible.
-    fn evaluate(
-        &self,
-        entry: &Entry,
-        credential: &Credential,
-    ) -> Result<Step<Result<TransactionView, Incompatibility>>, TransactionDataError> {
-        if credential.format() != Format::SdJwtVc {
-            return Ok(Step::Done(Err(Incompatibility::Format)));
-        }
-        let served = match self.sources().serve(entry, credential) {
-            Ok(Step::Fetch(fetch)) => return Ok(Step::Fetch(fetch)),
-            Ok(Step::Done(served)) => served,
-            Err(cause) => return Ok(Step::Done(Err(cause))),
-        };
-        if self.signature == RequestSignature::Unsigned && served.source.is_paso() {
-            return Err(TransactionDataError::Unsigned(entry.position()));
-        }
-        Ok(self.view(entry, &served))
-    }
-
-    /// The view of `entry` under `served`.
+    /// The view of `entry` under `projected`: its typed values, then the cap on the items it
+    /// would show, then its images verified, then the rendering. Under a TS12 rulebook an image
+    /// that does not verify is left out (PaSO Proof SD-JWT-VC and SVG, Section 2).
     fn view(
         &self,
         entry: &Entry,
-        served: &Served,
-    ) -> Step<Result<TransactionView, Incompatibility>> {
-        let projected = match served.definition.project(self.language) {
-            Ok(projected) => projected,
-            Err(unmatched) => return Step::Done(Err(Incompatibility::Language(unmatched))),
-        };
+        projected: &Projected,
+    ) -> Result<Step<TransactionView>, Incompatibility> {
         let payload = entry.payload();
-        let (values, floors) = match self.values(entry, served) {
-            Ok(typed) => typed,
-            Err(cause) => return Step::Done(Err(cause)),
-        };
-        let mut ready = Vec::new();
-        for placed in layout(&projected, payload, &values) {
-            let location = placed.location().clone();
-            let verified = placed.ready(|image| match image.verify(self.fetched) {
-                Ok(Step::Done(image)) => Ok(image),
-                Ok(Step::Fetch(fetch)) => Err(Unready::Fetch(fetch)),
-                Err(fault) => Err(Unready::Fault(fault)),
-            });
-            match verified {
-                Ok(placed) => ready.push(placed),
-                Err(Unready::Fetch(fetch)) => return Step::Fetch(fetch),
-                Err(Unready::Fault(fault)) => {
-                    return Step::Done(Err(Incompatibility::Image(location, fault)))
-                }
-            }
+        let (values, floors) = self.values(entry, projected)?;
+        let placed = layout(projected, payload, &values);
+        let items = placed.len() + projected.ui_elements();
+        if items > MAX_ITEMS {
+            return Err(Incompatibility::Render(RenderFault::TooManyItems(items)));
+        }
+        let mut ready = Vec::with_capacity(placed.len());
+        let mut absent = Vec::new();
+        for place in placed {
+            let value = match place.value() {
+                Typed::Image(image) => match image.verify(self.fetched) {
+                    Ok(step) => Ready::Image(fetched!(step)),
+                    Err(fault) => match projected.rulebook() {
+                        Rulebook::Ts12(_) => {
+                            absent.push((place.location().clone(), fault));
+                            continue;
+                        }
+                        Rulebook::Generic => {
+                            return Err(Incompatibility::Image(place.location().clone(), fault))
+                        }
+                    },
+                },
+                Typed::Scalar(scalar) => Ready::Scalar(scalar.clone()),
+                Typed::LabelOnly => Ready::LabelOnly,
+                Typed::Template(text, inner) => Ready::Template(text.clone(), *inner),
+            };
+            ready.push(place.with(value));
         }
         let rendering = Rendering {
             type_id: entry.type_id(),
-            source: served.source,
-            rulebook: served.rulebook,
-            projected: &projected,
+            projected,
             payload,
             values: &values,
             floors: &floors,
             signature: self.signature,
         };
-        Step::Done(rendering.render(ready).map_err(Incompatibility::Render))
+        rendering
+            .render(ready, absent)
+            .map(Step::Done)
+            .map_err(Incompatibility::Render)
     }
 
-    /// The typed values of `entry`'s payload under the rulebook of `served`, and the floors of
-    /// a TS12 payload's leaves.
+    /// The typed values of `entry`'s payload under the rulebook of `projected`, and the floors
+    /// of a TS12 payload's leaves.
     fn values(
         &self,
         entry: &Entry,
-        served: &Served,
-    ) -> Result<(Values, Vec<(Location, crate::definition::Prominence)>), Incompatibility> {
-        match served.rulebook {
-            Rulebook::Generic => conform(entry.payload(), &served.definition)
-                .map(|values| (values, Vec::new()))
-                .map_err(Incompatibility::Payload),
+        projected: &Projected,
+    ) -> Result<(Values, Vec<(Location, Prominence)>), Incompatibility> {
+        match projected.rulebook() {
+            Rulebook::Generic => conform(
+                entry.payload(),
+                projected.claims().iter().map(|claim| claim.definition()),
+            )
+            .map(|values| (values, Vec::new()))
+            .map_err(Incompatibility::Payload),
             Rulebook::Ts12(rulebook) => {
+                if entry.hashes().claim() == AlgClaim::Omitted {
+                    return Err(Incompatibility::HashesAlgAbsent);
+                }
                 let payload = Ts12Payload::parse(rulebook, entry.payload(), self.now)
                     .map_err(Incompatibility::Ts12Payload)?;
                 let typed = payload

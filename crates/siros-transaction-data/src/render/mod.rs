@@ -9,15 +9,17 @@ use siros_dcql::PathComponent;
 use siros_oid4vp::RequestSignature;
 
 use crate::definition::{
-    BaseType, ClaimDisplay, ClaimIndex, ClaimName, LabelFormat, LabelLength, LabelRole, LabelText,
-    Prominence, TextFault, UiLabel,
+    BaseType, ClaimDisplay, ClaimIndex, ClaimName, LabelFormat, LabelLength, LabelRole, LabelRules,
+    LabelText, Prominence, TextFault, UiLabel,
 };
-use crate::image::{ImageRef, VerifiedImage};
-use crate::payload::{scalar, select, Location, PayloadText, Scalar, Typed, ValueFault, Values};
+use crate::image::{ImageFault, VerifiedImage};
+use crate::payload::{
+    scalar, select, Location, PayloadText, Reach, Scalar, Typed, ValueFault, Values,
+};
 use crate::projection::{Projected, ProjectedClaim};
-use crate::sources::{Rulebook, SourceKind};
+use crate::sources::Rulebook;
 use crate::type_id::TypeId;
-use crate::view::{Row, RowValue, ShownLabel, TransactionView};
+use crate::view::{Interpolated, Row, RowValue, Segment, ShownLabel, TransactionView};
 
 use template::Sources;
 pub use template::TemplateFault;
@@ -88,33 +90,27 @@ pub(crate) enum Ready {
     Image(VerifiedImage),
 }
 
-impl<'p> Placed<'p, &'p Typed> {
-    /// The instance with its value ready: `ready` verifies an image.
-    pub(crate) fn ready<E>(
-        self,
-        verify: impl FnOnce(&ImageRef) -> Result<VerifiedImage, E>,
-    ) -> Result<Placed<'p, Ready>, E> {
-        let value = match self.value {
-            Typed::Scalar(scalar) => Ready::Scalar(scalar.clone()),
-            Typed::LabelOnly => Ready::LabelOnly,
-            Typed::Template(text, inner) => Ready::Template(text.clone(), *inner),
-            Typed::Image(image) => Ready::Image(verify(image)?),
-        };
-        Ok(Placed {
+impl<'p, V> Placed<'p, V> {
+    /// The instance's location in the payload.
+    pub(crate) fn location(&self) -> &Location {
+        &self.location
+    }
+
+    /// The instance's value.
+    pub(crate) fn value(&self) -> &V {
+        &self.value
+    }
+
+    /// The instance with the value `value`.
+    pub(crate) fn with<W>(self, value: W) -> Placed<'p, W> {
+        Placed {
             index: self.index,
             claim: self.claim,
             display: self.display,
             location: self.location,
             wildcards: self.wildcards,
             value,
-        })
-    }
-}
-
-impl<V> Placed<'_, V> {
-    /// The instance's location in the payload.
-    pub(crate) fn location(&self) -> &Location {
-        &self.location
+        }
     }
 }
 
@@ -226,8 +222,6 @@ fn bind_first_null<'p>(pending: &Pending<'p>, position: u64) -> Pending<'p> {
 /// What a view is rendered from.
 pub(crate) struct Rendering<'r> {
     pub(crate) type_id: &'r TypeId,
-    pub(crate) source: SourceKind,
-    pub(crate) rulebook: Rulebook,
     pub(crate) projected: &'r Projected,
     pub(crate) payload: &'r Json,
     pub(crate) values: &'r Values,
@@ -236,7 +230,8 @@ pub(crate) struct Rendering<'r> {
 }
 
 impl Rendering<'_> {
-    /// The view of the instances `placed`, their values ready.
+    /// The view of the instances `placed`, their values ready, without the TS12 images
+    /// `absent` that did not verify.
     ///
     /// # Errors
     ///
@@ -244,64 +239,60 @@ impl Rendering<'_> {
     pub(crate) fn render(
         &self,
         placed: Vec<Placed<'_, Ready>>,
+        absent: Vec<(Location, ImageFault)>,
     ) -> Result<TransactionView, RenderFault> {
+        let projected = self.projected;
         let sources = Sources {
-            claims: self.projected.claims(),
+            claims: projected.claims(),
             payload: self.payload,
             values: self.values,
         };
+        let rules = projected.source().label_rules();
         let rows = placed
             .into_iter()
-            .map(|place| self.row(place, &sources))
+            .map(|place| self.row(place, &sources, rules))
             .collect::<Result<Vec<_>, _>>()?;
-        let projected = self.projected;
         let view = TransactionView {
             type_id: self.type_id.clone(),
-            source: self.source,
-            rulebook: self.rulebook,
+            source: projected.source(),
+            rulebook: projected.rulebook(),
             title: projected
                 .title()
-                .map(|l| ui_label(l, &sources))
+                .map(|l| ui_label(l, &sources, rules))
                 .transpose()?,
             affirmative: projected
                 .affirmative()
-                .map(|l| ui_label(l, &sources))
+                .map(|l| ui_label(l, &sources, rules))
                 .transpose()?,
             denial: projected
                 .denial()
-                .map(|l| ui_label(l, &sources))
+                .map(|l| ui_label(l, &sources, rules))
                 .transpose()?,
             security_hint: projected.security_hint().map(|hint| hint.value().clone()),
             rows,
+            absent,
             signature: self.signature,
         };
-        let items = view.rows.len()
-            + [
-                view.title.is_some(),
-                view.affirmative.is_some(),
-                view.denial.is_some(),
-            ]
-            .into_iter()
-            .filter(|present| *present)
-            .count()
-            + usize::from(view.security_hint.is_some());
-        if items > MAX_ITEMS {
-            return Err(RenderFault::TooManyItems(items));
-        }
-        if let Rulebook::Ts12(_) = self.rulebook {
+        if let Rulebook::Ts12(_) = projected.rulebook() {
             self.ts12_complete(&view)?;
         }
         Ok(view)
     }
 
-    /// The row of `place`.
-    fn row(&self, place: Placed<'_, Ready>, sources: &Sources<'_>) -> Result<Row, RenderFault> {
+    /// The row of `place`, its label under `rules`.
+    fn row(
+        &self,
+        place: Placed<'_, Ready>,
+        sources: &Sources<'_>,
+        rules: LabelRules,
+    ) -> Result<Row, RenderFault> {
         let display = place.display;
         let label = shown::<ClaimName>(
             display.name().as_str(),
             display.format(),
             &place.wildcards,
             sources,
+            rules,
         )
         .map_err(|fault| match fault {
             Shown::Template(fault) => RenderFault::Template(fault),
@@ -312,14 +303,14 @@ impl Rendering<'_> {
             Ready::LabelOnly => RowValue::LabelOnly,
             Ready::Image(image) => RowValue::Image(image),
             Ready::Template(text, inner) => {
-                let interpolated = template::interpolate(text.as_str(), &place.wildcards, sources)
+                let segments = template::interpolate(text.as_str(), &place.wildcards, sources)
                     .map_err(RenderFault::Template)?;
-                inner_value(interpolated, inner)
+                inner_value(segments, inner)
                     .map_err(|fault| RenderFault::Value(place.location.clone(), fault))?
             }
         };
         let set = place.claim.definition().prominence();
-        let prominence = match self.rulebook {
+        let prominence = match self.projected.rulebook() {
             Rulebook::Ts12(_) => Some(self.prominence(set, &place.location)),
             Rulebook::Generic => set,
         };
@@ -341,20 +332,20 @@ impl Rendering<'_> {
         }
     }
 
-    /// Checks that every TS12 leaf parameter shows as a row, or that the metadata marks it 4
-    /// and its type lets it be left out; and that the type has an `affirmative_action_label`
-    /// (EC TS12 v1.0.1, Sections 3.3.1 and 3.3.3).
+    /// Checks that every TS12 leaf parameter shows as a row, is an image left out, or that the
+    /// metadata marks it 4 and its type lets it be left out; and that the type has an
+    /// `affirmative_action_label` (EC TS12 v1.0.1, Sections 3.3.1 and 3.3.3).
     fn ts12_complete(&self, view: &TransactionView) -> Result<(), RenderFault> {
         if view.affirmative.is_none() {
             return Err(RenderFault::AffirmativeAbsent);
         }
         for (location, _) in self.values.iter() {
-            if view.rows.iter().any(|row| row.location == *location) {
+            let shown = view.rows.iter().any(|row| row.location == *location);
+            if shown || view.absent.iter().any(|(at, _)| at == location) {
                 continue;
             }
             let claim = self.projected.claims().iter().find(|claim| {
-                let path = claim.definition().path().components();
-                path.len() == location.steps().len() && location.covered_by(path)
+                location.reach(claim.definition().path().components()) == Reach::Addresses
             });
             let level = self.prominence(claim.and_then(|c| c.definition().prominence()), location);
             if claim.is_none() || level != Prominence::Omittable {
@@ -372,45 +363,68 @@ enum Shown {
 }
 
 /// The label `text` of role `R` formatted by `format`: interpolated when a template, then
-/// checked against the rules of its role (PaSO View, Section 2).
+/// checked against the rules of its role under `rules`, each value counted as the payload
+/// writes it (PaSO View, Section 2).
 fn shown<R: LabelRole>(
     text: &str,
     format: LabelFormat,
     wildcards: &[u64],
     sources: &Sources<'_>,
+    rules: LabelRules,
 ) -> Result<ShownLabel, Shown> {
     match format {
         LabelFormat::Plain | LabelFormat::MiniMarkdown => Ok(ShownLabel {
-            text: text.to_owned(),
+            segments: vec![Segment::Text(text.to_owned())],
             format,
         }),
         LabelFormat::TemplateMiniMarkdown => {
-            let text = template::interpolate(text, wildcards, sources).map_err(Shown::Template)?;
-            let label = LabelText::<R>::parse(&text, LabelLength::Final).map_err(Shown::Text)?;
+            let segments =
+                template::interpolate(text, wildcards, sources).map_err(Shown::Template)?;
+            LabelText::<R>::parse(&written(&segments), LabelLength::Final, rules)
+                .map(drop)
+                .map_err(Shown::Text)?;
             Ok(ShownLabel {
-                text: label.as_str().to_owned(),
+                segments,
                 format: LabelFormat::MiniMarkdown,
             })
         }
     }
 }
 
-/// A UI element's label, interpolated when a template.
+/// A UI element's label under `rules`, interpolated when a template.
 fn ui_label<R: LabelRole>(
     label: &UiLabel<R>,
     sources: &Sources<'_>,
+    rules: LabelRules,
 ) -> Result<ShownLabel, RenderFault> {
-    shown::<R>(label.value().as_str(), label.format(), &[], sources).map_err(|fault| match fault {
-        Shown::Template(fault) => RenderFault::Template(fault),
-        Shown::Text(fault) => RenderFault::Label(None, fault),
+    shown::<R>(label.value().as_str(), label.format(), &[], sources, rules).map_err(|fault| {
+        match fault {
+            Shown::Template(fault) => RenderFault::Template(fault),
+            Shown::Text(fault) => RenderFault::Label(None, fault),
+        }
     })
 }
 
-/// The interpolated `text` formatted by the template's inner type `inner`.
-fn inner_value(text: String, inner: BaseType) -> Result<RowValue, ValueFault> {
+/// The text of `segments`, each value as the payload writes it.
+fn written(segments: &[Segment]) -> String {
+    segments
+        .iter()
+        .map(|segment| match segment {
+            Segment::Text(text) => text.clone(),
+            Segment::Value(value) => value.text(),
+        })
+        .collect()
+}
+
+/// The interpolated `segments` of a template whose inner type is `inner`: their text, each value
+/// as the payload writes it, is a value of `inner`.
+fn inner_value(segments: Vec<Segment>, inner: BaseType) -> Result<RowValue, ValueFault> {
     match inner {
         BaseType::LabelOnly => Ok(RowValue::LabelOnly),
         BaseType::Boolean | BaseType::Image => Err(ValueFault::Type(inner)),
-        _ => scalar(PayloadText::parse(text)?, inner).map(RowValue::Value),
+        _ => {
+            scalar(PayloadText::parse(written(&segments))?, inner).map(drop)?;
+            Ok(RowValue::Template(Interpolated { segments, inner }))
+        }
     }
 }

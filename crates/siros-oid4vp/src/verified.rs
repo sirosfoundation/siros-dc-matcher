@@ -9,8 +9,9 @@ use crate::fetch::HttpsUrl;
 use crate::handover::{Handover, JwkThumbprint};
 use crate::intake::Verdict;
 use crate::protocol::Protocol;
+use crate::request::{RequestSignature, ResponseMode, TransactionDataItem};
 use crate::semantic::{SemanticIdError, SemanticIdentifier};
-use crate::values::{Kid, Nonce, Origin, State, TransactionDataItem};
+use crate::values::{Kid, Nonce, Origin, State};
 
 /// An OpenID4VP request that intake verified. Only intake constructs it.
 ///
@@ -73,35 +74,6 @@ pub(crate) enum PostEncoding {
     Jwe(Encryption),
     /// `direct_post.cwt`: a `COSE_Encrypt` (`zkp_req.md`, Section 6.2).
     Cose(Encryption),
-}
-
-/// The Response Mode of a verified request (Sections 8.2, 8.3.1; A.2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ResponseMode {
-    /// `direct_post`.
-    DirectPost,
-    /// `direct_post.jwt`.
-    DirectPostJwt,
-    /// `direct_post.cwt` (`zkp_req.md`, Section 6.2).
-    DirectPostCwt,
-    /// `dc_api`.
-    DcApi,
-    /// `dc_api.jwt`.
-    DcApiJwt,
-}
-
-impl ResponseMode {
-    /// The `response_mode` value.
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::DirectPost => "direct_post",
-            Self::DirectPostJwt => "direct_post.jwt",
-            Self::DirectPostCwt => "direct_post.cwt",
-            Self::DcApi => "dc_api",
-            Self::DcApiJwt => "dc_api.jwt",
-        }
-    }
 }
 
 /// The content encryption of an encrypted response: AES GCM with a 96-bit IV and a 128-bit tag
@@ -233,15 +205,6 @@ impl AttestationFormat {
     pub fn as_str(&self) -> &str {
         &self.0
     }
-}
-
-/// Whether a request arrived as a signed Request Object (RFC 9101).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum RequestSignature {
-    /// A Request Object whose signature intake verified.
-    Signed,
-    /// A request of a `redirect_uri` client, or an unsigned DC API request.
-    Unsigned,
 }
 
 /// Who asks, as the consent screen shows it.

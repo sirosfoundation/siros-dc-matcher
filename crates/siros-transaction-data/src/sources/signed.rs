@@ -10,9 +10,9 @@ use siros_codec::member::MemberFault;
 use siros_credential::Credential;
 use siros_trust::{Certificate, ChainError, IssuerChain, TrustStore, Unanchored};
 
+use super::held::HeldMetadata;
 use super::issuer_keys::{self, KeySetFault};
 use super::jws::{Jws, JwsFault, VerifyingKey};
-use crate::fetched::{Fetched, Step};
 use crate::json::{self, Fields};
 
 /// The device-signed namespace of PaSO Core, Section 6.3, which no `sub` names (Section 7,
@@ -70,12 +70,12 @@ pub enum SignedFault {
     Jws(JwsFault),
     /// `typ` is absent or other than the JWT's type (step 1).
     Typ,
-    /// The header names its key by both `x5c` and `kid`, or by neither.
-    KeyChoice,
+    /// The header names its key by neither `x5c` nor `kid`.
+    KeyAbsent,
     /// `kid` is no string.
     Kid,
-    /// The header names its key by `kid`, and the credential's issuer keys are an `x5c` chain;
-    /// or by `x5c`, and the credential carries no chain (Section 4).
+    /// The header names its key by `kid` alone, and the credential's issuer keys are an `x5c`
+    /// chain; or by `x5c`, and the credential carries no chain (Section 4).
     KeyKind,
     /// `x5c` is no non-empty array of base64 certificates.
     X5c,
@@ -118,7 +118,7 @@ impl SignedFault {
         match self {
             Self::Jws(fault) => fault.code(),
             Self::Typ => "metadata_jwt_typ",
-            Self::KeyChoice => "metadata_jwt_key_choice",
+            Self::KeyAbsent => "metadata_jwt_key_absent",
             Self::Kid => "metadata_jwt_kid",
             Self::KeyKind => "metadata_jwt_key_kind",
             Self::X5c => "metadata_jwt_x5c",
@@ -144,22 +144,29 @@ siros_codec::display_code!(SignedFault);
 
 impl std::error::Error for SignedFault {}
 
-/// What a verification reads with: the trust store, the host's fetches, and the time.
+/// What a verification reads with: the trust store, the metadata the host holds, and the time.
 #[derive(Clone, Copy)]
 pub(crate) struct Verifier<'v> {
     pub(crate) trust: &'v TrustStore,
-    pub(crate) fetched: &'v Fetched,
+    pub(crate) held: &'v HeldMetadata,
     pub(crate) now: DateTime,
 }
 
-/// The claims of the metadata JWT `text` of type `typ` for `credential`, after the steps both
-/// verifications share: `iss`, `sub`, `format`, `iat` and `exp` taken, the other claims left.
+/// The claims of a verified metadata JWT that the steps both verifications share leave, and its
+/// `exp`.
+pub(crate) struct Verified {
+    pub(crate) claims: Fields,
+    pub(crate) expires: DateTime,
+}
+
+/// The metadata JWT `text` of type `typ` for `credential`, after the steps both verifications
+/// share: `iss`, `sub`, `format`, `iat` and `exp` taken, the other claims left.
 pub(crate) fn verify(
     text: &str,
     typ: &str,
     credential: &Credential,
     verifier: Verifier<'_>,
-) -> Result<Step<Fields>, SignedFault> {
+) -> Result<Verified, SignedFault> {
     let mut jws = Jws::parse(text).map_err(SignedFault::Jws)?;
     // Step 1.
     match jws.header.take("typ") {
@@ -167,10 +174,7 @@ pub(crate) fn verify(
         _ => return Err(SignedFault::Typ),
     }
     // Steps 2 and 3, and the root and leaf of step 6.
-    let key = match signing_key(&mut jws.header, credential, verifier)? {
-        Step::Fetch(fetch) => return Ok(Step::Fetch(fetch)),
-        Step::Done(key) => key,
-    };
+    let key = signing_key(&mut jws.header, credential, verifier)?;
     if !jws.verified_by(&key) {
         return Err(SignedFault::Signature);
     }
@@ -182,6 +186,10 @@ pub(crate) fn verify(
     }
     // Step 5.
     let exp = date_claim(&mut claims, MetadataClaim::Exp)?;
+    let expires = DateTime::from_unix(exp).ok_or(SignedFault::Claim(
+        MetadataClaim::Exp,
+        MemberFault::WrongType,
+    ))?;
     if exp <= verifier.now.unix() {
         return Err(SignedFault::Expired);
     }
@@ -194,26 +202,26 @@ pub(crate) fn verify(
         return Err(SignedFault::Format);
     }
     date_claim(&mut claims, MetadataClaim::Iat).map(drop)?;
-    Ok(Step::Done(claims))
+    Ok(Verified { claims, expires })
 }
 
 /// The key that signed the JWT of `header`, trusted and bound to `credential` (steps 3 and 6).
 ///
-/// With an `x5c` chain, the credential carries one too: the JWT's chain has a path to the trust
-/// store at the same root as the credential's, and the two leaves have one Subject. With a
-/// `kid`, the credential carries no chain, and the key is the `kid`'s of its issuer's key set,
-/// the set that verifies the credential (step 6).
+/// A credential with an `x5c` chain takes the JWT's `x5c` chain, a `kid` beside it unused: the
+/// chain has a path to the trust store at the same root as the credential's, and the two leaves
+/// have one Subject. A credential without a chain takes the `kid` alone, the key of its issuer's
+/// key set, the set that verifies the credential (Section 4; step 6).
 fn signing_key(
     header: &mut Fields,
     credential: &Credential,
     verifier: Verifier<'_>,
-) -> Result<Step<VerifyingKey>, SignedFault> {
+) -> Result<VerifyingKey, SignedFault> {
     let x5c = header.take("x5c");
     let kid = header
         .optional("kid", json::text)
         .map_err(|_| SignedFault::Kid)?;
     match (x5c, kid, credential.issuer_chain()) {
-        (Some(x5c), None, Some(own)) => {
+        (Some(x5c), _, Some(own)) => {
             let chain = chain(x5c)?;
             let root = verifier
                 .trust
@@ -229,14 +237,14 @@ fn signing_key(
             if chain.leaf().subject() != own.leaf().subject() {
                 return Err(SignedFault::LeafSubject);
             }
-            leaf_key(chain.leaf()).map(Step::Done)
+            leaf_key(chain.leaf())
         }
         (None, Some(kid), None) => {
             let issuer = credential.issuer().ok_or(SignedFault::Issuer)?;
-            issuer_keys::key(issuer, &kid, verifier.fetched).map_err(SignedFault::KeySet)
+            issuer_keys::key(issuer, &kid, verifier.held).map_err(SignedFault::KeySet)
         }
-        (Some(_), None, None) | (None, Some(_), Some(_)) => Err(SignedFault::KeyKind),
-        (Some(_), Some(_), _) | (None, None, _) => Err(SignedFault::KeyChoice),
+        (Some(_), _, None) | (None, Some(_), Some(_)) => Err(SignedFault::KeyKind),
+        (None, None, _) => Err(SignedFault::KeyAbsent),
     }
 }
 

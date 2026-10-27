@@ -1,15 +1,24 @@
 //! SVG documents (PaSO Proof SD-JWT-VC and SVG, Section 3): every URL the document references
-//! carries its integrity value in its fragment, and the wallet fetches and verifies each. A
-//! document's size is its root's `width` and `height` in absolute units.
+//! carries its integrity value in its fragment, and the wallet fetches and verifies each. The
+//! scan vouches for every reference: what it cannot read — a processing instruction, a
+//! `foreignObject`, a CSS escape, a CSS function that takes a URL as a string, a Data URL other
+//! than a PNG or JPEG image — refuses the document. A document's size is its root's `width` and
+//! `height` in absolute units.
 
-use siros_oid4vp::{BodyLimit, HttpsUrl, MediaType};
+use siros_oid4vp::{BodyLimit, HttpsUrl};
 
-use super::{strip_prefix_ignore_case, Dimensions, Resource, MAX_IMAGE_BYTES};
+use super::{
+    image_fetch, strip_prefix_ignore_case, Dimensions, ImageFormat, Resource, MAX_IMAGE_BYTES,
+};
+use crate::fetched;
 use crate::fetched::{FetchFault, Fetched, Step};
 use crate::integrity::{Integrity, IntegrityFault};
 
 /// The limit of the fetch of a resource an SVG document references.
 const RESOURCE_LIMIT: BodyLimit = BodyLimit::bytes(MAX_IMAGE_BYTES);
+
+/// The CSS functions that take a URL as a string, which the scan does not follow.
+const STRING_URL_FUNCTIONS: [&str; 2] = ["image-set(", "src("];
 
 /// Why an SVG document is refused.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,9 +26,19 @@ pub enum SvgFault {
     /// The bytes are no UTF-8 text.
     NotUtf8,
     /// The text is no XML document without a DTD.
-    Xml,
+    Xml(roxmltree::Error),
     /// The root element is no `svg` element.
     NotSvg,
+    /// The document holds a processing instruction of this target.
+    ProcessingInstruction(String),
+    /// The document holds a `foreignObject` element.
+    ForeignObject,
+    /// An attribute or a `style` element holds a backslash: a CSS escape.
+    CssEscape,
+    /// CSS calls this function, which takes a URL as a string.
+    CssFunction(&'static str),
+    /// The document references this Data URL of a type other than PNG and JPEG.
+    DataReference(String),
     /// A URL the document references is no `https` URL.
     ReferenceNotHttps(String),
     /// A URL the document references has no fragment.
@@ -36,8 +55,13 @@ impl SvgFault {
     pub fn code(&self) -> &'static str {
         match self {
             Self::NotUtf8 => "svg_not_utf8",
-            Self::Xml => "svg_xml",
+            Self::Xml(_) => "svg_xml",
             Self::NotSvg => "svg_root",
+            Self::ProcessingInstruction(_) => "svg_processing_instruction",
+            Self::ForeignObject => "svg_foreign_object",
+            Self::CssEscape => "svg_css_escape",
+            Self::CssFunction(_) => "svg_css_function",
+            Self::DataReference(_) => "svg_data_reference",
             Self::ReferenceNotHttps(_) => "svg_reference_not_https",
             Self::ReferenceUnpinned(_) => "svg_reference_unpinned",
             Self::ReferenceIntegrity(..) => "svg_reference_integrity",
@@ -60,7 +84,7 @@ pub(super) struct Document {
 /// The SVG document `bytes`; the fetch of a resource while the host has not given it.
 pub(super) fn read(bytes: &[u8], fetched: &Fetched) -> Result<Step<Document>, SvgFault> {
     let text = std::str::from_utf8(bytes).map_err(|_| SvgFault::NotUtf8)?;
-    let document = roxmltree::Document::parse(text).map_err(|_| SvgFault::Xml)?;
+    let document = roxmltree::Document::parse(text).map_err(SvgFault::Xml)?;
     let root = document.root_element();
     if root.tag_name().name() != "svg" {
         return Err(SvgFault::NotSvg);
@@ -76,15 +100,11 @@ pub(super) fn read(bytes: &[u8], fetched: &Fetched) -> Result<Step<Document>, Sv
         }),
     };
     let mut resources = Vec::new();
-    for reference in references(&document) {
+    for reference in references(&document)? {
         let (url, integrity) = pinned(&reference)?;
-        let body = match fetched
-            .body(&url, MediaType::IMAGES, RESOURCE_LIMIT)
-            .map_err(|fault| SvgFault::ReferenceFetch(reference.clone(), fault))?
-        {
-            Step::Fetch(fetch) => return Ok(Step::Fetch(fetch)),
-            Step::Done(body) => body,
-        };
+        let body = fetched!(fetched
+            .body_of(image_fetch(url, RESOURCE_LIMIT))
+            .map_err(|fault| SvgFault::ReferenceFetch(reference.clone(), fault))?);
         integrity
             .check(body)
             .map_err(|fault| SvgFault::ReferenceIntegrity(reference.clone(), fault))?;
@@ -97,55 +117,105 @@ pub(super) fn read(bytes: &[u8], fetched: &Fetched) -> Result<Step<Document>, Sv
 }
 
 /// The URLs `document` references outside itself, in document order, each once: each `href`
-/// and `src` attribute, and each `url(…)` and `@import` of an attribute or a `style` element. A
-/// reference to a fragment of the document and a Data URL are inside it.
-fn references(document: &roxmltree::Document<'_>) -> Vec<String> {
+/// and `src` attribute, and each `url(…)` and `@import` of an attribute or a `style` element,
+/// CSS names compared without regard to ASCII case. A reference to a fragment of the document,
+/// and a Data URL of a PNG or JPEG image, are inside it.
+///
+/// # Errors
+///
+/// [`SvgFault`]: a construct the scan cannot vouch for.
+fn references(document: &roxmltree::Document<'_>) -> Result<Vec<String>, SvgFault> {
     let mut found: Vec<String> = Vec::new();
     for node in document.descendants() {
-        if node.is_element() {
-            for attribute in node.attributes() {
-                if matches!(attribute.name(), "href" | "src") {
-                    found.push(attribute.value().trim().to_owned());
-                }
-                found.extend(css_urls(attribute.value()));
+        if let Some(pi) = node.pi() {
+            return Err(SvgFault::ProcessingInstruction(pi.target.to_owned()));
+        }
+        if !node.is_element() {
+            continue;
+        }
+        if node.tag_name().name().eq_ignore_ascii_case("foreignObject") {
+            return Err(SvgFault::ForeignObject);
+        }
+        for attribute in node.attributes() {
+            if matches!(attribute.name(), "href" | "src") {
+                found.push(attribute.value().trim().to_owned());
             }
-            if node.tag_name().name() == "style" {
-                let css: String = node.descendants().filter_map(|n| n.text()).collect();
-                found.extend(css_urls(&css));
-            }
+            found.extend(css_urls(attribute.value())?);
+        }
+        if node.tag_name().name() == "style" {
+            let css: String = node.descendants().filter_map(|n| n.text()).collect();
+            found.extend(css_urls(&css)?);
         }
     }
     let mut unique: Vec<String> = Vec::new();
     for reference in found {
-        let inside =
-            reference.starts_with('#') || strip_prefix_ignore_case(&reference, "data:").is_some();
-        if !inside && !unique.contains(&reference) {
-            unique.push(reference);
+        if reference.starts_with('#') || inside_data_url(&reference)? || unique.contains(&reference)
+        {
+            continue;
         }
+        unique.push(reference);
     }
-    unique
+    Ok(unique)
 }
 
-/// The URLs of the `url(…)` functions and `@import` rules of the CSS text `css`.
-fn css_urls(css: &str) -> Vec<String> {
+/// Whether `reference` is a Data URL of a PNG or JPEG image, which holds no reference.
+///
+/// # Errors
+///
+/// [`SvgFault::DataReference`] for a Data URL of another type, an SVG document included.
+fn inside_data_url(reference: &str) -> Result<bool, SvgFault> {
+    let Some(rest) = strip_prefix_ignore_case(reference, "data:") else {
+        return Ok(false);
+    };
+    let media_type = rest.split([';', ',']).next().unwrap_or_default().trim();
+    match ImageFormat::of_media_type(media_type) {
+        Some(ImageFormat::Png | ImageFormat::Jpeg) => Ok(true),
+        Some(ImageFormat::Svg) | None => Err(SvgFault::DataReference(reference.to_owned())),
+    }
+}
+
+/// The URLs of the `url(…)` functions and `@import` rules of the CSS text `css`, CSS names
+/// compared without regard to ASCII case.
+///
+/// # Errors
+///
+/// [`SvgFault::CssEscape`] for a backslash, and [`SvgFault::CssFunction`] for a function that
+/// takes a URL as a string.
+fn css_urls(css: &str) -> Result<Vec<String>, SvgFault> {
+    if css.contains('\\') {
+        return Err(SvgFault::CssEscape);
+    }
+    let folded = css.to_ascii_lowercase();
+    if let Some(function) = STRING_URL_FUNCTIONS
+        .into_iter()
+        .find(|function| folded.contains(function))
+    {
+        return Err(SvgFault::CssFunction(function));
+    }
     let unquote = |text: &str| {
         text.trim()
             .trim_matches(|c| c == '"' || c == '\'')
             .trim()
             .to_owned()
     };
-    let mut urls: Vec<String> = css
-        .split("url(")
-        .skip(1)
+    // ASCII case folding keeps every byte offset, so `folded` locates the names in `css`.
+    let after = |name: &str| -> Vec<&str> {
+        folded
+            .match_indices(name)
+            .filter_map(|(at, _)| css.get(at + name.len()..))
+            .collect()
+    };
+    let mut urls: Vec<String> = after("url(")
+        .into_iter()
         .filter_map(|rest| rest.split(')').next())
         .map(unquote)
         .collect();
-    urls.extend(css.split("@import").skip(1).filter_map(|rest| {
+    urls.extend(after("@import").into_iter().filter_map(|rest| {
         let rest = rest.trim_start();
         let quote = rest.chars().next().filter(|c| *c == '"' || *c == '\'')?;
         rest.get(1..)?.split(quote).next().map(str::to_owned)
     }));
-    urls
+    Ok(urls)
 }
 
 /// The `https` URL of `reference` without its fragment, and the integrity value its fragment

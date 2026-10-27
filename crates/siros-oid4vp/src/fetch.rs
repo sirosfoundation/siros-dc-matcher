@@ -3,7 +3,6 @@
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use siros_codec::locale::Locale;
 pub use siros_codec::url::HttpsUrl;
 
 /// A media type a fetch accepts or a body has, `type/subtype`; or, as the `Accept` value of an
@@ -20,8 +19,6 @@ impl MediaType {
     pub const FORM: Self = Self("application/x-www-form-urlencoded");
     /// `application/cwt`, the body of `direct_post.cwt` (`zkp_req.md`, Section 6.2).
     pub const CWT: Self = Self("application/cwt");
-    /// `application/jwt`: a signed credential metadata JWT (PaSO Proof Metadata, Section 2).
-    pub const JWT: Self = Self("application/jwt");
     /// The image types the wallet shows: PNG, JPEG and SVG (PaSO View, Section 3, `image`).
     pub const IMAGES: Self = Self("image/png, image/jpeg, image/svg+xml");
 
@@ -70,14 +67,36 @@ pub enum Method {
     },
 }
 
-/// An HTTPS request the host performs under H1: HTTPS only, public addresses only, no
-/// redirects, at most [`Fetch::limit`] of response body, within [`Fetch::timeout`].
+/// The most redirects a fetch follows. Each hop is a request held to H1's rules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Redirects(u8);
+
+impl Redirects {
+    /// None: the response to the first request is the response.
+    pub const NONE: Self = Self(0);
+
+    /// At most `hops` redirects.
+    #[must_use]
+    pub const fn at_most(hops: u8) -> Self {
+        Self(hops)
+    }
+
+    /// The number of redirects.
+    #[must_use]
+    pub fn get(self) -> u8 {
+        self.0
+    }
+}
+
+/// An HTTPS request the host performs under H1: HTTPS only, public addresses only, no cookies,
+/// credentials or wallet-identifying headers, at most [`Fetch::redirects`] redirects, at most
+/// [`Fetch::limit`] of response body, within [`Fetch::timeout`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fetch {
     url: HttpsUrl,
     method: Method,
     accept: MediaType,
-    language: Option<Locale>,
+    redirects: Redirects,
     limit: BodyLimit,
 }
 
@@ -87,7 +106,7 @@ impl Fetch {
             url,
             method,
             accept,
-            language: None,
+            redirects: Redirects::NONE,
             limit,
         }
     }
@@ -110,13 +129,10 @@ impl Fetch {
         &self.method
     }
 
-    /// The fetch with the `Accept-Language` header `language`.
+    /// The fetch following at most `redirects` redirects.
     #[must_use]
-    pub fn in_language(self, language: Locale) -> Self {
-        Self {
-            language: Some(language),
-            ..self
-        }
+    pub fn following(self, redirects: Redirects) -> Self {
+        Self { redirects, ..self }
     }
 
     /// The `Accept` header value.
@@ -125,10 +141,10 @@ impl Fetch {
         self.accept
     }
 
-    /// The `Accept-Language` header value, when the fetch carries one.
+    /// The most redirects the host follows; each hop is held to H1's rules.
     #[must_use]
-    pub fn accept_language(&self) -> Option<&Locale> {
-        self.language.as_ref()
+    pub fn redirects(&self) -> Redirects {
+        self.redirects
     }
 
     /// The largest response body the host may read.
@@ -194,6 +210,7 @@ impl FetchResponse {
         self.status
     }
 
+    #[cfg(feature = "crypto")]
     /// Whether the media type of `Content-Type`, parameters aside, is `media_type` (any
     /// case).
     pub(crate) fn has_media_type(&self, media_type: MediaType) -> bool {

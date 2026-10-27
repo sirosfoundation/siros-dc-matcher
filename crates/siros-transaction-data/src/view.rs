@@ -3,8 +3,8 @@
 
 use siros_oid4vp::RequestSignature;
 
-use crate::definition::{LabelFormat, LabelText, Prominence, SecurityHint};
-use crate::image::VerifiedImage;
+use crate::definition::{BaseType, LabelFormat, LabelText, Prominence, SecurityHint};
+use crate::image::{ImageFault, VerifiedImage};
 use crate::payload::{Location, Scalar};
 use crate::sources::{Rulebook, SourceKind};
 use crate::type_id::TypeId;
@@ -21,14 +21,35 @@ pub struct TransactionView {
     pub(crate) denial: Option<ShownLabel>,
     pub(crate) security_hint: Option<LabelText<SecurityHint>>,
     pub(crate) rows: Vec<Row>,
+    pub(crate) absent: Vec<(Location, ImageFault)>,
     pub(crate) signature: RequestSignature,
 }
 
-/// A label as shown: its text, interpolated when it was a template, and how it is formatted.
+/// A piece of a shown text: the metadata's own text, or a payload value the UI formats by its
+/// type (PaSO View, Section 3, `template:`, step 3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Segment {
+    /// Text of the label or the template.
+    Text(String),
+    /// A value a placeholder resolved to.
+    Value(Scalar),
+}
+
+/// A label as shown: its segments, one text unless it was a template, and how the whole is
+/// formatted. The label's length rule counts each value as the payload writes it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShownLabel {
-    pub(crate) text: String,
+    pub(crate) segments: Vec<Segment>,
     pub(crate) format: LabelFormat,
+}
+
+/// The value of a `template:` claim: the interpolated segments, and the inner type that formats
+/// the whole. The text of the segments, each value as the payload writes it, is a value of the
+/// inner type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Interpolated {
+    pub(crate) segments: Vec<Segment>,
+    pub(crate) inner: BaseType,
 }
 
 /// A displayed claim instance: its location in the payload, its label, its value, and the
@@ -48,6 +69,8 @@ pub enum RowValue {
     LabelOnly,
     /// A value formatted by its type.
     Value(Scalar),
+    /// A `template:` value.
+    Template(Interpolated),
     /// An image, verified.
     Image(VerifiedImage),
 }
@@ -112,6 +135,13 @@ impl TransactionView {
         &self.rows
     }
 
+    /// The images of a TS12 payload that did not verify, each with why: the view leaves them
+    /// out (PaSO Proof SD-JWT-VC and SVG, Section 2).
+    #[must_use]
+    pub fn absent_images(&self) -> &[(Location, ImageFault)] {
+        &self.absent
+    }
+
     /// Whether the UI warns that the request arrived unsigned (EC TS12 v1.0.1, Section 3.1).
     #[must_use]
     pub fn unsigned_warning(&self) -> UnsignedWarning {
@@ -125,16 +155,30 @@ impl TransactionView {
 }
 
 impl ShownLabel {
-    /// The text.
+    /// The segments, in order.
     #[must_use]
-    pub fn text(&self) -> &str {
-        &self.text
+    pub fn segments(&self) -> &[Segment] {
+        &self.segments
     }
 
-    /// How the text is formatted: plain or `mini_markdown`.
+    /// How the whole is formatted: plain or `mini_markdown`.
     #[must_use]
     pub fn format(&self) -> LabelFormat {
         self.format
+    }
+}
+
+impl Interpolated {
+    /// The segments, in order.
+    #[must_use]
+    pub fn segments(&self) -> &[Segment] {
+        &self.segments
+    }
+
+    /// The inner type, which formats the whole.
+    #[must_use]
+    pub fn inner(&self) -> BaseType {
+        self.inner
     }
 }
 

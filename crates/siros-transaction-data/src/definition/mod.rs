@@ -14,19 +14,21 @@ use siros_codec::member::MemberFault;
 
 use crate::json::{self, Fields};
 
-pub use claim::{ClaimDefinition, ClaimDisplay, Description, Mandatory, PayloadPath, Prominence};
+pub use claim::{ClaimDefinition, ClaimDisplay, Mandatory, PayloadPath, Prominence};
 pub use error::{
     ClaimFault, ClaimIndex, DefinitionError, DefinitionMember, EntryFault, LabelsFault,
+    UiElementKey,
 };
 pub use localized::Localizations;
 pub use text::{
-    ActionLabel, ClaimName, LabelLength, LabelRole, LabelText, OtherUiElement, SecurityHint,
-    TextFault, TransactionTitle,
+    ActionLabel, ClaimName, Description, LabelLength, LabelRole, LabelRules, LabelText, Limit,
+    OtherUiElement, SecurityHint, TextFault, TransactionTitle,
 };
 pub use ui_labels::{HintEntry, UiLabel, UiLabels};
 pub use value_type::{BaseType, LabelFormat, ValueType};
 
-pub(crate) use claim::{pointer, ClaimDisplay as Display};
+#[cfg(feature = "wallet")]
+pub(crate) use claim::{pointer, visualisation, ClaimDisplay as Display};
 pub(crate) use text::bidi;
 pub(crate) use ui_labels::{AFFIRMATIVE, DENIAL, SECURITY_HINT, TITLE};
 
@@ -43,19 +45,19 @@ pub struct Definition {
 }
 
 impl Definition {
-    /// The definition of the JSON object `value`: `claims`, at most 100, no two with one
-    /// `path`; optional `ui_labels`; and additional parameters, kept as written (Sections 3.1 to
-    /// 3.3).
+    /// The definition of the JSON object `value`, its labels under `rules`: `claims`, at most
+    /// 100, no two with one `path`; optional `ui_labels`; and additional parameters, kept as
+    /// written (Sections 3.1 to 3.3).
     ///
     /// # Errors
     ///
     /// [`DefinitionError`]: the first rule `value` breaks.
-    pub fn parse(value: Json) -> Result<Self, DefinitionError> {
+    pub fn parse(value: Json, rules: LabelRules) -> Result<Self, DefinitionError> {
         let mut fields = json::object(value).map_err(|_| DefinitionError::NotObject)?;
-        let claims = claims(&mut fields)?;
+        let claims = claims(&mut fields, rules)?;
         let ui_labels = fields
             .take(DefinitionMember::UiLabels.as_str())
-            .map(UiLabels::parse)
+            .map(|labels| UiLabels::parse(labels, rules))
             .transpose()?
             .unwrap_or_default();
         Self::new(claims, ui_labels, fields.rest())
@@ -105,7 +107,7 @@ impl Definition {
 }
 
 /// The required `claims` of a definition: an array of claim metadata objects.
-fn claims(fields: &mut Fields) -> Result<Vec<ClaimDefinition>, DefinitionError> {
+fn claims(fields: &mut Fields, rules: LabelRules) -> Result<Vec<ClaimDefinition>, DefinitionError> {
     let items = fields
         .require(DefinitionMember::Claims.as_str())
         .and_then(json::array)
@@ -114,7 +116,7 @@ fn claims(fields: &mut Fields) -> Result<Vec<ClaimDefinition>, DefinitionError> 
         .into_iter()
         .enumerate()
         .map(|(at, item)| {
-            ClaimDefinition::parse(item)
+            ClaimDefinition::parse(item, rules)
                 .map_err(|fault| DefinitionError::Claim(ClaimIndex::new(at), fault))
         })
         .collect()

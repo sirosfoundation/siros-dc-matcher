@@ -12,7 +12,8 @@ use crate::fetch::HttpsUrl;
 use crate::handover::ec_jwk_thumbprint;
 use crate::jose;
 use crate::protocol::Protocol;
-use crate::values::{Kid, Nonce, Origin, State, TransactionDataItem};
+use crate::request::TransactionDataItem;
+use crate::values::{Kid, Nonce, Origin, State};
 use crate::verified::{
     AttestationFormat, Channel, ContentEncryption, Encryption, PostEncoding, VerifiedRequest,
 };

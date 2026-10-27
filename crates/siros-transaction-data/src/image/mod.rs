@@ -1,14 +1,17 @@
 //! Images of a payload (PaSO View, Section 3, `image`): a Data URL of a PNG, JPEG or SVG image,
 //! or an `https` URL whose content a `#integrity` sibling pins. The wallet fetches the content
-//! through the host, verifies it, and the view carries the verified bytes.
+//! through the host, following at most 3 redirects, verifies it, and the view carries the
+//! verified bytes. A TS12 logo may be a URL without `#integrity` (EC TS12 v1.0.1, Section
+//! 4.3.1): it cannot be verified.
 
 mod raster;
 mod svg;
 
-use siros_codec::base64;
 use siros_codec::json::Json;
-use siros_oid4vp::{BodyLimit, HttpsUrl, MediaType};
+use siros_codec::{base64, Base64Error};
+use siros_oid4vp::{BodyLimit, Fetch, HttpsUrl, MediaType, Redirects};
 
+use crate::fetched;
 use crate::fetched::{FetchFault, Fetched, Step};
 use crate::integrity::{Integrity, IntegrityFault};
 
@@ -23,6 +26,15 @@ pub const MAX_IMAGE_PIXELS: u32 = 2048;
 
 /// The limit of an image fetch.
 const IMAGE_LIMIT: BodyLimit = BodyLimit::bytes(MAX_IMAGE_BYTES);
+
+/// The most redirects an image fetch follows (PaSO View, Section 3, `image`).
+const IMAGE_REDIRECTS: Redirects = Redirects::at_most(3);
+
+/// The fetch of the image or resource at `url`: the image types accepted, at most `limit`
+/// bytes, at most 3 redirects.
+pub(crate) fn image_fetch(url: HttpsUrl, limit: BodyLimit) -> Fetch {
+    Fetch::get(url, MediaType::IMAGES, limit).following(IMAGE_REDIRECTS)
+}
 
 /// The pixels of an image in each direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -64,7 +76,7 @@ impl ImageFormat {
         }
     }
 
-    fn of_media_type(media_type: &str) -> Option<Self> {
+    pub(crate) fn of_media_type(media_type: &str) -> Option<Self> {
         Self::ALL
             .into_iter()
             .find(|format| format.media_type().eq_ignore_ascii_case(media_type))
@@ -83,8 +95,8 @@ impl ImageFormat {
     }
 }
 
-/// Where an image is: a Data URL's bytes, or an `https` URL with the integrity metadata its
-/// content must match.
+/// Where an image is: a Data URL's bytes, an `https` URL with the integrity metadata its
+/// content must match, or, for a TS12 logo, a reference that cannot be verified.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ImageRef {
     /// A Data URL (RFC 2397) of a PNG, JPEG or SVG image in base64.
@@ -100,6 +112,14 @@ pub enum ImageRef {
         url: HttpsUrl,
         /// The integrity metadata (W3C SRI).
         integrity: Integrity,
+    },
+    /// A TS12 logo that cannot be verified, and why: the view leaves it out (PaSO Proof
+    /// SD-JWT-VC and SVG, Section 2: "considered absent").
+    Unverifiable {
+        /// The reference, as the payload writes it.
+        reference: String,
+        /// Why it cannot be verified.
+        cause: ImageFault,
     },
 }
 
@@ -136,7 +156,7 @@ pub enum ImageFault {
     /// The Data URL has no comma, no `;base64`, or a media type other than PNG, JPEG and SVG.
     DataUrl,
     /// The Data URL's payload is no base64.
-    Base64,
+    Base64(Base64Error),
     /// The image has this many bytes, more than 512 KiB.
     TooLarge(usize),
     /// The fetch gave no content.
@@ -161,7 +181,7 @@ impl ImageFault {
             Self::IntegrityNotString => "image_integrity_not_string",
             Self::Integrity(fault) => fault.code(),
             Self::DataUrl => "image_data_url",
-            Self::Base64 => "image_base64",
+            Self::Base64(_) => "image_base64",
             Self::TooLarge(_) => "image_too_large",
             Self::Fetch(fault) => fault.code(),
             Self::FormatMismatch(_) => "image_format_mismatch",
@@ -177,6 +197,15 @@ siros_codec::display_code!(ImageFault);
 impl std::error::Error for ImageFault {}
 
 impl ImageRef {
+    /// The image of a TS12 logo `text`, `integrity` the value of its `#integrity` sibling: a
+    /// reference [`ImageRef::parse`] refuses cannot be verified.
+    pub(crate) fn logo(text: &str, integrity: Option<&Json>) -> Self {
+        Self::parse(text, integrity).unwrap_or_else(|cause| Self::Unverifiable {
+            reference: text.to_owned(),
+            cause,
+        })
+    }
+
     /// The image of the payload string `text`, `integrity` the value of its `#integrity`
     /// sibling.
     pub(crate) fn parse(text: &str, integrity: Option<&Json>) -> Result<Self, ImageFault> {
@@ -202,16 +231,13 @@ impl ImageRef {
         let (format, bytes) = match self {
             Self::Data { format, bytes } => (*format, bytes.clone()),
             Self::Remote { url, integrity } => {
-                let body = match fetched
-                    .body(url, MediaType::IMAGES, IMAGE_LIMIT)
-                    .map_err(ImageFault::Fetch)?
-                {
-                    Step::Fetch(fetch) => return Ok(Step::Fetch(fetch)),
-                    Step::Done(body) => body,
-                };
+                let body = fetched!(fetched
+                    .body_of(image_fetch(url.clone(), IMAGE_LIMIT))
+                    .map_err(ImageFault::Fetch)?);
                 integrity.check(body).map_err(ImageFault::Integrity)?;
                 (ImageFormat::sniff(body), body.to_vec())
             }
+            Self::Unverifiable { cause, .. } => return Err(cause.clone()),
         };
         if ImageFormat::sniff(&bytes) != format {
             return Err(ImageFault::FormatMismatch(format));
@@ -222,10 +248,10 @@ impl ImageRef {
                 raster::jpeg(&bytes).map_err(ImageFault::Raster)?,
                 Vec::new(),
             ),
-            ImageFormat::Svg => match svg::read(&bytes, fetched).map_err(ImageFault::Svg)? {
-                Step::Fetch(fetch) => return Ok(Step::Fetch(fetch)),
-                Step::Done(document) => (document.size, document.resources),
-            },
+            ImageFormat::Svg => {
+                let document = fetched!(svg::read(&bytes, fetched).map_err(ImageFault::Svg)?);
+                (document.size, document.resources)
+            }
         };
         if let Some(dimensions) = dimensions.filter(|d| d.over()) {
             return Err(ImageFault::TooManyPixels(dimensions));
@@ -276,7 +302,7 @@ fn data_url(rest: &str) -> Result<ImageRef, ImageFault> {
     if payload.len() > MAX_IMAGE_BYTES {
         return Err(ImageFault::TooLarge(payload.len()));
     }
-    let bytes = base64::decode(payload).map_err(|_| ImageFault::Base64)?;
+    let bytes = base64::decode(payload).map_err(ImageFault::Base64)?;
     Ok(ImageRef::Data { format, bytes })
 }
 

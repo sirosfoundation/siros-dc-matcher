@@ -1,19 +1,6 @@
 //! Phase 1: the plan of a verified request over the wallet's usable credentials, and its consent
 //! view.
 
-/// The value of the planning step `step`, or the fetch it waits for, which the enclosing
-/// function returns at once.
-macro_rules! fetched {
-    ($step:expr) => {
-        match $step {
-            siros_transaction_data::Step::Fetch(fetch) => {
-                return Ok(siros_transaction_data::Step::Fetch(fetch))
-            }
-            siros_transaction_data::Step::Done(value) => value,
-        }
-    };
-}
-
 mod digest;
 mod fetches;
 mod proof;
@@ -26,7 +13,9 @@ use siros_codec::date::DateTime;
 use siros_credential::{Credential, UsableCredential};
 use siros_display::{DisplayCache, Locale};
 use siros_oid4vp::{ErrorCode, Fetch, Submission, VerifiedRequest};
-use siros_transaction_data::{Amr, Configuration, Step, TransactionDataError};
+use siros_transaction_data::{
+    fetched, Amr, Configuration, HeldMetadata, Step, TransactionDataError,
+};
 use siros_trust::TrustStore;
 use siros_wallet_state::{CredentialId, KeyId, PresentationRecord};
 use siros_zkp_req_nym_auth::policy::RequestRefusal;
@@ -68,6 +57,9 @@ pub struct PlanInput<'a> {
     pub language: &'a Locale,
     /// The transaction data types the host configures.
     pub configuration: &'a Configuration,
+    /// The transaction metadata the host holds: signed credential metadata, Type Metadata and
+    /// key sets. The plan fetches none of it.
+    pub held: &'a HeldMetadata,
     /// The nym_auth systems whose circuits the host loaded, in the wallet's order of
     /// preference.
     pub systems: &'a [NymAuthSystem],

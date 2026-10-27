@@ -1,17 +1,19 @@
 //! Payload conformance (PaSO Core, Section 7.4.2, step 2; PaSO View, Section 3): every field
-//! covered by a claim, every mandatory claim present, every value of a displayed claim of its
-//! value type, and every string free of directional overrides.
+//! covered by a claim or the string `#integrity` companion of an image, every mandatory claim
+//! present, every value of a displayed claim of its value type, and every string free of
+//! directional overrides.
 
 mod pointer;
 mod time;
 mod values;
 
 use siros_codec::json::Json;
-use siros_dcql::PathError;
+use siros_dcql::{ComponentIndex, PathComponent, PathError};
 
-use crate::definition::{ClaimIndex, Definition, Mandatory, TextFault};
+use crate::definition::{BaseType, ClaimDefinition, ClaimIndex, Mandatory, TextFault, ValueType};
 use crate::image::ImageFault;
 
+pub(crate) use pointer::Reach;
 pub use pointer::{Location, Step};
 pub use time::{IsoDateTime, IsoTime};
 pub use values::{CurrencyAmount, Frequency, NumberText, PayloadText, Scalar, Typed};
@@ -28,7 +30,11 @@ pub(crate) const INTEGRITY_SUFFIX: &str = "#integrity";
 pub enum PayloadFault {
     /// The field at this location is covered by no claim's `path` (Core, Section 7.4.2).
     Uncovered(Location),
-    /// The mandatory claim at this position is absent.
+    /// The `#integrity` companion of an image at this location is no string (PaSO View,
+    /// Section 3, `image`).
+    IntegrityNotString(Location),
+    /// The mandatory claim at this position is absent, or absent from an element its path's
+    /// `null` ranges over.
     MandatoryAbsent(ClaimIndex),
     /// Processing the `path` of the claim at this position aborts (OpenID4VP 1.0, Section
     /// 7.1.1).
@@ -59,6 +65,7 @@ impl PayloadFault {
     pub fn code(&self) -> &'static str {
         match self {
             Self::Uncovered(_) => "payload_field_uncovered",
+            Self::IntegrityNotString(_) => "payload_integrity_not_string",
             Self::MandatoryAbsent(_) => "payload_mandatory_absent",
             Self::Path(..) => "payload_path",
             Self::Value(_, _, fault) => fault.code(),
@@ -108,38 +115,31 @@ impl Values {
     }
 }
 
-/// The values of `payload`, the members of a `payload` object, that conform to `definition`.
+/// The values of `payload`, the members of a `payload` object, that conform to the claims
+/// `claims`.
 ///
 /// # Errors
 ///
 /// [`PayloadFault`]: the first rule the payload breaks, in this order: the strings' directional
 /// rules, the coverage of every field, then each claim in order.
-pub(crate) fn conform(payload: &Json, definition: &Definition) -> Result<Values, PayloadFault> {
+pub(crate) fn conform<'c>(
+    payload: &Json,
+    claims: impl Iterator<Item = &'c ClaimDefinition> + Clone,
+) -> Result<Values, PayloadFault> {
     let mut fields = Vec::new();
     leaves(payload, &Location::default(), &mut fields)?;
-    let paths: Vec<_> = definition
-        .claims()
-        .iter()
-        .map(|claim| claim.path().components())
-        .collect();
-    // A field is covered by a claim that addresses it or what contains it, and an empty object
-    // or array by a claim that addresses what it would contain.
-    let covered = |location: &Location| {
-        paths
-            .iter()
-            .any(|path| location.covered_by(path) || location.leads_to(path))
-    };
-    if let Some(uncovered) = fields.iter().find(|location| {
-        !covered(location) && !integrity_companion(location).is_some_and(|of| covered(&of))
-    }) {
-        return Err(PayloadFault::Uncovered(uncovered.clone()));
+    for field in &fields {
+        covered(payload, field, claims.clone())?;
     }
     let mut values = Vec::new();
-    for (at, claim) in definition.claims().iter().enumerate() {
+    for (at, claim) in claims.enumerate() {
         let index = ClaimIndex::new(at);
-        let selected = select(payload, claim.path().components())
-            .map_err(|error| PayloadFault::Path(index, error))?;
-        if selected.is_empty() && claim.mandatory() == Mandatory::Required {
+        let components = claim.path().components();
+        let selected =
+            select(payload, components).map_err(|error| PayloadFault::Path(index, error))?;
+        if claim.mandatory() == Mandatory::Required
+            && !present(payload, components, 0).map_err(|e| PayloadFault::Path(index, e))?
+        {
             return Err(PayloadFault::MandatoryAbsent(index));
         }
         if claim.display().is_none() {
@@ -187,6 +187,78 @@ fn leaves(
     }
 }
 
+/// Checks that `claims` cover the field at `field`: a claim addresses it, what contains it,
+/// or, for an empty object or array, what it would contain. A field outside them is covered as
+/// the `#integrity` companion of an image claim's value, or within one, when the companion is a
+/// string.
+///
+/// # Errors
+///
+/// [`PayloadFault::Uncovered`], and [`PayloadFault::IntegrityNotString`] for a companion of
+/// another type.
+fn covered<'c>(
+    payload: &Json,
+    field: &Location,
+    claims: impl Iterator<Item = &'c ClaimDefinition> + Clone,
+) -> Result<(), PayloadFault> {
+    if claims
+        .clone()
+        .any(|claim| field.reach(claim.path().components()) != Reach::Apart)
+    {
+        return Ok(());
+    }
+    let companion = field.prefixes().find(|prefix| {
+        integrity_companion(prefix).is_some_and(|image| {
+            claims.clone().any(|claim| {
+                claim.value_type() == Some(ValueType::Plain(BaseType::Image))
+                    && image.reach(claim.path().components()) == Reach::Addresses
+            })
+        })
+    });
+    match companion {
+        None => Err(PayloadFault::Uncovered(field.clone())),
+        Some(companion)
+            if companion == *field
+                && value_at(payload, field).is_some_and(|v| matches!(v, Json::String(_))) =>
+        {
+            Ok(())
+        }
+        Some(companion) => Err(PayloadFault::IntegrityNotString(companion)),
+    }
+}
+
+/// Whether `root` holds what `components` addresses: every array a `null` ranges over exists,
+/// and each of its elements holds the rest of the path. `offset` is the position of
+/// `components` in the claim's path.
+///
+/// # Errors
+///
+/// [`PathError::TypeMismatch`] where a `null` meets a value that is no array.
+fn present(root: &Json, components: &[PathComponent], offset: usize) -> Result<bool, PathError> {
+    let Some(null) = components.iter().position(|c| *c == PathComponent::Null) else {
+        return Ok(!select(root, components)?.is_empty());
+    };
+    let (prefix, rest) = components.split_at(null);
+    let containers = select(root, prefix)?;
+    if containers.is_empty() {
+        return Ok(false);
+    }
+    let rest = rest.get(1..).unwrap_or_default();
+    for container in containers {
+        let Json::Array(items) = container.value else {
+            return Err(PathError::TypeMismatch {
+                at: ComponentIndex::new(offset + null),
+            });
+        };
+        for item in items {
+            if !present(item, rest, offset + null + 1)? {
+                return Ok(false);
+            }
+        }
+    }
+    Ok(true)
+}
+
 /// The location of the member `location` accompanies when it is a `#integrity` companion: the
 /// sibling named without the suffix.
 fn integrity_companion(location: &Location) -> Option<Location> {
@@ -194,19 +266,22 @@ fn integrity_companion(location: &Location) -> Option<Location> {
     location.sibling(name)
 }
 
+/// The value at `location` of `payload`.
+fn value_at<'j>(payload: &'j Json, location: &Location) -> Option<&'j Json> {
+    location
+        .steps()
+        .iter()
+        .try_fold(payload, |value, step| match (step, value) {
+            (Step::Key(key), Json::Object(members)) => {
+                members.iter().find(|(name, _)| name == key).map(|(_, v)| v)
+            }
+            (Step::Index(index), Json::Array(items)) => items.get(usize::try_from(*index).ok()?),
+            (Step::Key(_) | Step::Index(_), _) => None,
+        })
+}
+
 /// The value of the `#integrity` sibling of the member at `location`.
 pub(crate) fn integrity_of<'j>(payload: &'j Json, location: &Location) -> Option<&'j Json> {
     let name = format!("{}{INTEGRITY_SUFFIX}", location.last_key()?);
-    let sibling = location.sibling(&name)?;
-    let mut value = payload;
-    for step in sibling.steps() {
-        value = match (step, value) {
-            (Step::Key(key), Json::Object(members)) => {
-                &members.iter().find(|(name, _)| name == key)?.1
-            }
-            (Step::Index(index), Json::Array(items)) => items.get(usize::try_from(*index).ok()?)?,
-            (Step::Key(_) | Step::Index(_), _) => return None,
-        };
-    }
-    Some(value)
+    value_at(payload, &location.sibling(&name)?)
 }

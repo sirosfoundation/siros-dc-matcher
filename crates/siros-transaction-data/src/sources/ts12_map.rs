@@ -1,16 +1,16 @@
 //! The mapping of TS12 v1.0.1 claim metadata and UI elements catalogues into the definition
 //! form (PaSO Proof Metadata, Section 3): `path` loses its `payload` root, `lang` becomes
 //! `locale`, `label` becomes `name`, `description` stays, and `visualisation` stays as the
-//! claim's prominence.
+//! claim's prominence. The labels follow TS12's rules (Section 3.3.3).
 
 use siros_codec::json::Json;
 use siros_dcql::{ClaimPath, PathComponent};
 
 use super::ts12::{Ts12Fault, Ts12Member};
 use crate::definition::{
-    pointer, ClaimDefinition, ClaimFault, ClaimIndex, Definition, DefinitionError,
-    DefinitionMember, Display, Localizations, Mandatory, PayloadPath, Prominence, UiLabels,
-    AFFIRMATIVE, DENIAL, SECURITY_HINT, TITLE,
+    pointer, visualisation, ClaimDefinition, ClaimFault, ClaimIndex, Definition, DefinitionError,
+    DefinitionMember, Display, LabelRules, Localizations, Mandatory, PayloadPath, UiLabels,
+    AFFIRMATIVE,
 };
 use crate::json::{self, Fields};
 
@@ -44,17 +44,7 @@ fn claim(at: usize, value: Json) -> Result<ClaimDefinition, Ts12Fault> {
         }
         _ => return Err(Ts12Fault::PathOutsidePayload),
     };
-    let prominence = fields
-        .optional("visualisation", json::integer)
-        .map_err(|fault| Ts12Fault::Member(Ts12Member::Visualisation, fault))?
-        .map(|level| {
-            level
-                .number()
-                .as_u64()
-                .and_then(Prominence::of)
-                .ok_or(Ts12Fault::Visualisation)
-        })
-        .transpose()?;
+    let prominence = visualisation(&mut fields).map_err(claim_fault)?;
     let mandatory = match fields
         .optional("mandatory", json::boolean)
         .map_err(|fault| claim_fault(ClaimFault::Member(DefinitionMember::Mandatory, fault)))?
@@ -70,8 +60,10 @@ fn claim(at: usize, value: Json) -> Result<ClaimDefinition, Ts12Fault> {
                 .into_iter()
                 .map(display_entry)
                 .collect::<Result<Vec<_>, _>>()?;
-            Localizations::parse(Json::Array(entries), Display::parse)
-                .map_err(|fault| claim_fault(ClaimFault::Display(fault)))
+            Localizations::parse(Json::Array(entries), |entry| {
+                Display::parse(entry, LabelRules::Ts12)
+            })
+            .map_err(|fault| claim_fault(ClaimFault::Display(fault)))
         })
         .transpose()?;
     ClaimDefinition::new(path, mandatory, None, display, prominence).map_err(claim_fault)
@@ -104,54 +96,35 @@ fn language(fields: &mut Fields) -> Result<Json, Ts12Fault> {
     }
 }
 
-/// The most characters of each UI element of Section 3.3.3.
-const ELEMENT_LIMITS: [(&str, usize); 4] = [
-    (AFFIRMATIVE, 30),
-    (DENIAL, 30),
-    (TITLE, 50),
-    (SECURITY_HINT, 250),
-];
-
-/// The UI labels of the catalogue `labels`: each element an array of `{lang, value}` within its
-/// length (Section 3.3.3), with an `affirmative_action_label`.
+/// The UI labels of the catalogue `labels`: each element an array of `{lang, value}`, with an
+/// `affirmative_action_label` (Section 3.3.3).
 fn ui_labels(labels: Json) -> Result<UiLabels, Ts12Fault> {
     let members = json::object(labels)
         .map_err(|fault| Ts12Fault::Member(Ts12Member::UiLabels, fault))?
         .rest();
-    if !members.iter().any(|(name, _)| name == AFFIRMATIVE) {
+    if !members.iter().any(|(name, _)| AFFIRMATIVE == name.as_str()) {
         return Err(Ts12Fault::AffirmativeAbsent);
     }
     let members = members
         .into_iter()
         .map(|(name, entries)| {
-            let limit = ELEMENT_LIMITS
-                .iter()
-                .find(|(element, _)| *element == name)
-                .map(|&(element, limit)| (element, limit));
             let entries = json::array(entries)
                 .map_err(|fault| Ts12Fault::Member(Ts12Member::UiLabels, fault))?
                 .into_iter()
-                .map(|entry| ui_entry(entry, limit))
+                .map(ui_entry)
                 .collect::<Result<Vec<_>, _>>()?;
             Ok((name, Json::Array(entries)))
         })
         .collect::<Result<Vec<_>, Ts12Fault>>()?;
-    UiLabels::parse(Json::Object(members)).map_err(Ts12Fault::Definition)
+    UiLabels::parse(Json::Object(members), LabelRules::Ts12).map_err(Ts12Fault::Definition)
 }
 
-/// A catalogue entry `{lang, value}` in the definition form `{locale, value}`, its value within
-/// `limit` characters when the element has one.
-fn ui_entry(entry: Json, limit: Option<(&'static str, usize)>) -> Result<Json, Ts12Fault> {
+/// A catalogue entry `{lang, value}` in the definition form `{locale, value}`.
+fn ui_entry(entry: Json) -> Result<Json, Ts12Fault> {
     let entry_fault = |fault| Ts12Fault::Member(Ts12Member::UiEntry, fault);
     let mut fields = json::object(entry).map_err(entry_fault)?;
     let locale = language(&mut fields)?;
     let value = fields.require("value").map_err(entry_fault)?;
-    if let (Some((element, max)), Json::String(text)) = (limit, &value) {
-        let length = text.chars().count();
-        if length > max {
-            return Err(Ts12Fault::LabelLength(element, length));
-        }
-    }
     Ok(Json::Object(vec![
         ("locale".to_owned(), locale),
         ("value".to_owned(), value),

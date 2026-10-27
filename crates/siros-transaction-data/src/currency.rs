@@ -195,6 +195,15 @@ const MINOR_UNITS: [(&str, Minor); 178] = [
     ("ZWG", Minor::Digits(2)),
 ];
 
+/// Whether an amount must write the digits of its currency's minor unit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum Fraction {
+    /// It must: `iso_currency_amount` (PaSO View, Section 3).
+    Required,
+    /// It may leave them out: a TS12 `amount` (EC TS12 v1.0.1, Section 4.3.1).
+    Optional,
+}
+
 /// An ISO 4217 alphabetic code of the list, with its minor unit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CurrencyCode {
@@ -218,18 +227,19 @@ impl CurrencyCode {
     }
 
     /// Whether the unsigned decimal `amount` is an amount of this currency: the major units,
-    /// and an optional decimal point with exactly the digits of the minor unit. A currency
-    /// without a minor unit takes no fraction.
-    pub(crate) fn admits(self, amount: &str) -> bool {
-        let (major, fraction) = match amount.split_once('.') {
-            Some((major, fraction)) => (major, Some(fraction)),
+    /// and a decimal point with exactly the digits of the minor unit, which `fraction` says
+    /// whether the amount may leave out. A currency without a minor unit takes no fraction.
+    pub(crate) fn admits(self, amount: &str, fraction: Fraction) -> bool {
+        let (major, written) = match amount.split_once('.') {
+            Some((major, written)) => (major, Some(written)),
             None => (amount, None),
         };
         let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
-        let fraction_fits = match (fraction, self.minor) {
-            (None, _) => true,
-            (Some(fraction), Minor::Digits(n)) => {
-                n > 0 && digits(fraction) && fraction.len() == usize::from(n)
+        let fraction_fits = match (written, self.minor) {
+            (None, Minor::Digits(n)) if n > 0 => fraction == Fraction::Optional,
+            (None, Minor::Digits(_) | Minor::Undefined) => true,
+            (Some(written), Minor::Digits(n)) => {
+                n > 0 && digits(written) && written.len() == usize::from(n)
             }
             (Some(_), Minor::Undefined) => false,
         };

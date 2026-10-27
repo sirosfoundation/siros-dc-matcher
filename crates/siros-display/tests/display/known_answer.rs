@@ -216,3 +216,36 @@ fn the_card_and_the_labels_of_the_example() {
         assert_eq!(members, ["locality", "street_address"], "{language}");
     }
 }
+
+/// Type Metadata comes first, and the configuration's `credential_metadata` serves a language
+/// the Type Metadata has no entry for (D3; OpenID4VCI 1.0, Section 12.2.4).
+#[test]
+fn the_configuration_serves_a_language_the_type_metadata_lacks() {
+    let configurations: Value = serde_json::from_str(CONFIGURATIONS).unwrap();
+    let issuer_metadata = json!({
+        "credential_issuer": ISSUER,
+        "credential_endpoint": "https://issuer.example/credential",
+        "credential_configurations_supported": configurations
+    });
+    let metadata = IssuerMetadata::merge(&issuer_metadata, CONFIGURATION, None).unwrap();
+    let type_metadata = siros_display::TypeMetadata::parse(&json!({
+        "vct": CONFIGURATION,
+        "display": [{"locale": "fr", "name": "Identité"}],
+        "claims": [{"path": ["given_name"], "display": [{"locale": "fr", "label": "Prénom"}]}]
+    }))
+    .unwrap();
+    let cache = DisplayCache::new(vec![metadata], vec![type_metadata]).unwrap();
+    let credential = credential();
+    for (language, title, label) in [
+        ("fr", "Identité", "Prénom"),
+        ("en-US", "IdentityCredential", "Given Name"),
+    ] {
+        let language = Locale::parse(language).unwrap();
+        let card = cache.card(&credential, &language).unwrap();
+        assert_eq!(card.title().as_str(), title, "{language}");
+        let rows = cache
+            .claim_rows(&credential, &[pointer(&["given_name"])], &language)
+            .unwrap();
+        assert_eq!(rows[0].label().as_str(), label, "{language}");
+    }
+}

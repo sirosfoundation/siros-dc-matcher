@@ -15,10 +15,11 @@ use crate::json::{self, Fields};
 pub struct Localizations<T>(Vec<T>);
 
 impl<T: Localized> Localizations<T> {
-    /// The array `value`, each entry read by `entry`.
+    /// The array `value`, each entry read by `entry`, which passes over an entry the locale
+    /// function excludes by giving `None`.
     pub(crate) fn parse(
         value: Json,
-        entry: impl Fn(Fields) -> Result<T, EntryFault>,
+        entry: impl Fn(Fields) -> Result<Option<T>, EntryFault>,
     ) -> Result<Self, LabelsFault> {
         let items = json::array(value).map_err(|_| LabelsFault::NotArray)?;
         let entries: Vec<T> = items
@@ -29,6 +30,7 @@ impl<T: Localized> Localizations<T> {
                 let fields = json::object(item).map_err(|_| fault(EntryFault::NotObject))?;
                 entry(fields).map_err(fault)
             })
+            .filter_map(Result::transpose)
             .collect::<Result<_, _>>()?;
         let mut seen = FxHashSet::default();
         let mut defaults = 0usize;
@@ -43,6 +45,11 @@ impl<T: Localized> Localizations<T> {
             }
         }
         Ok(Self(entries))
+    }
+
+    /// The array of the one entry `entry`.
+    pub(crate) fn single(entry: T) -> Self {
+        Self(vec![entry])
     }
 
     /// The entries, in the metadata's order.
@@ -80,10 +87,9 @@ pub(crate) fn required_text(
 /// The optional string member `member` of an entry.
 pub(crate) fn optional_text(
     fields: &mut Fields,
-    name: &str,
     member: DefinitionMember,
 ) -> Result<Option<String>, EntryFault> {
     fields
-        .optional(name, json::text)
+        .optional(member.as_str(), json::text)
         .map_err(|fault| EntryFault::Member(member, fault))
 }

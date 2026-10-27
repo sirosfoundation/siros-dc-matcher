@@ -1,11 +1,14 @@
 //! `template:` interpolation (PaSO View, Section 3): `{<index>}` placeholders replaced, in one
-//! pass, by the value of the claim at that position of the `claims` array.
+//! pass, by the value of the claim at that position of the `claims` array. The result is a
+//! list of segments: the template's own text, and the values, which the UI formats by their
+//! types (step 3).
 
 use siros_codec::json::Json;
 
 use crate::definition::{BaseType, ClaimIndex, ValueType};
-use crate::payload::{select, Location, Typed, Values};
+use crate::payload::{select, Location, PayloadText, Scalar, Typed, ValueFault, Values};
 use crate::projection::ProjectedClaim;
+use crate::view::Segment;
 
 /// Why a template does not interpolate. The entry is then not compatible.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,12 +20,11 @@ pub enum TemplateFault {
     Wildcards(ClaimIndex),
     /// The claim at this position has no value type, and its value is no string.
     NotString(ClaimIndex),
+    /// The string of the claim at this position, which has no value type, breaks a rule.
+    Value(ClaimIndex, ValueFault),
     /// The claim at this position is absent from the payload: the locale entry is discarded,
     /// and no other locale is left.
     Absent(ClaimIndex),
-    /// The interpolated value is no value of the template's inner type, or the inner type is
-    /// `image` or `boolean`, which no string formats as.
-    Inner(BaseType),
 }
 
 impl TemplateFault {
@@ -33,8 +35,8 @@ impl TemplateFault {
             Self::Reference(_) => "template_reference",
             Self::Wildcards(_) => "template_wildcards",
             Self::NotString(_) => "template_not_string",
+            Self::Value(_, fault) => fault.code(),
             Self::Absent(_) => "template_absent",
-            Self::Inner(_) => "template_inner",
         }
     }
 }
@@ -50,9 +52,9 @@ pub(super) struct Sources<'s> {
     pub(super) values: &'s Values,
 }
 
-/// The text of `template` with each placeholder replaced, `wildcards` the array positions the
-/// `null`s of the referencing claim's path took. A placeholder past the end of `claims` stays
-/// as written, and a replaced value is never read again.
+/// The segments of `template` with each placeholder replaced by its value, `wildcards` the
+/// array positions the `null`s of the referencing claim's path took. A placeholder past the end
+/// of `claims` stays as written, and a replaced value is never read again.
 ///
 /// # Errors
 ///
@@ -61,12 +63,13 @@ pub(super) fn interpolate(
     template: &str,
     wildcards: &[u64],
     sources: &Sources<'_>,
-) -> Result<String, TemplateFault> {
-    let mut out = String::with_capacity(template.len());
+) -> Result<Vec<Segment>, TemplateFault> {
+    let mut segments: Vec<Segment> = Vec::new();
+    let mut text = String::new();
     let mut rest = template;
     while let Some(open) = rest.find('{') {
         let (before, from) = rest.split_at(open);
-        out.push_str(before);
+        text.push_str(before);
         let placeholder = from.get(1..).and_then(|tail| {
             let digits = tail.bytes().take_while(u8::is_ascii_digit).count();
             let index: usize = tail.get(..digits)?.parse().ok()?;
@@ -76,25 +79,30 @@ pub(super) fn interpolate(
         });
         match placeholder.filter(|(index, _)| *index < sources.claims.len()) {
             Some((index, after)) => {
-                out.push_str(&value(ClaimIndex::new(index), wildcards, sources)?);
+                let value = value(ClaimIndex::new(index), wildcards, sources)?;
+                segments
+                    .extend((!text.is_empty()).then(|| Segment::Text(std::mem::take(&mut text))));
+                segments.push(Segment::Value(value));
                 rest = after;
             }
             None => {
-                out.push('{');
+                text.push('{');
                 rest = from.get(1..).unwrap_or_default();
             }
         }
     }
-    out.push_str(rest);
-    Ok(out)
+    text.push_str(rest);
+    segments.extend((!text.is_empty()).then_some(Segment::Text(text)));
+    Ok(segments)
 }
 
-/// The text of the value of the claim at `index`, its `null`s resolved to `wildcards`.
+/// The value of the claim at `index`, its `null`s resolved to `wildcards`: a typed value, or the
+/// string of a claim without a value type as plain text.
 fn value(
     index: ClaimIndex,
     wildcards: &[u64],
     sources: &Sources<'_>,
-) -> Result<String, TemplateFault> {
+) -> Result<Scalar, TemplateFault> {
     let claim = sources
         .claims
         .get(index.value())
@@ -114,7 +122,7 @@ fn value(
     let location =
         Location::bound(claim.path().components(), bound).ok_or(TemplateFault::Wildcards(index))?;
     match sources.values.get(&location) {
-        Some(Typed::Scalar(scalar)) => return Ok(scalar.text()),
+        Some(Typed::Scalar(scalar)) => return Ok(scalar.clone()),
         Some(Typed::Image(_) | Typed::LabelOnly | Typed::Template(..)) => {
             return Err(TemplateFault::Reference(index))
         }
@@ -128,7 +136,9 @@ fn value(
         .find(|selected| selected.location == location)
         .map(|selected| selected.value)
     {
-        Some(Json::String(text)) => Ok(text.clone()),
+        Some(Json::String(text)) => PayloadText::parse(text.clone())
+            .map(Scalar::Text)
+            .map_err(|fault| TemplateFault::Value(index, fault)),
         Some(_) => Err(TemplateFault::NotString(index)),
         None => Err(TemplateFault::Absent(index)),
     }

@@ -5,10 +5,10 @@ use siros_codec::json::Json;
 use siros_display::{Locale, Localized};
 
 use super::claim::{label, label_format};
-use super::error::{DefinitionError, DefinitionMember, EntryFault, LabelsFault};
+use super::error::{DefinitionError, DefinitionMember, EntryFault, LabelsFault, UiElementKey};
 use super::localized::{self, Localizations};
 use super::text::{
-    ActionLabel, LabelRole, LabelText, OtherUiElement, SecurityHint, TransactionTitle,
+    ActionLabel, LabelRole, LabelRules, LabelText, OtherUiElement, SecurityHint, TransactionTitle,
 };
 use super::value_type::LabelFormat;
 use crate::json::Fields;
@@ -29,14 +29,15 @@ impl<R> Localized for UiLabel<R> {
 }
 
 impl<R: LabelRole> UiLabel<R> {
-    /// The entry of `fields`: `locale`, `value`, and `value_type` (Sections 3.2 and 3.3).
-    fn parse(mut fields: Fields) -> Result<Self, EntryFault> {
+    /// The entry of `fields` under `rules`: `locale`, `value`, and `value_type` (Sections 3.2
+    /// and 3.3).
+    fn parse(mut fields: Fields, rules: LabelRules) -> Result<Self, EntryFault> {
         let locale = localized::locale(&mut fields)?;
         let value = localized::required_text(&mut fields, DefinitionMember::Value)?;
-        let format = label_format(&mut fields, "value_type")?;
+        let format = label_format(&mut fields, DefinitionMember::ValueType)?;
         Ok(Self {
             locale,
-            value: label(&value, format, DefinitionMember::Value)?,
+            value: label(&value, format, DefinitionMember::Value, rules)?,
             format,
         })
     }
@@ -68,16 +69,16 @@ impl Localized for HintEntry {
 }
 
 impl HintEntry {
-    /// The entry of `fields`: `locale` and `value`, without `value_type`.
-    fn parse(mut fields: Fields) -> Result<Self, EntryFault> {
+    /// The entry of `fields` under `rules`: `locale` and `value`, without `value_type`.
+    fn parse(mut fields: Fields, rules: LabelRules) -> Result<Self, EntryFault> {
         let locale = localized::locale(&mut fields)?;
         let value = localized::required_text(&mut fields, DefinitionMember::Value)?;
-        if fields.take("value_type").is_some() {
+        if fields.take(DefinitionMember::ValueType.as_str()).is_some() {
             return Err(EntryFault::HintFormat);
         }
         Ok(Self {
             locale,
-            value: label(&value, LabelFormat::Plain, DefinitionMember::Value)?,
+            value: label(&value, LabelFormat::Plain, DefinitionMember::Value, rules)?,
         })
     }
 
@@ -96,22 +97,21 @@ pub struct UiLabels {
     pub(crate) denial: Option<Localizations<UiLabel<ActionLabel>>>,
     pub(crate) title: Option<Localizations<UiLabel<TransactionTitle>>>,
     pub(crate) security_hint: Option<Localizations<HintEntry>>,
-    pub(crate) others: Vec<(String, Localizations<UiLabel<OtherUiElement>>)>,
+    pub(crate) others: Vec<(UiElementKey, Localizations<UiLabel<OtherUiElement>>)>,
 }
 
 /// `affirmative_action_label`.
-pub(crate) const AFFIRMATIVE: &str = "affirmative_action_label";
+pub(crate) const AFFIRMATIVE: UiElementKey = UiElementKey::from_static("affirmative_action_label");
 /// `denial_action_label`.
-pub(crate) const DENIAL: &str = "denial_action_label";
+pub(crate) const DENIAL: UiElementKey = UiElementKey::from_static("denial_action_label");
 /// `transaction_title`.
-pub(crate) const TITLE: &str = "transaction_title";
+pub(crate) const TITLE: UiElementKey = UiElementKey::from_static("transaction_title");
 /// `security_hint`.
-pub(crate) const SECURITY_HINT: &str = "security_hint";
+pub(crate) const SECURITY_HINT: UiElementKey = UiElementKey::from_static("security_hint");
 
 impl UiLabels {
-    /// The labels of the `ui_labels` object `value` (Section 3.2). An element another
-    /// specification defines has at most 100 extended grapheme clusters (Section 3.3).
-    pub(crate) fn parse(value: Json) -> Result<Self, DefinitionError> {
+    /// The labels of the `ui_labels` object `value` under `rules` (Section 3.2).
+    pub(crate) fn parse(value: Json, rules: LabelRules) -> Result<Self, DefinitionError> {
         let Json::Object(members) = value else {
             return Err(DefinitionError::Member(
                 DefinitionMember::UiLabels,
@@ -120,19 +120,21 @@ impl UiLabels {
         };
         let mut labels = Self::default();
         for (name, value) in members {
-            let fault = |fault: LabelsFault| DefinitionError::UiElement(name.clone(), fault);
-            match name.as_str() {
-                AFFIRMATIVE => labels.affirmative = Some(array(value).map_err(fault)?),
-                DENIAL => labels.denial = Some(array(value).map_err(fault)?),
-                TITLE => labels.title = Some(array(value).map_err(fault)?),
-                SECURITY_HINT => {
-                    labels.security_hint =
-                        Some(Localizations::parse(value, HintEntry::parse).map_err(fault)?);
-                }
-                _ => {
-                    let other = array(value).map_err(fault)?;
-                    labels.others.push((name, other));
-                }
+            let key = UiElementKey::new(&name);
+            let fault = |fault: LabelsFault| DefinitionError::UiElement(key.clone(), fault);
+            if key == AFFIRMATIVE {
+                labels.affirmative = Some(array(value, rules).map_err(fault)?);
+            } else if key == DENIAL {
+                labels.denial = Some(array(value, rules).map_err(fault)?);
+            } else if key == TITLE {
+                labels.title = Some(array(value, rules).map_err(fault)?);
+            } else if key == SECURITY_HINT {
+                let hint =
+                    Localizations::parse(value, |entry| HintEntry::parse(entry, rules).map(Some));
+                labels.security_hint = Some(hint.map_err(fault)?);
+            } else {
+                let other = array(value, rules).map_err(fault)?;
+                labels.others.push((key, other));
             }
         }
         Ok(labels)
@@ -164,12 +166,15 @@ impl UiLabels {
 
     /// The elements PaSO does not define, by identifier, in the metadata's order.
     #[must_use]
-    pub fn others(&self) -> &[(String, Localizations<UiLabel<OtherUiElement>>)] {
+    pub fn others(&self) -> &[(UiElementKey, Localizations<UiLabel<OtherUiElement>>)] {
         &self.others
     }
 }
 
-/// A `ui_labels` array of labels of role `R`.
-fn array<R: LabelRole>(value: Json) -> Result<Localizations<UiLabel<R>>, LabelsFault> {
-    Localizations::parse(value, UiLabel::parse)
+/// A `ui_labels` array of labels of role `R` under `rules`.
+fn array<R: LabelRole>(
+    value: Json,
+    rules: LabelRules,
+) -> Result<Localizations<UiLabel<R>>, LabelsFault> {
+    Localizations::parse(value, |entry| UiLabel::parse(entry, rules).map(Some))
 }

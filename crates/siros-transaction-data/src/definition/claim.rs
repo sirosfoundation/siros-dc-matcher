@@ -7,7 +7,7 @@ use siros_display::{Locale, Localized};
 
 use super::error::{ClaimFault, DefinitionMember, EntryFault};
 use super::localized::{self, Localizations};
-use super::text::{ClaimName, LabelLength, LabelRole, LabelText};
+use super::text::{ClaimName, Description, LabelLength, LabelRole, LabelRules, LabelText};
 use super::value_type::{BaseType, LabelFormat, ValueType};
 use crate::json::{self, Fields};
 
@@ -89,22 +89,13 @@ impl Prominence {
     }
 }
 
-/// The description of a claim in one locale (EC TS12 v1.0.1, Section 2.3): display text of any
-/// length.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Description {}
-
-impl LabelRole for Description {
-    const MAX: usize = usize::MAX;
-}
-
 /// A `display` entry of a claim: its locale, its `name` and how the name is formatted.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClaimDisplay {
     pub(crate) locale: Option<Locale>,
     pub(crate) name: LabelText<ClaimName>,
     pub(crate) format: LabelFormat,
-    pub(crate) description: Option<LabelText<Description>>,
+    pub(crate) description: Option<Description>,
 }
 
 impl Localized for ClaimDisplay {
@@ -128,52 +119,64 @@ impl ClaimDisplay {
 
     /// The `description`, which TS12 type metadata carries.
     #[must_use]
-    pub fn description(&self) -> Option<&LabelText<Description>> {
+    pub fn description(&self) -> Option<&Description> {
         self.description.as_ref()
     }
 
-    /// The entry of `fields`: `locale`, `name`, and `display_type` (Sections 3.1 and 3.3), and
-    /// the `description` of SD-JWT VC claim metadata.
-    pub(crate) fn parse(mut fields: Fields) -> Result<Self, EntryFault> {
+    /// The entry of `fields` under `rules`: `locale`, `name`, and `display_type` (Sections 3.1
+    /// and 3.3), and the `description` of SD-JWT VC claim metadata. `None` for an entry whose
+    /// `display_type` is none of `mini_markdown` and `template:mini_markdown`: PaSO View,
+    /// Section 3 excludes it from the locale function.
+    pub(crate) fn parse(mut fields: Fields, rules: LabelRules) -> Result<Option<Self>, EntryFault> {
         let locale = localized::locale(&mut fields)?;
         let name = localized::required_text(&mut fields, DefinitionMember::Name)?;
-        let format = label_format(&mut fields, "display_type")?;
-        let description = localized::optional_text(
-            &mut fields,
-            DefinitionMember::Description.as_str(),
-            DefinitionMember::Description,
-        )?
-        .map(|text| label(&text, LabelFormat::Plain, DefinitionMember::Description))
-        .transpose()?;
-        Ok(Self {
+        let format = match label_format(&mut fields, DefinitionMember::DisplayType) {
+            Ok(format) => format,
+            Err(EntryFault::Format(_)) => return Ok(None),
+            Err(fault) => return Err(fault),
+        };
+        let description = localized::optional_text(&mut fields, DefinitionMember::Description)?
+            .map(|text| {
+                Description::parse(&text)
+                    .map_err(|fault| EntryFault::Text(DefinitionMember::Description, fault))
+            })
+            .transpose()?;
+        Ok(Some(Self {
             locale,
-            name: label(&name, format, DefinitionMember::Name)?,
+            name: label(&name, format, DefinitionMember::Name, rules)?,
             format,
             description,
-        })
+        }))
     }
 }
 
-/// The `display_type` or `value_type` member `name` of a label entry: absent for plain text,
-/// else `mini_markdown` or `template:mini_markdown`.
-pub(crate) fn label_format(fields: &mut Fields, name: &str) -> Result<LabelFormat, EntryFault> {
-    match localized::optional_text(fields, name, DefinitionMember::Format)? {
+/// The label format the member `member` of a label entry names: plain text when absent.
+///
+/// # Errors
+///
+/// [`EntryFault::Format`] for a type other than `mini_markdown` and `template:mini_markdown`.
+pub(crate) fn label_format(
+    fields: &mut Fields,
+    member: DefinitionMember,
+) -> Result<LabelFormat, EntryFault> {
+    match localized::optional_text(fields, member)? {
         None => Ok(LabelFormat::Plain),
         Some(text) => LabelFormat::parse(&text).ok_or(EntryFault::Format(text)),
     }
 }
 
-/// The label `text` of role `R`, formatted by `format`.
+/// The label `text` of role `R` under `rules`, formatted by `format`.
 pub(crate) fn label<R: LabelRole>(
     text: &str,
     format: LabelFormat,
     member: DefinitionMember,
+    rules: LabelRules,
 ) -> Result<LabelText<R>, EntryFault> {
     let length = match format {
         LabelFormat::TemplateMiniMarkdown => LabelLength::Template,
         LabelFormat::Plain | LabelFormat::MiniMarkdown => LabelLength::Final,
     };
-    LabelText::parse(text, length).map_err(|fault| EntryFault::Text(member, fault))
+    LabelText::parse(text, length, rules).map_err(|fault| EntryFault::Text(member, fault))
 }
 
 /// A claim metadata object (Section 3.1).
@@ -187,10 +190,11 @@ pub struct ClaimDefinition {
 }
 
 impl ClaimDefinition {
-    /// The claim of `value`: `path`, `mandatory`, `value_type` only with `display`, and a
-    /// `label_only` claim never mandatory (Section 3.1; PaSO View, Section 3). Other members
-    /// are ignored.
-    pub(crate) fn parse(value: Json) -> Result<Self, ClaimFault> {
+    /// The claim of `value` under `rules`: `path`, `mandatory`, `value_type` only with
+    /// `display`, and a `label_only` claim never mandatory (Section 3.1; PaSO View, Section 3);
+    /// under TS12's rules, `visualisation` (EC TS12 v1.0.1, Section 3.3.2). Other members are
+    /// ignored.
+    pub(crate) fn parse(value: Json, rules: LabelRules) -> Result<Self, ClaimFault> {
         let mut fields = json::object(value).map_err(|_| ClaimFault::NotObject)?;
         let path = path(&mut fields)?;
         let mandatory = match fields
@@ -207,10 +211,14 @@ impl ClaimDefinition {
             .transpose()?;
         let display = fields
             .take(DefinitionMember::Display.as_str())
-            .map(|display| Localizations::parse(display, ClaimDisplay::parse))
+            .map(|display| Localizations::parse(display, |entry| ClaimDisplay::parse(entry, rules)))
             .transpose()
             .map_err(ClaimFault::Display)?;
-        Self::new(path, mandatory, value_type, display, None)
+        let prominence = match rules {
+            LabelRules::Ts12 => visualisation(&mut fields)?,
+            LabelRules::Paso => None,
+        };
+        Self::new(path, mandatory, value_type, display, prominence)
     }
 
     /// The claim of its parts, checked against Section 3.1 and PaSO View, Section 3.
@@ -236,6 +244,14 @@ impl ClaimDefinition {
             display,
             prominence,
         })
+    }
+
+    /// The claim with its `display` array reduced to `entry`.
+    pub(crate) fn in_one_locale(&self, entry: ClaimDisplay) -> Self {
+        Self {
+            display: Some(Localizations::single(entry)),
+            ..self.clone()
+        }
     }
 
     /// The path.
@@ -267,6 +283,22 @@ impl ClaimDefinition {
     pub fn prominence(&self) -> Option<Prominence> {
         self.prominence
     }
+}
+
+/// The optional `visualisation` of a claim: an integer from 1 to 4 (EC TS12 v1.0.1, Section
+/// 3.3.2).
+pub(crate) fn visualisation(fields: &mut Fields) -> Result<Option<Prominence>, ClaimFault> {
+    fields
+        .optional(DefinitionMember::Visualisation.as_str(), json::integer)
+        .map_err(|fault| ClaimFault::Member(DefinitionMember::Visualisation, fault))?
+        .map(|level| {
+            level
+                .number()
+                .as_u64()
+                .and_then(Prominence::of)
+                .ok_or(ClaimFault::Visualisation)
+        })
+        .transpose()
 }
 
 /// The required `path` of a claim: a claims path pointer of keys, indexes and `null`.

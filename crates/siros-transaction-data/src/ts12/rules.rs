@@ -8,7 +8,7 @@ use siros_codec::base64;
 use siros_codec::date::Date;
 use siros_codec::json::{Json, JsonNumber};
 
-use crate::currency::CurrencyCode;
+use crate::currency::{CurrencyCode, Fraction};
 use crate::ts12::read::{self as json, MemberPath, Ts12PayloadFault};
 
 /// A string of `MIN` to `MAX` characters (JSON Schema `minLength`, `maxLength`).
@@ -134,7 +134,7 @@ pub(crate) fn amount(
 ) -> Result<Amount, Ts12PayloadFault> {
     let number = json::number(value, path)?;
     let text = number.text();
-    if currency.admits(text.strip_prefix('-').unwrap_or(text)) {
+    if currency.admits(text.strip_prefix('-').unwrap_or(text), Fraction::Optional) {
         Ok(Amount(number))
     } else {
         Err(Ts12PayloadFault::Invalid(path))

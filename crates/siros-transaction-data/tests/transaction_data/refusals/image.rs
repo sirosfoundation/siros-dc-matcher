@@ -1,13 +1,15 @@
 //! The image rules of PaSO View, Section 3: Data URLs of PNG, JPEG and SVG in base64, `https`
-//! URLs pinned by an `#integrity` sibling and fetched through the host, 512 KiB and 2048 pixels,
-//! and the URLs an SVG document references pinned in their fragments (PaSO Proof SD-JWT-VC and
-//! SVG, Section 3).
+//! URLs pinned by an `#integrity` sibling and fetched through the host with at most 3
+//! redirects, 512 KiB and 2048 pixels, the URLs an SVG document references pinned in their
+//! fragments, and what the scan of an SVG document cannot vouch for refused (PaSO Proof
+//! SD-JWT-VC and SVG, Section 3); and the cap on the items shown, counted before any fetch.
 
 use serde_json::json;
-use siros_oid4vp::HttpStatus;
+use siros_oid4vp::{HttpStatus, MediaType, Redirects};
 use siros_transaction_data::{
     ClaimIndex, Dimensions, FetchFault, ImageFault, ImageFormat, Incompatibility, IntegrityFault,
-    Location, LocationStep, PayloadFault, SvgFault, ValueFault, MAX_IMAGE_BYTES,
+    Location, LocationStep, PayloadFault, RenderFault, Selection, SvgFault, ValueFault,
+    MAX_IMAGE_BYTES,
 };
 
 use crate::common::{
@@ -55,7 +57,7 @@ fn outcome(logo: &str, integrity: Option<&str>, documents: Documents) -> Shown {
         {"path": ["logo"], "value_type": "image", "display": [{"locale": "en", "name": "Logo"}]}
     ]});
     let mut host = Host::new(json!([configured(TYPE, CARD, &definition)]));
-    host.documents = documents;
+    host.images = documents;
     let mut payload = json!({"logo": logo});
     if let Some(integrity) = integrity {
         payload["logo#integrity"] = json!(integrity);
@@ -94,6 +96,11 @@ fn each_image_rule_is_refused_alone() {
     let served = |bytes: &[u8]| vec![(URL.to_owned(), ok(bytes))];
     let pinned = |bytes: &[u8]| format!("{PART}#{}", sri(bytes).replace('=', "%3D"));
     let part = png(1, 1);
+    // An SVG document that references an unpinned URL in a style, as a Data URL.
+    let nested = data(
+        "image/svg+xml",
+        br#"<svg xmlns="http://www.w3.org/2000/svg"><rect style="fill:url(https://evil.example/n.png)"/></svg>"#,
+    );
     let rows: Vec<(&str, String, Option<String>, Documents, Shown)> = vec![
         (
             "a PNG Data URL",
@@ -142,7 +149,9 @@ fn each_image_rule_is_refused_alone() {
             "data:image/png;base64,***".to_owned(),
             None,
             vec![],
-            reference(ImageFault::Base64),
+            reference(ImageFault::Base64(
+                siros_codec::base64::decode("***").unwrap_err(),
+            )),
         ),
         (
             "a Data URL over 512 KiB",
@@ -263,6 +272,135 @@ fn each_image_rule_is_refused_alone() {
             ))),
         ),
         (
+            "an SVG calling URL( in capitals",
+            data(
+                "image/svg+xml",
+                &svg(
+                    10,
+                    10,
+                    r#"<rect style="fill:URL(https://evil.example/x.png)"/>"#,
+                ),
+            ),
+            None,
+            vec![],
+            image(ImageFault::Svg(SvgFault::ReferenceUnpinned(
+                "https://evil.example/x.png".to_owned(),
+            ))),
+        ),
+        (
+            "an SVG with a CSS escape",
+            data(
+                "image/svg+xml",
+                &svg(
+                    10,
+                    10,
+                    r#"<style>rect{fill:\75 rl(https://evil.example/x.png)}</style>"#,
+                ),
+            ),
+            None,
+            vec![],
+            image(ImageFault::Svg(SvgFault::CssEscape)),
+        ),
+        (
+            "an SVG importing in capitals",
+            data(
+                "image/svg+xml",
+                &svg(
+                    10,
+                    10,
+                    r#"<style>@IMPORT "https://evil.example/s.css";</style>"#,
+                ),
+            ),
+            None,
+            vec![],
+            image(ImageFault::Svg(SvgFault::ReferenceUnpinned(
+                "https://evil.example/s.css".to_owned(),
+            ))),
+        ),
+        (
+            "an SVG with an image-set",
+            data(
+                "image/svg+xml",
+                &svg(
+                    10,
+                    10,
+                    r#"<rect style="fill:image-set('https://evil.example/a.png' 1x)"/>"#,
+                ),
+            ),
+            None,
+            vec![],
+            image(ImageFault::Svg(SvgFault::CssFunction("image-set("))),
+        ),
+        (
+            "an SVG with an xml-stylesheet processing instruction",
+            data(
+                "image/svg+xml",
+                &[
+                    br#"<?xml version="1.0"?><?xml-stylesheet href="https://evil.example/s.css"?>"#
+                        .as_slice(),
+                    &svg(10, 10, ""),
+                ]
+                .concat(),
+            ),
+            None,
+            vec![],
+            image(ImageFault::Svg(SvgFault::ProcessingInstruction(
+                "xml-stylesheet".to_owned(),
+            ))),
+        ),
+        (
+            "an SVG with a foreignObject image srcset",
+            data(
+                "image/svg+xml",
+                &svg(
+                    10,
+                    10,
+                    r#"<foreignObject><img xmlns="http://www.w3.org/1999/xhtml" srcset="https://evil.example/a.png 1x"/></foreignObject>"#,
+                ),
+            ),
+            None,
+            vec![],
+            image(ImageFault::Svg(SvgFault::ForeignObject)),
+        ),
+        (
+            "an SVG with a foreignObject object",
+            data(
+                "image/svg+xml",
+                &svg(
+                    10,
+                    10,
+                    r#"<foreignObject><object xmlns="http://www.w3.org/1999/xhtml" data="https://evil.example/a.svg"/></foreignObject>"#,
+                ),
+            ),
+            None,
+            vec![],
+            image(ImageFault::Svg(SvgFault::ForeignObject)),
+        ),
+        (
+            "an SVG nesting an SVG Data URL",
+            data(
+                "image/svg+xml",
+                &svg(10, 10, &format!(r#"<image href="{nested}"/>"#)),
+            ),
+            None,
+            vec![],
+            image(ImageFault::Svg(SvgFault::DataReference(nested.clone()))),
+        ),
+        (
+            "an SVG nesting a PNG Data URL",
+            data(
+                "image/svg+xml",
+                &svg(
+                    10,
+                    10,
+                    &format!(r#"<image href="{}"/>"#, data("image/png", &png(1, 1))),
+                ),
+            ),
+            None,
+            vec![],
+            shown(ImageFormat::Svg),
+        ),
+        (
             "an XML document that is no SVG",
             data("image/svg+xml", b"<html/>"),
             None,
@@ -289,7 +427,7 @@ fn the_view_carries_the_verified_bytes() {
         {"path": ["logo"], "value_type": "image", "display": [{"locale": "en", "name": "Logo"}]}
     ]});
     let mut host = Host::new(json!([configured(TYPE, CARD, &definition)]));
-    host.documents = vec![("https://cdn.example/part.png".to_owned(), ok(&part))];
+    host.images = vec![("https://cdn.example/part.png".to_owned(), ok(&part))];
     let entry = json!({"type": TYPE, "credential_ids": ["card"],
                        "payload": {"logo": data("image/svg+xml", &document)}});
     let entries = entries(&[entry.to_string()], &query(&["card"], CARD));
@@ -303,4 +441,52 @@ fn the_view_carries_the_verified_bytes() {
     assert_eq!(image.resources().len(), 1);
     assert_eq!(image.resources()[0].bytes, part);
     assert_eq!(image.resources()[0].reference, reference);
+}
+
+/// An image fetch accepts the image types and follows at most 3 redirects (PaSO View, Section
+/// 3, `image`).
+#[test]
+fn an_image_fetch_follows_at_most_three_redirects() {
+    let definition = json!({"claims": [
+        {"path": ["logo"], "value_type": "image", "display": [{"locale": "en", "name": "Logo"}]}
+    ]});
+    let mut host = Host::new(json!([configured(TYPE, CARD, &definition)]));
+    let logo = png(5, 5);
+    host.images = vec![("https://cdn.example/logo.png".to_owned(), ok(&logo))];
+    let entry = json!({"type": TYPE, "credential_ids": ["card"], "payload": {
+        "logo": "https://cdn.example/logo.png", "logo#integrity": sri(&logo)}});
+    let entries = entries(&[entry.to_string()], &query(&["card"], CARD));
+    let (selection, fetches) = host.select_fetching(&[&entries[0]], &credential(CARD, &[]));
+    assert!(matches!(selection, Ok(Selection::Takes(_))));
+    let [fetch] = fetches.as_slice() else {
+        panic!("{fetches:?}")
+    };
+    assert_eq!(fetch.redirects(), Redirects::at_most(3));
+    assert_eq!(fetch.accept(), MediaType::IMAGES);
+}
+
+/// An entry over the cap of 200 items is refused before any image is fetched (PaSO View,
+/// Section 2).
+#[test]
+fn the_cap_comes_before_any_fetch() {
+    let definition = json!({"claims": [
+        {"path": ["items", null, "logo"], "value_type": "image",
+         "display": [{"locale": "en", "name": "Logo"}]}
+    ]});
+    let host = Host::new(json!([configured(TYPE, CARD, &definition)]));
+    let logo = png(1, 1);
+    let items: Vec<_> = (0..250)
+        .map(|i| json!({"logo": format!("https://img.example/{i}.png"), "logo#integrity": sri(&logo)}))
+        .collect();
+    let entry = json!({"type": TYPE, "credential_ids": ["card"], "payload": {"items": items}});
+    let entries = entries(&[entry.to_string()], &query(&["card"], CARD));
+    let (selection, fetches) = host.select_fetching(&[&entries[0]], &credential(CARD, &[]));
+    assert_eq!(fetches, []);
+    assert_eq!(
+        selection,
+        Ok(Selection::Excluded(vec![(
+            siros_transaction_data::EntryPosition::new(0),
+            Incompatibility::Render(RenderFault::TooManyItems(250))
+        )]))
+    );
 }

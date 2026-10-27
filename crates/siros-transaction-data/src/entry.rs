@@ -33,8 +33,8 @@ impl Entry {
     /// `raw` is base64url of a JSON object that repeats no member name in any object, with a
     /// non-empty string `type`, a non-empty array `credential_ids` of Credential Query ids of
     /// `query`, an object `payload`, an optional string `metadata`, and an optional
-    /// `transaction_data_hashes_alg`; a type of EC TS12 v1.0.1 requires it (Section 4.2). No
-    /// SD-JWT VC query it names sets `require_cryptographic_holder_binding` to `false` (B.3).
+    /// `transaction_data_hashes_alg`. No SD-JWT VC query it names sets
+    /// `require_cryptographic_holder_binding` to `false` (B.3).
     ///
     /// # Errors
     ///
@@ -69,14 +69,8 @@ impl Entry {
             .optional(EntryMember::Metadata.as_str(), json::text)
             .map_err(member(EntryMember::Metadata))?
             .map(AdHocMetadata::new);
-        let hashes_alg = fields.take(EntryMember::HashesAlg.as_str());
-        if hashes_alg.is_none() && type_id.rulebook().is_some() {
-            return Err(EntryRefusal::Member(
-                EntryMember::HashesAlg,
-                MemberFault::Absent,
-            ));
-        }
-        let hashes = Accepted::parse(hashes_alg).map_err(EntryRefusal::HashesAlg)?;
+        let hashes = Accepted::parse(fields.take(EntryMember::HashesAlg.as_str()))
+            .map_err(EntryRefusal::HashesAlg)?;
         if let Some(unknown) = fields.first_left() {
             return Err(EntryRefusal::MemberUnknown(unknown.to_owned()));
         }
@@ -126,8 +120,9 @@ impl Entry {
         &self.payload
     }
 
-    /// The ad-hoc metadata JWT.
-    pub(crate) fn metadata(&self) -> Option<&AdHocMetadata> {
+    /// The ad-hoc metadata JWT, which the wallet verifies and the credential picker cannot.
+    #[must_use]
+    pub fn metadata(&self) -> Option<&AdHocMetadata> {
         self.metadata.as_ref()
     }
 

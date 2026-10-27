@@ -4,7 +4,7 @@
 use serde_json::{json, Value};
 use siros_codec::base64url;
 use siros_codec::json::MAX_DEPTH;
-use siros_codec::member::MemberFault;
+use siros_codec::member::{ArrayIndex, MemberFault};
 use siros_dcql::{DcqlQuery, QueryId};
 use siros_oid4vp::RequestSignature;
 use siros_transaction_data::{
@@ -12,7 +12,7 @@ use siros_transaction_data::{
     SetsFault, TransactionDataError,
 };
 
-use crate::common::{encode, entries, item, PAYMENT};
+use crate::common::{encode, entries, item};
 
 /// `pay` and `card` ask for SD-JWT VCs with holder binding, `unbound` for one without, `mdl` for
 /// an mdoc.
@@ -198,7 +198,9 @@ fn each_entry_rule_is_refused_alone() {
         (
             "an element that is no string",
             alg(json!(["sha-256", 256])),
-            Expect::Refused(EntryRefusal::HashesAlg(HashesAlgFault::Element(1))),
+            Expect::Refused(EntryRefusal::HashesAlg(HashesAlgFault::Element(
+                ArrayIndex::new(1),
+            ))),
         ),
         (
             "no algorithm the wallet computes",
@@ -209,11 +211,6 @@ fn each_entry_rule_is_refused_alone() {
             "an object",
             alg(json!({})),
             Expect::Refused(EntryRefusal::HashesAlg(HashesAlgFault::WrongType)),
-        ),
-        (
-            "a TS12 type without it (EC TS12 v1.0.1, Section 4.2)",
-            changed(json!({"type": PAYMENT})),
-            member(EntryMember::HashesAlg, MemberFault::Absent),
         ),
     ];
     let query = query();

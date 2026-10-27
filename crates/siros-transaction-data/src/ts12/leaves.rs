@@ -191,10 +191,9 @@ impl Leaves {
                     Some(date) => Scalar::Date(date),
                     None => date_time(&text).map_err(fault)?,
                 }),
-                LeafValue::Logo(url) => Typed::Image(
-                    ImageRef::parse(&url, integrity_of(payload, &leaf.location))
-                        .map_err(|image| fault(ValueFault::Image(image)))?,
-                ),
+                LeafValue::Logo(url) => {
+                    Typed::Image(ImageRef::logo(&url, integrity_of(payload, &leaf.location)))
+                }
                 LeafValue::Frequency(frequency) => Typed::Scalar(Scalar::Frequency(frequency)),
                 LeafValue::Currency(code) => Typed::Scalar(Scalar::Currency(code)),
             };

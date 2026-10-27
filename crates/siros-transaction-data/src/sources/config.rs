@@ -1,8 +1,10 @@
 //! The host's configuration of transaction data types: definitions the wallet holds for the
-//! credential types they name, the global source after the credential's own metadata.
+//! credential types they name. It serves only credentials without transaction metadata of their
+//! own.
 
 use siros_codec::json::{Json, JsonFault};
 use siros_codec::member::{ArrayIndex, MemberFault};
+#[cfg(feature = "wallet")]
 use siros_credential::{Credential, CredentialType};
 use siros_dcql::{DocType, Vct};
 
@@ -127,6 +129,7 @@ impl Configuration {
     }
 
     /// The definition of `type_id` for `credential`'s type.
+    #[cfg(feature = "wallet")]
     pub(crate) fn definition(
         &self,
         type_id: &TypeId,
@@ -171,7 +174,8 @@ impl Configured {
         let definition = fields
             .require("definition")
             .map_err(member(ConfigurationMember::Definition))?;
-        let definition = Definition::parse(definition).map_err(ConfiguredFault::Definition)?;
+        let definition = Definition::parse(definition, crate::definition::LabelRules::Paso)
+            .map_err(ConfiguredFault::Definition)?;
         if let Some(unknown) = fields.first_left() {
             return Err(ConfiguredFault::MemberUnknown(unknown.to_owned()));
         }

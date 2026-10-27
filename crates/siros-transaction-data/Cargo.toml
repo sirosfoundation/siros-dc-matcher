@@ -9,9 +9,24 @@ repository.workspace = true
 authors.workspace = true
 rust-version.workspace = true
 
+[features]
+default = ["wallet"]
+# The wallet's selection: signed and ad-hoc metadata JWTs verified against the trust store,
+# Type Metadata and key sets the host holds, and the credentials' own chains. Without it the
+# crate holds what the credential picker runs over a registration, and links no X.509, ECDSA or
+# trust code.
+wallet = [
+    "dep:p256",
+    "dep:p384",
+    "dep:siros-trust",
+    "dep:siros-wallet-state",
+    "siros-credential/chain",
+    "siros-display/credential",
+]
+
 [dependencies]
-p256 = { version = "0.13.2", default-features = false, features = ["ecdsa", "alloc"] }
-p384 = { version = "0.13.1", default-features = false, features = ["ecdsa", "alloc"] }
+p256 = { version = "0.13.2", default-features = false, features = ["ecdsa", "alloc"], optional = true }
+p384 = { version = "0.13.1", default-features = false, features = ["ecdsa", "alloc"], optional = true }
 # SVG documents, read for their size and the URLs they reference.
 roxmltree = "0.20.0"
 rustc-hash = { workspace = true }
@@ -20,12 +35,12 @@ serde = { workspace = true }
 serde_json = { workspace = true, features = ["raw_value"] }
 sha2 = "0.10.9"
 siros-codec = { workspace = true, features = ["json"] }
-siros-credential = { workspace = true, features = ["chain"] }
+siros-credential = { workspace = true }
 siros-dcql = { workspace = true }
-siros-display = { workspace = true, features = ["credential"] }
-siros-oid4vp = { workspace = true, features = ["crypto"] }
-siros-trust = { workspace = true, features = ["chain"] }
-siros-wallet-state = { workspace = true }
+siros-display = { workspace = true }
+siros-oid4vp = { workspace = true }
+siros-trust = { workspace = true, features = ["chain"], optional = true }
+siros-wallet-state = { workspace = true, optional = true }
 # Label lengths in extended grapheme clusters (UAX #29). 1.13 needs Rust 1.85.
 unicode-segmentation = "~1.12.0"
 

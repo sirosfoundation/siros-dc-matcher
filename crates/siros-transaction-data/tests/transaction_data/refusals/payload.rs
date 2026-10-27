@@ -6,10 +6,10 @@ use serde_json::{json, Value};
 use siros_dcql::{ComponentIndex, PathError};
 use siros_transaction_data::{
     BaseType, ClaimIndex, Incompatibility, Location, LocationStep, PayloadFault, RenderFault,
-    TemplateFault, TextFault, Unmatched, ValueFault, MAX_ITEMS,
+    RowValue, Scalar, Segment, TemplateFault, TextFault, Unmatched, ValueFault, MAX_ITEMS,
 };
 
-use crate::common::{configured, credential, entries, mdoc, query, rows, Host, Shown, CARD};
+use crate::common::{configured, credential, entries, mdoc, query, rows, taken, Host, Shown, CARD};
 
 const TYPE: &str = "urn:paso:sca:com.example:test:1";
 
@@ -121,6 +121,24 @@ fn render(fault: RenderFault) -> Shown {
 
 #[test]
 fn the_honest_entry_renders_in_claims_order() {
+    let host = Host::new(json!([configured(TYPE, CARD, &definition())]));
+    let entry = json!({"type": TYPE, "credential_ids": ["card"], "payload": payload()});
+    let entries = entries(&[entry.to_string()], &query(&["card"], CARD));
+    let selection = host.select(&[&entries[0]], &credential(CARD, &[])).unwrap();
+    // The template's values stay typed for the UI to format (View, Section 3, `template:`).
+    let summary = taken(&selection)
+        .view()
+        .rows()
+        .iter()
+        .find_map(|row| match row.value() {
+            RowValue::Template(interpolated) => Some(interpolated.segments().to_vec()),
+            _ => None,
+        })
+        .unwrap();
+    assert!(matches!(
+        summary.as_slice(),
+        [Segment::Value(Scalar::CurrencyAmount(_)), Segment::Text(on), Segment::Value(Scalar::Date(_))] if on == " on "
+    ));
     let rows = outcome(&definition(), &payload()).unwrap();
     let expected = [
         ("Flag", "true"),
@@ -168,6 +186,34 @@ fn each_payload_rule_is_refused_alone() {
             changed(json!({"transaction_id": null})),
             Err(Incompatibility::Payload(PayloadFault::MandatoryAbsent(
                 ClaimIndex::new(0),
+            ))),
+        ),
+        (
+            "a mandatory claim absent from one element its null ranges over",
+            redefined(
+                1,
+                json!({"path": ["items", null, "name"], "mandatory": true,
+                       "display": [{"locale": "en", "name": "Item"}]}),
+            ),
+            changed(json!({"items": [{"name": "A"}, {"tags": []}]})),
+            Err(Incompatibility::Payload(PayloadFault::MandatoryAbsent(
+                ClaimIndex::new(1),
+            ))),
+        ),
+        (
+            "an #integrity companion beside a text claim",
+            definition(),
+            changed(json!({"text#integrity": "sha256-AAAA"})),
+            Err(Incompatibility::Payload(PayloadFault::Uncovered(at(&[
+                json!("text#integrity"),
+            ])))),
+        ),
+        (
+            "an #integrity companion of an image that is no string",
+            definition(),
+            changed(json!({"logo": "data:image/png;base64,iVBORw0KGgo=", "logo#integrity": 1})),
+            Err(Incompatibility::Payload(PayloadFault::IntegrityNotString(
+                at(&[json!("logo#integrity")]),
             ))),
         ),
         (
@@ -231,6 +277,12 @@ fn each_payload_rule_is_refused_alone() {
             "an amount with one euro decimal",
             definition(),
             changed(json!({"amount": "49.9 EUR"})),
+            value_fault(8, "amount", ValueFault::Type(BaseType::IsoCurrencyAmount)),
+        ),
+        (
+            "an amount without its decimal point",
+            definition(),
+            changed(json!({"amount": "49 EUR"})),
             value_fault(8, "amount", ValueFault::Type(BaseType::IsoCurrencyAmount)),
         ),
         (

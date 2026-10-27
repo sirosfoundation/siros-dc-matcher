@@ -1,13 +1,14 @@
 //! The rules of a definition (PaSO Proof Metadata, Sections 3.1 to 3.3): label lengths by role
-//! in extended grapheme clusters, label characters, and the structural rules.
+//! in extended grapheme clusters, or in characters under TS12's rules (EC TS12 v1.0.1, Section
+//! 3.3.3), label characters, and the structural rules.
 
 use serde_json::{json, Value};
 use siros_codec::json::Json;
 use siros_codec::member::{ArrayIndex, MemberFault};
 use siros_display::{Locale, LocaleError};
 use siros_transaction_data::{
-    ClaimFault, ClaimIndex, Definition, DefinitionError, DefinitionMember, EntryFault, LabelsFault,
-    TextFault,
+    ClaimFault, ClaimIndex, Definition, DefinitionError, DefinitionMember, EntryFault, LabelRules,
+    LabelsFault, Rulebook, SourceKind, TextFault, UiElementKey,
 };
 
 /// The honest definition: one displayed claim, and the four UI elements of Section 3.2.
@@ -77,7 +78,7 @@ fn name_fault(fault: EntryFault) -> DefinitionError {
 
 fn element(element: &str, fault: TextFault) -> DefinitionError {
     DefinitionError::UiElement(
-        element.to_owned(),
+        UiElementKey::new(element),
         LabelsFault::Entry(
             ArrayIndex::new(0),
             EntryFault::Text(DefinitionMember::Value, fault),
@@ -187,10 +188,24 @@ fn each_definition_rule_is_refused_alone() {
             named("Am\u{2067}ount"),
             Err(text(TextFault::IsolateUnterminated)),
         ),
+        ("a pop of no isolate", named("Am\u{2069}ount"), Ok(())),
         (
-            "a pop of no isolate",
-            named("Am\u{2069}ount"),
-            Err(text(TextFault::IsolateUnopened)),
+            "a DEL in a name",
+            named("Am\u{7f}ount"),
+            Err(text(TextFault::Control('\u{7f}'))),
+        ),
+        (
+            "a line break in a description",
+            display(json!([{"locale": "en", "name": "A", "description": "One\nTwo"}])),
+            Ok(()),
+        ),
+        (
+            "a right-to-left override in a description",
+            display(json!([{"locale": "en", "name": "A", "description": "O\u{202e}ne"}])),
+            Err(name_fault(EntryFault::Text(
+                DefinitionMember::Description,
+                TextFault::DirectionalOverride('\u{202e}'),
+            ))),
         ),
         // Structure (Section 3.3).
         ("100 claims", many(100), Ok(())),
@@ -259,9 +274,9 @@ fn each_definition_rule_is_refused_alone() {
             )),
         ),
         (
-            "an image as a display_type",
+            "an image as a display_type: the entry leaves the array (PaSO View, Section 3)",
             display(json!([{"locale": "en", "name": "A", "display_type": "image"}])),
-            Err(name_fault(EntryFault::Format("image".to_owned()))),
+            Ok(()),
         ),
         (
             "a url as a ui_labels value_type",
@@ -270,7 +285,7 @@ fn each_definition_rule_is_refused_alone() {
                 json!([{"locale": "en", "value": "T", "value_type": "url"}]),
             ),
             Err(DefinitionError::UiElement(
-                "transaction_title".to_owned(),
+                UiElementKey::new("transaction_title"),
                 LabelsFault::Entry(ArrayIndex::new(0), EntryFault::Format("url".to_owned())),
             )),
         ),
@@ -281,13 +296,88 @@ fn each_definition_rule_is_refused_alone() {
                 json!([{"locale": "en", "value": "Check", "value_type": "mini_markdown"}]),
             ),
             Err(DefinitionError::UiElement(
-                "security_hint".to_owned(),
+                UiElementKey::new("security_hint"),
                 LabelsFault::Entry(ArrayIndex::new(0), EntryFault::HintFormat),
             )),
         ),
     ];
     for (case, definition, expected) in rows {
         let read = Json::parse_unique(definition.to_string().as_bytes()).unwrap();
-        assert_eq!(Definition::parse(read).map(drop), expected, "{case}");
+        assert_eq!(
+            Definition::parse(read, LabelRules::Paso).map(drop),
+            expected,
+            "{case}"
+        );
     }
+}
+
+/// TS12's limits, in characters, for the UI elements it names, and none for claim names (EC
+/// TS12 v1.0.1, Section 3.3.3).
+#[test]
+fn ts12_rules_set_ts12_limits() {
+    let characters = |n: usize| "e".repeat(n);
+    let rows: Vec<(&str, Value, Result<(), DefinitionError>)> = vec![
+        ("a name of 70", named(&graphemes(70)), Ok(())),
+        (
+            "a security hint of 200",
+            labelled("security_hint", value(&characters(200))),
+            Ok(()),
+        ),
+        (
+            "a security hint of 250",
+            labelled("security_hint", value(&characters(250))),
+            Ok(()),
+        ),
+        (
+            "a security hint of 251",
+            labelled("security_hint", value(&characters(251))),
+            Err(element("security_hint", TextFault::TooLong(251))),
+        ),
+        (
+            "an action label of 30",
+            labelled("affirmative_action_label", value(&characters(30))),
+            Ok(()),
+        ),
+        (
+            "an action label of 31",
+            labelled("affirmative_action_label", value(&characters(31))),
+            Err(element("affirmative_action_label", TextFault::TooLong(31))),
+        ),
+        (
+            "a title of 51",
+            labelled("transaction_title", value(&characters(51))),
+            Err(element("transaction_title", TextFault::TooLong(51))),
+        ),
+        (
+            "a line feed in a name",
+            named("Am\nount"),
+            Err(text(TextFault::Control('\n'))),
+        ),
+    ];
+    for (case, definition, expected) in rows {
+        let read = Json::parse_unique(definition.to_string().as_bytes()).unwrap();
+        assert_eq!(
+            Definition::parse(read, LabelRules::Ts12).map(drop),
+            expected,
+            "{case}"
+        );
+    }
+}
+
+/// A `display` entry whose `display_type` is not a label format leaves the locale function: the
+/// default entry serves (PaSO View, Section 3).
+#[test]
+fn an_unsupported_display_type_leaves_the_locale_function() {
+    let definition = claims(json!([claim(json!({"display": [
+        {"locale": "en", "name": "Linked", "display_type": "url"},
+        {"name": "Default"}
+    ]}))]));
+    let read = Json::parse_unique(definition.to_string().as_bytes()).unwrap();
+    let english = Locale::parse("en").unwrap();
+    let projected = Definition::parse(read, LabelRules::Paso)
+        .unwrap()
+        .project(&english, SourceKind::Configuration, Rulebook::Generic)
+        .unwrap();
+    let display = projected.claims()[0].display().unwrap();
+    assert_eq!(display.name().as_str(), "Default");
 }

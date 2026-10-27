@@ -1,10 +1,22 @@
-//! The documents transaction data asks the host for (H1): each a [`Fetch`], its response kept
-//! by URL, and a step that waits for a fetch.
+//! The images transaction data asks the host for (H1): each a [`Fetch`], its response kept by
+//! URL, and a step that waits for a fetch.
 
 use std::collections::hash_map::Entry;
 
 use rustc_hash::FxHashMap;
-use siros_oid4vp::{BodyLimit, Fetch, FetchResponse, HttpStatus, HttpsUrl, MediaType};
+use siros_oid4vp::{Fetch, FetchResponse, HttpStatus, HttpsUrl};
+
+/// The value of the step `$step`, a [`Step`] that is done; the enclosing function returns
+/// `Ok(Step::Fetch(fetch))` for a step that asks the host for a fetch.
+#[macro_export]
+macro_rules! fetched {
+    ($step:expr) => {
+        match $step {
+            $crate::Step::Fetch(fetch) => return Ok($crate::Step::Fetch(fetch)),
+            $crate::Step::Done(value) => value,
+        }
+    };
+}
 
 /// The responses the host gave to the fetches of transaction data, by URL.
 #[derive(Debug, Clone, Default)]
@@ -18,6 +30,16 @@ pub enum Step<T> {
     Fetch(Fetch),
     /// The value.
     Done(T),
+}
+
+impl<T> Step<T> {
+    /// The step with `f` applied to its value.
+    pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Step<U> {
+        match self {
+            Self::Fetch(fetch) => Step::Fetch(fetch),
+            Self::Done(value) => Step::Done(f(value)),
+        }
+    }
 }
 
 impl Fetched {
@@ -47,21 +69,6 @@ impl Fetched {
     #[must_use]
     pub fn response(&self, fetch: &Fetch) -> Option<&FetchResponse> {
         self.0.get(fetch.url())
-    }
-
-    /// The body of the response to a `GET` of `url` accepting `accept`, at most `limit`
-    /// bytes; the fetch while the host has not answered it.
-    ///
-    /// # Errors
-    ///
-    /// [`FetchFault`]: a status other than 200, or a body over `limit`.
-    pub(crate) fn body(
-        &self,
-        url: &HttpsUrl,
-        accept: MediaType,
-        limit: BodyLimit,
-    ) -> Result<Step<&[u8]>, FetchFault> {
-        self.body_of(Fetch::get(url.clone(), accept, limit))
     }
 
     /// The body of the response to `fetch`, at most its limit; the fetch while the host has not

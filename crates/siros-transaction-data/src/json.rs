@@ -132,6 +132,26 @@ fn write_into(value: &Json, out: &mut String) {
     }
 }
 
+/// `value` with the members of every object in the order of RFC 8785, Section 3.2.3: by the
+/// UTF-16 code units of their names.
+pub(crate) fn canonical(value: &Json) -> Json {
+    match value {
+        Json::Object(members) => Json::Object(canonical_members(members)),
+        Json::Array(items) => Json::Array(items.iter().map(canonical).collect()),
+        Json::Null | Json::Bool(_) | Json::Number(_) | Json::String(_) => value.clone(),
+    }
+}
+
+/// `members` in the order of RFC 8785, Section 3.2.3, the members of their values too.
+pub(crate) fn canonical_members(members: &[(String, Json)]) -> Vec<(String, Json)> {
+    let mut sorted: Vec<(String, Json)> = members
+        .iter()
+        .map(|(name, value)| (name.clone(), canonical(value)))
+        .collect();
+    sorted.sort_by(|(a, _), (b, _)| a.encode_utf16().cmp(b.encode_utf16()));
+    sorted
+}
+
 /// The JSON string literal of `text`.
 pub(crate) fn quoted(text: &str) -> String {
     serde_json::Value::from(text).to_string()

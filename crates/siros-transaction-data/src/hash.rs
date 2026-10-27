@@ -5,6 +5,7 @@
 use sha2::{Digest, Sha256, Sha384, Sha512};
 use siros_codec::base64url::{self, Base64Url};
 use siros_codec::json::Json;
+use siros_codec::member::ArrayIndex;
 use siros_oid4vp::TransactionDataItem;
 
 /// A hash algorithm of the IANA Named Information Hash Algorithm Registry that this wallet
@@ -99,7 +100,7 @@ pub enum HashesAlgFault {
     /// The array is empty.
     Empty,
     /// The element at this position is no string.
-    Element(usize),
+    Element(ArrayIndex),
     /// No name is of an algorithm this wallet computes.
     Unsupported,
 }
@@ -144,7 +145,7 @@ impl Accepted {
                 .enumerate()
                 .map(|(at, item)| match item {
                     Json::String(name) => Ok(name),
-                    _ => Err(HashesAlgFault::Element(at)),
+                    _ => Err(HashesAlgFault::Element(ArrayIndex::new(at))),
                 })
                 .collect::<Result<_, _>>()?,
             Some(_) => return Err(HashesAlgFault::WrongType),

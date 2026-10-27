@@ -8,7 +8,7 @@ use siros_oid4vp::HttpsUrl;
 
 use super::time::{IsoDateTime, IsoTime};
 use super::ValueFault;
-use crate::currency::CurrencyCode;
+use crate::currency::{CurrencyCode, Fraction};
 use crate::definition::{bidi, BaseType, ValueType};
 use crate::image::ImageRef;
 
@@ -102,8 +102,9 @@ impl Frequency {
     }
 }
 
-/// An amount and its currency: a decimal number with the digits of the currency's minor unit,
-/// a space, and an ISO 4217 alphabetic code (PaSO View, Section 3, `iso_currency_amount`).
+/// An amount and its currency: a decimal number with a decimal point and the digits of the
+/// currency's minor unit, a space, and an ISO 4217 alphabetic code (PaSO View, Section 3,
+/// `iso_currency_amount`). A currency without a minor unit takes the integer alone.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CurrencyAmount {
     amount: String,
@@ -116,7 +117,7 @@ impl CurrencyAmount {
     pub fn parse(text: &str) -> Option<Self> {
         let (amount, code) = text.split_once(' ')?;
         let currency = CurrencyCode::of(code)?;
-        currency.admits(amount).then(|| Self {
+        currency.admits(amount, Fraction::Required).then(|| Self {
             amount: amount.to_owned(),
             currency,
         })

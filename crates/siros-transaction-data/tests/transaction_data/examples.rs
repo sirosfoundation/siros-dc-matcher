@@ -9,12 +9,14 @@ use siros_dcql::{DcqlQuery, QueryId};
 use siros_oid4vp::RequestSignature;
 use siros_transaction_data::{
     BaseType, ClaimFault, ClaimIndex, Definition, DefinitionError, DefinitionMember, EntryFault,
-    ImageFault, Incompatibility, IntegrityFault, JwsFault, LabelsFault, Location, LocationStep,
-    PayloadFault, RenderFault, RowValue, Scalar, Selection, SignedFault, TextFault,
-    TransactionView, Unmatched, UnsignedWarning, ValueFault,
+    ImageFault, Incompatibility, IntegrityFault, JwsFault, LabelRules, LabelsFault, Location,
+    LocationStep, PayloadFault, Projected, RenderFault, RowValue, Rulebook, Scalar, Selection,
+    SignedFault, SourceKind, TextFault, UiElementKey, Unmatched, UnsignedWarning, ValueFault,
 };
 
-use crate::common::{configured, credential, elements, entries, ok, query, Host, CARD};
+use crate::common::{
+    configured, credential, elements, entries, query, text, view_rows as rows, Host, CARD,
+};
 
 macro_rules! vector {
     ($name:literal) => {
@@ -34,7 +36,10 @@ fn types(object: &Json) -> Vec<(String, Definition)> {
     };
     members
         .iter()
-        .map(|(name, value)| (name.clone(), Definition::parse(value.clone()).unwrap()))
+        .map(|(name, value)| {
+            let definition = Definition::parse(value.clone(), LabelRules::Paso).unwrap();
+            (name.clone(), definition)
+        })
         .collect()
 }
 
@@ -50,21 +55,6 @@ fn query_for(texts: &[&str]) -> DcqlQuery {
         }
     }
     query(&ids.iter().map(String::as_str).collect::<Vec<_>>(), CARD)
-}
-
-/// Each label and value of `view`'s rows, as text.
-fn rows(view: &TransactionView) -> Vec<(String, String)> {
-    view.rows()
-        .iter()
-        .map(|row| {
-            let value = match row.value() {
-                RowValue::Value(value) => value.text(),
-                RowValue::LabelOnly => String::new(),
-                RowValue::Image(_) => "<image>".to_owned(),
-            };
-            (row.label().text().to_owned(), value)
-        })
-        .collect()
 }
 
 /// What the card takes of `entry` under the configured definition `definition`, in `language`.
@@ -128,7 +118,11 @@ fn every_paso_example_reads() {
         vector!("paso/metadata-a4-payload.json"),
         vector!("paso/metadata-a5-payload.json"),
     ] {
-        Definition::parse(json(payload).member("metadata").unwrap().clone()).unwrap();
+        Definition::parse(
+            json(payload).member("metadata").unwrap().clone(),
+            LabelRules::Paso,
+        )
+        .unwrap();
     }
     for object in [
         vector!("paso/payment-a1-types.json"),
@@ -145,7 +139,8 @@ fn every_paso_example_reads() {
         Definition::parse(
             aisp.member("urn:paso:sca:global:generic:aisp:1")
                 .unwrap()
-                .clone()
+                .clone(),
+            LabelRules::Paso
         ),
         Err(DefinitionError::Claim(
             ClaimIndex::new(4),
@@ -217,10 +212,10 @@ fn the_paso_examples_render_as_the_annexes_show() {
         ]
     );
     assert_eq!(
-        view.transaction_title().unwrap().text(),
+        text(view.transaction_title().unwrap()),
         "Anmeldung bestätigen"
     );
-    assert_eq!(view.affirmative_action_label().unwrap().text(), "Anmelden");
+    assert_eq!(text(view.affirmative_action_label().unwrap()), "Anmelden");
 
     let mandate = generic(
         vector!("paso/generic-a3-entry.json"),
@@ -254,7 +249,7 @@ fn the_paso_examples_render_as_the_annexes_show() {
     );
     assert!(matches!(
         &german,
-        Selection::Excluded(causes) if causes[0].1 == Incompatibility::Language(Unmatched::UiElement("security_hint"))
+        Selection::Excluded(causes) if causes[0].1 == Incompatibility::Language(Unmatched::UiElement(UiElementKey::new("security_hint")))
     ));
 
     let limit = generic(
@@ -342,9 +337,11 @@ fn the_cs12_examples_read() {
     let vct = "https://issuer.bank.example/credentials/sca/iban/1.0";
     let mut host = Host::new(json!([])).speaking("en-GB");
     host.signature = RequestSignature::Unsigned;
-    host.documents.push((
+    host.held.push((
         vct.to_owned(),
-        ok(vector!("cs12/sca-iban-type-metadata.json").as_bytes()),
+        vector!("cs12/sca-iban-type-metadata.json")
+            .as_bytes()
+            .to_vec(),
     ));
     let card = credential(vct, &[]);
     let selection = host.select(&[&payment[0]], &card).unwrap();
@@ -419,8 +416,8 @@ fn the_ts12_catalogue_labels_the_controls() {
     });
     let mut host = Host::new(json!([])).speaking("de");
     host.signature = RequestSignature::Unsigned;
-    host.documents
-        .push((vct.to_owned(), ok(metadata.to_string().as_bytes())));
+    host.held
+        .push((vct.to_owned(), metadata.to_string().into_bytes()));
     let entry = json!({
         "type": "urn:eudi:sca:payment:1", "credential_ids": ["pay"],
         "transaction_data_hashes_alg": ["sha-256"],
@@ -431,11 +428,11 @@ fn the_ts12_catalogue_labels_the_controls() {
     let selection = host.select(&[&entries[0]], &credential(vct, &[])).unwrap();
     let view = crate::common::taken(&selection).view();
     assert_eq!(
-        view.affirmative_action_label().unwrap().text(),
+        text(view.affirmative_action_label().unwrap()),
         "Zahlung bestätigen"
     );
     assert_eq!(
-        view.denial_action_label().unwrap().text(),
+        text(view.denial_action_label().unwrap()),
         "Zahlung abbrechen"
     );
     assert_eq!(view.unsigned_warning(), UnsignedWarning::Required);
@@ -446,7 +443,7 @@ fn the_ts12_catalogue_labels_the_controls() {
 }
 
 /// The definition of Metadata A.2 projected to German: each array keeps its German entry, every
-/// other member stays, and the text is the same each time it is written.
+/// other member stays, and the text reads back to the projection.
 #[test]
 fn the_projection_keeps_one_entry_per_array() {
     let a2 = json(vector!("paso/metadata-a2-payload.json"));
@@ -457,21 +454,26 @@ fn the_projection_keeps_one_entry_per_array() {
         .unwrap()
         .member("urn:paso:sca:global:payment:1")
         .unwrap();
-    let definition = Definition::parse(definition.clone()).unwrap();
+    let definition = Definition::parse(definition.clone(), LabelRules::Paso).unwrap();
     let german = siros_display::Locale::parse("de-AT").unwrap();
-    let projected = definition.project(&german).unwrap();
+    let projected = definition
+        .project(&german, SourceKind::CredentialMetadata, Rulebook::Generic)
+        .unwrap();
     let text = projected.to_json();
-    assert_eq!(definition.project(&german).unwrap().to_json(), text);
     let expected = json!({
-        "claims": [
-            {"path": ["transaction_id"], "mandatory": true},
-            {"path": ["amount"], "mandatory": true, "value_type": "iso_currency_amount",
-             "display": [{"locale": "de", "name": "Betrag"}]},
-            {"path": ["payee", "name"], "mandatory": true,
-             "display": [{"locale": "de", "name": "Empfänger"}]},
-            {"path": ["payee", "id"], "mandatory": true}
-        ],
-        "ui_labels": {}
+        "language": "de-AT", "source": "credential_metadata", "rulebook": "generic",
+        "definition": {
+            "claims": [
+                {"path": ["transaction_id"], "mandatory": true},
+                {"path": ["amount"], "mandatory": true, "value_type": "iso_currency_amount",
+                 "display": [{"locale": "de", "name": "Betrag"}]},
+                {"path": ["payee", "name"], "mandatory": true,
+                 "display": [{"locale": "de", "name": "Empfänger"}]},
+                {"path": ["payee", "id"], "mandatory": true}
+            ],
+            "ui_labels": {}
+        }
     });
     assert_eq!(serde_json::from_str::<Value>(&text).unwrap(), expected);
+    assert_eq!(Projected::parse(&text), Ok(projected));
 }

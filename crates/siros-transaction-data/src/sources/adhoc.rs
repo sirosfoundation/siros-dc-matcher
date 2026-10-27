@@ -1,15 +1,20 @@
 //! Ad-hoc transaction data metadata (PaSO Proof Metadata, Section 5): a JWT inside a
 //! `transaction_data` entry, signed by the Attestation Provider of the targeted credential,
-//! that defines the entry's type for that entry alone.
+//! that defines the entry's type for that entry alone. The credential picker cannot verify it
+//! (K2): the wallet's selection decides an entry that carries one.
 
+#[cfg(feature = "wallet")]
 use siros_credential::Credential;
 
+#[cfg(feature = "wallet")]
 use super::signed::{self, MetadataClaim, SignedFault, Verifier};
-use crate::definition::{Definition, DefinitionError};
-use crate::fetched::Step;
+#[cfg(feature = "wallet")]
+use crate::definition::{Definition, DefinitionError, LabelRules};
+#[cfg(feature = "wallet")]
 use crate::type_id::TypeId;
 
 /// The `typ` of an ad-hoc metadata JWT (Section 5.2).
+#[cfg(feature = "wallet")]
 const TYP: &str = "adhoc-transaction-metadata+jwt";
 
 /// The text of an entry's `metadata` member: the ad-hoc metadata JWT, verified per credential.
@@ -22,9 +27,10 @@ impl AdHocMetadata {
         Self(text)
     }
 
+    #[cfg(feature = "wallet")]
     /// The definition the JWT gives the entry of type `type_id` for `credential`, verified
-    /// (Section 5.3); the fetch of the issuer's key set while the host has not given it. A
-    /// verified JWT whose `metadata` breaks Section 3 gives the definition's error.
+    /// (Section 5.3). A verified JWT whose `metadata` breaks Section 3 gives the definition's
+    /// error.
     ///
     /// # Errors
     ///
@@ -35,11 +41,8 @@ impl AdHocMetadata {
         type_id: &TypeId,
         credential: &Credential,
         verifier: Verifier<'_>,
-    ) -> Result<Step<Result<Definition, DefinitionError>>, SignedFault> {
-        let mut claims = match signed::verify(&self.0, TYP, credential, verifier)? {
-            Step::Fetch(fetch) => return Ok(Step::Fetch(fetch)),
-            Step::Done(claims) => claims,
-        };
+    ) -> Result<Result<Definition, DefinitionError>, SignedFault> {
+        let mut claims = signed::verify(&self.0, TYP, credential, verifier)?.claims;
         // Step 7.
         if signed::text_claim(&mut claims, MetadataClaim::TransactionDataType)? != type_id.as_str()
         {
@@ -48,6 +51,6 @@ impl AdHocMetadata {
         let metadata = claims
             .require(MetadataClaim::Metadata.as_str())
             .map_err(|fault| SignedFault::Claim(MetadataClaim::Metadata, fault))?;
-        Ok(Step::Done(Definition::parse(metadata)))
+        Ok(Definition::parse(metadata, LabelRules::Paso))
     }
 }

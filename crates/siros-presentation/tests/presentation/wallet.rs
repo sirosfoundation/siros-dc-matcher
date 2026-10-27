@@ -11,12 +11,16 @@ use siros_codec::date::DateTime;
 use siros_credential::Credential;
 use siros_dcql::QueryId;
 use siros_display::{DisplayCache, Locale};
+use siros_oid4vp::HttpsUrl;
 use siros_oid4vp::{FetchResponse, HttpStatus, VerifiedRequest};
 use siros_presentation::{
     plan, AdditionIndex, Fetches, Fulfilment, OfferIndex, PlanInput, PlanStep, Planned,
     PresentationError, Response, Selection, SignId, Subset,
 };
-use siros_transaction_data::{Amr, Configuration, Factor, Inherence, Possession};
+use siros_transaction_data::{
+    Amr, Configuration, Factor, HeldDocument, HeldMetadata, Inherence, Possession, Segment,
+    ShownLabel,
+};
 use siros_trust::TrustStore;
 use siros_wallet_state::{CredentialId, WalletState};
 use siros_zkp_req_nym_auth::system::NymAuthSystem;
@@ -268,7 +272,10 @@ pub struct Wallet {
     pub verifier_id: VerifierIdForm,
     pub background: Vec<CredentialId>,
     pub key_factors: Vec<(siros_wallet_state::KeyId, Amr)>,
-    pub documents: Vec<(String, FetchResponse)>,
+    /// The transaction metadata the host holds.
+    pub metadata: HeldMetadata,
+    /// The images the host answers fetches with, by URL.
+    pub images: Vec<(String, FetchResponse)>,
     pub trust: TrustStore,
     state: WalletState,
 }
@@ -348,7 +355,8 @@ impl Wallet {
             verifier_id: VerifierIdForm::X509SanDns,
             background: Vec::new(),
             key_factors,
-            documents: Vec::new(),
+            metadata: HeldMetadata::default(),
+            images: Vec::new(),
             trust: TrustStore::parse("[]").unwrap(),
             state,
         }
@@ -377,6 +385,7 @@ impl Wallet {
             display: &self.display,
             language: &self.language,
             configuration: &self.configuration,
+            held: &self.metadata,
             systems: &self.systems,
             verifier_id: self.verifier_id,
             background: &self.background,
@@ -395,7 +404,7 @@ impl Wallet {
                 Ok(PlanStep::Ready(_)) | Err(_) => return fetches,
             };
             let response = self
-                .documents
+                .images
                 .iter()
                 .find(|(url, _)| url == fetch.url().as_str())
                 .map(|(_, r)| r.clone())
@@ -403,6 +412,27 @@ impl Wallet {
             fetches.answer(&fetch, response).unwrap();
         }
     }
+}
+
+/// The metadata of the documents `documents`, each the body the host fetched from its URL.
+pub fn holding(documents: Vec<(&str, Vec<u8>)>) -> HeldMetadata {
+    let documents = documents
+        .into_iter()
+        .map(|(url, body)| HeldDocument::new(HttpsUrl::parse(url).unwrap(), body))
+        .collect();
+    HeldMetadata::new(Vec::new(), documents).unwrap()
+}
+
+/// The text of `label`, each value as the payload writes it.
+pub fn label_text(label: &ShownLabel) -> String {
+    label
+        .segments()
+        .iter()
+        .map(|segment| match segment {
+            Segment::Text(text) => text.clone(),
+            Segment::Value(value) => value.text(),
+        })
+        .collect()
 }
 
 /// The plan of `input`, which needs no further fetch. Its view shows neither the seed nym_auth's
@@ -533,9 +563,9 @@ pub fn view_texts(view: &siros_presentation::ConsentView<'_>) -> Vec<String> {
             }
             if let Some(transaction) = credential.transaction() {
                 let view = transaction.view();
-                out.extend(view.affirmative_action_label().map(|l| l.text().to_owned()));
+                out.extend(view.affirmative_action_label().map(label_text));
                 for row in view.rows() {
-                    out.push(row.label().text().to_owned());
+                    out.push(label_text(row.label()));
                     if let RowValue::Value(value) = row.value() {
                         out.push(value.text());
                     }
