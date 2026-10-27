@@ -13,6 +13,12 @@ this file.
 
 ## Unreleased
 
+### Fixed
+
+- `DcqlQuery::validate` hashes with `rustc-hash`'s `FxHashSet`, whose hasher
+  takes no seed: a `wasm32-wasip1` build runs on a host that lacks WASI
+  `random_get`. The crate depends on `rustc-hash`; its API is unchanged.
+
 ## 0.11.0 — 2026-10-20
 
 No change to this crate: version bump only, to stay in step with the workspace

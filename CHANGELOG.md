@@ -11,6 +11,9 @@ existed.
 
 ## Unreleased
 
+`matcher.wasm` is 305,573 bytes against the 307,200-byte budget (303,418 at v0.11.0). The vector
+set digest is unchanged: `9f482d7a3fb87cb1381d0dfb7a2fc396b6cd3c1eba07c5d76f44e47142b751ac`.
+
 ### Changed
 
 - The matcher calls the host through the new `android-credman-sys` and
@@ -48,6 +51,10 @@ existed.
 - `clippy.toml` forbids std's `HashMap`, `HashSet` and `RandomState` in the
   crates that link into `matcher.wasm`.
 
+### Removed
+
+- `docs/plan.md`, the plan of the first release.
+
 ## v0.11.0 — 2026-10-20
 
 Adopts the `nym_auth` rulebook v0.4. **Breaking** (a minor bump, pre-1.0): the
@@ -58,7 +65,7 @@ are versioned 0.11.0 to match the release; `siros-dcql` has no change.
 Consumers that keep a copy of the vectors (siros-sdk-kotlin, siros-sdk-swift)
 must re-copy `zkp_req`, `zkp_req_response`, `zkp_req_unsat` and `proof_time`
 from the v0.11.0 tag; the vector set digest below identifies them.
-`matcher.wasm` is 303,480 bytes against the 307,200-byte budget.
+`matcher.wasm` is 303,418 bytes against the 307,200-byte budget.
 
 ### Changed
 
