@@ -361,12 +361,14 @@ pub fn chain(certificates: &[&Cert]) -> IssuerChain {
     IssuerChain::parse(&CertificateChain::new(first.der(), rest)).unwrap()
 }
 
-/// The authorities of a `mso_mdoc` query with `trusted_authorities` `authorities`.
+/// The authorities of a `mso_mdoc` query with `trusted_authorities` `authorities`; `null`
+/// writes a query without the member.
 pub fn authorities(authorities: serde_json::Value) -> QueryAuthorities {
-    let query = DcqlQuery::parse(&serde_json::json!({"credentials": [{
-        "id": "pid", "format": "mso_mdoc", "meta": {}, "trusted_authorities": authorities
-    }]}))
-    .unwrap();
+    let mut query = serde_json::json!({"id": "pid", "format": "mso_mdoc", "meta": {}});
+    if !authorities.is_null() {
+        query["trusted_authorities"] = authorities;
+    }
+    let query = DcqlQuery::parse(&serde_json::json!({ "credentials": [query] })).unwrap();
     QueryAuthorities::of(&query.credentials()[0]).unwrap()
 }
 

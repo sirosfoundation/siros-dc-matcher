@@ -130,8 +130,9 @@ impl Json {
     ///
     /// # Errors
     ///
-    /// [`JsonFault`]: the first fault in document order: text that is no JSON value, a number
-    /// beyond binary64, nesting deeper than [`MAX_DEPTH`], or a member name an object repeats.
+    /// [`JsonFault`]: a text fault anywhere in the bytes comes first; else the first, in document
+    /// order, of a number beyond binary64, nesting deeper than [`MAX_DEPTH`], and a member name an
+    /// object repeats.
     pub fn parse_unique(bytes: &[u8]) -> Result<Self, JsonFault> {
         let raw: &RawValue = serde_json::from_slice(bytes).map_err(text)?;
         value(raw, 0)

@@ -47,6 +47,17 @@ this file.
   `QueryMatch::refusals`, a `ClaimPathRefusal` each.
 - **BREAKING:** `CredentialQuery::claim_sets` gives the `ClaimOption`s, each with the `ids()`
   and the `claims()` it names.
+- **BREAKING:** the parse enforces the rest of §6. It refuses a Credential Query without `meta`
+  (REQUIRED, §6.1; `QueryError::Form` with `FormFault::Absent`), and `CredentialQuery::meta`
+  gives the object as sent. It refuses an empty `claims`, `claim_sets` (§6.1), `credential_sets`
+  (§6), `options` (§6.2) or `values` (§6.3), each `FormFault::Empty`; a `values` element other
+  than a string, an integer or a boolean (§6.3, `FormFault::Entry` with its `Position`); and a
+  claims query without `id` in a Credential Query with `claim_sets` (§6.3, `FormFault::Absent`
+  of `ClaimMember::Id`). An absent `claims` asks for no claim; an empty one is refused. A
+  `credential_sets` option that is an empty array is `FormFault::Entry` of
+  `SetMember::Options` (§6.2). `null` is a member of the wrong JSON type wherever §6 defines
+  one (`FormFault::WrongType`, `TrustedAuthorityError::NotArray`); `CredentialSetQuery::purpose`
+  gives the `purpose` as sent, `null` included, since §6.2 defines no such member.
 - **BREAKING:** `DcqlQuery::parse` refuses with a `QueryError`, which is `Clone`, `Eq` and
   `Hash`; `DcqlQuery::from_json` refuses with a `QueryTextError`: the serde_json error of text
   that is no JSON, or the `QueryError` of its value. `QueryError::Json` is gone.
@@ -55,7 +66,7 @@ this file.
 - **BREAKING:** `trusted_authorities` parses into `TrustedAuthorities`: a non-empty array of
   `TrustedAuthority`, each an `AuthorityType` and a non-empty list of `AuthorityValue`s
   (§6.1.1). A malformed one is `QueryError::TrustedAuthorities` with its
-  `TrustedAuthorityError`; `null` reads as absent. An entry's `type` is absent
+  `TrustedAuthorityError`; `null` is `NotArray`. An entry's `type` is absent
   (`TypeAbsent`) or no string (`TypeNotString`); its `values` is absent (`ValuesAbsent`), no
   array (`ValuesNotArray`), empty (`ValuesEmpty`), or holds a non-string at a `Position`
   (`ValueNotString`). `TrustedAuthorities` has no `Deserialize`.
@@ -76,15 +87,20 @@ this file.
 - **BREAKING:** `PathError::TypeMismatch::at` is a `ComponentIndex`.
 - **BREAKING:** `Credential::id` gives a `CredentialRef` and `Credential::format` a
   `CredentialFormat`; `Candidate::credential_id` is a `CredentialRef`.
-- Every error has a stable code, which its `Display` writes. A query that repeats an id is
-  checked by comparing each id with the earlier ones.
+- Every error has a stable code, which its `Display` writes. The parse finds a repeated id, and
+  resolves the ids a `claim_sets` or `credential_sets` option names, with rustc-hash's
+  `FxHashMap`.
 - `QueryResult::combinations` walks the candidates of each query as an odometer, the first
   query turning fastest: the order of the combinations is unchanged.
-- The crate depends on `serde` and `serde_json` only.
+- The crate depends on `rustc-hash`, `serde` and `serde_json` only.
 
 ### Added
 
 - `QueryId`, `QueryIdError` and `QueryError::Id`.
+- `CredentialQuery::parse`, the Credential Query of a JSON value alone, its errors naming it at
+  position 0; and `CredentialQuery::extension`, a member §6.1 leaves undefined, as sent, for
+  the profile of the query's format, such as `zkp_req`'s `_req`. A Credential Query serializes
+  with its extension members.
 - `ClaimId`, `ClaimIdError`, `AuthorityType`, `AuthorityValue`, `TrustedAuthority`,
   `TrustedAuthorities`, `TrustedAuthorityError`, `CredentialFormat`, `Multiplicity`,
   `HolderBinding`, `SetRequirement`, `CryptographicBinding`, `Satisfaction`, `ComponentIndex`,
@@ -94,8 +110,8 @@ this file.
   `Position`, `Member`, `CredentialMember`, `ClaimMember`, `SetMember`, `FormFault`, and
   `QueryError::Form`, `ClaimPath`, `UnknownClaimId`, `UnknownCredentialId`,
   `ClaimSetsWithoutClaims` and `MdocPath`.
-
-- `resolve`, the §7.1.1 processing over any claim tree that implements `ClaimNode` (with `Lookup`), which `resolve_json` now runs on, and `PathError::code`.
+- `resolve`, the §7.1.1 processing over any claim tree that implements `ClaimNode` (with
+  `Lookup`), which `resolve_json` runs on, and `PathError::code`.
 
 ## 0.11.0 — 2026-10-20
 

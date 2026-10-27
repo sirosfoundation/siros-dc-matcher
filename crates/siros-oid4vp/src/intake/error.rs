@@ -132,7 +132,8 @@ pub enum IntakeError {
     VerifierInfo(VerifierInfoRule),
     /// An encrypted Response Mode, and no key of `jwks` is a P-256 `ECDH-ES` encryption key.
     EncryptionKeyMissing,
-    /// The first `ECDH-ES` encryption key of `jwks` names P-256 and is no P-256 key.
+    /// No key of `jwks` is a usable P-256 `ECDH-ES` encryption key, and the first that names
+    /// P-256 is no P-256 key: its fault.
     EncryptionKeyInvalid(JwkFault),
     /// `encrypted_response_enc_values_supported` names no `enc` of the Response Mode's
     /// envelope: `A128GCM` or `A256GCM` for a JWE, these or `A192GCM` for a `COSE_Encrypt`.

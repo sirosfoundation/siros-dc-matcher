@@ -32,5 +32,6 @@
   },
   "expect": {
     "error": "dcql_malformed"
-  }
+  },
+  "v0_4": "DCQL refuses claims that is no array first, with its code (v0.4: claims_present)."
 }

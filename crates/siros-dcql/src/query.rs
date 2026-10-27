@@ -4,14 +4,16 @@
 //! its `Deserialize`, and [`CredentialQuery::parse`] for one Credential Query). The parse reads
 //! each member once and refuses what §6.1, §6.1.1, §6.2, §6.3 and §7 forbid:
 //!
-//! - a member of the wrong JSON type, and an absent REQUIRED member, `meta` among them;
+//! - a member of the wrong JSON type, `null` included, and an absent REQUIRED member, `meta`
+//!   among them;
 //! - an empty `credentials`, `claims`, `claim_sets`, `credential_sets`, `options`,
 //!   `trusted_authorities` or `values` array;
 //! - a `values` element other than a string, an integer or a boolean;
 //! - an identifier of the wrong syntax or repeated;
 //! - a claims query without `id` in a Credential Query with `claim_sets`;
 //! - `claim_sets` without `claims`;
-//! - a `claim_sets` or `credential_sets` option naming an unknown id;
+//! - an empty `credential_sets` option, and a `claim_sets` or `credential_sets` option naming an
+//!   unknown id;
 //! - a malformed claims path, and an `mso_mdoc` claims path other than a namespace and an
 //!   element.
 //!
@@ -365,8 +367,9 @@ impl CredentialSetQuery {
         self.required
     }
 
-    /// Why the Verifier wants this combination, for showing to the user (§6.2): a string, an
-    /// integer or an object.
+    /// `purpose`, as sent: why the Verifier wants this combination, for showing to the user.
+    /// OpenID4VP's drafts defined it as a string, an integer or an object; Section 6.2 of 1.0
+    /// defines no such member, so the parse keeps whatever value it holds.
     #[must_use]
     pub fn purpose(&self) -> Option<&Value> {
         self.purpose.as_ref()

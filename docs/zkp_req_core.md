@@ -14,7 +14,7 @@ behind the nym_auth prover interface and the rulebooks' artifact pins.
 
 | Crate | Holds | Rust |
 | :-- | :-- | :-- |
-| `siros-zkp-req` | The protocol: the Credential Query with `_req` and `_req_sets`, `vp_formats_supported.zkp_req`, the usable pair of Section 1.3, `ZkpPresentation`, the backends' `Proof`, the `vp_token`, the Verifier's steps 1 to 5 of Section 4.1. Depends on `serde`, `serde_json` and `siros-dcql`, which owns the query id and `trusted_authorities`. | 1.82 |
+| `siros-zkp-req` | The protocol: the Credential Query with `_req` and `_req_sets`, `vp_formats_supported.zkp_req`, the usable pair of Section 1.3, `ZkpPresentation`, the backends' `Proof`, the `vp_token`, the Verifier's steps 1 to 5 of Section 4.1. Depends on `serde_json`, `siros-codec` and `siros-dcql`, which parses the Credential Query: `ZkpReqQuery::parse` reads the `CredentialQuery` it gives. | 1.82 |
 | `siros-zkp-req-nym-auth` | The catalogue (`pseudonym`, `age_check` with E and C), `verifier_id`, the Longfellow and Vega systems, the `Handover`, the request policy. With the default feature `credential`: the nym_auth form of an mdoc, the Wallet's credential tests, the prover interface and the verifier (`siros-mdoc` with `crypto`, `siros-trust` with `chain`, `zeroize`). With `request`: the nym_auth request of `siros-oid4vp`'s verified request, the answer of an option and its presentation. With `test-fixtures`: a test issuer, signed requests and a test host. | 1.82 |
 | `siros-dc-matcher-core` | The matcher. It plans `zkp_req` with the two crates above, without `credential`. | 1.82 |
 | `siros-dc-matcher-ffi` | Module `zkp_req`: the session, the `vp_token` and the verifier for Kotlin and Swift (UniFFI), around a host's proof verifier. | 1.88 |
@@ -163,8 +163,11 @@ artifacts from their reference copies.
 * `siros_zkp_req::vp_token_json` and `vp_token_cbor` build the `vp_token`.
 * `verify::verify(&VerifyInput, &dyn NymAuthProofVerifier)` gives `Verified` or a `Rejection`
   with its Section 9 code. Its `trust_anchors` are the Verifier's own certificates: the
-  Document Signer is one, or one of them issued it. `verify::check_presentation` runs the
-  structural checks alone.
+  Document Signer is one, or one of them signs it under TR3's path rules
+  (`IssuerChain::validate_path`): both certificates valid at the Verifier's clock, the anchor a
+  CA whose keyUsage, when present, allows keyCertSign, no critical extension TR3 does not
+  process, and ECDSA P-256 with SHA-256 or P-384 with SHA-384. `verify::check_presentation` runs
+  the structural checks alone.
 
 ### FFI (Kotlin, Swift)
 

@@ -1,11 +1,11 @@
-//! A verifier's stated purpose (OpenID4VP 1.0, Section 6.2 `purpose`).
+//! A verifier's stated purpose: the `purpose` of a credential set query, which OpenID4VP's
+//! drafts defined as a string, an integer or an object (DCQL keeps it as sent).
 
 use serde_json::Value;
 
 /// One purpose as a string.
 ///
-/// Section 6.2 permits "a string, integer or object". A string loses its JSON quotes; any other
-/// value keeps its JSON form.
+/// A string loses its JSON quotes; any other value keeps its JSON form.
 pub fn display(purpose: &Value) -> String {
     match purpose {
         Value::String(s) => s.clone(),
@@ -16,8 +16,8 @@ pub fn display(purpose: &Value) -> String {
 /// The purposes of one offered combination as one line of the consent screen: the string
 /// purposes, trimmed and joined by `" · "`.
 ///
-/// The integer and object forms of Section 6.2 are identifiers for a scheme the verifier and
-/// the wallet share, and are left out; [`display`] gives them to the application.
+/// The other forms are identifiers for a scheme the verifier and the wallet share, and are left
+/// out; [`display`] gives them to the application.
 ///
 /// `None` when no string purpose holds more than whitespace. A blank purpose is no purpose: the
 /// host shows a warning triangle for any line, a blank one included (v0.6.1).

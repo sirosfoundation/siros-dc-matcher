@@ -46,7 +46,7 @@ pub(super) fn query(document: &Value) -> Result<DcqlQuery, QueryError> {
         }
     }
     let credential_sets = match document.get("credential_sets") {
-        None | Some(Value::Null) => None,
+        None => None,
         Some(sets) => Some(credential_sets(sets, &ids)?),
     };
     Ok(DcqlQuery {
@@ -130,7 +130,7 @@ pub(super) fn credential_query(
         Some(_) => return Err(form(member(CredentialMember::Meta), FormFault::WrongType)),
     };
     let trusted_authorities = match query.get("trusted_authorities") {
-        None | Some(Value::Null) => None,
+        None => None,
         Some(authorities) => Some(TrustedAuthorities::parse(authorities).map_err(|error| {
             QueryError::TrustedAuthorities {
                 credential: id.clone(),
@@ -155,8 +155,8 @@ pub(super) fn credential_query(
     };
     let named = check_claims(&id, &format, &claims)?;
     let claims = match query.get("claim_sets") {
-        None | Some(Value::Null) if claims.is_empty() => ClaimRequest::Nothing,
-        None | Some(Value::Null) => ClaimRequest::All(claims),
+        None if claims.is_empty() => ClaimRequest::Nothing,
+        None => ClaimRequest::All(claims),
         // "`claim_sets` MUST NOT be present if `claims` is absent" (§6.4.1).
         Some(_) if claims.is_empty() => return Err(QueryError::ClaimSetsWithoutClaims(id)),
         Some(sets) => ClaimRequest::Sets {
@@ -265,7 +265,7 @@ fn claims_query(
     let object = object(value, Member::Claim(credential, claim))?;
     let member = |field| Member::ClaimMember(credential, claim, field);
     let id = match object.get("id") {
-        None | Some(Value::Null) => None,
+        None => None,
         Some(Value::String(text)) => {
             Some(ClaimId::parse(text).map_err(|error| QueryError::ClaimId {
                 credential: query.clone(),
@@ -283,7 +283,7 @@ fn claims_query(
         error,
     })?;
     let values = match object.get("values") {
-        None | Some(Value::Null) => None,
+        None => None,
         values => Some(expected_values(values, member(ClaimMember::Values))?),
     };
     Ok(ClaimsQuery { id, path, values })
@@ -336,8 +336,10 @@ fn credential_set(
                     FormFault::Entry(Position::new(option)),
                 )
             };
-            let Value::Array(names) = names else {
-                return Err(entry());
+            // "a non-empty array of identifiers" (§6.2).
+            let names = match names {
+                Value::Array(names) if !names.is_empty() => names,
+                _ => return Err(entry()),
             };
             names
                 .iter()
@@ -359,10 +361,7 @@ fn credential_set(
         SetRequirement::Required,
         SetRequirement::Optional,
     )?;
-    let purpose = match set.get("purpose") {
-        None | Some(Value::Null) => None,
-        Some(purpose) => Some(purpose.clone()),
-    };
+    let purpose = set.get("purpose").cloned();
     Ok(CredentialSetQuery {
         options,
         required,
