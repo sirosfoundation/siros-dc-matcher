@@ -171,7 +171,7 @@ host-implemented `FfiProofVerifier`. `ZkpReqError` carries the request's `error_
 ### Browser
 
 `wasm-pack build proving/siros-zkp-req-wasm --target web`, for a desktop browser. Exports
-`ZkpProvers` (`loadLongfellow(circuitsZst)`, `loadVega(shapesZst)`, `systems()`), `matchQuery`,
+`ZkpProvers` (`loadLongfellow(circuits_zst)`, `loadVega(shapes_zst)`, `systems()`), `matchQuery`,
 `session` (→ `ZkpSession`), `prepare` (→ `ZkpPrepared` with `dataToSign`, `keyId`, `statement`,
 `prove(provers, deviceSignature)`) and `vpTokenJson`. It proves on one thread: no Web Worker
 pool, no cross-origin isolation. Objects use the snake_case names of `@sirosfoundation/zkp-req`;
