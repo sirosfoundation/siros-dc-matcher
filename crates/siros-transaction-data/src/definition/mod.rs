@@ -3,6 +3,7 @@
 
 mod claim;
 mod error;
+mod grapheme;
 mod localized;
 mod text;
 mod ui_labels;
@@ -19,6 +20,7 @@ pub use error::{
     ClaimFault, ClaimIndex, DefinitionError, DefinitionMember, EntryFault, LabelsFault,
     UiElementKey,
 };
+pub use grapheme::clusters as grapheme_clusters;
 pub use localized::Localizations;
 pub use text::{
     ActionLabel, ClaimName, Description, LabelLength, LabelRole, LabelRules, LabelText, Limit,

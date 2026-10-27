@@ -1,8 +1,9 @@
 //! The characters display text refuses: the code points of the general categories Cc
 //! (control), Cf (format), Zl (line separator), Zp (paragraph separator), Co (private use) and Cn
 //! (unassigned) of Unicode 16.0, as `unicode-general-category` 1.1.0 gives them, with the
-//! surrogates, which no `char` is. Inclusive ranges, sorted and disjoint. The test of display
-//! text checks them against that crate for every `char`.
+//! surrogates, which no `char` is. Inclusive ranges, sorted and disjoint, written by
+//! `scripts/gen_unicode_tables.py`. The test of display text checks them against that crate for
+//! every `char`.
 
 /// The ranges.
 #[rustfmt::skip]

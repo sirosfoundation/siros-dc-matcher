@@ -67,11 +67,11 @@ pub use amr::{Amr, AmrCategories, Factor, Inherence, Knowledge, Possession};
 pub use context::{Context, SourceInputs};
 pub use currency::CurrencyCode;
 pub use definition::{
-    ActionLabel, BaseType, ClaimDefinition, ClaimDisplay, ClaimFault, ClaimIndex, ClaimName,
-    Definition, DefinitionError, DefinitionMember, Description, EntryFault, HintEntry, LabelFormat,
-    LabelLength, LabelRole, LabelRules, LabelText, LabelsFault, Limit, Localizations, Mandatory,
-    OtherUiElement, PayloadPath, Prominence, SecurityHint, TextFault, TransactionTitle,
-    UiElementKey, UiLabel, UiLabels, ValueType, MAX_CLAIMS,
+    grapheme_clusters, ActionLabel, BaseType, ClaimDefinition, ClaimDisplay, ClaimFault,
+    ClaimIndex, ClaimName, Definition, DefinitionError, DefinitionMember, Description, EntryFault,
+    HintEntry, LabelFormat, LabelLength, LabelRole, LabelRules, LabelText, LabelsFault, Limit,
+    Localizations, Mandatory, OtherUiElement, PayloadPath, Prominence, SecurityHint, TextFault,
+    TransactionTitle, UiElementKey, UiLabel, UiLabels, ValueType, MAX_CLAIMS,
 };
 pub use entry::Entry;
 pub use error::{EntryMember, EntryPosition, EntryRefusal, TransactionDataError};

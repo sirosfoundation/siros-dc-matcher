@@ -5,8 +5,6 @@
 use std::fmt;
 use std::marker::PhantomData;
 
-use unicode_segmentation::UnicodeSegmentation;
-
 /// What a label or a payload string breaks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TextFault {
@@ -65,7 +63,7 @@ impl Limit {
     /// [`TextFault::TooLong`], with the length in the limit's unit.
     fn check(self, text: &str) -> Result<(), TextFault> {
         let (length, max) = match self {
-            Self::Graphemes(max) => (text.graphemes(true).count(), max),
+            Self::Graphemes(max) => (super::grapheme_clusters(text), max),
             Self::Characters(max) => (text.chars().count(), max),
         };
         if length > max {

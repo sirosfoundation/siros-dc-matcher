@@ -3,6 +3,7 @@
 mod common;
 mod examples;
 mod fixtures;
+mod graphemes;
 mod hashes;
 mod logos;
 mod projection;
