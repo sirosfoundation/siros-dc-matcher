@@ -147,7 +147,7 @@ Two profile details are load-bearing and easy to undo:
 | [`siros-dcql`](crates/siros-dcql) | any | OpenID4VP 1.0 DCQL: claims path pointers (§7) over any claim tree, credential and credential-set queries (§6.1–6.3) with `QueryId`s, selection (§6.4). No I/O, no platform. Published to crates.io. |
 | [`siros-sdjwt`](crates/siros-sdjwt) | any | SD-JWT VC (RFC 9901): the stored credential and its claim tree. |
 | [`siros-mdoc`](crates/siros-mdoc) | any | ISO/IEC 18013-5 mdocs: the stored credential with its MSO, and the device signature's signing input. |
-| [`siros-oid4vp`](crates/siros-oid4vp) | any | OpenID4VP 1.0: the request as the picker reads it, and, with `crypto`, request intake to a verified request and the mdoc `Handover`. |
+| [`siros-oid4vp`](crates/siros-oid4vp) | any | OpenID4VP 1.0: the request as the picker reads it, the mdoc `Handover`, and, with `crypto`, request intake to a verified request. |
 | [`siros-zkp-req`](crates/siros-zkp-req) | any | The `zkp_req` protocol layer: the query and its options, the usable pair, the presentation and the `vp_token`, the Verifier's structural checks. |
 | [`siros-zkp-req-nym-auth`](crates/siros-zkp-req-nym-auth) | any | The nym_auth catalogue and its Longfellow and Vega systems: session binding, credential checks, the presenter and verifier around a host's prover. |
 | [`siros-wallet-state`](crates/siros-wallet-state) | any | The decrypted wallet state `S` of the private data container. |
