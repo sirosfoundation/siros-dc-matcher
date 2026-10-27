@@ -11,7 +11,7 @@ existed.
 
 ## Unreleased
 
-`matcher.wasm` is 304,616 bytes against the 307,200-byte budget (303,418 at v0.11.0). The vector
+`matcher.wasm` is 304,683 bytes against the 307,200-byte budget (303,418 at v0.11.0). The vector
 set digest is unchanged: `9f482d7a3fb87cb1381d0dfb7a2fc396b6cd3c1eba07c5d76f44e47142b751ac`.
 
 ### Changed
@@ -23,10 +23,10 @@ set digest is unchanged: `9f482d7a3fb87cb1381d0dfb7a2fc396b6cd3c1eba07c5d76f44e4
 - Below host level 2 the matcher emits nothing; it used to call the
   `credman_v2` functions regardless.
 - On level 2 and above, the matcher traps when the host breaks its ABI: a
-  calling-app field without a terminating NUL or with invalid UTF-8, a
-  credential read that reports more bytes than it was asked for, or one that
-  copies nothing before the reported size. It used to emit entries from the
-  first two. Release and debug builds trap alike.
+  calling-app field that is not UTF-8, a credential read that reports more
+  bytes than it was asked for, or one that copies nothing before the reported
+  size. It used to emit entries from the first two. Release and debug builds
+  trap alike.
 - The registered blob is read until complete; a short
   `ReadCredentialsBuffer` read used to leave its tail zeroed.
 - `siros-dc-matcher-core`'s unused `sink` module is removed.
