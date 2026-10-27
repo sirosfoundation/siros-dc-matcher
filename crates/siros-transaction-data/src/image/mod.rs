@@ -14,7 +14,7 @@ use siros_codec::{base64, Base64Error};
 use siros_oid4vp::{BodyLimit, Fetch, HttpsUrl, MediaType, Redirects};
 
 use crate::fetched;
-use crate::fetched::{FetchFault, Fetched, Step};
+use crate::fetched::{FetchFault, Resources, Step};
 use crate::integrity::{Integrity, IntegrityFault};
 
 pub use css::CssFault;
@@ -278,15 +278,18 @@ impl ImageRef {
     /// # Errors
     ///
     /// [`ImageFault`]: the first rule the image breaks.
-    pub(crate) fn verify(&self, fetched: &Fetched) -> Result<Step<VerifiedImage>, ImageFault> {
+    pub(crate) fn verify(
+        &self,
+        fetched: &impl Resources,
+    ) -> Result<Step<VerifiedImage>, ImageFault> {
         let (format, bytes) = match self {
             Self::Data { format, bytes } => (*format, bytes.clone()),
             Self::Remote { url, integrity } => {
                 let body = fetched!(fetched
                     .body(image_fetch(url.clone(), MediaType::IMAGES))
                     .map_err(ImageFault::Fetch)?);
-                integrity.check(body).map_err(ImageFault::Integrity)?;
-                (ImageFormat::sniff(body), body.to_vec())
+                integrity.check(&body).map_err(ImageFault::Integrity)?;
+                (ImageFormat::sniff(&body), body.to_vec())
             }
             Self::Unverifiable { cause, .. } => return Err(cause.clone()),
         };

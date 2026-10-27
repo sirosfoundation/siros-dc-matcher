@@ -34,7 +34,7 @@ mod diagnostics;
 mod entries;
 mod fields;
 mod matching;
-#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+#[cfg(target_arch = "wasm32")]
 mod simple_allocator;
 
 // The host calls `_start`, which `wasm32-unknown-unknown` has no CRT to

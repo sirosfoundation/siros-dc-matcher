@@ -1,7 +1,7 @@
-//! A bump allocator for `wasm32-unknown-unknown`. std's own allocator also
-//! works on this target; this one keeps the module about 17 KB smaller.
-//! It grows linear memory with `memory.grow` and never frees: the host tears
-//! the instance down after one invocation.
+//! The matcher's allocator: a bump allocator. It grows linear memory with
+//! `memory.grow` and never frees: the host tears the instance down after one
+//! invocation. std's allocator on `wasm32-wasip1`, wasi-libc's dlmalloc, adds
+//! 24 KB to the module.
 
 use core::alloc::{GlobalAlloc, Layout};
 
@@ -64,6 +64,6 @@ unsafe impl GlobalAlloc for SimpleAllocator {
     unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {}
 }
 
-#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+#[cfg(target_arch = "wasm32")]
 #[global_allocator]
 static ALLOCATOR: SimpleAllocator = SimpleAllocator;

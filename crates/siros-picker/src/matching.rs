@@ -5,7 +5,7 @@ use android_credman::SetSink;
 use siros_oid4vp::{diagnose, Protocol, UnverifiedRequest};
 use siros_presentation::{Asked, Matching, NoOffer, ProofChoice, Transactions, ZkpQuery};
 use siros_registration::{RegisteredCredential, Registration, Unverified};
-use siros_transaction_data::{Fetched, Step};
+use siros_transaction_data::Step;
 use siros_zkp_req_nym_auth::policy::signed_and_encrypted;
 
 use crate::diagnostics::Unshown;
@@ -47,8 +47,7 @@ pub(crate) fn pick(
     if let Some(failure) = answered.invalid_request() {
         return vec![Unshown::Refused(failure.code())];
     }
-    let fetched = Fetched::new();
-    let source = Unverified::new(registration, &fetched, request.signature());
+    let source = Unverified::new(registration, request.signature());
     let transactions = match Transactions::read(&request, &answered, &source) {
         Ok(Step::Done(transactions)) => transactions,
         Ok(Step::Fetch(_)) => return vec![Unshown::Fetch],

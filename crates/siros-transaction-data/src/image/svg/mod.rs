@@ -19,7 +19,7 @@ use super::font::FontFault;
 use super::raster::RasterFault;
 use super::{Dimensions, Resource};
 use crate::fetched;
-use crate::fetched::{FetchFault, Fetched, Step};
+use crate::fetched::{FetchFault, Resources, Step};
 use crate::integrity::IntegrityFault;
 
 pub use markup::MAX_DEPTH;
@@ -124,7 +124,7 @@ pub(super) struct Document {
 }
 
 /// The SVG document `bytes`; the fetch of a resource while the host has not given it.
-pub(super) fn read(bytes: &[u8], fetched: &Fetched) -> Result<Step<Document>, SvgFault> {
+pub(super) fn read(bytes: &[u8], fetched: &impl Resources) -> Result<Step<Document>, SvgFault> {
     let text = std::str::from_utf8(bytes).map_err(|_| SvgFault::NotUtf8)?;
     let options = ParsingOptions {
         allow_dtd: markup::scan(text)?.readable(),

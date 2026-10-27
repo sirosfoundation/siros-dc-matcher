@@ -75,7 +75,7 @@ pub use definition::{
 };
 pub use entry::Entry;
 pub use error::{EntryMember, EntryPosition, EntryRefusal, TransactionDataError};
-pub use fetched::{FetchFault, Fetched, Step};
+pub use fetched::{FetchFault, Fetched, NoBody, Resources, Step, Unfetched};
 pub use hash::{AlgClaim, HashAlg, HashesAlgFault};
 pub use image::{
     CssFault, DataFault, Dimensions, FontFault, FontFormat, ImageFault, ImageFormat, ImageRef,

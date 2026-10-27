@@ -2,6 +2,7 @@
 //! URL, and a step that waits for a fetch.
 
 use std::collections::hash_map::Entry;
+use std::ops::Deref;
 
 use rustc_hash::FxHashMap;
 use siros_oid4vp::{Fetch, FetchResponse, HttpStatus, HttpsUrl};
@@ -70,14 +71,52 @@ impl Fetched {
     pub fn response(&self, fetch: &Fetch) -> Option<&FetchResponse> {
         self.0.get(fetch.url())
     }
+}
 
-    /// The body of the response to `fetch`, at most its limit; the fetch while the host has not
-    /// answered it.
+/// Where the body of a fetch comes from: the host's responses the wallet records, or nothing, for
+/// the credential picker.
+pub trait Resources {
+    /// A body the source gives.
+    type Body<'b>: Deref<Target = [u8]>
+    where
+        Self: 'b;
+
+    /// The body of the response to `fetch`, at most its limit; the fetch while there is none.
     ///
     /// # Errors
     ///
     /// [`FetchFault`]: a status other than 200, or a body over the fetch's limit.
-    pub(crate) fn body(&self, fetch: Fetch) -> Result<Step<&[u8]>, FetchFault> {
+    fn body(&self, fetch: Fetch) -> Result<Step<Self::Body<'_>>, FetchFault>;
+}
+
+/// No response: the credential picker fetches nothing, and defers each fetch to the wallet (K2).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Unfetched;
+
+/// The body of no response: there is none.
+#[derive(Debug, Clone, Copy)]
+pub enum NoBody {}
+
+impl Deref for NoBody {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        match *self {}
+    }
+}
+
+impl Resources for Unfetched {
+    type Body<'b> = NoBody;
+
+    fn body(&self, fetch: Fetch) -> Result<Step<NoBody>, FetchFault> {
+        Ok(Step::Fetch(fetch))
+    }
+}
+
+impl Resources for Fetched {
+    type Body<'b> = &'b [u8];
+
+    fn body(&self, fetch: Fetch) -> Result<Step<&[u8]>, FetchFault> {
         let Some(response) = self.response(&fetch) else {
             return Ok(Step::Fetch(fetch));
         };

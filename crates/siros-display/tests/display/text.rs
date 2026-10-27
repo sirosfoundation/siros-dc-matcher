@@ -135,3 +135,28 @@ fn unsafe_or_over_long_text_is_refused() {
         }
     }
 }
+
+/// Display text refuses exactly the characters of the general categories Cc, Cf, Zl, Zp, Co and
+/// Cn, as `unicode-general-category` gives them, for every `char`.
+#[test]
+fn the_refused_characters_are_those_of_the_unsafe_categories() {
+    use unicode_general_category::{get_general_category, GeneralCategory};
+
+    let differing: Vec<char> = (0..=u32::from(char::MAX))
+        .filter_map(char::from_u32)
+        .filter(|&c| {
+            let category = matches!(
+                get_general_category(c),
+                GeneralCategory::Control
+                    | GeneralCategory::Format
+                    | GeneralCategory::LineSeparator
+                    | GeneralCategory::ParagraphSeparator
+                    | GeneralCategory::PrivateUse
+                    | GeneralCategory::Unassigned
+            );
+            let refused = DisplayText::label(c.encode_utf8(&mut [0; 4])).is_err();
+            category != refused
+        })
+        .collect();
+    assert!(differing.is_empty(), "{differing:?}");
+}

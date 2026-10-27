@@ -1,8 +1,11 @@
 //! Display text: the only text the core puts on a screen.
 
+use std::cmp::Ordering;
 use std::fmt;
 
-use unicode_general_category::{get_general_category, GeneralCategory};
+mod unsafe_ranges;
+
+use unsafe_ranges::UNSAFE;
 
 /// The most characters of a label, a name, a title or a hint. EC TS12 v1.0.1, Section 3.3.3
 /// allows 250.
@@ -62,17 +65,20 @@ impl fmt::Display for DisplayText {
     }
 }
 
-/// A `char` excludes the surrogates (Cs), so the categories Cc, Cf, Zl, Zp, Co and Cn remain.
+/// Whether `c` is of the categories Cc, Cf, Zl, Zp, Co or Cn.
 fn unsafe_to_show(c: char) -> bool {
-    matches!(
-        get_general_category(c),
-        GeneralCategory::Control
-            | GeneralCategory::Format
-            | GeneralCategory::LineSeparator
-            | GeneralCategory::ParagraphSeparator
-            | GeneralCategory::PrivateUse
-            | GeneralCategory::Unassigned
-    )
+    let code = u32::from(c);
+    UNSAFE
+        .binary_search_by(|&(first, last)| {
+            if last < code {
+                Ordering::Less
+            } else if first > code {
+                Ordering::Greater
+            } else {
+                Ordering::Equal
+            }
+        })
+        .is_ok()
 }
 
 /// Why text is refused for display.

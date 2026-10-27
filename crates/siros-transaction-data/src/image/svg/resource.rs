@@ -13,7 +13,7 @@ use super::super::raster::{self, RasterFault};
 use super::super::{image_fetch, strip_prefix_ignore_case, Dimensions, Resource, ResourceKind};
 use super::{SvgFault, MAX_RESOURCES};
 use crate::fetched;
-use crate::fetched::{Fetched, Step};
+use crate::fetched::{Resources, Step};
 use crate::integrity::{Integrity, IntegrityFault};
 
 /// Why a Data URL is refused: it gives no content (Fetch, Section 4.2.1, "data: URL
@@ -108,7 +108,7 @@ impl Pins {
     ///
     /// [`SvgFault`] for a fetch without content, content that matches no integrity value of its
     /// URL, and content that does not pass.
-    pub(super) fn fetch(self, fetched: &Fetched) -> Result<Step<Vec<Resource>>, SvgFault> {
+    pub(super) fn fetch(self, fetched: &impl Resources) -> Result<Step<Vec<Resource>>, SvgFault> {
         let mut resources = Vec::with_capacity(self.0.len());
         for Pin { url, checks } in self.0 {
             let body = fetched!(fetched
@@ -116,10 +116,10 @@ impl Pins {
                 .map_err(|fault| SvgFault::ReferenceFetch(url.clone(), fault))?);
             for (reference, integrity) in &checks {
                 integrity
-                    .check(body)
+                    .check(&body)
                     .map_err(|fault| SvgFault::ReferenceIntegrity(reference.clone(), fault))?;
             }
-            let kind = admit(url.as_str(), body)?;
+            let kind = admit(url.as_str(), &body)?;
             resources.push(Resource {
                 url,
                 kind,

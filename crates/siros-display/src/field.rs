@@ -151,7 +151,8 @@ fn scalar(value: &DisplayValue) -> Option<String> {
         DisplayValue::Null => "null".to_owned(),
         DisplayValue::Boolean(b) => b.to_string(),
         DisplayValue::Integer(i) => i.to_string(),
-        DisplayValue::Number(n) => n.to_string(),
+        // The shortest text that reads back as the number, as JSON writes it.
+        DisplayValue::Number(n) => serde_json::Number::from_f64(*n)?.to_string(),
         DisplayValue::Text(text) => text.clone(),
         DisplayValue::Date(date) => date.to_string(),
         DisplayValue::DateTime(time) => time.to_string(),

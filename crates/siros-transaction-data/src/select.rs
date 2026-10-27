@@ -14,7 +14,7 @@ use crate::definition::{DefinitionError, Prominence};
 use crate::entry::Entry;
 use crate::error::{EntryPosition, TransactionDataError};
 use crate::fetched;
-use crate::fetched::{Fetched, Step};
+use crate::fetched::{Fetched, Resources, Step};
 use crate::hash::AlgClaim;
 use crate::image::ImageFault;
 use crate::payload::{conform, Location, PayloadFault, Typed, ValueFault, Values};
@@ -203,19 +203,20 @@ impl Taken {
     }
 }
 
-/// What the first match reads beside a credential's definitions: the host's answers to the
-/// image fetches, whether the request arrived signed, and the time.
+/// What the first match reads beside a credential's definitions: where image bodies come from,
+/// whether the request arrived signed, and the time. The wallet's images are the host's
+/// responses; the credential picker has none.
 #[derive(Debug, Clone, Copy)]
-pub struct Selector<'s> {
-    /// The host's responses to the image fetches transaction data asked for.
-    pub fetched: &'s Fetched,
+pub struct Selector<'s, R = Fetched> {
+    /// The bodies of the image fetches transaction data asked for.
+    pub fetched: &'s R,
     /// Whether the request arrived signed.
     pub signature: RequestSignature,
     /// The time, against which a TS12 payload's dates are read.
     pub now: DateTime,
 }
 
-impl Selector<'_> {
+impl<R: Resources> Selector<'_, R> {
     /// What a credential whose definitions `definitions` serves takes of `entries`, those that
     /// target it in array order (Section 7.4.2, steps 2 and 3). The step is a fetch while the
     /// host has not given an image.

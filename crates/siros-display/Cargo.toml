@@ -24,9 +24,10 @@ siros-credential = { workspace = true }
 siros-dcql = { workspace = true }
 siros-wallet-state = { workspace = true, optional = true }
 siros-zkp-req = { workspace = true }
-unicode-general-category = "1.1.0"
 
 [dev-dependencies]
+# The oracle of the characters display text refuses.
+unicode-general-category = "1.1.0"
 serde_json = { workspace = true }
 siros-codec = { workspace = true }
 siros-credential = { workspace = true }

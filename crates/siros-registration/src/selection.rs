@@ -2,7 +2,7 @@
 
 use siros_presentation::TransactionSource;
 use siros_transaction_data::{
-    Deferral, Entry, Fetched, Selection, Selector, Step, TransactionDataError,
+    Deferral, Entry, Selection, Selector, Step, TransactionDataError, Unfetched,
 };
 
 use crate::registration::{RegisteredCredential, Registration};
@@ -10,21 +10,17 @@ use crate::registration::{RegisteredCredential, Registration};
 /// The picker's selection: each credential's first match over the definitions the wallet
 /// registered, at the registration's time. An entry with ad-hoc metadata, and an entry with an
 /// image at an `https` URL, is deferred to the wallet, which verifies them after selection.
-pub struct Unverified<'s> {
-    selector: Selector<'s>,
+pub struct Unverified {
+    selector: Selector<'static, Unfetched>,
 }
 
-impl<'s> Unverified<'s> {
-    /// The selection over `registration` of a request that arrived as `signature` says.
-    /// `fetched` holds no image: the picker fetches none.
-    pub fn new(
-        registration: &Registration,
-        fetched: &'s Fetched,
-        signature: siros_oid4vp::RequestSignature,
-    ) -> Self {
+impl Unverified {
+    /// The selection over `registration` of a request that arrived as `signature` says. The
+    /// picker fetches no image.
+    pub fn new(registration: &Registration, signature: siros_oid4vp::RequestSignature) -> Self {
         Self {
             selector: Selector {
-                fetched,
+                fetched: &Unfetched,
                 signature,
                 now: registration.registered_at(),
             },
@@ -32,7 +28,7 @@ impl<'s> Unverified<'s> {
     }
 }
 
-impl<'c> TransactionSource<&'c RegisteredCredential> for Unverified<'_> {
+impl<'c> TransactionSource<&'c RegisteredCredential> for Unverified {
     type Deferral = Deferral;
 
     fn first_match(
