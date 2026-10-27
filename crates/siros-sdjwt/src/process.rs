@@ -91,7 +91,7 @@ impl Processor {
         Ok(match json {
             Json::Null => ClaimValue::Null,
             Json::Bool(b) => ClaimValue::Bool(b),
-            Json::Number(n) => ClaimValue::Number(n),
+            Json::Number(n) => ClaimValue::Number(n.into_number()),
             Json::String(s) => ClaimValue::String(s),
             Json::Array(items) => ClaimValue::Array(
                 items

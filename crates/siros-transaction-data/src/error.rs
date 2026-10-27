@@ -5,11 +5,10 @@ use std::fmt;
 
 use std::str::Utf8Error;
 
+use siros_codec::json::{JsonFault, ReadFault};
 use siros_codec::Base64Error;
 use siros_display::TextError;
 use siros_oid4vp::ErrorCode;
-
-use crate::json::JsonError;
 
 /// The path of a member in a `transaction_data` entry, `payee.name` for one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -45,15 +44,17 @@ impl MetadataPart {
 
 /// A rule a `transaction_data` entry, the type metadata of a credential, or a caller input
 /// breaks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TransactionDataError {
     /// The entry is not base64url without padding (OpenID4VP 1.0, Sections 1.2 and 5.1).
     NotBase64url(Base64Error),
     /// The entry's bytes are no UTF-8 text (Section 5.1).
     NotUtf8(Utf8Error),
-    /// The entry's text is no JSON document this crate reads: no JSON, an object that repeats a
-    /// member name, or objects and arrays nested deeper than [`MAX_DEPTH`](crate::MAX_DEPTH).
-    NotJson(JsonError),
+    /// The entry's text is no JSON document the strict reader holds: no JSON, a number beyond
+    /// binary64, objects and arrays nested deeper than
+    /// [`MAX_DEPTH`](siros_codec::json::MAX_DEPTH), or an object that repeats
+    /// a member name.
+    NotJson(JsonFault),
     /// The entry's JSON value is no object (Section 5.1).
     NotJsonObject,
     /// A required member is absent (Section 8.5).
@@ -101,8 +102,8 @@ pub enum TransactionDataError {
     FetchTooLarge,
     /// A metadata document's bytes are no UTF-8 text.
     MetadataNotUtf8(Utf8Error),
-    /// A metadata document's text is no JSON document this crate reads.
-    MetadataNotJson(JsonError),
+    /// A metadata document's text is no JSON document the strict reader holds.
+    MetadataNotJson(JsonFault),
     /// A metadata document is not a JSON document of the shape its specification gives.
     MetadataMalformed(MetadataPart),
     /// The type metadata describes another `vct` than the credential's (SD-JWT VC, Section
@@ -132,10 +133,12 @@ impl TransactionDataError {
     pub fn code(&self) -> &'static str {
         match self {
             Self::NotBase64url(_) => "transaction_data_not_base64url",
-            Self::NotJson(JsonError::DuplicateKey) => "transaction_data_duplicate_key",
-            Self::NotJson(JsonError::TooDeep) => "transaction_data_too_deep",
+            Self::NotJson(JsonFault::RepeatedMember(_)) => "transaction_data_duplicate_key",
+            Self::NotJson(JsonFault::Read(ReadFault::TooDeep)) => "transaction_data_too_deep",
             Self::NotUtf8(_)
-            | Self::NotJson(JsonError::Malformed(_) | JsonError::NumberUnrepresentable)
+            | Self::NotJson(JsonFault::Read(
+                ReadFault::Text(_) | ReadFault::NumberUnrepresentable,
+            ))
             | Self::NotJsonObject => "transaction_data_not_json_object",
             Self::MissingMember(_) => "transaction_data_member_missing",
             Self::WrongType(_) => "transaction_data_member_wrong_type",

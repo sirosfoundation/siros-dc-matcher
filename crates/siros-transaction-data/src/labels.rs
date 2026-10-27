@@ -2,10 +2,11 @@
 //! Section 3.3.2) and its UI elements catalogue (Section 3.3.3).
 
 use rustc_hash::FxHashSet;
+use siros_codec::json::Json;
 use siros_display::{Locale, Localized};
 
 use crate::error::{MetadataPart, TransactionDataError};
-use crate::json::{Fields, Json};
+use crate::json::Fields;
 use crate::view::Level;
 
 /// The claim metadata and the UI labels of one transaction data type.
@@ -107,13 +108,13 @@ impl ClaimMetadata {
 impl Claim {
     /// The claim metadata `value`; `None` for a path through an array element.
     fn parse(value: Json) -> Result<Option<Self>, TransactionDataError> {
-        let malformed = TransactionDataError::MetadataMalformed(CLAIMS);
+        let malformed = || TransactionDataError::MetadataMalformed(CLAIMS);
         let Json::Object(object) = value else {
-            return Err(malformed);
+            return Err(malformed());
         };
-        let mut fields = object.into_fields();
+        let mut fields = Fields::new(object);
         let Some(Json::Array(components)) = fields.take("path") else {
-            return Err(malformed);
+            return Err(malformed());
         };
         // The first component that is no key decides: an array element labels no row.
         let Some(path) = components
@@ -124,23 +125,27 @@ impl Claim {
             return Ok(None);
         };
         if path.is_empty() {
-            return Err(malformed);
+            return Err(malformed());
         }
         let path = KeyPath(path);
         let level = match fields.take("visualisation") {
             None => None,
-            Some(Json::Number(n)) => {
-                Some(n.text().parse().ok().and_then(Level::of).ok_or(malformed)?)
-            }
-            Some(_) => return Err(malformed),
+            Some(Json::Number(n)) => Some(
+                n.text()
+                    .parse()
+                    .ok()
+                    .and_then(Level::of)
+                    .ok_or_else(malformed)?,
+            ),
+            Some(_) => return Err(malformed()),
         };
         let labels = match fields.take("display") {
             None => Vec::new(),
             Some(Json::Array(entries)) => entries
                 .into_iter()
-                .map(|entry| claim_label(entry).ok_or(malformed))
+                .map(|entry| claim_label(entry).ok_or_else(malformed))
                 .collect::<Result<_, _>>()?,
-            Some(_) => return Err(malformed),
+            Some(_) => return Err(malformed()),
         };
         Ok(Some(Self {
             path,
@@ -177,7 +182,7 @@ fn claim_label(entry: Json) -> Option<Label> {
     let Json::Object(object) = entry else {
         return None;
     };
-    let mut fields = object.into_fields();
+    let mut fields = Fields::new(object);
     let tag = match (fields.take("locale"), fields.take("lang")) {
         (Some(Json::String(tag)), None) | (None, Some(Json::String(tag))) => tag,
         _ => return None,
@@ -203,7 +208,7 @@ impl UiLabels {
         let Json::Object(object) = value else {
             return Err(TransactionDataError::MetadataMalformed(UI_LABELS));
         };
-        let mut fields = object.into_fields();
+        let mut fields = Fields::new(object);
         Ok(Self {
             affirmative: element(&mut fields, "affirmative_action_label", 30)?,
             denial: element(&mut fields, "denial_action_label", 30)?,
@@ -220,25 +225,25 @@ fn element(
     name: &str,
     max: usize,
 ) -> Result<Vec<Label>, TransactionDataError> {
-    let malformed = TransactionDataError::MetadataMalformed(UI_LABELS);
+    let malformed = || TransactionDataError::MetadataMalformed(UI_LABELS);
     let entries = match fields.take(name) {
         None => return Ok(Vec::new()),
         Some(Json::Array(entries)) => entries,
-        Some(_) => return Err(malformed),
+        Some(_) => return Err(malformed()),
     };
     entries
         .into_iter()
         .map(|entry| {
             let Json::Object(object) = entry else {
-                return Err(malformed);
+                return Err(malformed());
             };
-            let mut fields = object.into_fields();
+            let mut fields = Fields::new(object);
             let Some(Json::String(tag)) = fields.take("lang") else {
-                return Err(malformed);
+                return Err(malformed());
             };
             label(tag, fields.take("value"))
                 .filter(|l| l.text.chars().count() <= max)
-                .ok_or(malformed)
+                .ok_or_else(malformed)
         })
         .collect()
 }

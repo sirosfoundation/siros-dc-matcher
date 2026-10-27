@@ -1,7 +1,7 @@
 //! The refusals of S1: one fixture per rule and per place the rule is checked.
 
 use serde_json::json;
-use siros_codec::json::{JsonFault, JsonTextFault};
+use siros_codec::json::{JsonFault, JsonTextFault, ReadFault};
 use siros_sdjwt::{
     Digest, DisclosureFault, DisclosureId, EncodedJsonFault, IssuerJwtFault, ParseError, Placement,
     ReservedFault, SdAlgFault, SdJwt,
@@ -143,7 +143,10 @@ fn s1_refusals() {
     match SdJwt::parse(&compact("{}", &[""])) {
         Err(ParseError::Disclosure {
             disclosure,
-            fault: DisclosureFault::Encoding(EncodedJsonFault::Json(JsonFault::Text(text))),
+            fault:
+                DisclosureFault::Encoding(EncodedJsonFault::Json(JsonFault::Read(ReadFault::Text(
+                    text,
+                )))),
         }) => {
             assert_eq!(disclosure, first);
             assert_eq!(text.kind(), JsonTextFault::Eof);

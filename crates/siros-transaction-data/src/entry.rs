@@ -2,13 +2,14 @@
 
 use siros_codec::base64url;
 use siros_codec::date::DateTime;
+use siros_codec::json::Json;
 use siros_credential::Format;
 use siros_dcql::{CredentialQuery, DcqlQuery, HolderBinding, QueryId};
 use siros_oid4vp::TransactionDataItem;
 
 use crate::binding::Binding;
 use crate::error::{MemberPath, TransactionDataError};
-use crate::json::{self, Json};
+use crate::json::{self, Fields};
 use crate::kind::{SupportedType, TransactionType};
 
 /// A `transaction_data` entry of a supported type, its members parsed into typed values.
@@ -44,11 +45,12 @@ impl Entry {
         let bytes = base64url::decode(raw.as_str()).map_err(TransactionDataError::NotBase64url)?;
         let text = String::from_utf8(bytes)
             .map_err(|error| TransactionDataError::NotUtf8(error.utf8_error()))?;
-        let object = match Json::parse(&text).map_err(TransactionDataError::NotJson)? {
-            Json::Object(object) => object,
-            _ => return Err(TransactionDataError::NotJsonObject),
-        };
-        let mut fields = object.into_fields();
+        let object =
+            match Json::parse_unique(text.as_bytes()).map_err(TransactionDataError::NotJson)? {
+                Json::Object(members) => members,
+                _ => return Err(TransactionDataError::NotJsonObject),
+            };
+        let mut fields = Fields::new(object);
         let identifier = json::text(fields.require("type", TYPE)?, TYPE)?;
         let named = credential_ids(fields.require("credential_ids", CREDENTIAL_IDS)?)?;
         let body = SupportedType::named(&identifier)

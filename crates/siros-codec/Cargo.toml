@@ -12,4 +12,5 @@ rust-version.workspace = true
 [dependencies]
 rustc-hash = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
+# `raw_value` gives each JSON value as its text, which keeps numbers as their writer wrote them.
+serde_json = { workspace = true, features = ["raw_value"] }

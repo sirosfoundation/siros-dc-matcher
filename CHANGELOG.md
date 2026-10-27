@@ -198,7 +198,7 @@ against the 307,200-byte budget (303,914 before).
   `IssuerJwtFault`, `DisclosureFault` with the disclosure's `DisclosureId`, `SdAlgFault`,
   `ReservedFault`, the repeated `Digest`, the misplaced disclosure with its `Placement`, the
   existing claim name, the unreferenced disclosure, and `X5cError` with the certificate's
-  `X5cIndex`. The JSON reader is `siros-codec`'s `Json`, which reports a `JsonTextError`.
+  `X5cIndex`. The JSON reader is `siros-codec`'s `Json`, which reports a `JsonFault`.
   `KeyBindingError` is `RequiredClaim` or `RepeatedClaim` with the name.
   `Presentation::key_binding` takes a `NumericDate`, an `Audience` and a `KbNonce`, and
   `KeyBinding::assemble` an `Es256Signature`; `siros-sdjwt` depends on neither `siros-oid4vp`
@@ -213,7 +213,7 @@ against the 307,200-byte budget (303,914 before).
   `valid_at` are steps of it. A certificate's issuer and subject are `DistinguishedName`s.
   `AuthorityKind::of` classifies a `type` (`aki`, or a `StoreType`); `StoreType::of` is gone.
   A store entry that repeats a member is `EntryError::RepeatedMember`
-  (`trust_store_entry_member_repeated`), and `StoreError::Json` holds the `JsonTextError`.
+  (`trust_store_entry_member_repeated`), and `StoreError::Json` holds the reader's `ReadFault`.
 - **BREAKING (trust):** TR3 applies RFC 5280's path rules: a signer whose keyUsage leaves
   keyCertSign out is `PathRefusal::KeyCertSign`; a signer with more non-self-issued
   intermediate certificates below it than its pathLenConstraint is `PathRefusal::PathLength`
@@ -233,7 +233,18 @@ against the 307,200-byte budget (303,914 before).
   `chain::CertificateChain`, which replaces `siros-mdoc`'s `X5Chain`, `siros-sdjwt`'s `X5c` and
   `siros-oid4vp`'s `X509Chain`. `siros-sdjwt` drops its `siros-mdoc` dependency and
   `siros-zkp-req-nym-auth` its `siros-wallet-state` one. `siros-display` keys Type Metadata by
-  `siros-dcql`'s `Vct`, and its `IssuerIdentifier` and `ConfigurationId` construct publicly.
+  `siros-dcql`'s `Vct`, and by `siros-wallet-state`'s `IssuerIdentifier` and `ConfigurationId`
+  (feature `credential`), whose `parse` refuses the empty string: an empty `credential_issuer`
+  or `credential_configuration_id` is `DisplayError::IssuerIdentifier` or `ConfigurationId`.
+  Display's own identifier types are gone.
+- **BREAKING (Rust API):** `siros-codec`'s strict JSON reader is the one reader: it keeps each
+  number with the text its writer chose (`JsonNumber`), refuses a number beyond binary64 and
+  nesting deeper than `json::MAX_DEPTH` (64) with a `ReadFault`, and `Json::parse_unique`
+  adds the repeated member name (`JsonFault`). `siros-transaction-data` reads its entries and
+  metadata documents with it: its own reader, `JsonError` and `MAX_DEPTH` are gone,
+  `TransactionDataError::NotJson` and `MetadataNotJson` hold the `JsonFault`, and
+  `TransactionDataError` loses `Copy`; the codes are unchanged. A part of an SD-JWT nested
+  deeper than 64 levels is a JSON fault of that part; `claims_too_deep` covers 33 to 64 levels.
 - **BREAKING (Rust API):** refusals keep their causes. `IntakeError::DcqlQueryInvalid` holds
   the `QueryError`, a form parameter that is no JSON is `IntakeError::ParameterNotJson`, a DC
   API request that is no JSON `EnvelopeNotJson`, and `IntakeError` loses `Copy`.
@@ -364,8 +375,9 @@ against the 307,200-byte budget (303,914 before).
   `COSE_Encrypt` by ECDH-ES + HKDF-256 with `A128GCM`, `A192GCM` or `A256GCM`.
   Without `crypto` it holds the picker's request reading and builds with Rust 1.82.
 - `siros-codec`'s `base64`: padded base64 (RFC 4648, Section 4), as `x5c` carries certificates.
-  `siros-codec`'s `json`: the strict JSON reader, members in document order, which finds a
-  repeated member name (`Json::parse_unique`, `Json::repeated_member`).
+  `siros-codec`'s `json`: the strict JSON reader, members in document order, numbers as their
+  writer wrote them, at most 64 levels deep, which finds a repeated member name
+  (`Json::parse_unique`, `Json::repeated_member`).
 - `siros-zkp-req`, the `zkp_req` protocol layer, and `siros-zkp-req-nym-auth`, the nym_auth
   catalogue with the Longfellow and Vega systems, the session binding, the Wallet's credential
   tests, a presenter in phases and the Verifier's checks, behind `NymAuthProver` and

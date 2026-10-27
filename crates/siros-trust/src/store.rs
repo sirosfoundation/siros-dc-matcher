@@ -3,7 +3,7 @@
 
 use std::fmt;
 
-use siros_codec::json::{Json, JsonTextError};
+use siros_codec::json::{Json, ReadFault};
 use siros_codec::member::MemberFault;
 use siros_codec::{base64, Base64Error};
 use siros_dcql::{AuthorityType, AuthorityValue};
@@ -28,8 +28,8 @@ pub struct StoreEntry {
 /// Why a record is no trust store (TR1).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StoreError {
-    /// The record is not JSON.
-    Json(JsonTextError),
+    /// The record is no JSON value the strict reader holds.
+    Json(ReadFault),
     /// The record is not a JSON array.
     NotArray,
     /// An entry breaks a rule.

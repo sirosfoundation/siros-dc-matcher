@@ -2,7 +2,7 @@
 
 use serde_json::json;
 use siros_codec::base64url;
-use siros_transaction_data::MAX_DEPTH;
+use siros_codec::json::MAX_DEPTH;
 
 use super::{changed, text, Input, Row};
 use crate::common::{encode, entry, payment, PAYMENT};
