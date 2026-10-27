@@ -79,9 +79,8 @@ Dependencies point downward through the layers:
 | L4 | wallet (provers), facades, picker |
 
 A component MUST NOT depend on a component of its own or a higher layer, except these:
-- SD-JWT and OpenID4VP depend on DCQL, for its claims path components and query.
+- Every other L1 component may depend on DCQL, for the request vocabulary it holds (Q5).
 - nym_auth depends on `zkp_req`, mdoc, OpenID4VP and trust.
-- Trust depends on DCQL, for `trusted_authorities`.
 - Transaction data depends on credential and display.
 - Display depends on credential.
 
@@ -107,8 +106,10 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
 
 **Responsibility:**
 - strict CBOR (definite lengths, no duplicate keys, no trailing bytes, depth limit);
+- strict JSON (a repeated member name is an error);
 - base64url;
-- hash and JOSE algorithm identifiers.
+- hash and JOSE algorithm identifiers, and the ES256 signature value;
+- the internals several L1 components share: the member fault of a decoded structure, the macros that define value newtypes, and the DER certificate chain that mdoc `x5chain` and SD-JWT `x5c` carry.
 
 **Contract:**
 - It accepts bytes or text.
@@ -127,6 +128,7 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
 - **Q2.** Evaluation MUST implement §6.4: claim presence, `claim_sets` (first satisfiable), `values`, `credential_sets` (`required`) and `multiple`.
 - **Q3.** `meta` and `format` are judged by a policy the presentation component supplies.
 - **Q4.** §7.1 resolution MUST have its only implementation here. It is generic over a claim tree node: an object member by key, an array element by issued position (which may be withheld), and the present elements of an array. An index on a withheld position selects nothing; `null` takes the present elements. Every format tree uses it.
+- **Q5.** DCQL holds the request vocabulary the other L1 components share: `QueryId`, the claims path, the credential type identifiers `DocType` and `Vct`, and `trusted_authorities`.
 
 ### 4.4 SD-JWT
 
@@ -153,7 +155,7 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
 - reading a stored mdoc (base64url of an `IssuerSigned`, a `Document`, or a single-document `DeviceResponse`);
 - selecting elements;
 - building `DeviceResponse` and the DeviceAuthentication signing input;
-- the issuer certificate and ES256 primitives.
+- the issuer chain (`x5chain`).
 
 **Requirements:**
 - **M1.** Parsing MUST yield the document type, namespaces with their items, and the MSO (validity, device key, value digests, key authorizations). It MUST keep each `IssuerSignedItemBytes` verbatim.
@@ -356,7 +358,7 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
 
 **Requirements:**
 - **K1.** The projection MUST hold, per credential: entry reference, format, type, the typed claim tree minus undisclosable attributes, card and labels, and the issuer facts of TR5. It also holds the available system ids, and is versioned. It MUST NOT hold delivered or derived secrets (R-G6).
-- **K2.** The picker MUST run the presentation component's matching over an `UnverifiedRequest`. For the same request, credentials, trust store and time, it MUST give the offers the wallet's plan gives, except where the wallet's plan depends on what the projection leaves out: the `zkp_req` credential tests that read undisclosable attributes (N3, for example the `age_check` bounds against `birth_date`) and the delivered seed (N4). The wallet refuses such an offer with `access_denied` (A9 applies to it as to any other).
+- **K2.** The picker MUST run the presentation component's matching over an `UnverifiedRequest`. For the same request, credentials, trust store and time, it MUST give the offers the wallet's plan gives, except where the wallet's plan depends on what the projection leaves out: the `zkp_req` credential tests that read undisclosable attributes (N3, for example the `age_check` bounds against `birth_date`), the delivered seed (N4), and the validity at request time of the certificates that admit an issuer (TR5). The wallet refuses such an offer with `access_denied` (A9 applies to it as to any other).
 - **K3.** Each picker entry's metadata MUST carry the offer, the query id and the `credentialId` of its credential. The wallet builds the selection from the picked entries' ids after its own verified plan. A picked id that the plan's offer does not hold is an error.
 - **K4. Delegation.** The picker MUST send `Full` delegation (Credential Manager keeps its UI and the wallet fulfils from its background service) for the entries of an offer that needs no wallet display, and no delegation otherwise. Every entry of one set gets the same type. The rule is A9's, applied with the host's display level: an offer that the host displayed only in part (`display_skipped`) needs the wallet's display.
 
@@ -389,11 +391,16 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
 - **TR3. Resolution.** For one Credential Query, a credential's issuer is admitted exactly when one of these holds:
   - the query has no `trusted_authorities`;
   - an `aki` value, base64url-decoded, equals the keyIdentifier of the AuthorityKeyIdentifier extension of a certificate in the chain;
-  - for an `etsi_tl` or `openid_federation` value, the store has an entry of that type and value, and the chain's first certificate validates up to one of its certificates at the current time. Each certificate on the path is signed by the next one or by the store certificate, names its signer as issuer, is valid at that time, and every signer is a CA (basicConstraints). Signatures are ECDSA P-256 with SHA-256 or P-384 with SHA-384.
+  - for an `etsi_tl` or `openid_federation` value, the store has an entry of that type and value, and the chain's first certificate validates up to one of its certificates at the current time:
+    - Each certificate on the path is signed by the next one or by the store certificate, names its signer as issuer, and is valid at that time.
+    - Every signer is a CA (basicConstraints) whose keyUsage includes keyCertSign. The intermediate certificates below it on the path that are not self-issued number at most its pathLenConstraint (RFC 5280 §6.1.4 (k) to (n)).
+    - A certificate with a critical extension the core does not process is refused (§6.1.4 (o)).
+    - Signatures are ECDSA P-256 with SHA-256 or P-384 with SHA-384.
+    - A store certificate byte-identical to the chain's first certificate admits it when it is valid at that time.
 
   An entry of any other type admits nothing. A malformed `aki` value makes the query invalid. Admission MUST be the constructor of an `AdmittedIssuer` witness that names the query and the chain's first certificate.
 - **TR4. Provision.** The host supplies the store (H4). The core fetches no list, federation statement or certificate. The store is global, the same for every request and channel, because the DC API gives the picker nothing per request.
-- **TR5. Picker facts.** At registration the wallet resolves each credential against the store. The projection records the credential's AKI keyIdentifiers and the `type` and `value` of every store entry that admits it. The picker admits an issuer from these facts alone, with the same rule. The wallet registers again when the store or the wallet state changes.
+- **TR5. Picker facts.** At registration the wallet resolves each credential against the store. The projection records the credential's AKI keyIdentifiers and the `type` and `value` of every store entry that admits it. The picker admits an issuer from these facts alone, with the same rule. The picker has no clock: its facts hold at registration time (K2). The wallet registers again when the store or the wallet state changes.
 
 ## 5. Boundary contracts
 
@@ -484,5 +491,8 @@ The core meets this document when all of the following hold:
 | Transaction data types own their bindings | OpenID4VP §8.4; Appendix B is a set of recommendations to type authors |
 | The mdoc ZK path (`mso_mdoc_zk`, `zk_system_type`) is retired everywhere | Owner's decision, 2026-10-26; `zkp_req` covers proof presentations |
 | Issuer trust: the core owns the store's format and the resolution; the host provisions one global store | Owner's decision, 2026-10-26; the DC API picker receives nothing per request. AuthZEN issuer evaluation stays a hook, to be built in the core when it is taken up |
+| DCQL holds the shared request vocabulary; codec holds the shared internals | Owner's decision, 2026-10-27; one newtype per value across L1 |
+| TR3 applies RFC 5280's keyCertSign, pathLenConstraint and critical-extension rules, and admits a store-listed issuer certificate | Owner's decision, 2026-10-27; the wallet offers only what a verifier's path validation admits |
+| The picker's issuer facts hold at registration time | Owner's decision, 2026-10-27; `matcher.wasm` has no clock. The wallet refuses an offer whose issuer is no longer admitted |
 
 **Open:** none.
