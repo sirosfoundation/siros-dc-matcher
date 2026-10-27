@@ -36,5 +36,6 @@
   },
   "expect": {
     "error": "claim_sets_without_claims"
-  }
+  },
+  "v0_4": "DCQL refuses claim_sets without claims first, with its code (v0.4: claim_sets_present)."
 }

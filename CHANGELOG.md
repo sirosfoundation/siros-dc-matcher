@@ -12,10 +12,11 @@ existed.
 ## Unreleased
 
 Adopts the `zkp_req` draft 0.1 and the nym_auth catalogue 0.5 (nym_auth rulebook repository,
-commit `e65861c`). **Breaking**: requests and presentations follow the draft, the FFI loses
+commit `e65861c`), and adds the components of the SIROS wallet core. **Breaking**: requests and
+presentations follow the draft, the DCQL parse enforces OpenID4VP 1.0, Section 6, the FFI loses
 `zkp_req_plan`, and the vectors move to the crates that own their rules. Consumers that keep a
 copy of the vectors (siros-sdk-kotlin, siros-sdk-swift) must re-copy them from the new
-directories; the vector set digest below identifies them. `matcher.wasm` is 296,180 bytes
+directories; the vector set digest below identifies them. `matcher.wasm` is 295,694 bytes
 against the 307,200-byte budget (303,914 before).
 
 ### Changed
@@ -57,336 +58,278 @@ against the 307,200-byte budget (303,914 before).
   members moved under `data`; `host_abi` became `host_level`.
 - A NUL inside a picker string becomes a space; it used to end the string.
 - **BREAKING (Rust API):** `siros-dc-matcher-core`'s `request` module is `siros-oid4vp`'s
-  `UnverifiedRequest` and `UnverifiedQuery`. An entry reads only under the three protocols of
-  OpenID4VP 1.0, A.1; a profile label outside them reads as no protocol.
-  `UnverifiedQuery::matching_query` gives the query the DCQL engine matches, always; a query
-  DCQL represents in neither form does not read.
+  `UnverifiedRequest`, which holds the request's parsed `DcqlQuery`. An entry reads only under
+  the three protocols of OpenID4VP 1.0, A.1; a profile label outside them reads as no protocol.
   `UnverifiedRequest::first_registered` and `diagnose` take the registration as a label
-  predicate, and `ProfilePolicy::with_context` takes the query and `client_metadata`.
-  `first_supported_request` and the entry predicate are removed.
-- **BREAKING (Rust API):** `Handover`, `HandoverInvalid` and `ec_jwk_thumbprint` move from
-  `siros_zkp_req_nym_auth::session` to `siros-oid4vp`. `Handover::dc_api` and
-  `Handover::redirect` take the encryption key thumbprint as an `Option`: `None` is CBOR `null`,
-  for an unencrypted response (B.2.6).
-- **BREAKING (Rust API):** in `siros-zkp-req-nym-auth`, each test of a query or a credential is
-  the constructor of its result. `NymAuthQuery::from_query` replaces `catalogue::validate` and
-  returns `Catalogued`: `NymAuth`, or `OtherType` for another credential type. The `checks`
-  module is `attestation`: `UsableAttestation::new` replaces `checks::check`, and its error
-  `Unusable` carries the Section 9 codes. `OpenedSeed::open` replaces `checks::opens_ssc`. Only
-  `Prepared::job` builds a `ProofJob`, from a `UsableAttestation` and an `OpenedSeed`. The fields
-  of `ProofJob`, `NymAuthQuery`, `NymAuthMdoc`, `SignedElement` and `Credential` are private;
-  methods of the same names read them.
-- **BREAKING (Rust API):** `siros-dcql`'s query is constructed only by parsing, one pass over
+  predicate. `ProfilePolicy::with_client_metadata` takes the request's `client_metadata`, which
+  a `zkp_req` query is matched against; the query's `_req` and `_req_sets` are extension members
+  of its DCQL `CredentialQuery`. `first_supported_request` and the entry predicate are removed.
+  `DecodeError::Malformed` is `Truncated`, `Syntax`, `Shape` or `TooDeep`.
+- **BREAKING (Rust API):** `siros-dcql` 0.12.0 constructs a query only by parsing, one pass over
   its JSON value: its fields are private, read through accessors, and `DcqlQuery::validate` is
-  gone. `trusted_authorities` parses into `TrustedAuthorities` (a non-empty array of entries,
-  each with a string `type` and a non-empty array of string `values`, OpenID4VP 1.0, Section
-  6.1.1). The parse refuses a malformed member or `trusted_authorities`, an empty
-  `credentials`, a `claim_sets` or `credential_sets` option naming an unknown id, `claim_sets`
-  without claims, a claims path that is no claims path pointer, and an `mso_mdoc` claims path
-  other than two strings. A claims path is a `ClaimPath`, which replaces `siros-credential`'s
-  `ClaimPointer` and `PointerError`; a claims path processing error other than an empty
-  selection reaches the caller (`select_claims`, `QueryMatch::refusals`). Claims query ids are
-  `ClaimId`s and `credential_sets` options name `QueryId`s; `multiple`,
-  `require_cryptographic_holder_binding` and `required` are enums. See
+  gone. The parse enforces OpenID4VP 1.0, Section 6. It refuses a member of the wrong JSON type
+  and an absent REQUIRED member, `meta` among them; an empty `credentials`, `claims`,
+  `claim_sets`, `credential_sets`, `options`, `trusted_authorities` or `values`; a `values`
+  element other than a string, an integer or a boolean; an id outside the characters of
+  Sections 6.1 and 6.3, or repeated; a claims query without `id` in a Credential Query with
+  `claim_sets`; `claim_sets` without `claims`; a `claim_sets` or `credential_sets` option naming
+  an unknown id; a claims path that is no claims path pointer; and an `mso_mdoc` claims path
+  other than two strings. Ids are `QueryId`s and `ClaimId`s, a claims path is a `ClaimPath`,
+  `trusted_authorities` is a `TrustedAuthorities`, and `multiple`,
+  `require_cryptographic_holder_binding` and `required` are enums. A Credential Query keeps its
+  other members as extension members (`CredentialQuery::extension`), and
+  `CredentialQuery::parse` reads one alone. A claims path processing error other than an empty
+  selection reaches the caller (`select_claims`, `QueryMatch::refusals`), and
+  `DcqlQuery::from_json` refuses with a `QueryTextError`. See
   [its changelog](crates/siros-dcql/CHANGELOG.md).
-- **BREAKING (Rust API):** `siros-zkp-req` reads no `trusted_authorities`: `TrustedAuthority`,
-  `AuthorityKind` and `RequestRule::TrustedAuthoritiesInvalid` are gone, and so is the request
-  vector `err_trusted_authorities_without_values`; the rule is `siros-dcql`'s. `ZkpReqQuery::id`
-  is a `QueryId`.
-- **BREAKING (Rust API):** `siros-mdoc` gives the whole `x5chain` (`IssuerAuth::x5chain`, the
-  Document Signer's first) and loses `P256Certificate`, `CertificateError` and `chains_to`;
-  `P256Key::from_sec1` reads an uncompressed point. `siros-sdjwt` keeps the issuer JWT's `x5c`
-  (`SdJwt::x5c`); a malformed one is `ParseError::X5c`.
-- **BREAKING (credential):** with the feature `chain`, a credential parses with its issuer chain
-  (TR2): the mdoc's `x5chain`, or the SD-JWT VC issuer JWT's `x5c`. A chain that does not parse
-  is `CredentialError::IssuerChain`; `Credential::issuer_chain` gives it. `siros-presentation`'s
-  `wallet` feature enables `chain`, so the picker build links no chain validation.
-  `UsableCredential::time` gives the time it is valid at. `Credential::claims` takes a
-  `ClaimPath`.
-- **BREAKING (presentation):** `PlanInput` takes the host's `TrustStore`. A credential whose
-  issuer the query's `trusted_authorities` refuse matches nothing, in every format (A1). A
-  candidate carries its issuer's admission into the offers and phase 2. `MatchCredential` gives
-  the admission, or why the authorities refuse the issuer (`MatchCredential::Unadmitted`),
-  with the trust context its implementor needs: the store for the wallet, nothing for the
-  picker's TR5 facts. `Unproven::Unlisted` is gone and `Unproven::Issuer` names an admission of
-  another certificate or query.
-- **BREAKING (presentation):** one Credential Query refused with `invalid_request` refuses the
-  whole request, whatever another option answers (`Answered::invalid_request`): a malformed
-  `aki` value (`QueryRefusal::Authorities`), and a `zkp_req` query that breaks a request rule,
-  the catalogue or the nym_auth policy. A plan used to offer the request's other options.
-- **BREAKING (presentation):** a query excludes a credential of its format and type, with its
-  `Exclusion`, when the authorities refuse its issuer, its claims path processing gives an
-  error, or it answers no option of a `zkp_req` query. `Answers::excluded` gives them for every
-  query, and `Failure::Excluded` names the first query without candidates that excludes
-  credentials (code `excluded`); it replaces `Failure::Unproven`. `QueryRefusal::ClaimPath` is
-  gone, and `Claims::pointers` gives `ClaimPath`s.
-- **BREAKING (nym_auth):** `TestedAttestation::of(mdoc, proof_time)` runs the credential tests;
-  `UsableAttestation::new(tested, admitted, query)` takes the `AdmittedIssuer` of the same
-  Document Signer for the same query (N3), and `Answer::new` refuses an attestation of another
-  query. The `anchors` of every signature, `HostError::AnchorsMissing`,
-  `CredentialCode::IssuerUntrusted`, `UsableAttestation::of` and the stored-data reader are
-  gone. The Verifier's `trust_anchors` are parsed certificates. The presenter keeps `Answer` and
-  `Prepared::new` (feature `request`); `match_query`, `prepare`, `present`, `Signer`,
-  `StoredCredential` and the rest of the old presenter path are removed.
-- **BREAKING (FFI):** `zkp_req_match`, `zkp_req_prepare`, `FfiPrepared`, `FfiProofJob`,
-  `FfiStoredCredential`, `FfiCandidate`, `FfiZkpMatch` and their records are removed. No FFI
-  function produces a nym_auth proof until the facades wave exposes the wallet's plan.
-  `zkp_req_verify` refuses a trust anchor that does not parse. Bindings are regenerated.
 - **BREAKING (FFI):** `match_dcql`, `match_dcql_with_context` and `match_dc_api_request` fail
-  with `MatchError::Request` for a query the DCQL parse refuses: a malformed
-  `trusted_authorities` (`[{"type": "aki"}]` or `[]`), an empty `credentials`, a `claim_sets`
-  or `credential_sets` option naming an unknown id, `claim_sets` without claims, a malformed
-  claims path, and an `mso_mdoc` claims path other than two strings. v0.11.0 matched such a
-  query: for the mDL fixture under a malformed `trusted_authorities`, its `match_dcql` gave `Ok`
-  with `satisfiable: true` and one combination.
-- **BREAKING (FFI):** `zkp_req_session` refuses, as `invalid_request`, a `client_id` that is no
-  supported Client Identifier (its `ClientIdError` code) and a `nonce` outside the ASCII
-  URL-safe characters (`nonce_malformed`), for both `verifier_id` forms; an absent or
-  non-string `nonce` stays `nonce_missing`.
+  with `MatchError::Request` for a query the DCQL parse refuses, as listed above: among them a
+  Credential Query without `meta`, a malformed `trusted_authorities` (`[{"type": "aki"}]` or
+  `[]`), an empty `claims`, and an object under `claims`, a `zkp_req` query's included. v0.11.0
+  matched such a query: for the mDL fixture under a malformed `trusted_authorities`, its
+  `match_dcql` gave `Ok` with `satisfiable: true` and one combination, and a `zkp_req` query
+  with an object under `claims` gave `Ok` with `satisfiable: false`.
 - **BREAKING (matcher):** `matcher.wasm` emits nothing for a request whose DCQL query the parse
   refuses, the same queries as the FFI above. Observed with the test host on the mDL fixture:
   under `trusted_authorities` `[{"type": "aki"}]` or `[]`, the matcher at `1b0fe3d` emitted the
   one entry of set `siros-0`, and this build emits nothing. An `aki` value that is no
   base64url changes nothing: the matcher resolves no `trusted_authorities`, and both emit the
   entry. A debug build names the parse error in its one entry, in set `siros-debug-request`.
-- **BREAKING (browser):** `siros-zkp-req-wasm` keeps `ZkpProvers` and `vpTokenJson`;
-  `matchQuery`, `session` and `prepare` are removed. No browser export produces a nym_auth
-  proof until the facades wave.
-- **BREAKING (Rust API):** `siros-zkp-req` types every value it reads. `ZkpReqQuery`,
-  `ReqItem`, `QueryOption` and `ZkpFormats` keep their fields private behind accessors; ids are
-  `FnId`, `ReturnHandle`, `SystemId`, `ProofBackend`, `ResultKey`, `InputName` and `W3cType`,
-  positions are `ItemIndex`, `ReqSetIndex`, `PresentationIndex` and `ArrayIndex`, and
-  `has_req_sets`, `require_holder_binding` and `multiple` are `ReqSets`, `HolderBinding` and
-  `Multiplicity`. A `RequestRule` carries what breaks it (`MemberFault`, `IdentifierFault`,
-  `ReturnFault`, `OptionFault`); its codes are unchanged. `ZkpPresentation` and `ProofEnvelope`
-  hold `ProofContent`, `ZkProof` and typed keys; a `req_set` beyond the platform's indexes is
-  `EncodingError::OutOfRange`. `System` gives a `SystemId` and judges a `ProofBackend`;
-  `answered_option` takes the Verifier's system of an identifier and returns it with the
-  option. `VpTokenError` carries the JSON and base64url errors. The unused consent model
-  (`Candidate`, `Judged`, `Match`, `OptionRefusal`, `UserInput`, `failure_code`) is removed.
-- **BREAKING (Rust API):** `siros-mdoc` types its names and values: `DocType` (from
-  `siros-dcql`), `NameSpace`, `ElementIdentifier`, `DigestId`, `ItemDigest`, `CoseAlgorithm`,
-  `SigStructure`, `MessageDigest` and `SessionTranscript`; `Es256Signature` is `siros-codec`'s.
-  `device_signing_input` takes a `SessionTranscript` and a `DocType` and gives a
-  `SigStructure`, whose `digest` replaces `device_signing_digest`. Every `MdocError` carries
-  its fault; its codes are unchanged.
-- **BREAKING (Rust API):** `siros-credential` gives `credential_type()` as a `CredentialType`
-  (`Vct` or `DocType`), `issuer()` as an `IssuerIdentifier` and `configuration_id()` as a
-  `ConfigurationId`. `CredentialError` names the `RegisteredClaim` and the `CborTag` it
-  refuses, and `HolderKeyError` the coordinate and its fault.
-- **BREAKING (nym_auth):** the catalogue's `Item` is an enum whose `pseudonym` holds its
-  `return`; `Pseudonym` and `AgeCheck` read through accessors and `verifier_context` is a
-  `VerifierContext`. A `CatalogueRule` carries what breaks it (`ParamFault`, `ContextFault`,
-  `PrfUndefined`); its codes are unchanged. `Statement` holds the `DocumentSigner`, a
-  `ProofBackend`, `VerifierInput`, `SessionTranscript` and `MessageDigest`, and loses
-  `doc_type`; `ProofOutput` and the verifier take `ZkProof` and `PseudonymValue`. `Prepared`
-  gives the `SigStructure` the device key signs and proves with an `Es256Signature`;
-  `Prepared::new` takes the answer and the request, and the `Sign` effect names the key;
-  `HostError::SignatureLength` is gone. `check_request` and the session values move to
-  `request_object` (feature `credential`) and take `Signing`; `Channel::DcApi` holds an
-  `Origin`. `Rejection` names its fault (`OwnQueryFault`, `ProofEncodingFault`,
-  `ResultsFault`, `IssuerKeySetError::Untrusted` with the `PathRefusal`), `VerifyInput::now`
-  is a `DateTime`, and
-  `Tolerance::seconds(future, past)` replaces its public fields. `MAX_ZK_PROOF` moves to
-  `system`, with `NymAuthSystem::admits_zk_proof`. The Verifier admits the Document Signer
-  through `siros-trust`'s `TrustPath`, the TR3 path validation the wallet runs. `CheckedRequest`
-  gives the `client_id` as a `ClientId` and the `nonce` as a `Nonce`; `PolicyRule::ClientId`
-  and `PolicyRule::NonceMalformed` refuse the others. `siros-zkp-req`'s
-  `CredentialType::source_format` gives a `CredentialFormat`, and `ReturnHandle::parse` reads
-  the identifier alphabet through `QueryId`.
-- **BREAKING (Rust API):** `siros-sdjwt` gives every `ParseError` its cause:
-  `IssuerJwtFault`, `DisclosureFault` with the disclosure's `DisclosureId`, `SdAlgFault`,
-  `ReservedFault`, the repeated `Digest`, the misplaced disclosure with its `Placement`, the
-  existing claim name, the unreferenced disclosure, and `X5cError` with the certificate's
-  `X5cIndex`. The JSON reader is `siros-codec`'s `Json`, which reports a `JsonFault`.
-  `KeyBindingError` is `RequiredClaim` or `RepeatedClaim` with the name.
-  `Presentation::key_binding` takes a `NumericDate`, an `Audience` and a `KbNonce`, and
-  `KeyBinding::assemble` an `Es256Signature`; `siros-sdjwt` depends on neither `siros-oid4vp`
-  nor `serde`. `SdJwt::select` takes `ClaimPath`s. Codes are unchanged.
-- **BREAKING (Rust API):** `siros-trust` errors carry their causes: `CertificateError::Der`,
-  `Name` and `BasicConstraints` hold the `der::Error`; `Validity` names the time, `PublicKey` a
-  `PublicKeyFault`, `ExtensionRepeated` the extension's identifier, and
-  `AuthorityKeyIdentifier` an `AuthorityKeyIdentifierFault`. `EntryError` names the unknown
-  member and type and gives a `MemberFault`. `IssuanceRefusal` and `PathRefusal` gain
-  `IssuerKey` and `SignatureEncoding`. Codes are unchanged; errors that hold a `der::Error`
-  lose `Hash`. `TrustPath::new` replaces `StoreEntry::validates`; `Certificate::issued_by` and
-  `valid_at` are steps of it. A certificate's issuer and subject are `DistinguishedName`s.
-  `AuthorityKind::of` classifies a `type` (`aki`, or a `StoreType`); `StoreType::of` is gone.
-  A store entry that repeats a member is `EntryError::RepeatedMember`
-  (`trust_store_entry_member_repeated`), and `StoreError::Json` holds the reader's `ReadFault`.
-- **BREAKING (trust):** TR3 applies RFC 5280's path rules: a signer whose keyUsage leaves
-  keyCertSign out is `PathRefusal::KeyCertSign`; a signer with more non-self-issued
-  intermediate certificates below it than its pathLenConstraint is `PathRefusal::PathLength`
-  (a self-issued link certificate counts none); a certificate on the path with a critical
-  extension outside the processed set (`extensions`: basicConstraints, keyUsage, extKeyUsage,
-  authorityKeyIdentifier, subjectKeyIdentifier) is `PathRefusal::CriticalExtension`. A store
-  certificate byte-identical to the chain's first certificate admits it when it is valid
-  (`TrustPath::Listed`; a path through a signer is `TrustPath::Signed`). `CertificateRole::Ca`
-  holds the `PathLength`, `Certificate::cert_signing` gives the `CertSigning`, a keyUsage or
-  extKeyUsage that does not decode is `CertificateError::KeyUsage` or `ExtendedKeyUsage`, and
-  `IssuerChain::parse` reads a `siros-codec` `CertificateChain`, so `ChainError` names the
-  certificate that does not parse and `issuer_chain_empty` is gone.
-- **BREAKING (Rust API):** `siros-codec` holds the internals the components share:
-  `signature::Es256Signature` (from `siros-mdoc`), `member::MemberFault` with its
-  `ArrayIndex` (replacing the enums of `siros-mdoc`, `siros-zkp-req`, `siros-trust` and
-  `siros-wallet-state`), the `position!` and `text_value!` macros, and
-  `chain::CertificateChain`, which replaces `siros-mdoc`'s `X5Chain`, `siros-sdjwt`'s `X5c` and
-  `siros-oid4vp`'s `X509Chain`. `siros-sdjwt` drops its `siros-mdoc` dependency and
-  `siros-zkp-req-nym-auth` its `siros-wallet-state` one. `siros-display` keys Type Metadata by
-  `siros-dcql`'s `Vct`, and by `siros-wallet-state`'s `IssuerIdentifier` and `ConfigurationId`
-  (feature `credential`), whose `parse` refuses the empty string: an empty `credential_issuer`
-  or `credential_configuration_id` is `DisplayError::IssuerIdentifier` or `ConfigurationId`.
-  Display's own identifier types are gone.
-- **BREAKING (Rust API):** `siros-codec`'s strict JSON reader (feature `json`) is the one
-  reader: it keeps each number with the text its writer chose (`JsonNumber`), refuses a number beyond binary64 and
-  nesting deeper than `json::MAX_DEPTH` (64) with a `ReadFault`, and `Json::parse_unique`
-  adds the repeated member name (`JsonFault`). `siros-transaction-data` reads its entries and
-  metadata documents with it: its own reader, `JsonError` and `MAX_DEPTH` are gone,
-  `TransactionDataError::NotJson` and `MetadataNotJson` hold the `JsonFault`, and
-  `TransactionDataError` loses `Copy`; the codes are unchanged. `siros-zkp-req`'s `vp_token`
-  reading (`presentations_of`, `VpTokenError`) moves behind its feature `vp-token`, which
-  enables the reader: `VpTokenError::NotJson` holds the `JsonFault` and replaces
-  `DuplicateMember`, `NotObject` covers a JSON value that is no object, and a member repeated
-  at any level of the `vp_token` refuses it; the codes are unchanged. A part of an SD-JWT nested
-  deeper than 64 levels is a JSON fault of that part; `claims_too_deep` covers 33 to 64 levels.
-- **BREAKING (Rust API):** refusals keep their causes. `IntakeError::DcqlQueryInvalid` holds
-  the `QueryError`, a form parameter that is no JSON is `IntakeError::ParameterNotJson`, a DC
-  API request that is no JSON `EnvelopeNotJson`, and `IntakeError` loses `Copy`.
-  `DcqlQuery::from_json` refuses with `QueryTextError`. `CborError::InvalidUtf8`,
-  `FormFault::NotUtf8` and `JwsFault::NotUtf8` hold the `Utf8Error`; `ChainFault`'s
-  `LeafNotCertificate` and `SubjectAltName` and `SemanticIdError`'s `Policies` and `Encoding`
-  (feature `crypto`) the `der::Error`; `NoQuery::PayloadNotJson`,
-  `WalletStateError::Malformed` and `PresentationsFault::Record` the `JsonTextError`;
-  `DigestError::Encoding` the `Base64Error`. `TransactionDataError` gains `NotUtf8` and
-  `NotJson`, which replaces `DuplicateKey` and `TooDeep`, and `MetadataNotUtf8` and
-  `MetadataNotJson`, with the codes unchanged. `RequestRule::TypeValueInvalid` holds a
-  `TypeValueFault`. `siros-dc-matcher-core`'s `DecodeError::Malformed` is `Truncated`,
-  `Syntax`, `Shape` or `TooDeep`. The proof backends' `ArtifactError::Decompress` holds zstd's
-  message. Enums that hold a `Utf8Error` or a `der::Error` lose `Hash`.
-- **BREAKING (FFI):** `zkp_req_verify` refuses a clock outside the years 0000 to 9999 and a
-  negative tolerance as host errors (`now_out_of_range`, `tolerance_out_of_range`), and
-  `zkp_req_vp_token_json` and `zkp_req_vp_token_cbor` refuse a query id outside §6.1.
-- Vector set digest: `1e2b5b3dc8107d8ce1f7a7d36461d70f66c6734e0bcaa1ebcfa82c8c261a03f8`.
+- Vector set digest: `db62a22cfaccb912bf717c63d2a107e41e5437caa72e21594ceb3bb395eab431`.
 
 ### Fixed
 
 - `matcher.wasm` v0.8.0 to v0.11.0 imported `wasi_snapshot_preview1.random_get`,
-  which the host lacks, and trapped on `zkp_req` requests. `siros-dcql` finds a
-  repeated id by comparing each id with the earlier ones, and the `zkp_req` crates
-  use no seeded collection.
+  which the host lacks, and trapped on `zkp_req` requests. `siros-dcql` finds repeated ids with
+  rustc-hash's `FxHashMap`, which takes no seed, and the `zkp_req` crates use no seeded
+  collection.
 
 ### Added
 
-- `siros-trust`, issuer trust for the wallet core (§4.18). `TrustStore::parse` reads the
-  host's record of `{type, value, certificates}` entries (TR1); `IssuerChain::parse` reads a
-  credential's certificates with their AuthorityKeyIdentifier keyIdentifiers (TR2);
-  `QueryAuthorities::of` and `AdmittedIssuer::resolve` admit a credential's issuer for one query
-  at a time: no `trusted_authorities`, an `aki` value a certificate of the chain names, or the
-  store entry of an `etsi_tl` or `openid_federation` value with a certificate that signs a
-  prefix of the chain, each certificate of the prefix signed by the next (TR3: names,
-  validity, `cA` of every signer, ECDSA P-256/SHA-256 and P-384/SHA-384 over the
-  `tbsCertificate` as written). `TrustPath` is the witness; the anchor whose
-  SubjectKeyIdentifier equals the AuthorityKeyIdentifier is tried first. The store refuses an
-  entry that repeats a member. `IssuerFacts::at` gives the facts the wallet records for the
-  picker, and `Admission::of` admits from them alone with the same rule (TR5). Without the
-  feature `chain` the crate holds the rule and the facts, on Rust 1.82.
-- `siros-presentation`, the presentation component of the wallet core. Phase 1 plans a
-  verified request over the wallet's credentials usable at the plan's time: the format table,
-  `meta`, holder binding and no query but `zkp_req` on a nym_auth attestation (A1); `zkp_req` as
-  one selection, then the usable attestation and the seed delivered in the credential's
-  auxiliary data (A2); offers, optional additions, an offer per option when every set is
-  optional, a `multiple` member holding every candidate, and, for an offer whose members leave a
-  transaction entry uncarried, each option of an optional set that can carry it joined in an
-  offer of its own, repeated until every entry is carried, at most one option per set (A3).
-  An offer that cannot carry every entry is dropped, two offers with the same members are one,
-  and the joins spend the examination budget and count among the combinations not examined.
-  `Offers::of` gives the first `Refusal`: an offer no join completes, or one the acceptance
-  refuses. The plan also gives the transaction entries each credential authorizes, the credential named by
-  `credentialId` and instance (T4); the plan's digest over the request, its trust verdict, the
-  nym_auth `verifier_id` and every offer's credentials by `credentialId` and instance, their
-  answers and bound entries, its additions and display (A4); and the consent
-  view with cards, claim rows, proof statement rows, additions, transactions and whether an
-  offer needs the wallet's display (A9). The plan asks the host for each type metadata fetch.
-  A nym_auth request must be signed, trusted and encrypted, and its `verifier_id` comes from the
-  authenticated certificate (N2). A `zkp_req` query that names `trusted_authorities` finds every
-  issuer untrusted until the wallet evaluates them. Phase 2 parses the selection against the
-  plan made again, with the non-empty subset of each `multiple` member by `credentialId`, kept
-  in the member's order. A selection that leaves out the credential an entry binds to is
-  refused, and phase 2 binds the entries to the credentials the view named. `Planned::picked`
-  makes the selection from the credential picker entries the user picked, each naming its
-  offer, query and `credentialId` (K3). Phase 2 gives a `Sign` effect per signing input,
-  verifies each signature under the instance's holder key (A5), and gives
-  one `vp_token` (A8), its submission for the request's Response Mode and the presentation
-  record. It proves `zkp_req` in-process through a `NymAuthProver`. A decline, and a background
-  fulfilment of an offer that needs the wallet's display, give `access_denied`. Positions and
-  identifiers are their own types (`QueryIndex`, `CandidateIndex`, `SetIndex`, `OfferIndex`,
-  `AdditionIndex`, `EntryPosition`, `PlanDigest`, `SignId`, and DCQL's `QueryId`),
-  and so are A9's facts. `Fetches` is the one store of the host's responses, and a second
-  answer to a URL is refused. A request without an offer gives its `Failure`: the refused query and why,
-  the credentials the first query without candidates excludes and why, or no combination.
-  Without the default feature `wallet` it holds the matching the picker runs, over
-  `MatchCredential`, links no chain validation or response crypto, and builds with Rust 1.82.
-- `siros-zkp-req-nym-auth`: `NymAuthRequest` (feature `request`), the nym_auth request of a
-  verified request, with the session of its `Handover`. The request is signed by a Request
-  Object or under `openid4vp-v1-signed`, trusted, encrypted, and carries no registration
-  certificate (`unsigned`, `multisigned`, `untrusted`, `response_mode`,
-  `registration_certificate`). Its `verifier_id` takes the `VerifierIdForm` of the trust
-  framework: `semantic_id:` and the access certificate's semantics identifier, or
-  `x509_san_dns:` and the Client Identifier; a certificate without one is refused with its
-  `VerifierIdRule::SemanticId` reason. **BREAKING (Rust API):** `VerifierId::semantic` takes a
-  `SemanticIdentifier`, and `VerifierId::x509_san_dns` a `ClientId` and an `Intermediary`;
-  `VerifierIdRule::DnsName` is gone. The FFI parses its host strings into them. `NymAuthQuery::options`, `UsablePair` with its
-  `ProofBackend`, `Answer`, `SecretSeed` and `Prepared::new`; `UsableAttestation::of` an mdoc
-  already parsed. `prepare` builds through them, and both test an option's items with one
-  function.
-- `siros-dcql` 0.12.0: the Credential Query `id` is a `QueryId` (§6.1), which the query parse
-  refuses outside its characters.
-- `siros-display`: `proof::verified_rows`, the proof statement rows of a verified request, each
-  a `DisplayText` label and value held whole, without the "(unverified request)" marker.
-- `siros-oid4vp`: `VpToken::json`. `VerifiedRequest::access_certificate` gives the
-  `CertificateDer` and the `SemanticIdentifier`, or the `SemanticIdError`, of an
-  `x509_san_dns` or `x509_hash` signer's certificate: the WRPAC policy (ETSI TS 119 411-8)
-  says whether its subject is a natural person, identified by its `serialNumber`, or a legal
-  person, identified by its `organizationIdentifier` (ETSI TS 119 475, Clauses 5.1.3 and 5.1.5);
-  `ClientId` builds without `crypto`, and its parse refuses with a `ClientIdError`, an
-  `x509_san_dns` value that is not ASCII included;
-  `dc_api_protocol` the DC API protocol; and `verifier_info_formats` the `AttestationFormat` of
-  each `verifier_info` attestation (OpenID4VP 1.0, Section 5.1). Intake refuses a malformed
-  `verifier_info` with the `VerifierInfoRule` it breaks.
-- `siros-credential`: `least_used` takes any `Instance`. `Credential::holder_key` gives the
-  holder's P-256 key, an SD-JWT VC's `cnf.jwk` or an mdoc's `deviceKey`; an SD-JWT VC whose
-  `cnf` holds no P-256 `jwk` does not parse (`CredentialError::HolderKey`). `siros-mdoc` gains
-  `P256Key::new`. `siros-transaction-data` gains `Entry::carried_by` and `Entry::names`, the
-  one rule of an entry naming a Credential Query, with `Entry::credential_ids` and
-  `Presented::query_id` as `QueryId`s; `Fetched::insert_first` records the first response to
-  a URL, and `Fetched::response` reads it. `siros-wallet-state`: `CredentialId::new` is public, for the ids
-  picker entries carry, and `InstanceId` displays its decimal form.
+- `siros-codec`, the encodings every wallet core crate shares: a strict CBOR reader (definite
+  lengths, no duplicate keys, no trailing bytes, at most `cbor::MAX_DEPTH` (32) levels) and a
+  deterministic writer; unpadded base64url and the padded base64 of `x5c` certificates (RFC
+  4648, Sections 4 and 5); the calendar dates and UTC times of CBOR's `full-date` and `tdate`;
+  the ES256 signature value (`signature::Es256Signature`); and `json::JsonTextError`, what
+  serde_json reports of text that is no JSON. With the feature `json` it holds the strict JSON
+  reader, `Json::parse_unique`: one value, members in document order, each member name once per
+  object, every number with the text its writer chose (`JsonNumber`), at most `json::MAX_DEPTH`
+  (64) levels; it refuses with the first `JsonFault` in document order. `siros-wallet-state`
+  reads the wallet state with its own reader, where a repeated name keeps its last value, as
+  `JSON.parse` in `wallet-frontend` does. The crate holds the internals the components share:
+  `member::MemberFault` with its `ArrayIndex`, `chain::CertificateChain` (the DER chain an mdoc
+  `x5chain` and an `x5c` carry), the `position!` and `text_value!` macros that declare value
+  newtypes, and `display_code!`, which shows an error by its stable code.
+- `siros-mdoc`, ISO/IEC 18013-5 mdocs: the stored credential, element selection, the
+  `DeviceResponse`, and the device signature's signing input (`device_signing_input`, a
+  `SigStructure` whose `digest` the device key signs). Names and values are types: `DocType`
+  (siros-dcql's), `NameSpace`, `ElementIdentifier`, `DigestId`, `ItemDigest`, `CoseAlgorithm`,
+  `SigStructure`, `MessageDigest` and `SessionTranscript`. `IssuerAuth::x5chain` gives the whole
+  `x5chain`, the Document Signer's certificate first, and `P256Key` reads an uncompressed point.
+  Every `MdocError` carries its fault.
+- `siros-sdjwt`, SD-JWT VC: the stored credential with its issuer JWT's `x5c` (`SdJwt::x5c`),
+  disclosure selection over `ClaimPath`s (`SdJwt::select`), and the presentation with its KB-JWT
+  signing input: `Presentation::key_binding` takes a `NumericDate`, an `Audience` and a
+  `KbNonce`, and `KeyBinding::assemble` an `Es256Signature`. Its JSON parts read with
+  siros-codec's strict reader. Every `ParseError` carries its cause: `IssuerJwtFault`,
+  `DisclosureFault` with the disclosure's `DisclosureId`, `SdAlgFault`, `ReservedFault`, the
+  repeated `Digest`, the misplaced disclosure with its `Placement`, the existing claim name, the
+  unreferenced disclosure, and `X5cError` with the certificate's `X5cIndex`. A part nested
+  deeper than 64 levels is a JSON fault of that part; `claims_too_deep` covers 33 to 64 levels.
+  `KeyBindingError` is `RequiredClaim` or `RepeatedClaim` with the name.
+- `siros-credential`, the format-independent credential: typed claims read by `ClaimPath`,
+  validity (`UsableCredential::time`), `credential_type()` (a `CredentialType`: `Vct` or
+  `DocType`), `issuer()` (an `IssuerIdentifier`), `configuration_id()` (a `ConfigurationId`),
+  and `holder_key()`, the holder's P-256 key: an SD-JWT VC's `cnf.jwk` or an mdoc's
+  `deviceKey`. An SD-JWT VC without a P-256 `cnf.jwk` does not parse
+  (`CredentialError::HolderKey`, with the coordinate and its fault); `CredentialError` names
+  the `RegisteredClaim` and the `CborTag` it refuses. `least_used` chooses the instance of a
+  batch (C5). With the feature `chain`, a credential parses with its issuer chain (TR2): the
+  mdoc's `x5chain`, or the issuer JWT's `x5c`; a chain that does not parse is
+  `CredentialError::IssuerChain`, and `Credential::issuer_chain` gives it.
+- `siros-wallet-state`, the decrypted wallet state `S` of the private data container
+  (privatedata 3.1, Section 6): `WalletState::parse` reads versions 3 and 4 into its credential
+  entries with their `metadata`, each value as its exact text, its presentation records and the
+  `kid` of each key pair. A repeated member name keeps its last value, as `JSON.parse` in
+  `wallet-frontend` does. A refusal is a `WalletStateError` with its cause: the `JsonTextError`
+  of a member of another JSON type (`ArrayFault`, `MetadataFault`, `TypeFault`,
+  `PresentationsFault`). `PresentationRecord::new` gives the record the host appends as a
+  `new_presentation` event (H5). `CredentialId::new` is public, for the ids picker entries
+  carry; `IssuerIdentifier::parse` and `ConfigurationId::parse` refuse the empty string
+  (`EmptyIdentifier`).
+- `siros-display`, display for the wallet core: display metadata and its locale, credential
+  cards (`Card`, with its `Colour`s and `Logo`), claim rows, purpose lines, and proof statement
+  rows (`proof::verified_rows`, each a `DisplayText` label and value held whole). `DisplayCache`
+  keys Type Metadata by siros-dcql's `Vct` and issuer metadata by siros-wallet-state's
+  `IssuerIdentifier` and `ConfigurationId`. A `DisplayError` carries its cause: a colour that is
+  no numerical colour value of CSS Color Module Level 3 holds its `ColourFault`. Without the
+  default feature `credential` it holds the purpose lines and proof statement rows the matcher
+  links.
+- `siros-oid4vp`, OpenID4VP 1.0 for the wallet core. Without `crypto` it holds the picker's
+  request reading (`UnverifiedRequest`, `diagnose`, `NoQuery`, whose `Malformed` holds the
+  `QueryError`) and `ClientId`, whose parse refuses with a `ClientIdError`, and builds with Rust
+  1.82. With `crypto`: sans-IO intake of redirect requests (by value, `request`, `request_uri`
+  with `get` or `post`) and DC API requests (unsigned, signed, multisigned) into a
+  `VerifiedRequest`, with `Fetch` and `Trust` effects for the host; the Client Identifier
+  Prefixes `x509_san_dns`, `x509_hash`, `decentralized_identifier`, `verifier_attestation`,
+  `openid_federation` and `redirect_uri`; ES256 Request Objects; the `vp_token` (`VpToken::json`),
+  its submission per Response Mode, `ECDH-ES` response encryption with `A128GCM` or `A256GCM`,
+  error submissions, and the reply to a direct post. `direct_post.cwt` (`zkp_req.md`, Section
+  6.2) posts the CBOR Authorization Response in a `COSE_Encrypt` by ECDH-ES + HKDF-256 with
+  `A128GCM`, `A192GCM` or `A256GCM`. `Handover` and `ec_jwk_thumbprint` give the session
+  transcript's handover, with `None` for the CBOR `null` of an unencrypted response (B.2.6).
+  `VerifiedRequest::access_certificate` gives the `CertificateDer` and the `SemanticIdentifier`,
+  or the `SemanticIdError`, of an `x509_san_dns` or `x509_hash` signer's certificate: the WRPAC
+  policy (ETSI TS 119 411-8) says whether its subject is a natural person, identified by its
+  `serialNumber`, or a legal person, identified by its `organizationIdentifier` (ETSI TS 119
+  475, Clauses 5.1.3 and 5.1.5). `dc_api_protocol` gives the DC API protocol, and
+  `verifier_info_formats` the `AttestationFormat` of each `verifier_info` attestation (Section
+  5.1). Each refusal is an `IntakeError` with its cause: the `QueryError` of a `dcql_query`, the
+  `JsonTextError` of a parameter or a DC API request that is no JSON, the `Utf8Error` and
+  `der::Error` of what does not decode, the `VerifierInfoRule` a `verifier_info` breaks, the
+  `LeafKeyFault` of an `x5c` leaf key, the `ClaimsFault` of a Verifier Attestation's claims, and
+  the `JwkFault` of a JWK that is no P-256 key: the host's resolved key (`ResolvedKeyInvalid`)
+  or the first P-256 `ECDH-ES` encryption key of `jwks` (`EncryptionKeyInvalid`), where keys of
+  other types and curves are passed over.
 - `siros-transaction-data`, the `transaction_data` request parameter (OpenID4VP 1.0, Section
   5.1) for the wallet core. It parses entries of the four EC TS12 v1.0.1 types into typed
-  payloads, binds each entry to one credential of an offer, gives the KB-JWT claims
-  (`transaction_data_hashes`, `transaction_data_hashes_alg`, `jti`, `response_mode`, `amr`)
-  and the consent display, and asks the host to fetch the SD-JWT VC type metadata and the
-  documents it references. It builds with Rust 1.82. `siros-oid4vp` gains `Fetch::get`,
-  `FetchResponse::status` and `FetchResponse::body`.
-- `siros-oid4vp`, OpenID4VP 1.0 for the wallet core. With the `crypto` feature: sans-IO intake
-  of redirect requests (by value, `request`, `request_uri` with `get` or `post`) and DC API
-  requests (unsigned, signed, multisigned) into a `VerifiedRequest`, with `Fetch` and `Trust`
-  effects for the host; the Client Identifier Prefixes `x509_san_dns`, `x509_hash`,
-  `decentralized_identifier`, `verifier_attestation`, `openid_federation` and `redirect_uri`;
-  ES256 Request Objects; the `vp_token`, its submission per Response Mode, `ECDH-ES` response
-  encryption with `A128GCM` or `A256GCM`, error submissions, and the reply to a direct post.
-  `direct_post.cwt` (`zkp_req.md`, Section 6.2) posts the CBOR Authorization Response in a
-  `COSE_Encrypt` by ECDH-ES + HKDF-256 with `A128GCM`, `A192GCM` or `A256GCM`.
-  Without `crypto` it holds the picker's request reading and builds with Rust 1.82.
-- `siros-codec`'s `base64`: padded base64 (RFC 4648, Section 4), as `x5c` carries certificates.
-  `siros-codec`'s `json`: the strict JSON reader, members in document order, numbers as their
-  writer wrote them, at most 64 levels deep, which finds a repeated member name
-  (`Json::parse_unique`, `Json::repeated_member`).
-- `siros-zkp-req`, the `zkp_req` protocol layer, and `siros-zkp-req-nym-auth`, the nym_auth
-  catalogue with the Longfellow and Vega systems, the session binding, the Wallet's credential
-  tests, a presenter in phases and the Verifier's checks, behind `NymAuthProver` and
-  `NymAuthProofVerifier`. Both crates hold Rust 1.82. `NymAuthSystem::circuit_artifact` gives
-  the circuit artifact pins of the system rulebooks' Section 8.
+  payloads, binds each entry to one credential of an offer (`Entry::carried_by`, `Entry::names`,
+  `Entry::credential_ids`, `Presented::query_id`), gives the KB-JWT claims
+  (`transaction_data_hashes`, `transaction_data_hashes_alg`, `jti`, `response_mode`, `amr`) and
+  the consent display, and asks the host to fetch the SD-JWT VC type metadata and the documents
+  it references (`Fetched::insert_first` records the first response to a URL, and
+  `Fetched::response` reads it). Entries and metadata documents read with siros-codec's strict
+  reader: `TransactionDataError::NotJson` and `MetadataNotJson` hold the `JsonFault`, and
+  `NotUtf8` and `MetadataNotUtf8` the `Utf8Error`. It builds with Rust 1.82.
+- `siros-trust`, issuer trust for the wallet core (§4.18).
+  - TR1: `TrustStore::parse` reads the host's record, an array of `{type, value, certificates}`
+    entries, `type` `etsi_tl` or `openid_federation`, each authority once, with siros-codec's
+    strict reader; each refusal is a `StoreError` with its cause (`EntryError` with a
+    `MemberFault`, the certificate's `CertificateError`, a member name an object repeats in the
+    `JsonFault`).
+  - TR2: `IssuerChain::parse` reads a credential's `CertificateChain` with the
+    AuthorityKeyIdentifier keyIdentifiers of its certificates; `ChainError` names the
+    certificate that does not parse, and `CertificateError` holds its `der::Error`,
+    `PublicKeyFault` or `KeyIdentifierFault`. A certificate's issuer and subject are
+    `DistinguishedName`s, compared as DER bytes.
+  - TR3: `QueryAuthorities::of` reads a Credential Query's `trusted_authorities` (a malformed
+    `aki` value is an `AuthorityError`), and `AdmittedIssuer::resolve` admits a credential's
+    issuer for one query at a time: the query names no authority, an `aki` value names a key the
+    chain's AuthorityKeyIdentifiers name, or the store entry of an `etsi_tl` or
+    `openid_federation` value admits the chain. The `AdmittedIssuer` keeps the query's
+    `QueryAuthorities`, which `QueryAuthorities::are_those_of` compares with a Credential Query.
+    Path validation, `IssuerChain::validate_path`, gives the `PathRefusal` of a chain without a
+    path to an anchor at a time. A path is a prefix of the chain, each certificate signed by the
+    next, whose last certificate an anchor signs: every certificate on it, the anchor included,
+    is valid at the time; each signer's subject is the certificate's issuer, the signer is a
+    CA, its keyUsage, when present, includes keyCertSign, and at most its pathLenConstraint of
+    non-self-issued intermediate certificates lie below it, a self-issued link certificate
+    counting none; each signature is ECDSA P-256 with SHA-256 or P-384 with SHA-384 over the
+    `tbsCertificate` as written; and every critical extension on the path is one TR3 processes
+    (`extensions`: basicConstraints, keyUsage, extKeyUsage, authorityKeyIdentifier,
+    subjectKeyIdentifier). Direct trust: a store certificate byte-identical to the chain's first
+    certificate admits it while it is valid. The anchor whose SubjectKeyIdentifier equals the
+    certificate's AuthorityKeyIdentifier is tried first.
+  - TR5: `IssuerFacts::at` gives the facts the wallet records for the picker, and
+    `Admission::of` admits from them alone, with the rule of TR3 (`QueryAuthorities::admit` over
+    an `Issuer`).
+  - Without the feature `chain` the crate holds the rule, the authorities and the facts, builds
+    with Rust 1.82, and links no X.509 or ECDSA code.
+- `siros-zkp-req`, the `zkp_req` protocol layer. `ZkpReqQuery::parse` reads a DCQL
+  `CredentialQuery`, its `format`, `meta` and the extension members `_req` and `_req_sets`, and
+  takes `id`, `multiple` and `require_cryptographic_holder_binding` from it; a `RequestRule`
+  carries what breaks it (`MemberFault`, `IdentifierFault`, `ReturnFault`, `OptionFault`,
+  `TypeValueFault`). It holds `ZkpFormats` (Section 1.2), the usable pair of a `System` and a
+  `ProofBackend` (Section 1.3), `ZkpPresentation` and `ProofEnvelope` with `ProofContent`,
+  `ZkProof` and typed keys (Section 4), and the Verifier's steps 1 to 5 (`answered_option`,
+  `StructureRejection`, Section 4.1). With the feature `vp-token`, `presentations_of` gives the
+  presentations of a query in a JSON `vp_token`, read with siros-codec's strict reader
+  (`VpTokenError`). Ids and positions are types: `FnId`, `ReturnHandle`, `SystemId`,
+  `ProofBackend`, `ResultKey`, `InputName`, `W3cType`, `ItemIndex`, `ReqSetIndex` and
+  `PresentationIndex`. It holds Rust 1.82.
+- `siros-zkp-req-nym-auth`, the nym_auth catalogue with the Longfellow and Vega systems, the
+  session binding, the Wallet's credential tests, a presenter in phases and the Verifier's
+  checks, behind `NymAuthProver` and `NymAuthProofVerifier`. It holds Rust 1.82.
+  - Each test of a query or a credential is the constructor of its result.
+    `NymAuthQuery::from_query` reads a `ZkpReqQuery` against the catalogue (`Catalogued`:
+    `NymAuth`, or `OtherType` for another credential type); its `Item` is an enum whose
+    `pseudonym` holds its `return`, and a `CatalogueRule` carries what breaks it (`ParamFault`,
+    `ContextFault`, `PrfUndefined`). `TestedAttestation::of(mdoc, proof_time)` runs the
+    credential tests, and its refusal `Unusable` carries the Section 9 codes; the `birth_date`,
+    `ssc` and `psc` refusals hold a `FullDateFault` or a `CommitmentFault`.
+    `UsableAttestation::new(tested, admitted, query)` takes the `AdmittedIssuer` of the same
+    Document Signer by the authorities of the same query, its `id` and its
+    `trusted_authorities` (N3), and `Answer::new` refuses an attestation admitted for another
+    query's authorities. `OpenedSeed::open` opens the `ssc` with the `SecretSeed`.
+  - The presenter: `Prepared::new` takes the answer and the request, gives the `SigStructure`
+    the device key signs, and proves with its `Es256Signature`; only `Prepared::job` builds a
+    `ProofJob`. `NymAuthRequest` (feature `request`) is the nym_auth request of a verified
+    request, with the session of its `Handover`: signed by a Request Object or under
+    `openid4vp-v1-signed`, trusted, encrypted, and without a registration certificate. Its
+    `verifier_id` takes the `VerifierIdForm` of the trust framework: `semantic_id:` and the
+    access certificate's semantics identifier, or `x509_san_dns:` and the Client Identifier
+    (`VerifierId::semantic`, `VerifierId::x509_san_dns`); a certificate without one is refused
+    with its `VerifierIdRule::SemanticId` reason. `check_request` (feature `credential`) takes
+    `Signing`, and `CheckedRequest` gives the `client_id` as a `ClientId` and the `nonce` as a
+    `Nonce`.
+  - The Verifier (`verify`) builds the `Statement` from its own query, session, clock and trust
+    configuration. DCQL parses its own query first (`OwnQueryFault::Dcql`). It admits the
+    Document Signer by siros-trust's path validation over its `trust_anchors` at its clock: an
+    anchor that is expired, is no CA, or carries a critical extension TR3 does not process is
+    refused, and an anchor that signs with ECDSA P-384 and SHA-384 admits the Document Signer
+    it signs. `Rejection` names its fault (`OwnQueryFault`, `ProofEncodingFault`,
+    `ResultsFault`, `IssuerKeySetError::Untrusted` with the `PathRefusal`).
+    `NymAuthSystem::circuit_artifact` gives the circuit artifact pins of the system rulebooks'
+    Section 8, and `NymAuthSystem::admits_zk_proof` whether a proof has a length the system's
+    proof backend reads.
+- `siros-presentation`, the presentation component of the wallet core.
+  - Phase 1 plans a verified request over the wallet's credentials usable at the plan's time,
+    against the host's `TrustStore` (`PlanInput`): the format table, `meta`, holder binding and
+    no query but `zkp_req` on a nym_auth attestation (A1); a credential whose issuer the query's
+    `trusted_authorities` refuse matches nothing, in every format (TR3), and a candidate carries
+    its issuer's admission into the offers and phase 2. `zkp_req` is one selection, then the
+    usable attestation and the `secret_seed` delivered in the credential's auxiliary data (A2),
+    read with siros-codec's strict reader: a credential without one is excluded with its
+    `NoSeed`, an `opening` absent, not a string, not base64url or not 16 bytes each its own.
+    Offers, optional additions, an offer per option when every set is optional, a `multiple`
+    member holding every candidate, and, for an offer whose members leave a transaction entry
+    uncarried, each option of an optional set that can carry it joined in an offer of its own,
+    repeated until every entry is carried, at most one option per set (A3). An offer that cannot
+    carry every entry is dropped, two offers with the same members are one, and the joins spend
+    the examination budget and count among the combinations not examined. `Offers::of` gives the
+    first `Refusal`: an offer no join completes, or one the acceptance refuses.
+  - The plan also gives the transaction entries each credential authorizes, the credential named
+    by `credentialId` and instance (T4); the plan's digest over the request, its trust verdict,
+    the nym_auth `verifier_id` and every offer's credentials by `credentialId` and instance,
+    their answers and bound entries, its additions and display (A4); and the consent view with
+    cards, claim rows, proof statement rows, additions, transactions and whether an offer needs
+    the wallet's display (A9). The plan asks the host for each type metadata fetch. A nym_auth
+    request must be signed, trusted and encrypted, and its `verifier_id` comes from the
+    authenticated certificate (N2).
+  - One Credential Query refused with `invalid_request` refuses the whole request
+    (`Answered::invalid_request`): a malformed `aki` value (`QueryRefusal::Authorities`), and a
+    `zkp_req` query that breaks a request rule, the catalogue or the nym_auth policy. A query
+    excludes a credential of its format and type, with its `Exclusion`, when the authorities
+    refuse its issuer, its claims path processing gives an error, or it answers no option of a
+    `zkp_req` query. A request without an offer gives its `Failure`: the refused query and why,
+    the credentials the first query without candidates excludes and why (`excluded`), or no
+    combination.
+  - Phase 2 parses the selection against the plan made again, with the non-empty subset of each
+    `multiple` member by `credentialId`, kept in the member's order. A selection that leaves out
+    the credential an entry binds to is refused, and phase 2 binds the entries to the
+    credentials the view named. `Planned::picked` makes the selection from the credential picker
+    entries the user picked, each naming its offer, query and `credentialId` (K3). Phase 2 gives
+    a `Sign` effect per signing input, verifies each signature under the instance's holder key
+    (A5), and gives one `vp_token` (A8), its submission for the request's Response Mode and the
+    presentation record. It proves `zkp_req` in-process through a `NymAuthProver`. A decline,
+    and a background fulfilment of an offer that needs the wallet's display, give
+    `access_denied`.
+  - Positions and identifiers are their own types (`QueryIndex`, `CandidateIndex`, `SetIndex`,
+    `OfferIndex`, `AdditionIndex`, `EntryPosition`, `PlanDigest`, `SignId`, and DCQL's
+    `QueryId`), and so are A9's facts. `Fetches` is the one store of the host's responses, and a
+    second answer to a URL is refused. Without the default feature `wallet` it holds the
+    matching the picker runs, over `MatchCredential`, links no chain validation or response
+    crypto, and builds with Rust 1.82.
 - The `proving/` workspace: `siros-zkp-backend-longfellow` and `siros-zkp-backend-vega`
   implement the prover and verifier of each system over zk-cred-longfellow and zk-cred-vega,
   and check the circuit artifact the host fetched against its pin. CI runs real proofs of both
@@ -394,9 +337,18 @@ against the 307,200-byte budget (303,914 before).
 - FFI module `zkp_req`: `zkp_req_session`, `zkp_req_jwk_thumbprint`, `zkp_req_vp_token_json`,
   `zkp_req_vp_token_cbor`, and `zkp_req_verify` with a host-implemented `FfiProofVerifier`,
   whose `FfiProofCheck::Internal` reports a verifier that failed on its own inputs.
+  `zkp_req_session` refuses, as `invalid_request`, a `client_id` that is no supported Client
+  Identifier (its `ClientIdError` code) and a `nonce` outside the ASCII URL-safe characters
+  (`nonce_malformed`), for both `verifier_id` forms; an absent or non-string `nonce` is
+  `nonce_missing`. `zkp_req_verify` refuses a trust anchor that does not parse, a clock outside
+  the years 0000 to 9999 and a negative tolerance as host errors (`now_out_of_range`,
+  `tolerance_out_of_range`), and `zkp_req_vp_token_json` and `zkp_req_vp_token_cbor` refuse a
+  query id outside §6.1. No FFI function produces a nym_auth proof until the facades wave
+  exposes the wallet's plan.
 - `siros-zkp-req-wasm` (in `proving/`), the browser module with both provers on one thread:
   `ZkpProvers` loads the artifacts and names the loaded systems, and `vpTokenJson` writes the
-  `vp_token`. CI lints and builds it for `wasm32-unknown-unknown` and checks its imports.
+  `vp_token`. CI lints and builds it for `wasm32-unknown-unknown` and checks its imports. No
+  browser export produces a nym_auth proof until the facades wave.
 - Vectors: 49 protocol request vectors (`crates/siros-zkp-req/tests/vectors/request`), 72
   catalogue request vectors and 149 presentation vectors
   (`crates/siros-zkp-req-nym-auth/tests/vectors/`, the latter from
