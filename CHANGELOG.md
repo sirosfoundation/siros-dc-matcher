@@ -217,17 +217,18 @@ against the 307,200-byte budget (303,418 at v0.11.0).
     `Description` follows the directional rule alone. A `display` entry whose `display_type` is
     no label format leaves its array (View, Section 3). The structural rules refuse with a
     `DefinitionError`.
-  - Sources, each a parser into that form. For one entry and credential: the entry's ad-hoc
-    metadata JWT (Section 5.3); else the credential's own metadata, its signed credential
-    metadata JWT (Sections 4 and 7: ES256 or ES384, an `x5c` chain to the credential's root with
-    its leaf's Subject, or a `kid` of the issuer's JWT VC issuer metadata) or its TS12 SCA type
-    metadata, which declares every type the credential supports (`TypeUndeclared`); else, for a
-    credential known to have no metadata of its own, the host's `Configuration`: a `vct` that is
-    no `https` URL, or Type Metadata held without SCA types or recorded as absent. Type Metadata
-    neither held nor recorded absent (`Ts12Fault::NotHeld`), issuer metadata the host does not
-    hold (`IssuerMetadataNotHeld`), and signed credential metadata that is not held or not valid
-    exclude the credential for every entry, an ad-hoc JWT included; a failed ad-hoc JWT makes
-    its entry incompatible.
+  - Sources, each a parser into that form. For one entry and credential: the entry's ad-hoc metadata
+    JWT (Section 5.3); else the credential's own metadata, its signed credential metadata JWT
+    (Sections 4 and 7: ES256 or ES384, an `x5c` chain to the credential's root with its leaf's
+    Subject, or a `kid` of the issuer's JWT VC issuer metadata) or the `transaction_data_types` of
+    its TS12 type metadata, which declare every type the credential supports (`TypeUndeclared`):
+    none outside the SCA category, and the SCA category requires them; else, for a credential known
+    to have no metadata of its own, the host's `Configuration`: a `vct` that is no `https` URL and
+    that `vct#integrity` does not pin (`Ts12Fault::VctNotHttps`), or Type Metadata without
+    `transaction_data_types` or recorded as absent. Type Metadata neither held nor recorded absent
+    (`Ts12Fault::NotHeld`), issuer metadata the host does not hold (`IssuerMetadataNotHeld`), and
+    signed credential metadata that is not held or not valid exclude the credential for every entry,
+    an ad-hoc JWT included; a failed ad-hoc JWT makes its entry incompatible.
   - Metadata is input: `HeldMetadata` holds the signed credential metadata JWTs, Type Metadata
     with the documents it references, and issuer key sets, which the host fetches and renews
     outside presentations, and records a URL whose fetch answered 404 as absent
@@ -246,26 +247,31 @@ against the 307,200-byte budget (303,418 at v0.11.0).
     CS-12's string, and a TS12 rulebook requires it. `check_request` refuses an unsigned
     request with a PaSO-targeted entry (Core, Section 3), and targeted queries outside one
     credential set or alternatives that are not transposable (Section 7.4.1).
-  - `Selector::first_match` over a credential's `Definitions`, and `Context::first_match` over
-    the wallet's sources, give each candidate credential its first compatible entry (Section
-    7.4.2): a supported type, a conforming payload (`PayloadFault`: `#integrity` companions
-    only beside image claims and as strings, a mandatory claim in every element its `null`
-    ranges over and an empty array holding none, an `iso_currency_amount` with its minor unit's
-    digits), at most 200 items counted before any image is fetched, verified images
-    (`VerifiedImage`: Data URLs of PNG, JPEG and SVG, `https` URLs pinned by `#integrity` and
-    fetched through the host with at most 3 redirects, 512 KiB, 2048 pixels), and a full
-    rendering (`TransactionView`: rows in claims order, `template:` values as `Segment`s of text
-    and typed values; the UI checks each label again once formatted). An SVG document passes
-    only within a static subset: allowlisted elements of the SVG namespace with their
-    attributes, CSS read by a CSS Syntax 3 tokenizer with the at-rules `@font-face` and
-    `@media` and known functions (`CssFault`), and each URL a fragment of the document, a Data
-    URL of a PNG or JPEG image, or an `https` URL pinned in its fragment. At most
-    `MAX_RESOURCES` (8) pinned resources are fetched, each a PNG or JPEG image within the image
-    limits or a font. The host renders the image statically and loads nothing outside its
-    resources. Under a TS12 rulebook an image
-    that does not verify is left out (`TransactionView::absent_images`). Every reason an entry
-    does not serve a credential is an `Incompatibility`. A PaSO-sourced definition needs a
-    signed request; a TS12 type in an unsigned request carries `UnsignedWarning::Required`.
+  - `Selector::first_match` over a credential's `Definitions`, and `Context::first_match` over the
+    wallet's sources, give each candidate credential its first compatible entry (Section 7.4.2): a
+    supported type, a conforming payload (`PayloadFault`: `#integrity` companions only beside image
+    claims and as strings, a mandatory claim in every element its `null` ranges over and an empty
+    array holding none, an `iso_currency_amount` with its minor unit's digits), at most 200 items
+    counted before any image is fetched, verified images (`VerifiedImage`: Data URLs of PNG, JPEG
+    and SVG, `https` URLs pinned by `#integrity` and fetched through the host with at most 3
+    redirects, 512 KiB, 2048 pixels), and a full rendering (`TransactionView`: rows in claims order,
+    `template:` values as `Segment`s of text and typed values; the UI checks each label again once
+    formatted). An SVG document passes only within a static subset: elements nested at most
+    `MAX_DEPTH` (128) levels, counted before the parse; a DOCTYPE without an internal subset;
+    allowlisted elements of the SVG namespace with their attributes, drawing programs' editing data,
+    and RDF inside `metadata`; CSS read by a CSS Syntax 3 tokenizer with the at-rules `@charset`,
+    `@font-face` and `@media` and known functions, no `var()` inside a function that takes URLs and
+    no string or URL in a custom property (`CssFault`); and each URL a fragment of the document, a
+    Data URL, or an `https` URL pinned in its fragment. A Data URL's content and each fetched
+    resource pass as a PNG or JPEG image within the image limits or as a font whose header and table
+    directory read (`FontFault`). At most `MAX_RESOURCES` (8) URLs are fetched, each once without
+    its fragment, with `Accept` `MediaType::RESOURCES`, and checked against every integrity value
+    the document gives it; a `Resource` holds that URL and its `ResourceKind`. The host renders the
+    image statically and answers the renderer's request for a resource's URL with it, as its kind;
+    it loads nothing else. Under a TS12 rulebook an image that does not verify is left out
+    (`TransactionView::absent_images`). Every reason an entry does not serve a credential is an
+    `Incompatibility`. A PaSO-sourced definition needs a signed request; a TS12 type in an unsigned
+    request carries `UnsignedWarning::Required`.
   - `Binding::kb_jwt_claims` gives the KB-JWT claims of the entry a credential binds:
     `transaction_data_hashes` over the entry as received, `transaction_data_hashes_alg` when
     the entry carried it, and under a TS12 rulebook `jti`, `response_mode` and `amr`.
