@@ -23,12 +23,13 @@ mod differential;
 mod paso;
 mod sides;
 
-/// Build (if needed) and load the matcher binary under test.
+/// Build (if needed) and load the matcher binary under test: the artifact `make matcher`
+/// writes, stripped and optimized as it ships.
 ///
-/// Builds on demand rather than assuming a prior `cargo build`, so a bare
+/// Builds on demand rather than assuming a prior `make matcher`, so a bare
 /// `cargo test` in a fresh checkout exercises the real artifact instead of
 /// quietly skipping. Cached per test binary — every test needs the module, and
-/// spawning Cargo once per test costs seconds even when the build is a no-op.
+/// spawning the build once per test costs seconds even when it is a no-op.
 pub fn matcher_wasm() -> &'static [u8] {
     static WASM: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
     WASM.get_or_init(build_matcher_wasm)
@@ -41,7 +42,7 @@ fn build_matcher_wasm() -> Vec<u8> {
         .expect("workspace root");
     let wasm = root.join("target/wasm32-wasip1/wasm-release/matcher.wasm");
 
-    let out = Command::new(env!("CARGO"))
+    let out = Command::new("make")
         .current_dir(&root)
         // The parent's compiler flags must not reach this build. Under
         // `cargo llvm-cov` they carry `-C instrument-coverage`, which
@@ -56,20 +57,12 @@ fn build_matcher_wasm() -> Vec<u8> {
         .env_remove("CARGO_ENCODED_RUSTFLAGS")
         .env_remove("RUSTDOCFLAGS")
         .env_remove("CARGO_ENCODED_RUSTDOCFLAGS")
-        .args([
-            "build",
-            "-p",
-            "siros-picker",
-            "--target",
-            "wasm32-wasip1",
-            "--profile",
-            "wasm-release",
-        ])
+        .arg("matcher")
         .output()
-        .expect("running cargo build for the wasm target");
+        .expect("running make matcher");
     assert!(
         out.status.success(),
-        "could not build matcher.wasm — is the wasm32-wasip1 target installed?\n{}",
+        "could not build matcher.wasm — are the wasm32-wasip1 target and `make wasm-opt` installed?\n{}",
         String::from_utf8_lossy(&out.stderr)
     );
 

@@ -1,6 +1,7 @@
 # siros-dc-matcher — UniFFI bindings, native packaging, and the matcher binary.
 #
 #   make matcher        — build matcher.wasm (the artifact wallets register)
+#   make wasm-opt       — install the pinned wasm-opt that `make matcher` runs
 #   make bindings       — generate Kotlin + Swift bindings
 #   make android        — cross-compile the FFI library for Android
 #   make aar            — package the Android AAR
@@ -31,7 +32,7 @@ IOS_TARGETS     := aarch64-apple-ios
 IOS_SIM_TARGETS := aarch64-apple-ios-sim x86_64-apple-ios
 export IPHONEOS_DEPLOYMENT_TARGET ?= 16.0
 
-.PHONY: all matcher bindings bindings-kotlin bindings-swift android aar pom \
+.PHONY: all matcher wasm-opt bindings bindings-kotlin bindings-swift android aar pom \
         publish-local ios xcframework check-bindings clean
 
 all: matcher bindings
@@ -61,7 +62,23 @@ else
   REMAP_LAST  := $(CARGO_HOME_DIR)=/cargo
 endif
 
+# The optimizer `make matcher` runs after the strip: binaryen version_116, the wasm-opt crate
+# 0.116.1. Another binaryen writes other bytes, so the build refuses it. The features are those
+# rustc enables on wasm32-wasip1.
+WASM_OPT_CRATE    := 0.116.1
+WASM_OPT_VERSION  := wasm-opt version 116 (version_116)
+WASM_OPT_FEATURES := --enable-bulk-memory --enable-sign-ext --enable-mutable-globals \
+                     --enable-nontrapping-float-to-int --enable-multivalue --enable-reference-types
+
+wasm-opt:
+	@if [ "$$(wasm-opt --version 2>/dev/null)" != "$(WASM_OPT_VERSION)" ]; then \
+	  cargo install --locked wasm-opt --version $(WASM_OPT_CRATE); \
+	fi
+	@test "$$(wasm-opt --version)" = "$(WASM_OPT_VERSION)"
+
 matcher:
+	@test "$$(wasm-opt --version 2>/dev/null)" = "$(WASM_OPT_VERSION)" || \
+	  { echo "make matcher runs $(WASM_OPT_VERSION): make wasm-opt installs it" >&2; exit 1; }
 	set -eu; \
 	us=$$(printf '\037'); \
 	base="$${CARGO_ENCODED_RUSTFLAGS:-$$(printf '%s' "$${RUSTFLAGS:-}" | tr -s ' ' | sed 's/^ //; s/ $$//' | tr ' ' "$$us")}"; \
@@ -77,6 +94,8 @@ matcher:
 	# out as local no-ops is cheap insurance against ever finding out the
 	# hard way. See the script for what it rewrites and how.
 	python3 scripts/strip_wasi_environ.py $(MATCHER_WASM) $(MATCHER_WASM).tmp
+	mv $(MATCHER_WASM).tmp $(MATCHER_WASM)
+	wasm-opt -Oz $(WASM_OPT_FEATURES) $(MATCHER_WASM) -o $(MATCHER_WASM).tmp
 	mv $(MATCHER_WASM).tmp $(MATCHER_WASM)
 	@ls -l $(MATCHER_WASM)
 

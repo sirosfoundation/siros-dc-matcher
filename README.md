@@ -32,10 +32,13 @@ Released artifacts are on the
 
 ## Build and test
 
-Rust, pinned exactly in `rust-toolchain.toml` (rustup installs it on first use), plus the wasm target:
+Rust, pinned exactly in `rust-toolchain.toml` (rustup installs it on first use), plus the wasm
+target, and binaryen's `wasm-opt` version_116 (the `wasm-opt` crate 0.116.1), the one optimizer
+`make matcher` runs:
 
 ```sh
 rustup target add wasm32-wasip1
+make wasm-opt
 ```
 
 Then:
@@ -48,10 +51,9 @@ make matcher                            # target/wasm32-wasip1/wasm-release/matc
 `cargo test` covers the matcher binary too, not just the libraries.
 `siros-picker-testhost` is a wasmtime host implementing the Credential
 Manager ABI, so `crates/siros-picker-testhost/tests/matcher_wasm/` drives the same `.wasm` a device
-would run. It builds the module on demand, so `make matcher` is not a
-prerequisite — but without the wasm target installed those tests **fail**,
-deliberately, rather than skipping and reporting a green run that checked
-nothing.
+would run. It runs `make matcher` on demand — but without the wasm target or the pinned
+`wasm-opt` those tests **fail**, deliberately, rather than skipping and reporting a green run
+that checked nothing.
 
 Before pushing, what CI will check:
 

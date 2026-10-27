@@ -33,16 +33,19 @@ jobs:
       # carrying exactly the two imports the host's WASI subset may not
       # provide, where a missing import traps when called, with no error
       # surface at all.
+      - run: make wasm-opt
       - run: make matcher
 
       # This binary runs inside other people's credential picker. "Built from
       # this commit" has to be something they can check, so the digest is
-      # recorded in the release rather than left implicit.
+      # recorded in the release rather than left implicit, with the rustc and
+      # the binaryen that wrote it.
       - name: Record digest
         run: |
           cp target/wasm32-wasip1/wasm-release/matcher.wasm .
           sha256sum matcher.wasm | tee matcher.wasm.sha256
           echo "toolchain: $(rustc --version)" | tee -a matcher.wasm.sha256
+          echo "binaryen: $(wasm-opt --version)" | tee -a matcher.wasm.sha256
 
       # The published artifact and the one inside the AAR are built by separate
       # jobs from the same commit. They must be the same bytes; checking is
@@ -159,6 +162,7 @@ jobs:
       # The AAR carries both the native library and matcher.wasm, at one
       # version. The picker reads the registration of siros-registration; the
       # FFI writes the v1 blob.
+      - run: make wasm-opt
       - run: make aar pom
 
       - name: Publish to GitHub Packages
@@ -284,8 +288,18 @@ jobs:
         with:
           name: xcframework
           path: artifacts/
+      # The notes name the rustc and the binaryen that built matcher.wasm, with
+      # its digest.
+      - name: Release notes
+        run: |
+          {
+            echo "matcher.wasm, its digest and the tools that built it:"
+            echo
+            sed 's/^/    /' artifacts/matcher.wasm.sha256
+          } > notes.md
       - uses: softprops/action-gh-release@c12583777ecdfd3be55c69cf75464299dc01057e # v3
         with:
+          body_path: notes.md
           generate_release_notes: true
           files: |
             artifacts/matcher.wasm

@@ -26,10 +26,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      # The test host's integration tests build and run the real matcher.wasm,
-      # so the target has to be present for `cargo test` to mean anything.
+      # The test host's integration tests build and run the real matcher.wasm
+      # with `make matcher`, so the target and the pinned wasm-opt have to be
+      # present for `cargo test` to mean anything.
       - uses: ./.github/actions/rust-toolchain
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - run: make wasm-opt
       - run: cargo test --locked --workspace --all-features
 
   fmt:
@@ -62,8 +64,11 @@ jobs:
       - uses: ./.github/actions/rust-toolchain
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       # `make matcher`, so the module checked below is the one that ships —
-      # a bare `cargo build` leaves the `environ_*` imports in, and then the
-      # ABI check and the size budget both measure a file no wallet runs.
+      # a bare `cargo build` leaves the `environ_*` imports in and skips
+      # wasm-opt, and then the ABI check and the size budget both measure a
+      # file no wallet runs. `make wasm-opt` installs the one binaryen version
+      # `make matcher` accepts.
+      - run: make wasm-opt
       - run: make matcher
 
       # The host links a module whose imports it lacks, and the matcher traps
