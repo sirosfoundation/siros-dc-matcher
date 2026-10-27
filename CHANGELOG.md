@@ -16,7 +16,7 @@ commit `e65861c`), and adds the components of the SIROS wallet core. **Breaking*
 presentations follow the draft, the DCQL parse enforces OpenID4VP 1.0, Section 6, the FFI loses
 `zkp_req_plan`, and the vectors move to the crates that own their rules. Consumers that keep a
 copy of the vectors (siros-sdk-kotlin, siros-sdk-swift) must re-copy them from the new
-directories; the vector set digest below identifies them. `matcher.wasm` is 295,552 bytes
+directories; the vector set digest below identifies them. `matcher.wasm` is 295,545 bytes
 against the 307,200-byte budget (303,418 at v0.11.0).
 
 ### Changed
