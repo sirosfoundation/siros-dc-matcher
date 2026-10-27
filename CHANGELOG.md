@@ -74,8 +74,8 @@ against the 307,200-byte budget (303,418 at v0.11.0).
 - `source()` returns the cause a variant holds. It returned `None` in `ChoiceError`,
   `CredentialError`, `DisplayError`, `EncodingError`, `FormError`, `HandoverInvalid`,
   `IntakeError`, `InvalidRequest`, `MdocError`, `PresentationError`, `ProveError`,
-  `QueryRefusal`, `Rejection`, `RequestRefusal`, `TransactionDataError`, `Unproven`, `Unusable`,
-  `WalletStateError` and `ZkpRefusal`.
+  `QueryRefusal`, `Rejection`, `RequestRefusal`, `ResponseError`, `TransactionDataError`,
+  `Unproven`, `Unusable`, `WalletStateError` and `ZkpRefusal`.
 
 ### Fixed
 
