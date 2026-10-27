@@ -99,7 +99,7 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
 - **H1.** It MUST execute every `Fetch` effect within its constraints: HTTPS only, public addresses only, no redirects, the stated size cap and timeout.
 - **H2.** It MUST answer `Trust` effects with the AuthZEN verdict for the stated subject and key material.
 - **H3.** It MUST sign exactly the bytes a `Sign` effect states, with the key it names, and report that key's authentication factors (`amr`) before signing.
-- **H4.** It MUST supply the decrypted wallet state, the display metadata it holds, the user's locale preferences, the current time, the circuit artifacts it ships, and the trust store it provisions (TR1, TR4).
+- **H4.** It MUST supply the decrypted wallet state, the display and transaction metadata it holds (signed credential metadata JWTs, type metadata and referenced documents, issuer key sets, each with the URL it was fetched from, and the URLs it observed absent), the wallet's language, the current time, the circuit artifacts it ships, and the trust store it provisions (TR1, TR4).
 - **H5.** It MUST append the presentation record the core returns as a `new_presentation` event (privatedata §6).
 - **H6.** It MUST render the views the core returns and return the user's selection.
 - **H7.** It MUST NOT interpret protocol data, choose credentials, choose claims, choose a proof system, or build a presentation.
@@ -259,42 +259,32 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
 
 **Requirements:**
 - **D1.** It is the only metadata merger: it MUST remove `auxiliary_data` before any merge (privatedata §5A.3).
-- **D2.** Locale choice MUST be: exact tag, then primary language, then the first entry.
+- **D2.** Each display array MUST resolve by PaSO View §4: RFC 4647 Lookup with the wallet's language, then the entry without `locale`. The format-specific display falls back to `credential_metadata` per language (D3). One function serves credential display and transaction data.
 - **D3.** Format-specific display (SD-JWT VC type metadata) wins over OpenID4VCI `credential_metadata`, which is the fallback (OpenID4VCI 1.0 §12.2.4).
 - **D4.** Values MUST be typed for display (null, text, boolean, integer, number, date, date-time, bytes, list, group). The UI formats dates and numbers for its locale.
-- **D5.** Bytes are shown only by their length. No metadata in the ecosystem declares a claim as an image: vc's MDDL types the mDL portrait as `bstr`, and SD-JWT VC type metadata and OpenID4VCI 1.0 claims carry no value type.
+- **D5.** A credential claim's bytes are shown by their length.
 
 ### 4.12 Transaction data
 
-**Responsibility:**
-- the `transaction_data` request parameter (§5.1) and its error conditions (§8.5);
-- the registry of supported transaction data types;
-- what each type binds into a presentation (§8.4).
+**Responsibility:** the `transaction_data` request parameter (§5.1), transaction data type definitions and their sources, their projection to the wallet's language, the selection of one entry per credential, the generic rendering, images, and the bindings (§8.4). The model is PaSO draft-2 (Core, View, Proof Metadata, the SVG module).
 
 **Requirements:**
-- **T1.** An entry MUST be parsed from base64url JSON with no duplicate keys, a string `type`, and a non-empty `credential_ids` that names DCQL query ids. Every other member belongs to the type.
-- **T2.** Each type MUST be one implementation that owns five things:
-  - parsing its members into typed values, which enforces the §8.5 conditions (unknown fields, wrong types, invalid values, missing fields);
-  - which credentials can authorize it;
-  - its display;
-  - its bindings per credential format: a KB-JWT claim (B.3.3), the hashes profile (B.3.3.1), or a `DeviceSigned` element (B.2.1);
-  - the extra KB-JWT claims its specification requires.
-- **T3.** The B.3.3.1 profile is one binding a type MAY adopt. It hashes each entry's string exactly as received. The algorithm is one listed in `transaction_data_hashes_alg`, or `sha-256` when absent, and is shared by the entries bound to one credential. `transaction_data_hashes_alg` is returned when the request carried it.
-- **T4.** An entry MUST bind to exactly one presented credential: the first of its `credential_ids` that the chosen offer answers with a credential the type authorizes (§5.1). The binding MUST name that credential by its `credentialId` and instance. The view shows it, the plan digest covers it, and phase 2 binds by it. A selection that leaves the named credential out is an error.
-- **T5.** An SD-JWT member whose query sets `require_cryptographic_holder_binding: false` MUST NOT carry a binding (B.3.3).
-- **T6.** The supported types are the four TS12 v1.0.1 types:
-  - `urn:eudi:sca:payment:1`
-  - `urn:eudi:sca:login_risk_transaction:1`
-  - `urn:eudi:sca:account_access:1`
-  - `urn:eudi:sca:emandate:1`
-
-  For each of them:
-  - SD-JWT VC only (§1.2);
-  - `transaction_data_hashes_alg` and `payload` required (§4.2), and `transaction_id` required in every payload (§4.3);
-  - payloads parsed into typed values equivalent to the TS12 schemas;
-  - bindings: the B.3.3.1 hashes plus the KB-JWT claims `jti` (fresh), `response_mode` and `amr` (§3.6);
-  - display fails closed on a missing localised name or `affirmative_action_label`, and on control, format or bidi characters or over-long strings.
-- **T7.** Type metadata and referenced documents arrive as host fetches under the H1 constraints.
+- **T1. Entry.** An entry MUST be parsed from base64url JSON with no duplicate keys: a string `type`, a non-empty `credential_ids` naming DCQL query ids, a `payload`, and an optional ad-hoc `metadata` JWT. `transaction_data_hashes_alg` is a JSON array (§5.1) or a single string, read as a one-element list.
+- **T2. Definitions.** A definition is a PaSO `transaction_data_types` entry (Proof Metadata §3): claims with a payload path, `mandatory`, `value_type` and `display`, and `ui_labels`. Its parse checks every locale, with the limits of its source: PaSO §3.3 for PaSO and configured definitions, TS12 §3.3.3 for TS12 ones. The sources, for one type and credential:
+  - ad-hoc metadata in the entry, verified per Proof Metadata §5.3; a failure makes that entry incompatible, with no fallback;
+  - the credential's own metadata: a PaSO signed credential metadata JWT, verified at every load (§7, and §8 against the URL it was fetched from), or TS12 v1.0.1 SD-JWT VC type metadata with its `#integrity` pins. Invalid or unheld metadata excludes the credential for every entry;
+  - the host configuration: a definition and the credential types (`vct`, doctype) it applies to. It serves only credentials without transaction metadata of their own; an https `vct` whose metadata the host neither holds nor observed absent is an error.
+- **T3. Projection.** A definition is projected to the wallet's language (D2): each array keeps the entry its locale selects, and a type with an unmatched array is unsupported by the credential. The projection removes the other locales and keeps everything else, with its source kind and rulebook, and serializes canonically.
+- **T4. Selection** (PaSO Core §7.4):
+  - the query ids the entries target lie in one credential set, and its alternatives are transposable;
+  - each candidate credential takes the first entry, in array order, that targets it, whose type it supports, whose payload conforms (Core §7.4.2, View §3), and whose resources verify; a credential without one is excluded;
+  - an entry that no chosen credential takes stays unused; a type that no source defines for any candidate is `TypeUnknown`;
+  - the binding names the credential by `credentialId` and instance; the view shows it, the plan digest covers it with its source and rulebook, and phase 2 binds by it.
+- **T5. Rendering** follows View §2: claims order, the `null` rule, single-pass templates carried as typed segments, at most 200 items counted before any image is fetched, `security_hint` as given. The UI re-checks each formatted label's limit. An entry that cannot render in full is incompatible.
+- **T6. Images.** A Data URL is admitted by its bytes and a matching media type. An `https` URL needs its `#integrity` sibling, is fetched through `Fetch` with at most 3 redirects, and is verified (SRI, 512 KiB, 2048 px). An SVG is admitted only within an allowlist of static SVG; each URL inside it is a fragment, a PNG or JPEG Data URL, or a pinned https resource checked by signature (SVG module §3). The view carries the verified bytes. Under the TS12 rulebook an image that does not verify is left out.
+- **T7. Output.** Transaction data binds into SD-JWT VC only. A query that sets `require_cryptographic_holder_binding: false` refuses the request (B.3.3). A KB-JWT carries the B.3.3.1 hashes of the entries bound to its credential, over each entry string as received, with one algorithm; `transaction_data_hashes_alg` is returned when the request carried it. The TS12 v1.0.1 rulebook adds `jti`, `response_mode` and `amr`.
+- **T8. Signed requests.** An entry a PaSO-sourced definition serves requires a signed request (Core §3). An unsigned request with TS12 entries carries TS12's warning in the view.
+- **T9. Metadata is input.** The plan fetches no metadata (Proof Metadata §6, §8). The host holds and renews it outside presentations; the core gives it the verification of a fetched JWT and the list of documents it still wants.
 
 ### 4.13 Presentation
 
@@ -316,7 +306,7 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
 - **A3. Offers.**
   - Each combination of the required credential sets is an offer.
   - Optional sets are additions the user may choose on top of an offer, at most one option per set.
-  - When no member of an offer can carry a transaction entry, an optional set whose credentials can carry it joins the offer as members (OpenID4VP §8.4). Each such set gives its own offer. Joining repeats until every entry is carried, at most one option per set; an offer that cannot carry every entry is dropped. Joined offers count against the same examination limit as the others, and two offers with the same members are one offer.
+  - Each member a transaction entry targets holds the entry T4 selects for it.
   - When every set is optional, each option is an offer.
   - Each member names its query, its instance (C5), its answer (SD-JWT pointers, mdoc elements, or the `zkp_req` system, backend and option) and the transaction entries bound to it (T4).
   - The member of a `multiple` query holds every candidate. The selection chooses a non-empty subset of them, naming each chosen credential by its `credentialId`.
@@ -334,7 +324,7 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
   - The presentation record names exactly the instances used.
 - **A9. Wallet display.** An offer needs the wallet's display unless all of these hold:
   - every member credential is registered as presentable without the wallet's UI (the wallet declares it per credential: its key signs without user interaction and its background service answers);
-  - the request carries no `transaction_data` (a type renders it in the wallet, T2);
+  - the request carries no `transaction_data` (the wallet renders it, T5);
   - every disclosed claim and every proof statement of the offer has a display row, and no row is clipped;
   - the offer has no optional additions to choose, and no `multiple` query with more than one candidate.
 
@@ -359,8 +349,8 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
 - the registration projection the wallet writes for it.
 
 **Requirements:**
-- **K1.** The projection MUST hold, per credential: entry reference, format, type, the typed claim tree minus undisclosable attributes, card and labels, and the issuer facts of TR5. It also holds the available system ids, and is versioned. It MUST NOT hold delivered or derived secrets (R-G6).
-- **K2.** The picker MUST run the presentation component's matching over an `UnverifiedRequest`. For the same request, credentials, trust store and time, it MUST give the offers the wallet's plan gives, except where the wallet's plan depends on what the projection leaves out: the `zkp_req` credential tests that read undisclosable attributes (N3, for example the `age_check` bounds against `birth_date`), the delivered seed (N4), and the validity at request time of the certificates that admit an issuer (TR5). The wallet refuses such an offer with `access_denied` (A9 applies to it as to any other).
+- **K1.** The projection MUST hold, per credential: entry reference, format, type, the typed claim tree minus undisclosable attributes, card and labels in the wallet's language, the issuer facts of TR5, and the transaction definitions it supports, projected (T3). Each projected definition is stored once and credentials reference it. It also holds the available system ids, and is versioned. It MUST NOT hold delivered or derived secrets (R-G6).
+- **K2.** The picker MUST run the presentation component's matching over an `UnverifiedRequest`. For the same request, credentials, trust store and time, it MUST give the offers the wallet's plan gives, except where the wallet's plan depends on what the projection leaves out: the `zkp_req` credential tests that read undisclosable attributes (N3, for example the `age_check` bounds against `birth_date`), the delivered seed (N4), the validity at request time of the certificates that admit an issuer (TR5), ad-hoc transaction metadata, and remote images (T6). The wallet refuses such an offer with `access_denied` (A9 applies to it as to any other).
 - **K3.** Each picker entry's metadata MUST carry the offer, the query id and the `credentialId` of its credential. The wallet builds the selection from the picked entries' ids after its own verified plan. A picked id that the plan's offer does not hold is an error.
 - **K4. Delegation.** The picker MUST send `Full` delegation (Credential Manager keeps its UI and the wallet fulfils from its background service) for the entries of an offer that needs no wallet display, and no delegation otherwise. Every entry of one set gets the same type. The rule is A9's, applied with the host's display level: an offer that the host displayed only in part (`display_skipped`) needs the wallet's display.
 
@@ -402,7 +392,7 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
 
   An entry of any other type admits nothing. A malformed `aki` value makes the query invalid. Admission MUST be the constructor of an `AdmittedIssuer` witness that names the query and the chain's first certificate.
 - **TR4. Provision.** The host supplies the store (H4). The core fetches no list, federation statement or certificate. The store is global, the same for every request and channel, because the DC API gives the picker nothing per request.
-- **TR5. Picker facts.** At registration the wallet resolves each credential against the store. The projection records the credential's AKI keyIdentifiers and the `type` and `value` of every store entry that admits it. The picker admits an issuer from these facts alone, with the same rule. The picker has no clock: its facts hold at registration time (K2). The wallet registers again when the store or the wallet state changes.
+- **TR5. Picker facts.** At registration the wallet resolves each credential against the store. The projection records the credential's AKI keyIdentifiers and the `type` and `value` of every store entry that admits it. The picker admits an issuer from these facts alone, with the same rule. The picker has no clock: its facts hold at registration time (K2). The wallet registers again when the store, the wallet state, the wallet's language or a credential's metadata changes.
 
 ## 5. Boundary contracts
 
@@ -495,6 +485,7 @@ The core meets this document when all of the following hold:
 | Issuer trust: the core owns the store's format and the resolution; the host provisions one global store | Owner's decision, 2026-10-26; the DC API picker receives nothing per request. AuthZEN issuer evaluation stays a hook, to be built in the core when it is taken up |
 | DCQL holds the shared request vocabulary; codec holds the shared internals | Owner's decision, 2026-10-27; one newtype per value across L1 |
 | TR3 applies RFC 5280's keyCertSign, pathLenConstraint and critical-extension rules, and admits a store-listed issuer certificate | Owner's decision, 2026-10-27; the wallet offers only what a verifier's path validation admits |
+| Transaction data follows PaSO draft-2: one definition form, sources by precedence, one wallet language, first match per credential, TS12-compatible output | Owner's decision, 2026-10-27; the configuration serves only credentials without metadata of their own |
 | The picker's issuer facts hold at registration time | Owner's decision, 2026-10-27; `matcher.wasm` has no clock. The wallet refuses an offer whose issuer is no longer admitted |
 
 **Open:** none.
