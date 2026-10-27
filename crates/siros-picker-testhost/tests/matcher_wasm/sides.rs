@@ -5,6 +5,7 @@ use android_credman::Picked;
 use serde_json::Value;
 use siros_codec::date::DateTime;
 use siros_display::Field;
+use siros_oid4vp::Verdict;
 use siros_presentation::testing::host::label_text;
 use siros_presentation::testing::verifier::{dc_api_intake, intake_with, NOW, ORIGIN};
 use siros_presentation::testing::wallet::Wallet;
@@ -53,7 +54,7 @@ pub struct Presented {
 /// The request intake verifies of the DC API request `request`, the host trusting every
 /// verifier; `None` when intake refuses it.
 pub fn intake(request: &[u8]) -> Option<siros_oid4vp::VerifiedRequest> {
-    intake_with(dc_api_intake(request), true).ok()
+    intake_with(dc_api_intake(request), Verdict::Trusted).ok()
 }
 
 /// The offers of the wallet's plan, as its consent view shows them; `entries` are the

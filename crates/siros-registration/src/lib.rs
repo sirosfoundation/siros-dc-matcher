@@ -8,7 +8,7 @@
 //! | K2: the picker's transaction data selection over the projected definitions, deferring ad-hoc metadata and remote images to the wallet | [`Unverified`] |
 //! | R-G6: no delivered or derived secret, no undisclosable attribute | [`write()`] reads no auxiliary data and removes the undisclosable attributes |
 //!
-//! The format is CBOR, read strictly: a reader refuses every version but [`VERSION`], every
+//! The format is CBOR, read strictly: a reader refuses every version but [`Version::CURRENT`], every
 //! member it does not define, and every reference outside its tables. The wallet registers the
 //! projection with the matcher it ships, so the two versions are one.
 //!
@@ -40,7 +40,7 @@ pub use error::{CredentialFault, Member, RegistrationError};
 pub use ids::{CredentialIndex, DefinitionIndex, IconIndex};
 pub use registration::{
     Diagnostics, Icon, IconEmpty, RegisteredCard, RegisteredCredential, RegisteredType,
-    Registration, VERSION,
+    Registration, Version,
 };
 pub use selection::Unverified;
 #[cfg(feature = "wallet")]

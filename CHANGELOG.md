@@ -16,9 +16,9 @@ commit `e65861c`), and adds the components of the SIROS wallet core. **Breaking*
 presentations follow the draft, the DCQL parse enforces OpenID4VP 1.0, Section 6, the FFI loses
 `zkp_req_plan`, and the vectors move to the crates that own their rules. Consumers that keep a
 copy of the vectors (siros-sdk-kotlin, siros-sdk-swift) must re-copy them from the new
-directories; the vector set digest below identifies them. `matcher.wasm` is 493,764 bytes, over
+directories; the vector set digest below identifies them. `matcher.wasm` is 493,805 bytes, over
 the 307,200-byte budget (303,418 at v0.11.0), sha256
-`148dfbe2d7e30f624fc54d91a798b0cbba0f53c19638ff8054065da1fa464389` with Rust 1.99.1.
+`17b224036ecde41025b2a0087c71e2d15dcfa3fdf6e574f5e35acc3096b503e1` with Rust 1.99.1.
 
 ### Changed
 
@@ -496,7 +496,7 @@ the 307,200-byte budget (303,418 at v0.11.0), sha256
   TR5 facts, the icon, and for each transaction data type the projected definition that serves
   it or why none does; each definition and icon is stored once. It also holds the system ids
   the wallet proves, the time of registration and the diagnostics flag. `Registration::read`
-  refuses another version and every unexpected member, with a `RegistrationError` or the
+  refuses a format `Version` other than `Version::CURRENT` (2) and every unexpected member, with a `RegistrationError` or the
   credential's `CredentialFault`. The writer (`write`, feature `wallet`) takes the parsed
   credentials, the presentation records, the display cache and language, the held transaction
   metadata and the configuration, the trust store, the systems, the credentials presented

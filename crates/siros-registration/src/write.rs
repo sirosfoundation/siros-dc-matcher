@@ -14,7 +14,7 @@ use siros_zkp_req_nym_auth::catalogue::{ATTESTATION_TYPES, UNDISCLOSABLE};
 use siros_zkp_req_nym_auth::system::NymAuthSystem;
 
 use crate::error::Member;
-use crate::registration::{Diagnostics, Icon, VERSION};
+use crate::registration::{Diagnostics, Icon, Version};
 use crate::wire::write::{self as wire, map};
 
 /// What a registration is made from: the wallet state, the metadata the host holds, the trust
@@ -147,7 +147,7 @@ pub fn write(input: &RegistrationInput<'_>) -> Result<Vec<u8>, WriteError> {
         .map(|usable| credential(input, &sources, &mut tables, usable))
         .collect::<Result<Vec<_>, _>>()?;
     let registration = map([
-        (Member::Version, Cbor::Unsigned(VERSION)),
+        (Member::Version, Cbor::Unsigned(Version::CURRENT.number())),
         (
             Member::RegisteredAt,
             Cbor::Tag(0, Box::new(Cbor::Text(input.now.to_string()))),

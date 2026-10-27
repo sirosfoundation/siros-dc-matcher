@@ -8,7 +8,7 @@ use siros_oid4vp::HttpsUrl;
 use siros_presentation::testing::host::holding_absent;
 use siros_presentation::testing::paso::{approval, paso_wallet, APPROVAL};
 use siros_presentation::testing::verifier::{
-    b64, client_metadata, dc_api_signed_request, NONCE, SIGNER,
+    b64, client_metadata, dc_api_signed_request, SignedForm, NONCE, SIGNER,
 };
 use siros_presentation::testing::wallet::{sd_jwt, Held, Wallet, VCT};
 use siros_transaction_data::{Configuration, HeldDocument, HeldMetadata};
@@ -46,7 +46,7 @@ fn request(dcql_query: Value, entries: &[Value]) -> Vec<u8> {
         "client_metadata": client_metadata(), "transaction_data": transaction_data,
         "dcql_query": dcql_query
     });
-    dc_api_signed_request(&params, SIGNER, false)
+    dc_api_signed_request(&params, SIGNER, SignedForm::Compact)
 }
 
 /// A query of `id` for an SD-JWT VC of `vct`, asking for `claims`.

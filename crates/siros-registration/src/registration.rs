@@ -13,12 +13,38 @@ use siros_zkp_req_nym_auth::system::NymAuthSystem;
 
 use crate::ids::IconIndex;
 
-/// The format of a registration, which this picker reads alone.
-pub const VERSION: u64 = 2;
+/// The format version of a registration: the one this crate reads and writes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Version(u64);
+
+impl Version {
+    /// The version this crate reads and writes.
+    pub const CURRENT: Self = Self(2);
+
+    /// The version `number`.
+    ///
+    /// # Errors
+    ///
+    /// `number`, back, for a version other than [`Version::CURRENT`].
+    pub fn of(number: u64) -> Result<Self, u64> {
+        if number == Self::CURRENT.0 {
+            Ok(Self::CURRENT)
+        } else {
+            Err(number)
+        }
+    }
+
+    /// The number.
+    #[must_use]
+    pub fn number(self) -> u64 {
+        self.0
+    }
+}
 
 /// What the wallet registers for the credential picker: its usable credentials, one instance
 /// per batch, with what the picker shows and admits of each, at the time its facts hold.
 pub struct Registration {
+    pub(crate) version: Version,
     pub(crate) registered_at: DateTime,
     pub(crate) language: Locale,
     pub(crate) diagnostics: Diagnostics,
@@ -77,6 +103,12 @@ pub struct RegisteredCard {
 }
 
 impl Registration {
+    /// The format version.
+    #[must_use]
+    pub fn version(&self) -> Version {
+        self.version
+    }
+
     /// The time the registration's facts hold at: the credentials' validity, their issuers'
     /// admission, and the dates of transaction data and `zkp_req` options.
     pub fn registered_at(&self) -> DateTime {

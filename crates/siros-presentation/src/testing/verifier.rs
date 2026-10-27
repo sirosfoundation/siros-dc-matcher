@@ -18,7 +18,7 @@ use siros_codec::base64url;
 use siros_codec::date::DateTime;
 use siros_oid4vp::{
     concat_kdf, cose_kdf, ContentEncryption, Effect, EffectResult, IntakeError, IntakeState,
-    Method, Origin, Step, Submission, TrustAnswer, VerifiedRequest,
+    Method, Origin, Step, Submission, TrustAnswer, Verdict, VerifiedRequest,
 };
 use x509_cert::builder::{Builder, CertificateBuilder, Profile};
 use x509_cert::der::asn1::ObjectIdentifier;
@@ -113,17 +113,20 @@ pub fn client_metadata() -> Value {
 
 /// Intake of `state` to its end, the host trusting every subject.
 pub fn intake(state: IntakeState) -> VerifiedRequest {
-    intake_with(state, true).unwrap()
+    intake_with(state, Verdict::Trusted).unwrap()
 }
 
 /// Intake of `state` to its end, the host's trust verdict `trusted` on every subject.
-pub fn intake_with(mut state: IntakeState, trusted: bool) -> Result<VerifiedRequest, IntakeError> {
+pub fn intake_with(
+    mut state: IntakeState,
+    verdict: Verdict,
+) -> Result<VerifiedRequest, IntakeError> {
     loop {
         match state.step()? {
             Step::Verified(request) => return Ok(*request),
-            Step::Effect(Effect::Trust(_)) => state.answer(EffectResult::Trusted(
-                TrustAnswer::new(trusted.into(), None, None),
-            )),
+            Step::Effect(Effect::Trust(_)) => {
+                state.answer(EffectResult::Trusted(TrustAnswer::new(verdict, None, None)))
+            }
             Step::Effect(other) => panic!("no fetch expected: {other:?}"),
         }
     }
@@ -183,6 +186,14 @@ pub struct Signer {
 pub enum SignedPrefix {
     X509SanDns,
     X509Hash,
+}
+
+/// The DC API protocol of a signed request: a compact JWS under `openid4vp-v1-signed`, or a JWS
+/// JSON Serialization under `openid4vp-v1-multisigned`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignedForm {
+    Compact,
+    Multisigned,
 }
 
 /// NCP-n-eudiwrp: an access certificate issued to a natural person (ETSI TS 119 411-8).
@@ -334,21 +345,23 @@ pub fn dc_api_unsigned(params: &Value) -> VerifiedRequest {
 
 /// A signed DC API request of `params`, which expects [`ORIGIN`].
 pub fn dc_api_signed(params: &Value) -> VerifiedRequest {
-    intake(dc_api_signed_state(params, SIGNER, false))
+    intake(dc_api_signed_state(params, SIGNER, SignedForm::Compact))
 }
 
 /// The intake of a DC API request of `params` that `signer` signs, which expects [`ORIGIN`]:
-/// `openid4vp-v1-signed`, or `openid4vp-v1-multisigned` with one signature when `multiple`.
-pub fn dc_api_signed_state(params: &Value, signer: Signer, multiple: bool) -> IntakeState {
-    dc_api_intake(&dc_api_signed_request(params, signer, multiple))
+/// `openid4vp-v1-signed` for [`SignedForm::Compact`], `openid4vp-v1-multisigned` with one
+/// signature for [`SignedForm::Multisigned`].
+pub fn dc_api_signed_state(params: &Value, signer: Signer, form: SignedForm) -> IntakeState {
+    dc_api_intake(&dc_api_signed_request(params, signer, form))
 }
 
 /// The DC API request of `params` that `signer` signs, which expects [`ORIGIN`]:
-/// `openid4vp-v1-signed`, or `openid4vp-v1-multisigned` with one signature when `multiple`.
-pub fn dc_api_signed_request(params: &Value, signer: Signer, multiple: bool) -> Vec<u8> {
+/// `openid4vp-v1-signed` for [`SignedForm::Compact`], `openid4vp-v1-multisigned` with one
+/// signature for [`SignedForm::Multisigned`].
+pub fn dc_api_signed_request(params: &Value, signer: Signer, form: SignedForm) -> Vec<u8> {
     let mut object = params.clone();
     object["expected_origins"] = json!([ORIGIN]);
-    if !multiple {
+    if form == SignedForm::Compact {
         object["client_id"] = signer.client_id().into();
         return dc_api_request(
             "openid4vp-v1-signed",

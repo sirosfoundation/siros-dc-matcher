@@ -8,7 +8,8 @@ use serde_json::{json, Map, Value};
 use siros_codec::base64url;
 use siros_codec::cbor::Value as Cbor;
 use siros_presentation::testing::verifier::{
-    client_metadata, dc_api_request, dc_api_signed_request, encryption_jwk, NONCE, SIGNER,
+    client_metadata, dc_api_request, dc_api_signed_request, encryption_jwk, SignedForm, NONCE,
+    SIGNER,
 };
 use siros_presentation::testing::wallet::{
     base64, mdoc, mdoc_by, nym_auth, sd_jwt_x5c, Held, Wallet, MDL, MDL_NS, VCT,
@@ -68,8 +69,8 @@ fn with_purpose(purpose: Value) -> Value {
 }
 
 /// The signed form of `params`: `dc_api.jwt` with the verifier's encryption key, signed by the
-/// test verifier, under `openid4vp-v1-signed` or, when `multiple`, `-multisigned`.
-fn signed(params: Value, multiple: bool) -> Vec<u8> {
+/// test verifier, in `form`.
+fn signed(params: Value, form: SignedForm) -> Vec<u8> {
     let mut object = params;
     object["response_type"] = json!("vp_token");
     object["response_mode"] = json!("dc_api.jwt");
@@ -78,7 +79,7 @@ fn signed(params: Value, multiple: bool) -> Vec<u8> {
         object["client_metadata"] = client_metadata();
     }
     object["client_metadata"]["jwks"] = json!({"keys": [encryption_jwk()]});
-    dc_api_signed_request(&object, SIGNER, multiple)
+    dc_api_signed_request(&object, SIGNER, form)
 }
 
 fn case(name: &str, request: Vec<u8>, wallet: Wallet) -> Case {
@@ -219,7 +220,8 @@ fn request_cases() -> Vec<Case> {
         .collect();
     let fallthrough = {
         let signed: Value =
-            serde_json::from_slice(&signed(age("mso_mdoc", mdl_meta()), false)).unwrap();
+            serde_json::from_slice(&signed(age("mso_mdoc", mdl_meta()), SignedForm::Compact))
+                .unwrap();
         let entry = signed["requests"][0].clone();
         json!({"requests": [
             {"protocol": "openid4vp-v1-signed", "data": {"request": "@@@not-a-jws@@@"}},
@@ -235,12 +237,12 @@ fn request_cases() -> Vec<Case> {
         ),
         case(
             "signed",
-            signed(age("mso_mdoc", mdl_meta()), false),
+            signed(age("mso_mdoc", mdl_meta()), SignedForm::Compact),
             plain(),
         ),
         case(
             "multisigned",
-            signed(age("mso_mdoc", mdl_meta()), true),
+            signed(age("mso_mdoc", mdl_meta()), SignedForm::Multisigned),
             plain(),
         ),
         case(
@@ -316,7 +318,10 @@ fn nym_cases() -> Vec<Case> {
     };
     let mut minor = case(
         "nym signed, minor",
-        signed(request(nym_query(Some("18-"), true), None), false),
+        signed(
+            request(nym_query(Some("18-"), true), None),
+            SignedForm::Compact,
+        ),
         nym_wallet(NymAuthSystem::ALL.to_vec()),
     );
     // The age check reads `birth_date`, which the registration leaves out (N3, K2).
@@ -339,22 +344,22 @@ fn nym_cases() -> Vec<Case> {
         ),
         case(
             "nym signed",
-            signed(request(query(), None), false),
+            signed(request(query(), None), SignedForm::Compact),
             nym_wallet(NymAuthSystem::ALL.to_vec()),
         ),
         case(
             "nym signed, no system",
-            signed(request(query(), None), false),
+            signed(request(query(), None), SignedForm::Compact),
             nym_wallet(Vec::new()),
         ),
         case(
             "nym signed, multisigned",
-            signed(request(query(), None), true),
+            signed(request(query(), None), SignedForm::Multisigned),
             nym_wallet(NymAuthSystem::ALL.to_vec()),
         ),
         case(
             "nym signed beside an mDL",
-            signed(request(query(), None), false),
+            signed(request(query(), None), SignedForm::Compact),
             {
                 let mut wallet = Wallet::new(vec![nym(1, &Spec::default()), mdl(2)]);
                 wallet.systems = NymAuthSystem::ALL.to_vec();
@@ -399,7 +404,7 @@ fn vector_cases() -> Vec<Case> {
             wallet.systems = NymAuthSystem::ALL.to_vec();
             Some(case(
                 &format!("vector {name}"),
-                signed(params, false),
+                signed(params, SignedForm::Compact),
                 wallet,
             ))
         })

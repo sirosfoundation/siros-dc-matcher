@@ -15,7 +15,7 @@ use siros_zkp_req_nym_auth::system::NymAuthSystem;
 use crate::error::{CredentialFault, Member, RegistrationError};
 use crate::ids::{CredentialIndex, DefinitionIndex, IconIndex};
 use crate::registration::{
-    Diagnostics, Icon, RegisteredCard, RegisteredCredential, RegisteredType, Registration, VERSION,
+    Diagnostics, Icon, RegisteredCard, RegisteredCredential, RegisteredType, Registration, Version,
 };
 use crate::wire::{self, Map};
 
@@ -46,7 +46,7 @@ const CREDENTIAL_MEMBERS: [Member; 10] = [
 ];
 
 impl Registration {
-    /// The registration of `bytes`: a CBOR map of [`VERSION`], the time its facts hold at, the
+    /// The registration of `bytes`: a CBOR map of [`Version::CURRENT`], the time its facts hold at, the
     /// wallet's language, the diagnostics, the nym_auth systems, the icon table, the table of
     /// projected definitions, each in the wallet's language, and the credentials, each
     /// `credentialId` and each batch once.
@@ -57,10 +57,8 @@ impl Registration {
     pub fn read(bytes: &[u8]) -> Result<Self, RegistrationError> {
         let item = cbor::decode(bytes).map_err(RegistrationError::Cbor)?;
         let fields = Map::of(&item).map_err(|_| RegistrationError::NotMap)?;
-        let version = fields.read(Member::Version, wire::unsigned)?;
-        if version != VERSION {
-            return Err(RegistrationError::Version(version));
-        }
+        let version = Version::of(fields.read(Member::Version, wire::unsigned)?)
+            .map_err(RegistrationError::Version)?;
         if let Some(unknown) = fields.unknown(&MEMBERS) {
             return Err(RegistrationError::MemberUnknown(unknown));
         }
@@ -125,6 +123,7 @@ impl Registration {
             return Err(RegistrationError::EntryRepeated(CredentialIndex::new(at)));
         }
         Ok(Self {
+            version,
             registered_at,
             language,
             diagnostics,
