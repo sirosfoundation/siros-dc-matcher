@@ -14,7 +14,7 @@ pub struct Handover {
 }
 
 /// Why bytes are not a `Handover` of OpenID4VP 1.0, B.2.6.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HandoverInvalid {
     /// The bytes are not one CBOR item.
     Cbor(CborError),

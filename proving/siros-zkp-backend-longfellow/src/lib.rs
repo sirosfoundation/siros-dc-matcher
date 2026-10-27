@@ -45,8 +45,8 @@ fn params() -> NymAuthCircuitParams {
 pub enum ArtifactError {
     /// The bytes are not the pinned file.
     Pin(ArtifactPin),
-    /// The pinned file does not decompress within its content's length.
-    Decompress,
+    /// The pinned file does not decompress within its content's length: zstd's message.
+    Decompress(String),
     /// zk-cred-longfellow refused the circuits.
     Circuits(String),
 }
@@ -55,7 +55,7 @@ impl fmt::Display for ArtifactError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Pin(pin) => write!(f, "not the pinned {} ({} bytes)", pin.name, pin.len),
-            Self::Decompress => f.write_str("the circuits do not decompress"),
+            Self::Decompress(cause) => write!(f, "the circuits do not decompress: {cause}"),
             Self::Circuits(detail) => write!(f, "circuits refused: {detail}"),
         }
     }
@@ -70,7 +70,7 @@ fn circuits(circuits_zst: &[u8]) -> Result<Vec<u8>, ArtifactError> {
         return Err(ArtifactError::Pin(artifact.compressed));
     }
     zstd::bulk::decompress(circuits_zst, artifact.content.len)
-        .map_err(|_| ArtifactError::Decompress)
+        .map_err(|error| ArtifactError::Decompress(error.to_string()))
 }
 
 /// The prover of the system.

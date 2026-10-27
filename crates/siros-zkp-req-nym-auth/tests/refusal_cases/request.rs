@@ -48,7 +48,9 @@ pub fn cases() -> Vec<Case> {
         (
             "type_value_invalid",
             match_query_edit(|q| q["meta"] = json!({"source_format": "mso_mdoc"})),
-            protocol(RequestRule::TypeValueInvalid(MemberFault::Absent)),
+            protocol(RequestRule::TypeValueInvalid(TypeValueFault::Member(
+                MemberFault::Absent,
+            ))),
         ),
         (
             "req_invalid",

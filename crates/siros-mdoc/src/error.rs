@@ -9,7 +9,7 @@ use siros_codec::Base64Error;
 use crate::names::{DigestId, NameSpace};
 
 /// Why a stored credential is no mdoc [`Mdoc::parse`](crate::Mdoc::parse) reads.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MdocError {
     /// The text is not base64url without padding.
     Encoding(Base64Error),
@@ -78,7 +78,7 @@ pub enum IssuerAuthFault {
 }
 
 /// Why the protected header names no algorithm.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AlgorithmFault {
     /// The header is not one CBOR item.
     Header(CborError),
@@ -87,7 +87,7 @@ pub enum AlgorithmFault {
 }
 
 /// Why the payload is no MSO.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PayloadFault {
     /// The payload is not one CBOR item.
     Cbor(CborError),
@@ -247,7 +247,7 @@ pub enum ItemMember {
 }
 
 /// Why an `IssuerSignedItem` is refused.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ItemFault {
     /// The tagged bytes are not one CBOR item.
     Cbor(CborError),

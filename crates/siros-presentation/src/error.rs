@@ -101,7 +101,7 @@ pub enum PresentationError {
 }
 
 /// How a plan contradicts itself: a position or an answer that a list of the plan lacks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Inconsistency {
     /// A member names a query the matching lacks.
     Query(QueryIndex),

@@ -66,7 +66,7 @@ impl Chain {
         let leaf_der = ders.next().ok_or(invalid(ChainFault::Absent))??;
         let chain = CertificateChain::new(leaf_der, ders.collect::<Result<_, _>>()?);
         let leaf = Certificate::from_der(chain.first())
-            .map_err(|_| invalid(ChainFault::LeafNotCertificate))?;
+            .map_err(|error| invalid(ChainFault::LeafNotCertificate(error)))?;
         let tbs = &leaf.tbs_certificate;
         let key = p256_key(tbs).ok_or(invalid(ChainFault::LeafKey))?;
         let dns_names = match tbs.get::<SubjectAltName>() {
@@ -79,7 +79,7 @@ impl Chain {
                 })
                 .collect(),
             Ok(None) => Vec::new(),
-            Err(_) => return Err(invalid(ChainFault::SubjectAltName)),
+            Err(error) => return Err(invalid(ChainFault::SubjectAltName(error))),
         };
         Ok(Self {
             leaf: CertificateDer(chain.first().to_vec()),
@@ -158,7 +158,7 @@ fn person(tbs: &TbsCertificate) -> Result<Person, SemanticIdError> {
     let policies = match tbs.get::<CertificatePolicies>() {
         Ok(Some((_, policies))) => policies.0,
         Ok(None) => Vec::new(),
-        Err(_) => return Err(SemanticIdError::Policies),
+        Err(error) => return Err(SemanticIdError::Policies(error)),
     };
     let names = |listed: &[ObjectIdentifier]| {
         policies
@@ -206,5 +206,5 @@ fn printable_string(value: &Any) -> Result<String, SemanticIdError> {
     value
         .decode_as::<PrintableStringRef<'_>>()
         .map(|text| text.as_str().to_owned())
-        .map_err(|_| SemanticIdError::Encoding)
+        .map_err(SemanticIdError::Encoding)
 }

@@ -6,6 +6,7 @@ use std::fmt;
 use rustc_hash::FxHashSet;
 use serde::de::{Deserialize, Deserializer, MapAccess, Visitor};
 use serde_json::value::RawValue;
+use siros_codec::json::JsonTextError;
 
 use crate::error::{MemberPath, TransactionDataError};
 
@@ -13,9 +14,12 @@ use crate::error::{MemberPath, TransactionDataError};
 pub const MAX_DEPTH: usize = 64;
 
 /// Why a text is no JSON document this crate reads.
-pub(crate) enum JsonError {
-    /// The text is not one JSON value (RFC 8259), or a number exceeds binary64.
-    Malformed,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum JsonError {
+    /// The text is no JSON value (RFC 8259).
+    Malformed(JsonTextError),
+    /// A number has no finite binary64 value.
+    NumberUnrepresentable,
     /// An object repeats a member name.
     DuplicateKey,
     /// Objects and arrays nest deeper than [`MAX_DEPTH`].
@@ -44,7 +48,8 @@ pub(crate) struct Number {
 impl Json {
     /// The value of the JSON text `text`.
     pub(crate) fn parse(text: &str) -> Result<Self, JsonError> {
-        let raw: &RawValue = serde_json::from_str(text).map_err(|_| JsonError::Malformed)?;
+        let raw: &RawValue =
+            serde_json::from_str(text).map_err(|e| JsonError::Malformed(JsonTextError::of(&e)))?;
         value(raw, 0)
     }
 }
@@ -114,7 +119,8 @@ fn value(raw: &RawValue, depth: usize) -> Result<Json, JsonError> {
     match text.as_bytes().first() {
         Some(b'{') => {
             let depth = nested(depth)?;
-            let Members(members) = serde_json::from_str(text).map_err(|_| JsonError::Malformed)?;
+            let Members(members) = serde_json::from_str(text)
+                .map_err(|e| JsonError::Malformed(JsonTextError::of(&e)))?;
             let mut names = FxHashSet::default();
             if !members.iter().all(|(name, _)| names.insert(name.as_str())) {
                 return Err(JsonError::DuplicateKey);
@@ -127,17 +133,19 @@ fn value(raw: &RawValue, depth: usize) -> Result<Json, JsonError> {
         }
         Some(b'[') => {
             let depth = nested(depth)?;
-            let items: Vec<&RawValue> =
-                serde_json::from_str(text).map_err(|_| JsonError::Malformed)?;
+            let items: Vec<&RawValue> = serde_json::from_str(text)
+                .map_err(|e| JsonError::Malformed(JsonTextError::of(&e)))?;
             let items = items
                 .into_iter()
                 .map(|raw| value(raw, depth))
                 .collect::<Result<_, JsonError>>()?;
             Ok(Json::Array(items))
         }
-        Some(b'"') => Ok(Json::String(
-            serde_json::from_str(text).map_err(|_| JsonError::Malformed)?,
-        )),
+        Some(b'"') => {
+            Ok(Json::String(serde_json::from_str(text).map_err(|e| {
+                JsonError::Malformed(JsonTextError::of(&e))
+            })?))
+        }
         Some(b't') => Ok(Json::Bool(true)),
         Some(b'f') => Ok(Json::Bool(false)),
         Some(b'n') => Ok(Json::Null),
@@ -147,7 +155,7 @@ fn value(raw: &RawValue, depth: usize) -> Result<Json, JsonError> {
                 text: text.to_owned(),
                 value,
             })),
-            _ => Err(JsonError::Malformed),
+            _ => Err(JsonError::NumberUnrepresentable),
         },
     }
 }

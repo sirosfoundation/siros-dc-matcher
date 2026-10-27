@@ -63,8 +63,8 @@ pub use fetch::{BodyLimit, Fetch, FetchResponse, HttpStatus, HttpsUrl, MediaType
 #[cfg(feature = "crypto")]
 pub use intake::{
     AttestationFault, ChainFault, Effect, EffectResult, FormFault, IntakeError, IntakeState,
-    JwsError, JwsFault, KeyMaterial, Step, Trust, TrustAnswer, TrustSubject, Verdict,
-    VerifierInfoRule,
+    JsonParameter, JwsError, JwsFault, KeyMaterial, Step, Trust, TrustAnswer, TrustSubject,
+    Verdict, VerifierInfoRule,
 };
 #[cfg(feature = "crypto")]
 pub use response::{

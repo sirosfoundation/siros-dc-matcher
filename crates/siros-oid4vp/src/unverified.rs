@@ -14,6 +14,7 @@ mod shape;
 
 use serde::Deserialize;
 use serde_json::Value;
+use siros_codec::json::JsonTextError;
 use siros_codec::Base64Error;
 use siros_dcql::DcqlQuery;
 
@@ -43,7 +44,7 @@ pub enum NoQuery {
     /// The payload segment is no unpadded base64url the picker decodes.
     PayloadNotBase64url(PayloadFault),
     /// The payload decoded, but is not JSON.
-    PayloadNotJson,
+    PayloadNotJson(JsonTextError),
     /// The payload is JSON but carries no `dcql_query`.
     PayloadHasNoDcqlQuery,
     /// A `dcql_query` was found but does not parse as DCQL.
@@ -64,7 +65,7 @@ impl NoQuery {
             Self::ShapeDoesNotMatchProtocol => "shape_does_not_match_protocol",
             Self::NotACompactJws(_) => "not_a_compact_jws",
             Self::PayloadNotBase64url(_) => "payload_not_base64url",
-            Self::PayloadNotJson => "payload_not_json",
+            Self::PayloadNotJson(_) => "payload_not_json",
             Self::PayloadHasNoDcqlQuery => "payload_has_no_dcql_query",
             Self::Malformed(_) => "dcql_query_malformed",
             Self::NoParser => "protocol_unsupported",
@@ -90,7 +91,7 @@ impl NoQuery {
             }
             Self::NotACompactJws(_) => "data.request is not a compact JWS".into(),
             Self::PayloadNotBase64url(_) => "JWS payload is not unpadded base64url".into(),
-            Self::PayloadNotJson => "JWS payload is not JSON".into(),
+            Self::PayloadNotJson(_) => "JWS payload is not JSON".into(),
             Self::PayloadHasNoDcqlQuery => "JWS payload has no `dcql_query`".into(),
             Self::Malformed(e) => format!("dcql_query failed to parse: {e}"),
             Self::NoParser => "no parser for this protocol in this build".into(),

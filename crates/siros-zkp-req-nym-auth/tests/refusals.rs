@@ -20,7 +20,8 @@ use siros_trust::Certificate;
 use siros_zkp_req::{
     EncodingError, IdentifierFault, InputName, ItemIndex, OptionFault, PairRefusal, ProofBackend,
     ProofContent, ProofEnvelope, ReqSetIndex, RequestRule, ResultKey, ReturnFault,
-    ReturnHandleError, StructureRejection, ZkProof, ZkpFormats, ZkpPresentation, ZkpReqQuery,
+    ReturnHandleError, StructureRejection, TypeValueFault, ZkProof, ZkpFormats, ZkpPresentation,
+    ZkpReqQuery,
 };
 use siros_zkp_req_nym_auth::attestation::{SecretSeed, Unusable};
 use siros_zkp_req_nym_auth::catalogue::{

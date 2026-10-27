@@ -8,7 +8,7 @@ use siros_oid4vp::TransactionDataItem;
 
 use crate::binding::Binding;
 use crate::error::{MemberPath, TransactionDataError};
-use crate::json::{self, Json, JsonError};
+use crate::json::{self, Json};
 use crate::kind::{SupportedType, TransactionType};
 
 /// A `transaction_data` entry of a supported type, its members parsed into typed values.
@@ -42,12 +42,11 @@ impl Entry {
         now: DateTime,
     ) -> Result<Self, TransactionDataError> {
         let bytes = base64url::decode(raw.as_str()).map_err(TransactionDataError::NotBase64url)?;
-        let text = String::from_utf8(bytes).map_err(|_| TransactionDataError::NotJsonObject)?;
-        let object = match Json::parse(&text) {
-            Ok(Json::Object(object)) => object,
-            Ok(_) | Err(JsonError::Malformed) => return Err(TransactionDataError::NotJsonObject),
-            Err(JsonError::DuplicateKey) => return Err(TransactionDataError::DuplicateKey),
-            Err(JsonError::TooDeep) => return Err(TransactionDataError::TooDeep),
+        let text = String::from_utf8(bytes)
+            .map_err(|error| TransactionDataError::NotUtf8(error.utf8_error()))?;
+        let object = match Json::parse(&text).map_err(TransactionDataError::NotJson)? {
+            Json::Object(object) => object,
+            _ => return Err(TransactionDataError::NotJsonObject),
         };
         let mut fields = object.into_fields();
         let identifier = json::text(fields.require("type", TYPE)?, TYPE)?;

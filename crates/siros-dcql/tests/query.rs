@@ -11,13 +11,18 @@ use siros_dcql::{
     QueryError, QueryId, QueryIdError, SetRequirement, TrustedAuthorityError,
 };
 
+/// The query of the JSON text `json`.
+fn parsed(json: &str) -> Result<DcqlQuery, QueryError> {
+    DcqlQuery::parse(&serde_json::from_str(json).expect("JSON"))
+}
+
 /// Defaults the spec states explicitly, all of which change behaviour if
 /// got wrong: a missing `required` would make a mandatory set optional,
 /// and a missing `require_cryptographic_holder_binding` would silently
 /// accept an unbound credential.
 #[test]
 fn omitted_fields_take_their_specified_defaults() {
-    let q = DcqlQuery::from_json(
+    let q = parsed(
         r#"{"credentials":[{"id":"pid","format":"mso_mdoc","meta":{}}],
             "credential_sets":[{"options":[["pid"]]}]}"#,
     )
@@ -35,7 +40,7 @@ fn omitted_fields_take_their_specified_defaults() {
 /// that rejects tomorrow's extension is worse than one that ignores it.
 #[test]
 fn unknown_properties_are_ignored() {
-    let q = DcqlQuery::from_json(
+    let q = parsed(
         r#"{"credentials":[{"id":"pid","format":"mso_mdoc","meta":{},
              "some_future_field":{"a":1}}],
             "another_future_field":[1,2,3]}"#,
@@ -49,7 +54,7 @@ fn unknown_properties_are_ignored() {
 /// worth failing a request over.
 #[test]
 fn missing_meta_is_treated_as_no_constraints() {
-    let q = DcqlQuery::from_json(r#"{"credentials":[{"id":"pid","format":"mso_mdoc"}]}"#).unwrap();
+    let q = parsed(r#"{"credentials":[{"id":"pid","format":"mso_mdoc"}]}"#).unwrap();
     assert!(q.credentials()[0].meta().is_empty());
 }
 
@@ -58,7 +63,7 @@ fn missing_meta_is_treated_as_no_constraints() {
 /// resolves a reference to whichever entry came first and the second is answered by nobody.
 #[test]
 fn duplicate_credential_ids_are_rejected() {
-    let err = DcqlQuery::from_json(
+    let err = parsed(
         r#"{"credentials":[{"id":"pid","format":"mso_mdoc"},
                            {"id":"pid","format":"dc+sd-jwt"}]}"#,
     )
@@ -74,7 +79,7 @@ fn duplicate_credential_ids_are_rejected() {
 /// id, so a duplicate makes an option ambiguous.
 #[test]
 fn duplicate_claim_ids_are_rejected() {
-    let err = DcqlQuery::from_json(
+    let err = parsed(
         r#"{"credentials":[{"id":"pid","format":"mso_mdoc","claims":[
              {"id":"a","path":["ns","given_name"]},
              {"id":"a","path":["ns","family_name"]}],
@@ -96,7 +101,7 @@ fn duplicate_claim_ids_are_rejected() {
 /// about ids.
 #[test]
 fn claims_without_ids_do_not_collide() {
-    let q = DcqlQuery::from_json(
+    let q = parsed(
         r#"{"credentials":[{"id":"pid","format":"mso_mdoc","claims":[
              {"path":["ns","given_name"]},
              {"path":["ns","family_name"]}]}]}"#,
@@ -118,7 +123,7 @@ fn credential_ids_follow_section_6_1() {
     for (id, outcome) in cases {
         assert_eq!(QueryId::parse(id).map(drop), outcome, "{id:?}");
         let json = format!(r#"{{"credentials":[{{"id":"{id}","format":"mso_mdoc"}}]}}"#);
-        let parsed = DcqlQuery::from_json(&json).map(drop).map_err(|e| match e {
+        let parsed = parsed(&json).map(drop).map_err(|e| match e {
             QueryError::Id(e) => Some(e),
             _ => None,
         });
@@ -176,7 +181,7 @@ fn the_parse_refuses_what_section_6_forbids() {
         ),
     ];
     for (json, refused) in cases {
-        let error = DcqlQuery::from_json(json).expect_err(json);
+        let error = parsed(json).expect_err(json);
         assert!(refused(&error), "{json}: {error:?}");
     }
 }
@@ -186,7 +191,7 @@ fn the_parse_refuses_what_section_6_forbids() {
 /// object, so all three have to survive parsing.
 #[test]
 fn purpose_is_kept_in_all_three_shapes() {
-    let q = DcqlQuery::from_json(
+    let q = parsed(
         r#"{"credentials":[{"id":"pid","format":"mso_mdoc"}],
             "credential_sets":[
               {"options":[["pid"]],"purpose":"Proving your age"},
@@ -216,7 +221,7 @@ fn purpose_is_kept_in_all_three_shapes() {
 /// sent.
 #[test]
 fn an_absent_purpose_is_not_serialised() {
-    let q = DcqlQuery::from_json(
+    let q = parsed(
         r#"{"credentials":[{"id":"pid","format":"mso_mdoc"}],
             "credential_sets":[{"options":[["pid"]]}]}"#,
     )
@@ -236,7 +241,7 @@ fn realistic_query_round_trips() {
         "meta":{"doctype_value":"org.iso.18013.5.1.mDL"},
         "claims":[{"id":"a","path":["org.iso.18013.5.1","age_over_18"],"values":[true]}],
         "claim_sets":[["a"]]}]}"#;
-    let q = DcqlQuery::from_json(json).unwrap();
+    let q = parsed(json).unwrap();
     let c = &q.credentials()[0];
     assert_eq!(c.claims()[0].values().unwrap()[0], Value::Bool(true));
     assert_eq!(

@@ -86,11 +86,9 @@ pub enum FormFault {
     Entry(Position),
 }
 
-/// Why a document is no usable DCQL query.
-#[derive(Debug)]
+/// Why a JSON value is no usable DCQL query.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum QueryError {
-    /// The text is no JSON.
-    Json(serde_json::Error),
     /// A member breaks the form §6 gives it.
     Form {
         /// The member.
@@ -162,7 +160,7 @@ impl QueryError {
     #[must_use]
     pub fn code(&self) -> &'static str {
         match self {
-            Self::Json(_) | Self::Form { .. } => "dcql_malformed",
+            Self::Form { .. } => "dcql_malformed",
             Self::Id(error) => error.code(),
             Self::ClaimId { error, .. } => error.code(),
             Self::TrustedAuthorities { error, .. } => error.code(),
@@ -180,7 +178,6 @@ impl QueryError {
 impl fmt::Display for QueryError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Json(e) => write!(f, "{}: {e}", self.code()),
             Self::Form { member, fault } => write!(f, "{}: {member:?} {fault:?}", self.code()),
             Self::Id(_) => f.write_str(self.code()),
             Self::DuplicateCredentialId(credential)
@@ -199,7 +196,6 @@ impl fmt::Display for QueryError {
 impl std::error::Error for QueryError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Json(e) => Some(e),
             Self::Id(e) => Some(e),
             Self::ClaimId { error, .. } => Some(error),
             Self::TrustedAuthorities { error, .. } => Some(error),
@@ -215,8 +211,40 @@ impl std::error::Error for QueryError {
     }
 }
 
-impl From<serde_json::Error> for QueryError {
-    fn from(e: serde_json::Error) -> Self {
-        Self::Json(e)
+/// Why JSON text is no usable DCQL query.
+#[derive(Debug)]
+pub enum QueryTextError {
+    /// The text is no JSON.
+    Json(serde_json::Error),
+    /// The JSON value is no usable DCQL query.
+    Query(QueryError),
+}
+
+impl QueryTextError {
+    /// A stable identifier: `dcql_malformed` for text that is no JSON, else the query's.
+    #[must_use]
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Json(_) => "dcql_malformed",
+            Self::Query(error) => error.code(),
+        }
+    }
+}
+
+impl fmt::Display for QueryTextError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Json(e) => write!(f, "{}: {e}", self.code()),
+            Self::Query(e) => e.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for QueryTextError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Json(e) => Some(e),
+            Self::Query(e) => Some(e),
+        }
     }
 }

@@ -2,13 +2,14 @@
 
 use std::fmt;
 
+use siros_codec::json::JsonTextError;
 use siros_codec::member::MemberFault;
 
 /// Why text is not the `S` of a WalletStateContainer (privatedata 3.1, Section 6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WalletStateError {
-    /// The text is not a JSON object.
-    Malformed,
+    /// The text is not a JSON object of the members `S` gives them.
+    Malformed(JsonTextError),
     /// `schemaVersion` is neither 3 nor 4.
     UnsupportedSchemaVersion(FoundVersion),
     /// `credentials` is absent or not an array.
@@ -99,7 +100,7 @@ pub enum PresentationsFault {
     /// wrong type: `presentationId` and `transactionId` non-negative integers of 64 bits,
     /// `usedCredentialIds` an array of them, `presentationTimestampSeconds` an integer, and
     /// the strings `data` and `audience`.
-    Record,
+    Record(JsonTextError),
     /// A `presentationTimestampSeconds` is outside the years 0000 to 9999.
     Timestamp,
 }
@@ -108,7 +109,7 @@ impl WalletStateError {
     /// A stable identifier.
     pub fn code(&self) -> &'static str {
         match self {
-            Self::Malformed => "state_malformed",
+            Self::Malformed(_) => "state_malformed",
             Self::UnsupportedSchemaVersion(_) => "schema_version_unsupported",
             Self::Credentials => "credentials_malformed",
             Self::CredentialEntry => "credential_entry_malformed",

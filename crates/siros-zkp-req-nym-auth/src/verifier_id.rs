@@ -14,7 +14,7 @@ use crate::catalogue::Config;
 pub struct VerifierId(String);
 
 /// Why the `verifier_id` of the fixed form cannot be obtained. Each makes the query invalid.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VerifierIdRule {
     /// The form is `semantic` and no semantic identifier comes from an authenticated source.
     SemanticIdMissing,

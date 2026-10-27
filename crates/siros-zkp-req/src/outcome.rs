@@ -37,6 +37,16 @@ impl fmt::Display for ErrorCode {
     }
 }
 
+/// What breaks the `meta` member a source format defines (Section 1.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TypeValueFault {
+    /// The member breaks its rule.
+    Member(MemberFault),
+    /// The `type_values` list at this position breaks the rule of a non-empty array of
+    /// strings.
+    List(ArrayIndex, MemberFault),
+}
+
 /// Why a member does not hold an identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum IdentifierFault<E> {
@@ -91,7 +101,7 @@ pub enum RequestRule {
     /// `meta.source_format` is absent, not a string or empty (Section 1.1).
     SourceFormatInvalid(MemberFault),
     /// The `meta` member the source format defines breaks its rule (Section 1.1).
-    TypeValueInvalid(MemberFault),
+    TypeValueInvalid(TypeValueFault),
     /// `_req` is absent, not an array or empty (Section 2).
     ReqInvalid(MemberFault),
     /// A `_req` item is not an object (Section 2).

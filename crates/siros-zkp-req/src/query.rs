@@ -6,7 +6,7 @@ use siros_dcql::{CredentialFormat, DocType, HolderBinding, Multiplicity, QueryId
 
 use crate::ids::{FnId, ItemIndex, ReqSetIndex, ReturnHandle, W3cType};
 use crate::json::{identifier, non_empty_array, non_empty_strings};
-use crate::outcome::{OptionFault, RequestRule, ReturnFault};
+use crate::outcome::{OptionFault, RequestRule, ReturnFault, TypeValueFault};
 
 /// The Credential Format Identifier of a `zkp_req` query.
 pub const FORMAT: &str = "zkp_req";
@@ -242,14 +242,15 @@ fn read_meta(meta: Option<&Value>) -> Result<CredentialType, RequestRule> {
     .map_err(RequestRule::SourceFormatInvalid)?;
     let credential_type = match source_format {
         "mso_mdoc" => match meta.get("doctype_value") {
-            None => Err(MemberFault::Absent),
+            None => Err(TypeValueFault::Member(MemberFault::Absent)),
             Some(Value::String(doctype)) => Ok(CredentialType::MsoMdoc {
                 doctype: DocType::new(doctype),
             }),
-            Some(_) => Err(MemberFault::WrongType),
+            Some(_) => Err(TypeValueFault::Member(MemberFault::WrongType)),
         },
         "dc+sd-jwt" => non_empty_strings(meta.get("vct_values"), Vct::new)
-            .map(|vct_values| CredentialType::SdJwt { vct_values }),
+            .map(|vct_values| CredentialType::SdJwt { vct_values })
+            .map_err(TypeValueFault::Member),
         "jwt_vc_json" | "ldp_vc" => {
             type_values(meta.get("type_values")).map(|type_values| CredentialType::W3c {
                 source_format: CredentialFormat::new(source_format),
@@ -265,11 +266,15 @@ fn read_meta(meta: Option<&Value>) -> Result<CredentialType, RequestRule> {
 }
 
 /// `type_values`: a non-empty array of non-empty arrays of strings.
-fn type_values(value: Option<&Value>) -> Result<Vec<Vec<W3cType>>, MemberFault> {
+fn type_values(value: Option<&Value>) -> Result<Vec<Vec<W3cType>>, TypeValueFault> {
     let mut lists = Vec::new();
-    for (index, entry) in non_empty_array(value)?.iter().enumerate() {
+    for (index, entry) in non_empty_array(value)
+        .map_err(TypeValueFault::Member)?
+        .iter()
+        .enumerate()
+    {
         let list = non_empty_strings(Some(entry), W3cType::new)
-            .map_err(|_| MemberFault::Entry(ArrayIndex::new(index)))?;
+            .map_err(|fault| TypeValueFault::List(ArrayIndex::new(index), fault))?;
         lists.push(list);
     }
     Ok(lists)

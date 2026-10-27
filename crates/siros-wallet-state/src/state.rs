@@ -2,6 +2,7 @@
 
 use rustc_hash::FxHashSet;
 use serde_json::value::RawValue;
+use siros_codec::json::JsonTextError;
 
 use crate::entry::{array, object, CredentialEntry, Members};
 use crate::error::{FoundVersion, PresentationsFault, WalletStateError};
@@ -26,8 +27,8 @@ impl WalletState {
     ///
     /// [`WalletStateError`]: the first rule the text breaks.
     pub fn parse(text: &str) -> Result<Self, WalletStateError> {
-        let members: Members<'_> =
-            serde_json::from_str(text).map_err(|_| WalletStateError::Malformed)?;
+        let members: Members<'_> = serde_json::from_str(text)
+            .map_err(|error| WalletStateError::Malformed(JsonTextError::of(&error)))?;
         match schema_version(&members) {
             FoundVersion::Version(3 | 4) => {}
             found => return Err(WalletStateError::UnsupportedSchemaVersion(found)),

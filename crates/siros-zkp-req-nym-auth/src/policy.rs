@@ -71,7 +71,7 @@ impl std::error::Error for PolicyRule {}
 
 /// Why a verified request is no nym_auth request: a rule of the policy, or of the Verifier
 /// identity. Each makes a nym_auth query invalid.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequestRefusal {
     /// A rule of the signed-request and encrypted-response policy.
     Policy(PolicyRule),

@@ -311,9 +311,8 @@ fn read(
     if let Some(integrity) = integrity {
         integrity.check(body)?;
     }
-    let malformed = TransactionDataError::MetadataMalformed(MetadataPart::new("document"));
-    let text = std::str::from_utf8(body).map_err(|_| malformed)?;
-    Json::parse(text).map_err(|_| malformed)
+    let text = std::str::from_utf8(body).map_err(TransactionDataError::MetadataNotUtf8)?;
+    Json::parse(text).map_err(TransactionDataError::MetadataNotJson)
 }
 
 /// The integrity metadata of the credential's top-level claim `name`, when it has the claim.

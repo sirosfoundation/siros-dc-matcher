@@ -4,6 +4,7 @@
 //! verifier belongs in the device pass.
 
 use siros_codec::base64url::encode as b64;
+use siros_codec::json::JsonTextError;
 use siros_codec::Base64Error;
 use siros_oid4vp::{diagnose, CompactFault, NoQuery, PayloadFault, UnverifiedRequest};
 
@@ -214,7 +215,9 @@ fn each_failure_is_named_separately() {
         (
             "openid4vp-v1-signed",
             serde_json::json!({"request": format!("aGVhZGVy.{}.c2ln", b64(b"plain text"))}),
-            NoQuery::PayloadNotJson,
+            NoQuery::PayloadNotJson(JsonTextError::of(
+                &serde_json::from_slice::<serde_json::Value>(b"plain text").unwrap_err(),
+            )),
         ),
         (
             "openid4vp-v1-signed",

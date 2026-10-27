@@ -34,8 +34,8 @@ const SYSTEM: NymAuthSystem = NymAuthSystem::VegaV1;
 pub enum ArtifactError {
     /// The bytes are not the pinned file.
     Pin(ArtifactPin),
-    /// The pinned file does not decompress within its content's length.
-    Decompress,
+    /// The pinned file does not decompress within its content's length: zstd's message.
+    Decompress(String),
     /// zk-cred-vega refused the shapes.
     Shapes(String),
 }
@@ -44,7 +44,7 @@ impl fmt::Display for ArtifactError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Pin(pin) => write!(f, "not the pinned {} ({} bytes)", pin.name, pin.len),
-            Self::Decompress => f.write_str("the shapes do not decompress"),
+            Self::Decompress(cause) => write!(f, "the shapes do not decompress: {cause}"),
             Self::Shapes(detail) => write!(f, "shapes refused: {detail}"),
         }
     }
@@ -67,7 +67,7 @@ impl VegaNymAuth {
             return Err(ArtifactError::Pin(artifact.compressed));
         }
         let shapes = zstd::bulk::decompress(shapes_zst, artifact.content.len)
-            .map_err(|_| ArtifactError::Decompress)?;
+            .map_err(|error| ArtifactError::Decompress(error.to_string()))?;
         Keys::from_shapes(&shapes)
             .map(Self)
             .map_err(|e| ArtifactError::Shapes(e.to_string()))

@@ -21,7 +21,8 @@ use serde_json::{Map, Value};
 use siros_codec::date::DateTime;
 
 pub use error::{
-    AttestationFault, ChainFault, FormFault, IntakeError, JwsError, JwsFault, VerifierInfoRule,
+    AttestationFault, ChainFault, FormFault, IntakeError, JsonParameter, JwsError, JwsFault,
+    VerifierInfoRule,
 };
 pub use trust::{KeyMaterial, Trust, TrustAnswer, TrustSubject, Verdict};
 

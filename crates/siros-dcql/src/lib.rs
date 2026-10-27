@@ -90,8 +90,8 @@ pub use path::{
 };
 pub use query::{
     ClaimMember, ClaimOption, ClaimsQuery, CredentialMember, CredentialQuery, CredentialSetQuery,
-    DcqlQuery, FormFault, HolderBinding, Member, Multiplicity, Position, QueryError, SetMember,
-    SetRequirement,
+    DcqlQuery, FormFault, HolderBinding, Member, Multiplicity, Position, QueryError,
+    QueryTextError, SetMember, SetRequirement,
 };
 pub use result::{
     Candidate, ClaimPathRefusal, QueryMatch, QueryResult, Satisfaction, SelectedClaim,

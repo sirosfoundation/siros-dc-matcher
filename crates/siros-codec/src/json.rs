@@ -49,6 +49,20 @@ pub struct JsonTextError {
 }
 
 impl JsonTextError {
+    /// What `error` found, and where.
+    #[must_use]
+    pub fn of(error: &serde_json::Error) -> Self {
+        Self {
+            kind: match error.classify() {
+                Category::Syntax | Category::Io => JsonTextFault::Syntax,
+                Category::Data => JsonTextFault::Value,
+                Category::Eof => JsonTextFault::Eof,
+            },
+            line: error.line(),
+            column: error.column(),
+        }
+    }
+
     /// What breaks the text.
     #[must_use]
     pub fn kind(self) -> JsonTextFault {
@@ -114,15 +128,7 @@ impl Json {
     ///
     /// [`JsonTextError`]: what serde_json found, and where.
     pub fn parse(bytes: &[u8]) -> Result<Self, JsonTextError> {
-        serde_json::from_slice(bytes).map_err(|error| JsonTextError {
-            kind: match error.classify() {
-                Category::Syntax | Category::Io => JsonTextFault::Syntax,
-                Category::Data => JsonTextFault::Value,
-                Category::Eof => JsonTextFault::Eof,
-            },
-            line: error.line(),
-            column: error.column(),
-        })
+        serde_json::from_slice(bytes).map_err(|error| JsonTextError::of(&error))
     }
 
     /// The value `bytes` encode, each object naming each member once.

@@ -22,7 +22,7 @@ fn cbor_code(e: CborError) -> &'static str {
         CborError::Truncated => "cbor_truncated",
         CborError::TrailingBytes => "cbor_trailing_bytes",
         CborError::Unsupported(_) => "cbor_unsupported",
-        CborError::InvalidUtf8 => "cbor_invalid_utf8",
+        CborError::InvalidUtf8(_) => "cbor_invalid_utf8",
         CborError::DuplicateKey => "cbor_duplicate_key",
         CborError::TooDeep => "cbor_too_deep",
     }

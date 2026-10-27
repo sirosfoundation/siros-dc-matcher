@@ -20,7 +20,8 @@ use crate::meta::CredentialFormat;
 use crate::path::ClaimPath;
 
 pub use error::{
-    ClaimMember, CredentialMember, FormFault, Member, Position, QueryError, SetMember,
+    ClaimMember, CredentialMember, FormFault, Member, Position, QueryError, QueryTextError,
+    SetMember,
 };
 
 /// A complete DCQL query (§6).
@@ -169,21 +170,22 @@ impl<'de> Deserialize<'de> for DcqlQuery {
 }
 
 impl DcqlQuery {
-    /// The DCQL query of the JSON text `json`.
+    /// The DCQL query of the JSON text `json`, as [`Self::parse`] reads its value.
+    ///
+    /// # Errors
+    ///
+    /// [`QueryTextError`]: text that is no JSON, or the [`QueryError`] of its value.
+    pub fn from_json(json: &str) -> Result<Self, QueryTextError> {
+        let document = serde_json::from_str(json).map_err(QueryTextError::Json)?;
+        Self::parse(&document).map_err(QueryTextError::Query)
+    }
+
+    /// The DCQL query of the JSON value `document`.
     ///
     /// # Errors
     ///
     /// [`QueryError`]: the first rule of §6.1, §6.1.1, §6.2, §6.3 or §7 the document breaks.
     /// Unknown properties are ignored (§6).
-    pub fn from_json(json: &str) -> Result<Self, QueryError> {
-        Self::parse(&serde_json::from_str(json)?)
-    }
-
-    /// The DCQL query of the JSON value `document`, as [`Self::from_json`] reads text.
-    ///
-    /// # Errors
-    ///
-    /// [`QueryError`], as for [`Self::from_json`].
     pub fn parse(document: &Value) -> Result<Self, QueryError> {
         read::query(document)
     }
