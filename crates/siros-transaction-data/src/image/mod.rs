@@ -5,6 +5,7 @@
 //! 4.3.1): it cannot be verified.
 
 mod css;
+mod font;
 mod raster;
 mod svg;
 
@@ -17,8 +18,9 @@ use crate::fetched::{FetchFault, Fetched, Step};
 use crate::integrity::{Integrity, IntegrityFault};
 
 pub use css::CssFault;
+pub use font::{FontFault, FontFormat};
 pub use raster::RasterFault;
-pub use svg::{SvgFault, MAX_DEPTH, MAX_RESOURCES};
+pub use svg::{DataFault, SvgFault, MAX_DEPTH, MAX_RESOURCES};
 
 /// The most bytes of an image: of a Data URL's payload, or of the fetched content.
 pub const MAX_IMAGE_BYTES: usize = 512 * 1024;
@@ -32,10 +34,10 @@ const IMAGE_LIMIT: BodyLimit = BodyLimit::bytes(MAX_IMAGE_BYTES);
 /// The most redirects an image fetch follows (PaSO View, Section 3, `image`).
 const IMAGE_REDIRECTS: Redirects = Redirects::at_most(3);
 
-/// The fetch of the image or resource at `url`: the image types accepted, at most `limit`
-/// bytes, at most 3 redirects.
-pub(crate) fn image_fetch(url: HttpsUrl, limit: BodyLimit) -> Fetch {
-    Fetch::get(url, MediaType::IMAGES, limit).following(IMAGE_REDIRECTS)
+/// The fetch of the image or resource at `url`: the types `accept` lists, at most 512 KiB, at
+/// most 3 redirects.
+pub(crate) fn image_fetch(url: HttpsUrl, accept: MediaType) -> Fetch {
+    Fetch::get(url, accept, IMAGE_LIMIT).following(IMAGE_REDIRECTS)
 }
 
 /// The pixels of an image in each direction.
@@ -129,8 +131,9 @@ pub enum ImageRef {
 /// resource an SVG document references fetched and verified.
 ///
 /// The host renders it statically: it runs no script and no animation, and it loads nothing
-/// outside [`VerifiedImage::resources`] (PaSO View, Section 3, `image`). An SVG document's
-/// references resolve to those bytes, by the reference as the document writes it.
+/// outside [`VerifiedImage::resources`] (PaSO View, Section 3, `image`). The host answers the
+/// renderer's request for a URL, without its fragment, with the resource of that
+/// [`Resource::url`], as its [`Resource::kind`]; any other request fails.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerifiedImage {
     format: ImageFormat,
@@ -138,14 +141,56 @@ pub struct VerifiedImage {
     resources: Vec<Resource>,
 }
 
-/// A resource an SVG document references, verified against the integrity value of its URL's
-/// fragment (PaSO Proof SD-JWT-VC and SVG, Section 3).
+/// A resource an SVG document references, verified against the integrity value of each
+/// fragment its URL carries in the document (PaSO Proof SD-JWT-VC and SVG, Section 3).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Resource {
-    /// The URL, as the document writes it.
-    pub reference: String,
+    url: HttpsUrl,
+    kind: ResourceKind,
+    bytes: Vec<u8>,
+}
+
+impl Resource {
+    /// The URL a renderer requests: the `https` URL of the references, without the fragment.
+    #[must_use]
+    pub fn url(&self) -> &HttpsUrl {
+        &self.url
+    }
+
+    /// The kind of the content.
+    #[must_use]
+    pub fn kind(&self) -> ResourceKind {
+        self.kind
+    }
+
     /// The verified bytes.
-    pub bytes: Vec<u8>,
+    #[must_use]
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+}
+
+/// The kind of a resource's content, by its signature and header.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ResourceKind {
+    /// A PNG image within the image limits.
+    Png,
+    /// A JPEG image within the image limits.
+    Jpeg,
+    /// A font whose header and table directory read.
+    Font(FontFormat),
+}
+
+impl ResourceKind {
+    /// The media type the host serves the resource as.
+    #[must_use]
+    pub fn media_type(self) -> &'static str {
+        match self {
+            Self::Png => ImageFormat::Png.media_type(),
+            Self::Jpeg => ImageFormat::Jpeg.media_type(),
+            Self::Font(format) => format.media_type(),
+        }
+    }
 }
 
 /// Why an image is refused. The entry is then not compatible (PaSO View, Section 3).
@@ -238,7 +283,7 @@ impl ImageRef {
             Self::Data { format, bytes } => (*format, bytes.clone()),
             Self::Remote { url, integrity } => {
                 let body = fetched!(fetched
-                    .body(image_fetch(url.clone(), IMAGE_LIMIT))
+                    .body(image_fetch(url.clone(), MediaType::IMAGES))
                     .map_err(ImageFault::Fetch)?);
                 integrity.check(body).map_err(ImageFault::Integrity)?;
                 (ImageFormat::sniff(body), body.to_vec())

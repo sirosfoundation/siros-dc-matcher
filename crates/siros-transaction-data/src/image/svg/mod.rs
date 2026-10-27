@@ -1,30 +1,29 @@
 //! SVG documents (PaSO Proof SD-JWT-VC and SVG, Section 3; PaSO View, Section 3, `image`). A
-//! document passes only within a static subset: the elements and attributes of [`allow`], CSS
-//! within the subset of `css`, and each URL a same-document fragment, a Data URL of a PNG or
-//! JPEG image, or an `https` URL whose fragment carries its integrity value. The wallet fetches
-//! and verifies each such resource, at most [`MAX_RESOURCES`], and admits PNG and JPEG images
-//! within the image limits and WOFF, WOFF2, TrueType and OpenType fonts. A document's size is
-//! its root's `width` and `height` in absolute units.
+//! document passes only within a static subset: its elements nested at most [`MAX_DEPTH`]
+//! levels, the elements and attributes of [`allow`], CSS within the subset of `css`, and each
+//! URL a same-document fragment, a Data URL, or an `https` URL whose fragment carries its
+//! integrity value. The wallet fetches and verifies each such resource, at most
+//! [`MAX_RESOURCES`]; a resource and a Data URL's content pass as PNG and JPEG images within the
+//! image limits and as WOFF, WOFF2, TrueType and OpenType fonts. A document's size is its
+//! root's `width` and `height` in absolute units.
 
 mod allow;
 mod markup;
+mod resource;
 
 use roxmltree::{Document as Xml, Node, NodeType, ParsingOptions};
-use siros_oid4vp::{BodyLimit, HttpsUrl};
+use siros_oid4vp::HttpsUrl;
 
 use super::css::{self, CssFault};
-use super::raster::{self, RasterFault};
-use super::{
-    image_fetch, strip_prefix_ignore_case, Dimensions, ImageFormat, Resource, MAX_IMAGE_BYTES,
-};
+use super::font::FontFault;
+use super::raster::RasterFault;
+use super::{Dimensions, Resource};
 use crate::fetched;
 use crate::fetched::{FetchFault, Fetched, Step};
-use crate::integrity::{Integrity, IntegrityFault};
+use crate::integrity::IntegrityFault;
 
 pub use markup::MAX_DEPTH;
-
-/// The limit of the fetch of a resource an SVG document references.
-const RESOURCE_LIMIT: BodyLimit = BodyLimit::bytes(MAX_IMAGE_BYTES);
+pub use resource::DataFault;
 
 /// The most resources an SVG document references. A logo draws from a few images and fonts;
 /// each is a fetch at consent time.
@@ -45,31 +44,40 @@ pub enum SvgFault {
     ProcessingInstruction(String),
     /// The document holds this element, of this namespace, outside the static subset.
     Element(Option<String>, String),
-    /// The element of the first name takes no attribute of the second.
-    Attribute(String, String),
+    /// The element of this name takes no attribute of this namespace and name.
+    Attribute {
+        /// The element's name.
+        element: String,
+        /// The attribute's namespace.
+        namespace: Option<String>,
+        /// The attribute's name.
+        name: String,
+    },
     /// A `style` element holds something other than text.
     StyleContent,
     /// The CSS of the document breaks the subset.
     Css(CssFault),
     /// The document references this URL, which is neither a fragment of the document, a Data
-    /// URL of a PNG or JPEG image, nor an `https` URL.
+    /// URL, nor an `https` URL.
     ReferenceNotHttps(String),
     /// The document references this `https` URL without a fragment.
     ReferenceUnpinned(String),
     /// The fragment of this URL is no integrity value, or its content does not match it.
     ReferenceIntegrity(String, IntegrityFault),
     /// The fetch of this URL gave no content.
-    ReferenceFetch(String, FetchFault),
-    /// The document references this Data URL of a type other than PNG and JPEG.
-    DataReference(String),
+    ReferenceFetch(HttpsUrl, FetchFault),
+    /// The document references this Data URL, which gives no content.
+    DataReference(String, DataFault),
     /// The document references this many resources, more than [`MAX_RESOURCES`].
     TooManyResources(usize),
-    /// The content of this URL is neither a PNG or JPEG image nor a font.
+    /// The content of this URL or Data URL is neither a PNG or JPEG image nor a font.
     ResourceType(String),
-    /// The PNG or JPEG image of this URL does not read.
+    /// The PNG or JPEG image of this URL or Data URL does not read.
     ResourceRaster(String, RasterFault),
-    /// The PNG or JPEG image of this URL is over 2048 pixels in a direction.
+    /// The PNG or JPEG image of this URL or Data URL is over 2048 pixels in a direction.
     ResourceTooManyPixels(String, Dimensions),
+    /// The font of this URL or Data URL has a header or table directory that does not read.
+    ResourceFont(String, FontFault),
 }
 
 impl SvgFault {
@@ -83,18 +91,19 @@ impl SvgFault {
             Self::NotSvg => "svg_root",
             Self::ProcessingInstruction(_) => "svg_processing_instruction",
             Self::Element(..) => "svg_element",
-            Self::Attribute(..) => "svg_attribute",
+            Self::Attribute { .. } => "svg_attribute",
             Self::StyleContent => "svg_style_content",
             Self::Css(fault) => fault.code(),
             Self::ReferenceNotHttps(_) => "svg_reference_not_https",
             Self::ReferenceUnpinned(_) => "svg_reference_unpinned",
             Self::ReferenceIntegrity(..) => "svg_reference_integrity",
             Self::ReferenceFetch(..) => "svg_reference_fetch",
-            Self::DataReference(_) => "svg_data_reference",
+            Self::DataReference(..) => "svg_data_reference",
             Self::TooManyResources(_) => "svg_too_many_resources",
             Self::ResourceType(_) => "svg_resource_type",
             Self::ResourceRaster(..) => "svg_resource_raster",
             Self::ResourceTooManyPixels(..) => "svg_resource_too_many_pixels",
+            Self::ResourceFont(..) => "svg_resource_font",
         }
     }
 }
@@ -132,31 +141,8 @@ pub(super) fn read(bytes: &[u8], fetched: &Fetched) -> Result<Step<Document>, Sv
             height: height.unwrap_or(0),
         }),
     };
-    let mut pinned: Vec<(String, HttpsUrl, Integrity)> = Vec::new();
-    for reference in references(&document)? {
-        if let Some((url, integrity)) = classify(&reference)? {
-            if !pinned.iter().any(|(seen, _, _)| *seen == reference) {
-                pinned.push((reference, url, integrity));
-            }
-        }
-    }
-    if pinned.len() > MAX_RESOURCES {
-        return Err(SvgFault::TooManyResources(pinned.len()));
-    }
-    let mut resources = Vec::with_capacity(pinned.len());
-    for (reference, url, integrity) in pinned {
-        let body = fetched!(fetched
-            .body(image_fetch(url, RESOURCE_LIMIT))
-            .map_err(|fault| SvgFault::ReferenceFetch(reference.clone(), fault))?);
-        integrity
-            .check(body)
-            .map_err(|fault| SvgFault::ReferenceIntegrity(reference.clone(), fault))?;
-        admit(&reference, body)?;
-        resources.push(Resource {
-            reference,
-            bytes: body.to_vec(),
-        });
-    }
+    let pins = resource::Pins::of(&references(&document)?)?;
+    let resources = fetched!(pins.fetch(fetched)?);
     Ok(Step::Done(Document { size, resources }))
 }
 
@@ -198,7 +184,11 @@ fn element(node: Node<'_, '_>) -> Result<Vec<String>, SvgFault> {
     };
     let mut found = Vec::new();
     for attribute in node.attributes() {
-        let refused = || SvgFault::Attribute(name.to_owned(), attribute.name().to_owned());
+        let refused = || SvgFault::Attribute {
+            element: name.to_owned(),
+            namespace: attribute.namespace().map(str::to_owned),
+            name: attribute.name().to_owned(),
+        };
         match (attribute.namespace(), attribute.name()) {
             (Some(allow::XLINK), "href") | (None, "href") => {
                 if !allow::HREF.contains(&name) {
@@ -229,85 +219,6 @@ fn element(node: Node<'_, '_>) -> Result<Vec<String>, SvgFault> {
         found.extend(css::urls(&sheet).map_err(SvgFault::Css)?);
     }
     Ok(found)
-}
-
-/// The resource `reference` names: `None` for a fragment of the document or a Data URL of a
-/// PNG or JPEG image, else its `https` URL and integrity value.
-///
-/// # Errors
-///
-/// [`SvgFault`] for a URL of another kind.
-fn classify(reference: &str) -> Result<Option<(HttpsUrl, Integrity)>, SvgFault> {
-    let trimmed = reference.trim_matches(|c: char| c.is_ascii_whitespace());
-    if trimmed.starts_with('#') {
-        return Ok(None);
-    }
-    if let Some(rest) = strip_prefix_ignore_case(trimmed, "data:") {
-        let media_type = rest.split([';', ',']).next().unwrap_or_default().trim();
-        return match ImageFormat::of_media_type(media_type) {
-            Some(ImageFormat::Png | ImageFormat::Jpeg) => Ok(None),
-            Some(ImageFormat::Svg) | None => Err(SvgFault::DataReference(reference.to_owned())),
-        };
-    }
-    pinned(trimmed).map(Some)
-}
-
-/// The font signatures a resource may carry: WOFF, WOFF2, TrueType and OpenType.
-const FONTS: [&[u8]; 5] = [b"wOFF", b"wOF2", &[0, 1, 0, 0], b"true", b"OTTO"];
-
-/// Checks the content `body` of the resource `reference` by its signature: a PNG or JPEG image
-/// within the image limits, or a font.
-fn admit(reference: &str, body: &[u8]) -> Result<(), SvgFault> {
-    let raster = |read: fn(&[u8]) -> Result<Option<Dimensions>, RasterFault>| match read(body)
-        .map_err(|fault| SvgFault::ResourceRaster(reference.to_owned(), fault))?
-    {
-        Some(dimensions) if dimensions.over() => Err(SvgFault::ResourceTooManyPixels(
-            reference.to_owned(),
-            dimensions,
-        )),
-        Some(_) | None => Ok(()),
-    };
-    if body.starts_with(&raster::PNG_SIGNATURE) {
-        raster(raster::png)
-    } else if body.starts_with(&raster::JPEG_SOI) {
-        raster(raster::jpeg)
-    } else if FONTS.iter().any(|signature| body.starts_with(signature)) {
-        Ok(())
-    } else {
-        Err(SvgFault::ResourceType(reference.to_owned()))
-    }
-}
-
-/// The `https` URL of `reference` without its fragment, and the integrity value its fragment
-/// carries, percent-decoded (Section 3, steps 1 and 2).
-fn pinned(reference: &str) -> Result<(HttpsUrl, Integrity), SvgFault> {
-    let (url, fragment) = reference
-        .split_once('#')
-        .ok_or_else(|| SvgFault::ReferenceUnpinned(reference.to_owned()))?;
-    let url =
-        HttpsUrl::parse(url).ok_or_else(|| SvgFault::ReferenceNotHttps(reference.to_owned()))?;
-    let integrity = percent_decoded(fragment)
-        .ok_or(IntegrityFault::Malformed)
-        .and_then(|text| Integrity::parse(&text))
-        .map_err(|fault| SvgFault::ReferenceIntegrity(reference.to_owned(), fault))?;
-    Ok((url, integrity))
-}
-
-/// `text` with each `%XX` decoded; `None` for a malformed escape or bytes that are no UTF-8.
-fn percent_decoded(text: &str) -> Option<String> {
-    let mut bytes = Vec::with_capacity(text.len());
-    let mut rest = text.as_bytes();
-    while let Some((&first, tail)) = rest.split_first() {
-        if first == b'%' {
-            let hex = std::str::from_utf8(tail.get(..2)?).ok()?;
-            bytes.push(u8::from_str_radix(hex, 16).ok()?);
-            rest = tail.get(2..)?;
-        } else {
-            bytes.push(first);
-            rest = tail;
-        }
-    }
-    String::from_utf8(bytes).ok()
 }
 
 /// The pixels of an SVG length attribute in an absolute unit, rounded up; `None` for an absent

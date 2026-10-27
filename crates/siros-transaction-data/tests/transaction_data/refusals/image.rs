@@ -5,28 +5,18 @@
 //! SD-JWT-VC and SVG, Section 3); and the cap on the items shown, counted before any fetch.
 
 use serde_json::json;
-use siros_oid4vp::{HttpStatus, MediaType, Redirects};
+use siros_oid4vp::{HttpStatus, HttpsUrl, MediaType, Redirects};
 use siros_transaction_data::{
     ClaimIndex, Dimensions, FetchFault, ImageFault, ImageFormat, Incompatibility, IntegrityFault,
-    Location, LocationStep, PayloadFault, RenderFault, Selection, SvgFault, ValueFault,
-    MAX_IMAGE_BYTES,
+    Location, LocationStep, PayloadFault, RenderFault, ResourceKind, Selection, SvgFault,
+    ValueFault, MAX_IMAGE_BYTES,
 };
 
 use crate::common::{
-    b64, configured, credential, entries, ok, query, rows, sri, Documents, Host, Shown, CARD,
+    b64, configured, credential, entries, ok, png, query, rows, sri, Documents, Host, Shown, CARD,
 };
 
 const TYPE: &str = "urn:paso:sca:com.example:logo:1";
-
-/// A PNG of `width` by `height` pixels: its signature and IHDR chunk.
-fn png(width: u32, height: u32) -> Vec<u8> {
-    let mut bytes = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13];
-    bytes.extend_from_slice(b"IHDR");
-    bytes.extend_from_slice(&width.to_be_bytes());
-    bytes.extend_from_slice(&height.to_be_bytes());
-    bytes.extend_from_slice(&[8, 6, 0, 0, 0, 0, 0, 0, 0]);
-    bytes
-}
 
 /// A JPEG of `width` by `height` pixels: an APP0 segment, then a baseline start of frame.
 fn jpeg(width: u16, height: u16) -> Vec<u8> {
@@ -283,7 +273,9 @@ fn each_image_rule_is_refused_alone() {
     }
 }
 
-/// The view carries the verified bytes, and those of each resource an SVG document references.
+/// The view carries the verified bytes, and those of each resource an SVG document references,
+/// by the URL a renderer requests and the kind the host serves it as; a resource fetch accepts
+/// the resource types.
 #[test]
 fn the_view_carries_the_verified_bytes() {
     let part = png(1, 1);
@@ -297,16 +289,27 @@ fn the_view_carries_the_verified_bytes() {
     let entry = json!({"type": TYPE, "credential_ids": ["card"],
                        "payload": {"logo": data("image/svg+xml", &document)}});
     let entries = entries(&[entry.to_string()], &query(&["card"], CARD));
-    let selection = host.select(&[&entries[0]], &credential(CARD, &[])).unwrap();
+    let (selection, fetches) = host.select_fetching(&[&entries[0]], &credential(CARD, &[]));
+    let selection = selection.unwrap();
     let siros_transaction_data::RowValue::Image(image) =
         crate::common::taken(&selection).view().rows()[0].value()
     else {
         panic!("no image")
     };
     assert_eq!(image.bytes(), document.as_slice());
-    assert_eq!(image.resources().len(), 1);
-    assert_eq!(image.resources()[0].bytes, part);
-    assert_eq!(image.resources()[0].reference, reference);
+    let [resource] = image.resources() else {
+        panic!("{:?}", image.resources())
+    };
+    assert_eq!(resource.bytes(), part);
+    assert_eq!(resource.kind(), ResourceKind::Png);
+    assert_eq!(
+        resource.url(),
+        &HttpsUrl::parse("https://cdn.example/part.png").unwrap()
+    );
+    let [fetch] = fetches.as_slice() else {
+        panic!("{fetches:?}")
+    };
+    assert_eq!(fetch.accept(), MediaType::RESOURCES);
 }
 
 /// An image fetch accepts the image types and follows at most 3 redirects (PaSO View, Section

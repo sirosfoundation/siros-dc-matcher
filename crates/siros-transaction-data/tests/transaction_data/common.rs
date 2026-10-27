@@ -391,6 +391,16 @@ pub fn configured(type_id: &str, vct: &str, definition: &Value) -> Value {
     json!({"type": type_id, "vct_values": [vct], "definition": definition})
 }
 
+/// A PNG of `width` by `height` pixels: its signature and IHDR chunk.
+pub fn png(width: u32, height: u32) -> Vec<u8> {
+    let mut bytes = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13];
+    bytes.extend_from_slice(b"IHDR");
+    bytes.extend_from_slice(&width.to_be_bytes());
+    bytes.extend_from_slice(&height.to_be_bytes());
+    bytes.extend_from_slice(&[8, 6, 0, 0, 0, 0, 0, 0, 0]);
+    bytes
+}
+
 /// SRI integrity metadata of `bytes`: `sha256-` and the base64 of their SHA-256.
 pub fn sri(bytes: &[u8]) -> String {
     format!("sha256-{}", b64(&Sha256::digest(bytes)))
