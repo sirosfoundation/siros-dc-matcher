@@ -265,6 +265,10 @@ fn anchor_list(anchors: Option<Vec<ByteBuf>>) -> Option<Vec<Vec<u8>>> {
 /// # Errors
 ///
 /// Throws `{kind: "host"}` for an input the presenter cannot use.
+///
+/// # Panics
+///
+/// When the query has `trusted_authorities` and `anchors` is absent.
 #[wasm_bindgen(js_name = matchQuery)]
 pub fn match_query(input: JsValue) -> Result<JsValue, JsValue> {
     let input: JsMatchInput = from_js(input, "match_input")?;
@@ -339,7 +343,12 @@ fn invalid(code: &str) -> JsValue {
 ///
 /// # Errors
 ///
-/// Throws `{kind: "invalid_request"}` for a rule of the policy or of the verifier identity.
+/// Throws `{kind: "invalid_request"}` for a rule of the policy or of the verifier identity,
+/// and `{kind: "host"}` for a thumbprint that is not 32 bytes.
+///
+/// # Panics
+///
+/// When the thumbprint is of no key in the request.
 #[wasm_bindgen(js_name = session)]
 pub fn session(input: JsValue) -> Result<ZkpSession, JsValue> {
     let input: JsSessionInput = from_js(input, "session_input")?;
@@ -354,9 +363,7 @@ pub fn session(input: JsValue) -> Result<ZkpSession, JsValue> {
         .into_vec()
         .try_into()
         .map_err(|_| host("thumbprint_length"))?;
-    let handover = checked
-        .handover(&thumbprint)
-        .map_err(|_| host("thumbprint_not_in_request"))?;
+    let handover = checked.handover(&thumbprint);
     let verifier_id = match input.verifier_id {
         JsVerifierIdForm::Semantic {
             semantic_identifier,
@@ -456,6 +463,11 @@ pub struct ZkpPrepared(Prepared);
 /// # Errors
 ///
 /// Throws `{kind: "rejected", errors}` with the system rulebook's codes, or another kind.
+///
+/// # Panics
+///
+/// When `secret_seed` is not 16 bytes, `credential` is not the candidate's, or the query has
+/// `trusted_authorities` and `anchors` is absent.
 #[wasm_bindgen(js_name = prepare)]
 pub fn prepare(input: JsValue, session: &ZkpSession) -> Result<ZkpPrepared, JsValue> {
     let input: JsProveInput = from_js(input, "prove_input")?;
@@ -500,7 +512,11 @@ impl ZkpPrepared {
     /// # Errors
     ///
     /// Throws `device_binding` or `credential_form` as `{kind: "rejected"}`, and `{kind:
-    /// "host"}` for a signature that is not 64 bytes or a system `provers` has not loaded.
+    /// "host"}` for a system `provers` has not loaded.
+    ///
+    /// # Panics
+    ///
+    /// When the device signature is not 64 bytes.
     pub fn prove(&self, provers: &ZkpProvers, device_signature: &[u8]) -> Result<Vec<u8>, JsValue> {
         let presentation = self
             .0

@@ -66,19 +66,20 @@ impl Chain {
     /// certificates, leaf first.
     pub(crate) fn parse(x5c: Option<&Value>) -> Result<Self, IntakeError> {
         let invalid = IntakeError::CertificateChainInvalid;
-        let der = x5c
+        let (leaf, intermediates) = x5c
             .and_then(Value::as_array)
-            .filter(|chain| !chain.is_empty())
-            .ok_or(invalid(ChainFault::Absent))?
-            .iter()
-            .map(|c| {
-                let text = c.as_str().ok_or(invalid(ChainFault::NotString))?;
-                base64::decode(text).map_err(|e| invalid(ChainFault::Encoding(e)))
-            })
+            .and_then(|chain| chain.split_first())
+            .ok_or(invalid(ChainFault::Absent))?;
+        let decode = |c: &Value| {
+            let text = c.as_str().ok_or(invalid(ChainFault::NotString))?;
+            base64::decode(text).map_err(|e| invalid(ChainFault::Encoding(e)))
+        };
+        let leaf_der = decode(leaf)?;
+        let der = std::iter::once(Ok(leaf_der.clone()))
+            .chain(intermediates.iter().map(decode))
             .collect::<Result<Vec<_>, _>>()?;
-        let leaf_der = der.first().ok_or(invalid(ChainFault::Absent))?;
-        let leaf =
-            Certificate::from_der(leaf_der).map_err(|_| invalid(ChainFault::LeafNotCertificate))?;
+        let leaf = Certificate::from_der(&leaf_der)
+            .map_err(|_| invalid(ChainFault::LeafNotCertificate))?;
         let tbs = &leaf.tbs_certificate;
         let key = p256_key(tbs).ok_or(invalid(ChainFault::LeafKey))?;
         let dns_names = match tbs.get::<SubjectAltName>() {
@@ -94,7 +95,7 @@ impl Chain {
             Err(_) => return Err(invalid(ChainFault::SubjectAltName)),
         };
         Ok(Self {
-            leaf: CertificateDer(leaf_der.clone()),
+            leaf: CertificateDer(leaf_der),
             key,
             dns_names,
             semantic_identifier: semantic_identifier(tbs),

@@ -354,7 +354,7 @@ impl Wallet {
                 .find(|(url, _)| url == fetch.url().as_str())
                 .map(|(_, r)| r.clone())
                 .unwrap_or_else(|| FetchResponse::new(HttpStatus::new(404), None, Vec::new()));
-            fetches.answer(&fetch, response).unwrap();
+            fetches.answer(&fetch, response);
         }
     }
 }

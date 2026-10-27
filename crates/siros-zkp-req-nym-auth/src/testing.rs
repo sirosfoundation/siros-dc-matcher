@@ -323,7 +323,7 @@ pub fn session(query: &Value, nonce: &str) -> Session {
     let checked = check_request(&request_object(query, nonce), true, Channel::Redirect).unwrap();
     let thumbprint = ec_jwk_thumbprint(&encryption_jwk()).unwrap();
     Session {
-        handover: checked.handover(thumbprint.as_bytes()).unwrap(),
+        handover: checked.handover(thumbprint.as_bytes()),
         verifier_id: VerifierId::x509_san_dns(
             &ClientId::parse(&checked.client_id).unwrap(),
             Intermediary::Absent,

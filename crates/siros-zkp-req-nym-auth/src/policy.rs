@@ -167,32 +167,30 @@ pub fn check_request(
     })
 }
 
-/// The host chose an encryption key that is not one of the request's.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
-#[error("the JWK thumbprint is of no key in client_metadata.jwks")]
-pub struct KeyNotInRequest;
-
 impl CheckedRequest {
     /// The `Handover` of this request, for the response-encryption key whose JWK SHA-256
     /// Thumbprint is `jwk_thumbprint` (OpenID4VP 1.0, Section 8.3 picks the key).
     ///
-    /// # Errors
+    /// # Panics
     ///
-    /// [`KeyNotInRequest`] when no key of `client_metadata.jwks` has that thumbprint: the
-    /// session binds only values of the validated Request Object.
-    pub fn handover(&self, jwk_thumbprint: &[u8; 32]) -> Result<Handover, KeyNotInRequest> {
+    /// When no key of `client_metadata.jwks` has that thumbprint.
+    pub fn handover(&self, jwk_thumbprint: &[u8; 32]) -> Handover {
         let known = self.encryption_keys.iter().any(|k| {
             ec_jwk_thumbprint(k).as_ref().map(JwkThumbprint::as_bytes) == Some(jwk_thumbprint)
         });
-        if !known {
-            return Err(KeyNotInRequest);
-        }
+        // The host picks one of the request's keys (OpenID4VP 1.0, Section 8.3). Another key is
+        // a bug of the host, and the session would bind a value the validated Request Object
+        // does not hold.
+        assert!(
+            known,
+            "the JWK thumbprint is of no key in client_metadata.jwks"
+        );
         let thumbprint = JwkThumbprint::new(*jwk_thumbprint);
-        Ok(match &self.endpoint {
+        match &self.endpoint {
             Endpoint::Origin(origin) => Handover::dc_api(origin, &self.nonce, Some(&thumbprint)),
             Endpoint::ResponseUri(uri) => {
                 Handover::redirect(&self.client_id, &self.nonce, Some(&thumbprint), uri)
             }
-        })
+        }
     }
 }

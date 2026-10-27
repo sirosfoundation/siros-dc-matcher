@@ -109,7 +109,6 @@ impl ProveError {
 impl From<Unanswerable> for ProveError {
     fn from(e: Unanswerable) -> Self {
         match e {
-            Unanswerable::ProofDate => Self::Host(HostError::Time),
             Unanswerable::Failed(errors) => Self::Rejected(errors),
         }
     }
@@ -161,22 +160,35 @@ impl fmt::Debug for Prepared {
 /// # Errors
 ///
 /// [`ProveError`]: what fails, as the Section 9 codes name it.
+///
+/// # Panics
+///
+/// When the host breaks [`ProveInput`]: a secret seed of other than 16 bytes, a credential
+/// other than the candidate's, or no anchors for a query that names trusted authorities.
+#[expect(
+    clippy::expect_used,
+    reason = "ProveInput's secret seed is 16 bytes; another length is a bug of the host, and \
+              no seed opens `ssc` from it"
+)]
 pub fn prepare(input: &ProveInput<'_>) -> Result<Prepared, ProveError> {
     let proof_time = DateTime::from_unix(input.now).ok_or(HostError::Time)?;
     let seed = SecretSeed::new(Zeroizing::new(
         input
             .secret_seed
             .try_into()
-            .map_err(|_| HostError::SeedLength)?,
+            .expect("the secret seed is 16 bytes"),
     ));
     let parsed = parse(input.query, input.client_metadata)
         .map_err(ProveError::Invalid)?
         .ok_or(HostError::CandidateMismatch)?;
     let pair = candidate_pair(&parsed, input.candidate, proof_time.date())?;
-    if input.credential.id != input.candidate.credential_id {
-        return Err(HostError::CredentialMismatch.into());
-    }
-    let anchors = anchors_for(&parsed.query, input.anchors)?;
+    // ProveInput carries the candidate's credential. Another credential is a bug of the host,
+    // and the proof would be of a credential the User did not consent to.
+    assert!(
+        input.credential.id == input.candidate.credential_id,
+        "the host passed a credential other than the candidate's"
+    );
+    let anchors = anchors_for(&parsed.query, input.anchors);
     let answer = answer(pair, input.credential, anchors, proof_time, &seed)?;
     build(answer, input.session, &input.credential.kid)
 }
@@ -267,6 +279,15 @@ fn candidate_pair<'q>(
 /// The answer of `pair`'s option by `stored` at `proof_time`, opened with `secret_seed`. The
 /// failures of the credential come first, then those of the items: the `age_check` assertion
 /// and the `pseudonym`, whose seed must open `ssc`.
+///
+/// # Panics
+///
+/// When `stored` is an mdoc of another `docType` than nym_auth's.
+#[expect(
+    clippy::panic,
+    reason = "`match` gives candidates of nym_auth credentials only, and ProveInput carries the \
+              candidate's credential; another `docType` is a bug of the host"
+)]
 fn answer<'q>(
     pair: UsablePair<'q>,
     stored: &StoredCredential,
@@ -276,7 +297,9 @@ fn answer<'q>(
 ) -> Result<Answer<'q>, ProveError> {
     match UsableAttestation::new(&stored.data, anchors, proof_time) {
         Ok(attestation) => Ok(Answer::new(pair, attestation, secret_seed)?),
-        Err(Unusable::OtherDocType) => Err(HostError::CredentialMismatch.into()),
+        Err(Unusable::OtherDocType) => {
+            panic!("the candidate's credential is an mdoc of another docType")
+        }
         Err(unusable) => {
             let tested = unusable
                 .codes()
@@ -342,12 +365,20 @@ impl Prepared {
     ///
     /// # Errors
     ///
-    /// [`ProveError::Host`] for a signature that is not 64 bytes, and `device_binding` for one
-    /// that does not verify.
+    /// `device_binding` for a signature that does not verify.
+    ///
+    /// # Panics
+    ///
+    /// When the signature is not the 64 bytes `r ‖ s` of ES256.
+    #[expect(
+        clippy::expect_used,
+        reason = "the host signs `data_to_sign` with ES256 as `r ‖ s`; another length is a bug \
+                  of the host, and no proof binds the device key with it"
+    )]
     pub fn job(&self, device_signature: &[u8]) -> Result<ProofJob, ProveError> {
         let signature: [u8; 64] = device_signature
             .try_into()
-            .map_err(|_| HostError::SignatureLength)?;
+            .expect("the device signature is the 64 bytes r || s");
         let device_key = self.attestation.credential().mdoc().device_key();
         if !es256_verifies(device_key, &self.data_to_sign, &signature) {
             return Err(ProveError::Rejected(vec![ZkpError::Credential(
