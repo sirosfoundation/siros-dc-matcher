@@ -178,8 +178,9 @@ pool, no cross-origin isolation. Objects use the snake_case names of `@sirosfoun
 bytes are `Uint8Array`. A refusal throws `{error_code, kind, code, errors?}`. Verification is
 available in Rust and through the FFI.
 
-Built with wasm-pack 0.15.0 and wasm-opt 116, the module is 2,896,001 bytes (772,160 with brotli
-at quality 11) and its JavaScript glue 31,300 (6,097). It links zk-cred-longfellow under MPL-2.0, part of it derived from Google's
+Built with wasm-pack 0.15.0 and wasm-opt 116, the module is about 2.9 MB (0.77 MB with brotli at
+quality 11) and its JavaScript glue 31 KB (6 KB); the exact sizes vary with the source paths the
+module embeds. It links zk-cred-longfellow under MPL-2.0, part of it derived from Google's
 longfellow-zk under Apache-2.0; a page that serves it carries their notices.
 
 ## The frontend package
