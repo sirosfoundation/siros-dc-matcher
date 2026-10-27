@@ -16,15 +16,18 @@ commit `e65861c`), and adds the components of the SIROS wallet core. **Breaking*
 presentations follow the draft, the DCQL parse enforces OpenID4VP 1.0, Section 6, the FFI loses
 `zkp_req_plan`, and the vectors move to the crates that own their rules. Consumers that keep a
 copy of the vectors (siros-sdk-kotlin, siros-sdk-swift) must re-copy them from the new
-directories; the vector set digest below identifies them. `matcher.wasm` is 493,805 bytes, over
+directories; the vector set digest below identifies them. `matcher.wasm` is 358,122 bytes, over
 the 307,200-byte budget (303,418 at v0.11.0), sha256
-`17b224036ecde41025b2a0087c71e2d15dcfa3fdf6e574f5e35acc3096b503e1` with Rust 1.99.1.
+`3778393e7909806c6cfdfd486f87329d1a3b42f57fabc17f2c6d6b6fee10f3c6` with Rust 1.99.1 and binaryen version_116.
 
 ### Changed
 
 - The matcher crate `siros-dc-matcher-wasm` is `siros-picker`, and its test host
   `siros-dc-matcher-testhost` is `siros-picker-testhost`. `make matcher` builds `matcher.wasm`
   as before.
+- `make matcher` runs `wasm-opt -Oz` of binaryen version_116 after the strip, and refuses
+  another version; `make wasm-opt` installs it (the `wasm-opt` crate 0.116.1). The release's
+  `matcher.wasm.sha256` and its notes name the binaryen beside the rustc.
 - **BREAKING (matcher):** `matcher.wasm` is the credential picker of the wallet core (K1 to
   K4). It reads the registration siros-registration writes, parses the request into
   `UnverifiedRequest`, and runs the presentation component's matching over it: the matching of
