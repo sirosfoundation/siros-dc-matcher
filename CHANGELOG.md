@@ -15,7 +15,7 @@ Adopts the `zkp_req` draft 0.1 and the nym_auth catalogue 0.5 (nym_auth rulebook
 commit `e65861c`). **Breaking**: requests and presentations follow the draft, the FFI loses
 `zkp_req_plan`, and the vectors move to the crates that own their rules. Consumers that keep a
 copy of the vectors (siros-sdk-kotlin, siros-sdk-swift) must re-copy them from the new
-directories; the vector set digest below identifies them. `matcher.wasm` is 296,158 bytes
+directories; the vector set digest below identifies them. `matcher.wasm` is 296,397 bytes
 against the 307,200-byte budget (303,914 before).
 
 ### Changed
