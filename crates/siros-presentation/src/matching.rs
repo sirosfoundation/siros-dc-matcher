@@ -10,8 +10,8 @@ use siros_codec::date::Date;
 use siros_credential::{least_used, ClaimPointer, Format, PointerError};
 use siros_dcql::eval::select_claims;
 use siros_dcql::{
-    CredentialQuery, CredentialSetQuery, CryptographicBinding, DcqlQuery, HolderBinding,
-    PathComponent, PathError, QueryId,
+    CredentialFormat, CredentialQuery, CredentialRef, CredentialSetQuery, CryptographicBinding,
+    DcqlQuery, HolderBinding, PathComponent, PathError, QueryId,
 };
 use siros_trust::QueryAuthorities;
 use siros_wallet_state::PresentationRecord;
@@ -329,7 +329,8 @@ fn claims<C: MatchCredential>(
     }
     let held = Held {
         credential,
-        id: credential.entry().credential_id().to_string(),
+        id: CredentialRef::new(&credential.entry().credential_id().to_string()),
+        format: CredentialFormat::new(format.identifier()),
     };
     let Some(selected) = select_claims(query, &held) else {
         return Ok(None);
@@ -362,19 +363,21 @@ fn asked_format<C: MatchCredential>(query: &CredentialQuery, credential: &C) -> 
     }
 }
 
-/// A credential as DCQL's claim selection reads it, with its decimal `credentialId`.
+/// A credential as DCQL's claim selection reads it, with its decimal `credentialId` and its
+/// format's identifier.
 struct Held<'c, C> {
     credential: &'c C,
-    id: String,
+    id: CredentialRef,
+    format: CredentialFormat,
 }
 
 impl<C: MatchCredential> siros_dcql::Credential for Held<'_, C> {
-    fn id(&self) -> &str {
+    fn id(&self) -> &CredentialRef {
         &self.id
     }
 
-    fn format(&self) -> &str {
-        self.credential.format().identifier()
+    fn format(&self) -> &CredentialFormat {
+        &self.format
     }
 
     fn claim(&self, path: &[PathComponent]) -> Result<Vec<Value>, PathError> {

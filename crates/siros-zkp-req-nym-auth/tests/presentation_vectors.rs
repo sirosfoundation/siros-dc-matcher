@@ -48,12 +48,13 @@ fn rejection_code(r: &Rejection) -> &'static str {
         Rejection::Presentation(EncodingError::UnknownMember) => "presentation_unknown_member",
         Rejection::Presentation(EncodingError::Missing(_)) => "presentation_member_missing",
         Rejection::Presentation(EncodingError::WrongType(_)) => "presentation_member_wrong_type",
+        Rejection::Presentation(EncodingError::OutOfRange(_)) => "presentation_member_range",
         Rejection::Structure(s) => structure_code(s),
         Rejection::Request(_) | Rejection::Unsupported(_) => "request",
-        Rejection::ProofEncoding | Rejection::Proof(ProofFailure::Encoding) => "proof_encoding",
+        Rejection::ProofEncoding(_) | Rejection::Proof(ProofFailure::Encoding) => "proof_encoding",
         Rejection::IssuerKeySet(_) => "issuer_key_set",
         Rejection::ProofTime(_) => "proof_time",
-        Rejection::Results => "results",
+        Rejection::Results(_) => "results",
         Rejection::Proof(ProofFailure::Invalid) => "proof_invalid",
         Rejection::Proof(ProofFailure::PublicInput) => "public_input",
         Rejection::Proof(ProofFailure::Internal) => "verifier_internal",
@@ -72,7 +73,7 @@ fn verdict(vector: &Value) -> Option<&'static str> {
         (None, Some(Value::String(t))) => t.clone(),
         _ => panic!("a vector has vp_token or vp_token_text"),
     };
-    let presentations = match presentations_of(&text, &parsed.id, parsed.multiple) {
+    let presentations = match presentations_of(&text, parsed.id(), parsed.multiplicity()) {
         Ok(p) => p,
         Err(e) => return Some(e.code()),
     };

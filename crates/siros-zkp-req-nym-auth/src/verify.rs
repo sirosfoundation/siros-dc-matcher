@@ -7,30 +7,28 @@ use std::fmt;
 
 use serde_json::Value;
 use siros_codec::cbor::Value as Cbor;
-use siros_codec::date::{Date, DateTime};
-use siros_mdoc::{device_signing_digest, DeviceNameSpaces};
+use siros_codec::date::DateTime;
+use siros_mdoc::{device_signing_input, DeviceNameSpaces, SessionTranscript};
 use siros_trust::Certificate;
 use siros_zkp_req::{
-    answered_option, EncodingError, ProofEnvelope, QueryOption, StructureRejection, ZkpFormats,
-    ZkpPresentation, ZkpReqQuery,
+    answered_option, EncodingError, InputName, ProofBackend, ProofEnvelope, QueryOption,
+    ReqSetIndex, ResultKey, StructureRejection, ZkProof, ZkpFormats, ZkpPresentation, ZkpReqQuery,
 };
 
-use crate::age::{Bound, Bounds};
+use crate::age::{Bounds, Unencodable};
 use crate::attestation::{DocumentSigner, DocumentSignerError};
-use crate::catalogue::{has_result, Function, NymAuthQuery, MDOC_DOCTYPE};
+use crate::catalogue::{has_result, nym_auth_doc_type, NymAuthQuery, PseudonymItem};
 use crate::outcome::InvalidRequest;
-use crate::presenter::{Session, MAX_ZK_PROOF};
-use crate::prover::{NymAuthProofVerifier, ProofFailure, Statement};
+use crate::presenter::Session;
+use crate::prover::{NymAuthProofVerifier, ProofFailure, Statement, ISSUER_KEY_SET, PROOF_TIME};
 use crate::system::{NymAuthSystem, Unsupported};
-use crate::verifier_id::verifier_input;
+use crate::verifier_id::{verifier_input, LengthError, PseudonymValue};
 
-/// How far `proof_time` may lie from the Verifier's clock.
+/// How far `proof_time` may lie from the Verifier's clock, in whole seconds each way.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Tolerance {
-    /// Seconds ahead of the clock.
-    pub future: i64,
-    /// Seconds behind the clock.
-    pub past: i64,
+    future: u32,
+    past: u32,
 }
 
 /// What the Verifier holds.
@@ -44,8 +42,8 @@ pub struct VerifyInput<'a> {
     pub session: &'a Session,
     /// The presentation, CBOR.
     pub presentation: &'a [u8],
-    /// Its clock: seconds since 1970-01-01T00:00:00Z.
-    pub now: i64,
+    /// Its clock.
+    pub now: DateTime,
     /// Its tolerance for `proof_time`.
     pub tolerance: Tolerance,
     /// Its trust configuration: the certificates it trusts for this query.
@@ -58,26 +56,66 @@ pub struct Verified {
     /// The system.
     pub system: NymAuthSystem,
     /// The proof backend.
-    pub proof_backend: String,
+    pub proof_backend: ProofBackend,
     /// The answered option's index in `_req_sets`.
-    pub req_set: Option<usize>,
+    pub req_set: Option<ReqSetIndex>,
     /// `results`.
-    pub results: Vec<(String, Cbor)>,
-    /// The Document Signer certificate the proof was made against.
-    pub issuer_certificate: Vec<u8>,
+    pub results: Vec<(ResultKey, Cbor)>,
+    /// The Document Signer the proof was made against.
+    pub issuer: DocumentSigner,
     /// The proof time.
     pub proof_time: DateTime,
+}
+
+/// Why the Verifier's own query is unusable: `request`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum OwnQueryFault {
+    /// It breaks a rule.
+    Invalid(InvalidRequest),
+    /// It asks for another credential type than the nym_auth attestation.
+    OtherType,
+}
+
+/// Why `proof` or its `inputs` break the proof backend's format or Section 3:
+/// `proof_encoding`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProofEncodingFault {
+    /// `proof` is no `Proof`.
+    Envelope(EncodingError),
+    /// `zk_proof` has a length the system's proof backend does not read.
+    ZkProofLength,
+    /// `inputs` holds other members than `issuer_key_set` and `proof_time`.
+    Inputs,
+    /// `inputs` lacks this member.
+    InputMissing(InputName),
+    /// `issuer_key_set` is no array of byte strings.
+    IssuerKeySet,
+    /// `proof_time` is no `tdate`: text under tag 0.
+    ProofTime,
+}
+
+/// Why the pseudonym of `results` is refused: `results`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ResultsFault {
+    /// `results` has no value under the `pseudonym` item's handle.
+    Absent,
+    /// The value is not a byte string.
+    NotBytes,
+    /// The byte string is no 32-byte pseudonym.
+    Length(LengthError),
 }
 
 /// Why `issuer_key_set` is refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum IssuerKeySetError {
-    /// It holds zero or several certificates.
-    Count,
+    /// It holds this many certificates, where the systems take one.
+    Count(usize),
     /// The certificate is not one of the systems' form.
     Certificate(DocumentSignerError),
-    /// The certificate chains to no trust anchor, or is not valid at the Verifier's clock.
+    /// The certificate is none of the trust anchors, and none of them issued it.
     Untrusted,
+    /// The certificate is not valid at the Verifier's clock.
+    Expired,
 }
 
 /// Why `proof_time` is refused.
@@ -92,23 +130,22 @@ pub enum ProofTimeError {
 /// Why a presentation is rejected.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Rejection {
-    /// The Verifier's own query is invalid, or its clock is out of range.
-    Request(Option<InvalidRequest>),
+    /// The Verifier's own query is unusable.
+    Request(OwnQueryFault),
     /// The Verifier's own option lies outside the system's Section 2: `request`.
     Unsupported(Unsupported),
     /// The presentation is not a `ZkpPresentation`.
     Presentation(EncodingError),
     /// Steps 1 to 5 of `zkp_req`, Section 4.1.
     Structure(StructureRejection),
-    /// `proof` breaks the proof backend's format, or `inputs` breaks Section 3:
-    /// `proof_encoding`.
-    ProofEncoding,
+    /// `proof` breaks the proof backend's format, or `inputs` breaks Section 3.
+    ProofEncoding(ProofEncodingFault),
     /// `issuer_key_set`.
     IssuerKeySet(IssuerKeySetError),
     /// `proof_time`.
     ProofTime(ProofTimeError),
-    /// The pseudonym is no 32-byte `bstr`: `results`.
-    Results,
+    /// The pseudonym of `results`.
+    Results(ResultsFault),
     /// The system's verifier refused the proof.
     Proof(ProofFailure),
 }
@@ -116,15 +153,16 @@ pub enum Rejection {
 impl Rejection {
     /// The code of the system rulebooks' Section 9 table, or the step of `zkp_req`,
     /// Section 4.1.
+    #[must_use]
     pub fn code(&self) -> &'static str {
         match self {
             Self::Request(_) | Self::Unsupported(_) => "request",
             Self::Presentation(_) => "presentation",
             Self::Structure(_) => "structure",
-            Self::ProofEncoding | Self::Proof(ProofFailure::Encoding) => "proof_encoding",
+            Self::ProofEncoding(_) | Self::Proof(ProofFailure::Encoding) => "proof_encoding",
             Self::IssuerKeySet(_) => "issuer_key_set",
             Self::ProofTime(_) => "proof_time",
-            Self::Results => "results",
+            Self::Results(_) => "results",
             Self::Proof(ProofFailure::Invalid) => "proof_invalid",
             Self::Proof(ProofFailure::PublicInput) => "public_input",
             Self::Proof(ProofFailure::Internal) => "verifier_internal",
@@ -153,8 +191,8 @@ pub struct CheckedPresentation {
     signer: DocumentSigner,
     proof_time: DateTime,
     bounds: Bounds,
-    pseudonym: [u8; 32],
-    zk_proof: Vec<u8>,
+    pseudonym: PseudonymValue,
+    zk_proof: ZkProof,
 }
 
 /// Checks the structure of a presentation for the Verifier's own query.
@@ -169,32 +207,30 @@ pub fn check_presentation(
 ) -> Result<CheckedPresentation, Rejection> {
     let (query, formats) = own_query(query, client_metadata)?;
     let presentation = ZkpPresentation::decode(presentation).map_err(Rejection::Presentation)?;
-    let option = answered_option(
+    let (option, system) = answered_option(
         query.query(),
         &formats,
         &presentation,
-        |system, backend| {
-            NymAuthSystem::from_id(system).is_some_and(|s| s.backends().contains(&backend))
-        },
-        |item| has_result(&item.fn_id),
+        NymAuthSystem::from_id,
+        |item| has_result(item.fn_id()),
     )
-    .map_err(Rejection::Structure)?
-    .clone();
-    let system = NymAuthSystem::from_id(&presentation.system_id)
-        .ok_or(Rejection::Structure(StructureRejection::SystemNotOnBackend))?;
-    let envelope =
-        ProofEnvelope::decode(&presentation.proof).map_err(|_| Rejection::ProofEncoding)?;
-    let length_ok = envelope.zk_proof.len() <= MAX_ZK_PROOF
-        && system
-            .zk_proof_len()
-            .is_none_or(|n| n == envelope.zk_proof.len());
-    if !length_ok || envelope.inputs.len() != 2 {
-        return Err(Rejection::ProofEncoding);
+    .map_err(Rejection::Structure)?;
+    let option = option.clone();
+    let envelope = ProofEnvelope::decode(&presentation.proof)
+        .map_err(|e| encoding(ProofEncodingFault::Envelope(e)))?;
+    if !system.admits_zk_proof(&envelope.zk_proof) {
+        return Err(encoding(ProofEncodingFault::ZkProofLength));
     }
-    let signer = issuer_certificate(input_of(&envelope, "issuer_key_set")?)?;
-    let proof_time = proof_time(input_of(&envelope, "proof_time")?)?;
-    let bounds = own_bounds(&query, &option, system, proof_time.date())?;
-    let pseudonym = pseudonym_result(&query, &option, &presentation)?;
+    if envelope.inputs.len() != 2 {
+        return Err(encoding(ProofEncodingFault::Inputs));
+    }
+    let signer = issuer_certificate(input_of(&envelope, &ISSUER_KEY_SET)?)?;
+    let proof_time = proof_time(input_of(&envelope, &PROOF_TIME)?)?;
+    let bounds = own_bounds(&query, &option, system, proof_time)?;
+    let pseudonym_item = query
+        .option_pseudonym(&option)
+        .ok_or(Rejection::Unsupported(Unsupported::NoPseudonym))?;
+    let pseudonym = pseudonym_result(pseudonym_item, &presentation)?;
     Ok(CheckedPresentation {
         query,
         option,
@@ -217,32 +253,43 @@ pub fn verify(
     input: &VerifyInput<'_>,
     verifier: &dyn NymAuthProofVerifier,
 ) -> Result<Verified, Rejection> {
-    let now = DateTime::from_unix(input.now).ok_or(Rejection::Request(None))?;
     let checked = check_presentation(input.query, input.client_metadata, input.presentation)?;
-    if !input.tolerance.admits(now, checked.proof_time) {
+    if !input.tolerance.admits(input.now, checked.proof_time) {
         return Err(Rejection::ProofTime(ProofTimeError::Tolerance));
     }
     let certificate = checked.signer.certificate();
-    let trusted = chains_to(certificate, input.trust_anchors) && certificate.valid_at(now);
-    if !trusted {
+    if !chains_to(certificate, input.trust_anchors) {
         return Err(Rejection::IssuerKeySet(IssuerKeySetError::Untrusted));
     }
-    let session_transcript = input.session.handover.session_transcript();
-    let challenge_digest = device_signing_digest(
+    if !certificate.valid_at(input.now) {
+        return Err(Rejection::IssuerKeySet(IssuerKeySetError::Expired));
+    }
+    let (earliest, cutoff) = checked
+        .bounds
+        .dates()
+        .map_err(|Unencodable| Rejection::Unsupported(Unsupported::AgeBounds))?;
+    let pseudonym_item = checked
+        .query
+        .option_pseudonym(&checked.option)
+        .ok_or(Rejection::Unsupported(Unsupported::NoPseudonym))?;
+    let session_transcript = SessionTranscript::new(input.session.handover.session_transcript());
+    let challenge_digest = device_signing_input(
         &session_transcript,
-        MDOC_DOCTYPE,
+        &nym_auth_doc_type(),
         &DeviceNameSpaces::empty(),
-    );
+    )
+    .digest();
     let statement = Statement {
         system: checked.system,
         proof_backend: checked.presentation.proof_backend.clone(),
-        doc_type: MDOC_DOCTYPE,
-        issuer_certificate: certificate.der().to_vec(),
-        issuer_key: *checked.signer.key(),
+        issuer: checked.signer.clone(),
         proof_time: checked.proof_time,
-        earliest: bound(checked.bounds.earliest)?,
-        cutoff: bound(checked.bounds.cutoff)?,
-        verifier_input: own_verifier_input(&checked.query, &checked.option, input.session)?,
+        earliest,
+        cutoff,
+        verifier_input: verifier_input(
+            pseudonym_item.pseudonym.config(),
+            &input.session.verifier_id,
+        ),
         session_transcript,
         challenge_digest,
     };
@@ -252,45 +299,56 @@ pub fn verify(
     Ok(Verified {
         system: checked.system,
         proof_backend: checked.presentation.proof_backend,
-        req_set: checked.option.req_set,
+        req_set: checked.option.req_set(),
         results: checked.presentation.results,
-        issuer_certificate: checked.signer.certificate().der().to_vec(),
+        issuer: checked.signer,
         proof_time: checked.proof_time,
     })
 }
 
 impl Tolerance {
+    /// `future` seconds ahead of the clock and `past` seconds behind it.
+    #[must_use]
+    pub fn seconds(future: u32, past: u32) -> Self {
+        Self { future, past }
+    }
+
     /// Whether `proof_time` lies within this tolerance of `now`, both ends included.
+    #[must_use]
     pub fn admits(&self, now: DateTime, proof_time: DateTime) -> bool {
-        let earliest = now.unix().saturating_sub(self.past);
-        let latest = now.unix().saturating_add(self.future);
+        let earliest = now.unix() - i64::from(self.past);
+        let latest = now.unix() + i64::from(self.future);
         (earliest..=latest).contains(&proof_time.unix())
     }
+}
+
+fn encoding(fault: ProofEncodingFault) -> Rejection {
+    Rejection::ProofEncoding(fault)
 }
 
 fn own_query(
     query: &Value,
     client_metadata: &Value,
 ) -> Result<(NymAuthQuery, ZkpFormats), Rejection> {
-    let invalid = |rule: InvalidRequest| Rejection::Request(Some(rule));
+    let invalid = |rule: InvalidRequest| Rejection::Request(OwnQueryFault::Invalid(rule));
     let parsed = ZkpReqQuery::parse(query).map_err(|r| invalid(r.into()))?;
     let formats =
         ZkpFormats::from_client_metadata(client_metadata).map_err(|r| invalid(r.into()))?;
     let query = NymAuthQuery::from_query(parsed)
         .map_err(|r| invalid(r.into()))?
         .nym_auth()
-        .ok_or(Rejection::Request(None))?;
+        .ok_or(Rejection::Request(OwnQueryFault::OtherType))?;
     Ok((query, formats))
 }
 
 /// The input `name` of `Proof.inputs`.
-fn input_of<'e>(envelope: &'e ProofEnvelope, name: &str) -> Result<&'e Cbor, Rejection> {
+fn input_of<'e>(envelope: &'e ProofEnvelope, name: &InputName) -> Result<&'e Cbor, Rejection> {
     envelope
         .inputs
         .iter()
         .find(|(k, _)| k == name)
         .map(|(_, v)| v)
-        .ok_or(Rejection::ProofEncoding)
+        .ok_or_else(|| encoding(ProofEncodingFault::InputMissing(name.clone())))
 }
 
 /// Whether the Verifier's `trust_anchors` hold `certificate`, or one of them issued it.
@@ -303,13 +361,19 @@ fn chains_to(certificate: &Certificate, trust_anchors: &[Certificate]) -> bool {
 /// `issuer_key_set`: `[ bstr ]`, exactly one DER certificate with a P-256 key.
 fn issuer_certificate(value: &Cbor) -> Result<DocumentSigner, Rejection> {
     let Cbor::Array(set) = value else {
-        return Err(Rejection::ProofEncoding);
+        return Err(encoding(ProofEncodingFault::IssuerKeySet));
     };
-    if set.iter().any(|c| !matches!(c, Cbor::Bytes(_))) {
-        return Err(Rejection::ProofEncoding);
-    }
-    let [Cbor::Bytes(der)] = set.as_slice() else {
-        return Err(Rejection::IssuerKeySet(IssuerKeySetError::Count));
+    let ders = set
+        .iter()
+        .map(|c| match c {
+            Cbor::Bytes(der) => Ok(der),
+            _ => Err(encoding(ProofEncodingFault::IssuerKeySet)),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let [der] = ders.as_slice() else {
+        return Err(Rejection::IssuerKeySet(IssuerKeySetError::Count(
+            ders.len(),
+        )));
     };
     DocumentSigner::parse(der)
         .map_err(|e| Rejection::IssuerKeySet(IssuerKeySetError::Certificate(e)))
@@ -318,10 +382,10 @@ fn issuer_certificate(value: &Cbor) -> Result<DocumentSigner, Rejection> {
 /// `proof_time`: `tdate`, exactly 20 characters `YYYY-MM-DDThh:mm:ssZ`.
 fn proof_time(value: &Cbor) -> Result<DateTime, Rejection> {
     let Cbor::Tag(0, text) = value else {
-        return Err(Rejection::ProofEncoding);
+        return Err(encoding(ProofEncodingFault::ProofTime));
     };
     let Cbor::Text(text) = text.as_ref() else {
-        return Err(Rejection::ProofEncoding);
+        return Err(encoding(ProofEncodingFault::ProofTime));
     };
     DateTime::parse(text).ok_or(Rejection::ProofTime(ProofTimeError::Malformed))
 }
@@ -331,57 +395,29 @@ fn own_bounds(
     query: &NymAuthQuery,
     option: &QueryOption,
     system: NymAuthSystem,
-    d: Date,
+    proof_time: DateTime,
 ) -> Result<Bounds, Rejection> {
-    let bounds = query.option_bounds(option, d);
+    let bounds = query.option_bounds(option, proof_time.date());
     system
         .supports(query.option_items(option).map(|(_, i)| i), &bounds)
         .map_err(Rejection::Unsupported)?;
     Ok(bounds)
 }
 
-fn bound(bound: Option<Bound>) -> Result<Option<Date>, Rejection> {
-    match bound {
-        None => Ok(None),
-        Some(Bound::Date(d)) => Ok(Some(d)),
-        Some(Bound::Unencodable) => Err(Rejection::Unsupported(Unsupported::AgeBounds)),
-    }
-}
-
 /// The pseudonym of `results`: a 32-byte `bstr` under the `pseudonym` item's handle.
 fn pseudonym_result(
-    query: &NymAuthQuery,
-    option: &QueryOption,
+    item: PseudonymItem<'_>,
     presentation: &ZkpPresentation,
-) -> Result<[u8; 32], Rejection> {
-    let handle = query
-        .option_items(option)
-        .find_map(|(_, item)| match item.function {
-            Function::Pseudonym(_) => item.ret.as_ref(),
-            Function::AgeCheck(_) => None,
-        })
-        .ok_or(Rejection::Unsupported(Unsupported::NoPseudonym))?;
+) -> Result<PseudonymValue, Rejection> {
     let value = presentation
         .results
         .iter()
-        .find(|(k, _)| k == handle.as_str())
-        .map(|(_, v)| v);
-    match value {
-        Some(Cbor::Bytes(b)) => b.as_slice().try_into().map_err(|_| Rejection::Results),
-        _ => Err(Rejection::Results),
-    }
-}
-
-fn own_verifier_input(
-    query: &NymAuthQuery,
-    option: &QueryOption,
-    session: &Session,
-) -> Result<[u8; 32], Rejection> {
-    query
-        .option_items(option)
-        .find_map(|(_, item)| match &item.function {
-            Function::Pseudonym(p) => Some(verifier_input(p, &session.verifier_id)),
-            Function::AgeCheck(_) => None,
-        })
-        .ok_or(Rejection::Unsupported(Unsupported::NoPseudonym))
+        .find(|(k, _)| k.as_str() == item.ret.as_str())
+        .map(|(_, v)| v)
+        .ok_or(Rejection::Results(ResultsFault::Absent))?;
+    let Cbor::Bytes(bytes) = value else {
+        return Err(Rejection::Results(ResultsFault::NotBytes));
+    };
+    PseudonymValue::try_from(bytes.as_slice())
+        .map_err(|e| Rejection::Results(ResultsFault::Length(e)))
 }

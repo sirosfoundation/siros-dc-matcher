@@ -6,10 +6,17 @@
 //! configuration and from the prover-supplied values of the presentation.
 
 use siros_codec::date::{Date, DateTime};
-use siros_mdoc::P256Key;
+use siros_mdoc::{Es256Signature, MessageDigest, SessionTranscript};
+use siros_zkp_req::{InputName, ProofBackend, ZkProof};
 
-use crate::attestation::{OpenedSeed, UsableAttestation};
+use crate::attestation::{DocumentSigner, OpenedSeed, UsableAttestation};
 use crate::system::NymAuthSystem;
+use crate::verifier_id::{PseudonymValue, VerifierInput};
+
+/// `Proof.inputs.issuer_key_set`: the Document Signer certificate (system rulebooks, Section 3).
+pub(crate) const ISSUER_KEY_SET: InputName = InputName::from_static("issuer_key_set");
+/// `Proof.inputs.proof_time`: T (system rulebooks, Section 3).
+pub(crate) const PROOF_TIME: InputName = InputName::from_static("proof_time");
 
 /// The public values of a nym_auth mdoc proof.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,13 +24,9 @@ pub struct Statement {
     /// The system.
     pub system: NymAuthSystem,
     /// The proof backend.
-    pub proof_backend: String,
-    /// The `docType` the circuits check, `eu.europa.ec.eudi.nym_auth.1`.
-    pub doc_type: &'static str,
-    /// `inputs.issuer_key_set[0]`: the Document Signer certificate, DER.
-    pub issuer_certificate: Vec<u8>,
-    /// The issuer key Q of that certificate.
-    pub issuer_key: P256Key,
+    pub proof_backend: ProofBackend,
+    /// `inputs.issuer_key_set[0]`: the Document Signer certificate, with the issuer key Q.
+    pub issuer: DocumentSigner,
     /// T: `inputs.proof_time`.
     pub proof_time: DateTime,
     /// E, the earliest birth date; `None` for the system's widest value.
@@ -31,11 +34,11 @@ pub struct Statement {
     /// C, the latest birth date; `None` for the system's widest value.
     pub cutoff: Option<Date>,
     /// `verifier_input` of the `pseudonym` item.
-    pub verifier_input: [u8; 32],
-    /// The encoded `SessionTranscript`, which seeds Longfellow's transcript.
-    pub session_transcript: Vec<u8>,
+    pub verifier_input: VerifierInput,
+    /// The `SessionTranscript`, which seeds Longfellow's transcript.
+    pub session_transcript: SessionTranscript,
     /// e2: the SHA-256 of the message the device key signed.
-    pub challenge_digest: [u8; 32],
+    pub challenge_digest: MessageDigest,
 }
 
 /// What a prover needs to prove a [`Statement`] (system rulebooks, Section 7): a usable
@@ -44,7 +47,7 @@ pub struct ProofJob {
     statement: Statement,
     attestation: UsableAttestation,
     seed: OpenedSeed,
-    device_signature: [u8; 64],
+    device_signature: Es256Signature,
 }
 
 impl ProofJob {
@@ -54,7 +57,7 @@ impl ProofJob {
         statement: Statement,
         attestation: UsableAttestation,
         seed: OpenedSeed,
-        device_signature: [u8; 64],
+        device_signature: Es256Signature,
     ) -> Self {
         Self {
             statement,
@@ -65,22 +68,26 @@ impl ProofJob {
     }
 
     /// The public values.
+    #[must_use]
     pub fn statement(&self) -> &Statement {
         &self.statement
     }
 
     /// The credential's `IssuerSigned`, as issued.
+    #[must_use]
     pub fn issuer_signed(&self) -> &[u8] {
         self.attestation.credential().mdoc().issuer_signed()
     }
 
     /// The 16-byte `secret_seed`. It is zeroed when the job is dropped.
+    #[must_use]
     pub fn secret_seed(&self) -> &[u8; 16] {
         self.seed.secret_seed()
     }
 
-    /// The device key's ES256 signature on the data to sign, `r ‖ s`.
-    pub fn device_signature(&self) -> &[u8; 64] {
+    /// The device key's ES256 signature on the data to sign.
+    #[must_use]
+    pub fn device_signature(&self) -> &Es256Signature {
         &self.device_signature
     }
 }
@@ -97,9 +104,9 @@ impl std::fmt::Debug for ProofJob {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProofOutput {
     /// `zk_proof`, as the proof backend specification defines it.
-    pub zk_proof: Vec<u8>,
+    pub zk_proof: ZkProof,
     /// The pseudonym the proof establishes. It must equal the catalogue's value.
-    pub pseudonym: [u8; 32],
+    pub pseudonym: PseudonymValue,
 }
 
 /// Why a prover made no proof.
@@ -160,7 +167,7 @@ pub trait NymAuthProofVerifier {
     fn verify(
         &self,
         statement: &Statement,
-        pseudonym: &[u8; 32],
-        zk_proof: &[u8],
+        pseudonym: &PseudonymValue,
+        zk_proof: &ZkProof,
     ) -> Result<(), ProofFailure>;
 }

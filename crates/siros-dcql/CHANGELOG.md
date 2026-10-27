@@ -46,6 +46,8 @@ this file.
   `Combinations::combinations()`, `dropped()`; `Combination::members()` (keyed by `QueryId`),
   `purposes()`.
 - **BREAKING:** `PathError::TypeMismatch::at` is a `ComponentIndex`.
+- **BREAKING:** `Credential::id` gives a `CredentialRef` and `Credential::format` a
+  `CredentialFormat`; `Candidate::credential_id` is a `CredentialRef`.
 - Every error has a stable code, which its `Display` writes. A query that repeats an id is
   checked by comparing each id with the earlier ones.
 
@@ -56,6 +58,8 @@ this file.
   `TrustedAuthorities`, `TrustedAuthorityError`, `CredentialFormat`, `Multiplicity`,
   `HolderBinding`, `SetRequirement`, `CryptographicBinding`, `Satisfaction`, `ComponentIndex`,
   `QueryError::code` and `select_claims` at the crate root.
+- `CredentialRef`, `DocType` and `Vct`, the text values a held credential and `meta` carry, and
+  `foreign_character`, the identifier alphabet check of §6.1 and §6.3.
 
 - `resolve`, the §7.1.1 processing over any claim tree that implements `ClaimNode` (with `Lookup`), which `resolve_json` now runs on, and `PathError::code`.
 

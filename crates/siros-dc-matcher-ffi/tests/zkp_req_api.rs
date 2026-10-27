@@ -7,12 +7,14 @@ use siros_dc_matcher_ffi::zkp_req::{
     zkp_req_jwk_thumbprint, zkp_req_session, zkp_req_verify, zkp_req_vp_token_json, FfiChannel,
     FfiProofCheck, FfiProofVerifier, FfiStatement, FfiVerifierIdForm, FfiVpTokenEntry, ZkpReqError,
 };
+use siros_zkp_req::ZkProof;
 use siros_zkp_req_nym_auth::prover::ProofOutput;
 use siros_zkp_req_nym_auth::system::NymAuthSystem;
 use siros_zkp_req_nym_auth::testing::{
     client_metadata, device_signature, encryption_jwk, expected_pseudonym, issue, prepared, query,
     request_object, verified_request, Issuer, Spec, CLIENT_ID, NONCE, NOW, SEED,
 };
+use siros_zkp_req_nym_auth::verifier_id::PseudonymValue;
 
 /// A verifier that accepts exactly the statement the prover received.
 struct Expecting(FfiStatement);
@@ -48,13 +50,13 @@ fn a_presentation_verifies_through_the_ffi() {
     let request = verified_request(&q, NONCE);
     let data = issue(&ds, &Spec::default());
     let prepared = prepared(NymAuthSystem::LongfellowV1, &q, &data, &SEED, &request).unwrap();
-    let signature = device_signature(Spec::default().device, prepared.data_to_sign());
+    let signature = device_signature(Spec::default().device, prepared.data_to_sign().as_bytes());
     let job = prepared.job(&signature).unwrap();
     let pseudonym = expected_pseudonym(&SEED, CLIENT_ID);
     let presentation = prepared
         .assemble(&ProofOutput {
-            zk_proof: vec![7; 1024],
-            pseudonym,
+            zk_proof: ZkProof::new(vec![7; 1024]),
+            pseudonym: PseudonymValue::new(pseudonym),
         })
         .unwrap()
         .encode();

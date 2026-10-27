@@ -14,7 +14,7 @@ behind the nym_auth prover interface and the rulebooks' artifact pins.
 
 | Crate | Holds | Rust |
 | :-- | :-- | :-- |
-| `siros-zkp-req` | The protocol: the Credential Query with `_req` and `_req_sets`, `vp_formats_supported.zkp_req`, the usable pair of Section 1.3, the consent model, `ZkpPresentation`, the backends' `Proof`, the `vp_token`, the Verifier's steps 1 to 5 of Section 4.1. Depends on `serde`, `serde_json` and `siros-dcql`, which owns the query id and `trusted_authorities`. | 1.82 |
+| `siros-zkp-req` | The protocol: the Credential Query with `_req` and `_req_sets`, `vp_formats_supported.zkp_req`, the usable pair of Section 1.3, `ZkpPresentation`, the backends' `Proof`, the `vp_token`, the Verifier's steps 1 to 5 of Section 4.1. Depends on `serde`, `serde_json` and `siros-dcql`, which owns the query id and `trusted_authorities`. | 1.82 |
 | `siros-zkp-req-nym-auth` | The catalogue (`pseudonym`, `age_check` with E and C), `verifier_id`, the Longfellow and Vega systems, the `Handover`, the request policy. With the default feature `credential`: the nym_auth form of an mdoc, the Wallet's credential tests, the prover interface and the verifier (`siros-mdoc` with `crypto`, `siros-trust` with `chain`, `zeroize`). With `request`: the nym_auth request of `siros-oid4vp`'s verified request, the answer of an option and its presentation. With `test-fixtures`: a test issuer, signed requests and a test host. | 1.82 |
 | `siros-dc-matcher-core` | The matcher. It plans `zkp_req` with the two crates above, without `credential`. | 1.82 |
 | `siros-dc-matcher-ffi` | Module `zkp_req`: the session, the `vp_token` and the verifier for Kotlin and Swift (UniFFI), around a host's proof verifier. | 1.88 |
@@ -87,8 +87,7 @@ build it independently; equal statements are the binding.
 | Field | Value | Longfellow (Section 4) | Vega (Section 4) |
 | :-- | :-- | :-- | :-- |
 | `system`, `proof_backend` | the pair of the candidate | selects the circuits | selects the circuits |
-| `doc_type` | `eu.europa.ec.eudi.nym_auth.1` | a circuit constant | values 7 to 12 |
-| `issuer_certificate`, `issuer_key` | `inputs.issuer_key_set[0]` and its P-256 key Q | signature slots 1, 2 | values 0, 1 |
+| `issuer` | `inputs.issuer_key_set[0]` and its P-256 key Q | signature slots 1, 2 | values 0, 1 |
 | `proof_time` | T, `inputs.proof_time` | hash slots 1–160, 20 ASCII bytes | value 4, YYYYMMDDhhmmss |
 | `earliest` | E, or `None` | hash slots 161–240, `YYYY-MM-DD`; `0000-00-00` for `None` | value 2, YYYYMMDD; 0 for `None` |
 | `cutoff` | C, or `None` | hash slots 241–320, `YYYY-MM-DD`; `9999-12-31` for `None` | value 3, YYYYMMDD; 99991231 for `None` |
@@ -156,8 +155,8 @@ artifacts from their reference copies.
   hold; `Prepared::new(answer, &NymAuthRequest, key_id)` gives the `Prepared` of the answer in
   the request's session: `data_to_sign`, `key_id`, `statement`, `job(device_signature)`,
   `assemble(&ProofOutput)`, and `prove(device_signature, prover)` for a linked prover.
-* `policy::check_request(request_object, signed, channel)` and `CheckedRequest::handover(jwk
-  thumbprint)`, with `VerifierId::x509_san_dns(&ClientId, Intermediary)` or
+* `request_object::check_request(request_object, signing, channel)` and
+  `CheckedRequest::handover(jwk_thumbprint)`, with `VerifierId::x509_san_dns(&ClientId, Intermediary)` or
   `VerifierId::semantic(&SemanticIdentifier)`, give the Verifier's `Session`.
 * `LongfellowProver::load(circuits_zst)`, `LongfellowVerifier::load(circuits_zst)` and
   `VegaNymAuth::load(shapes_zst)` are the backends.

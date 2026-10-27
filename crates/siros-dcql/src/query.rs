@@ -14,6 +14,7 @@ use serde_json::{Map, Value};
 
 use crate::authority::{TrustedAuthorities, TrustedAuthorityError};
 use crate::id::{ClaimId, ClaimIdError, QueryId, QueryIdError};
+use crate::meta::CredentialFormat;
 use crate::path::PathComponent;
 
 /// A complete DCQL query (§6).
@@ -66,38 +67,6 @@ pub struct CredentialSetQuery {
     required: SetRequirement,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     purpose: Option<Value>,
-}
-
-/// The `format` of a Credential Query: the Credential Format Identifier the Verifier asks for,
-/// such as `mso_mdoc` or `dc+sd-jwt` (OpenID4VP 1.0, Appendix B).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct CredentialFormat(String);
-
-impl CredentialFormat {
-    /// The identifier `text`.
-    #[must_use]
-    pub fn new(text: &str) -> Self {
-        Self(text.to_owned())
-    }
-
-    /// The identifier.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl PartialEq<str> for CredentialFormat {
-    fn eq(&self, other: &str) -> bool {
-        self.0 == other
-    }
-}
-
-impl PartialEq<&str> for CredentialFormat {
-    fn eq(&self, other: &&str) -> bool {
-        self.0 == *other
-    }
 }
 
 /// Whether a Credential Query accepts several credentials (§6.1 `multiple`, `false` when

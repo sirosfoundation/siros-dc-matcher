@@ -4,7 +4,10 @@
 use serde_json::{Map, Value as Json};
 use siros_codec::base64url;
 use siros_codec::cbor::Value as Cbor;
-use siros_dcql::{mdoc_components, resolve, CryptographicBinding, PathComponent, PathError};
+use siros_dcql::{
+    mdoc_components, resolve, CredentialFormat, CredentialRef, CryptographicBinding, PathComponent,
+    PathError,
+};
 use siros_mdoc::{IssuerSignedItem, Mdoc};
 use siros_sdjwt::{Node, NodeValue};
 
@@ -67,8 +70,8 @@ fn element<'a>(mdoc: &'a Mdoc, path: &[PathComponent]) -> Result<&'a Cbor, PathE
     let (name_space, identifier) = mdoc_components(path)?;
     mdoc.name_spaces()
         .iter()
-        .find(|n| n.name() == name_space)
-        .and_then(|n| n.items().iter().find(|i| i.identifier() == identifier))
+        .find(|n| *n.name() == name_space)
+        .and_then(|n| n.items().iter().find(|i| *i.identifier() == identifier))
         .map(IssuerSignedItem::value)
         .ok_or(PathError::Empty)
 }
@@ -81,13 +84,13 @@ fn element<'a>(mdoc: &'a Mdoc, path: &[PathComponent]) -> Result<&'a Cbor, PathE
 /// 6.1 converts CBOR to JSON.
 impl siros_dcql::Credential for Credential {
     /// The decimal `credentialId`.
-    fn id(&self) -> &str {
+    fn id(&self) -> &CredentialRef {
         Credential::id(self)
     }
 
     /// `dc+sd-jwt` or `mso_mdoc`.
-    fn format(&self) -> &str {
-        Credential::format(self).identifier()
+    fn format(&self) -> &CredentialFormat {
+        self.format_identifier()
     }
 
     fn claim(&self, path: &[PathComponent]) -> Result<Vec<Json>, PathError> {
@@ -109,11 +112,11 @@ impl siros_dcql::Credential for Credential {
 
 /// DCQL evaluation over usable credentials only (A1).
 impl siros_dcql::Credential for UsableCredential<'_> {
-    fn id(&self) -> &str {
+    fn id(&self) -> &CredentialRef {
         siros_dcql::Credential::id(self.credential())
     }
 
-    fn format(&self) -> &str {
+    fn format(&self) -> &CredentialFormat {
         siros_dcql::Credential::format(self.credential())
     }
 

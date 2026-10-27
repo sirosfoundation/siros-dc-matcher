@@ -82,7 +82,7 @@ impl DisplayCache {
             Some(named) => Some(named.text.clone()),
             None => credential
                 .issuer()
-                .map(DisplayText::label)
+                .map(|issuer| DisplayText::label(issuer.as_str()))
                 .transpose()
                 .map_err(DisplayError::Text)?,
         };
@@ -95,7 +95,7 @@ impl DisplayCache {
                 text: entry.text,
             },
             None => Card {
-                title: DisplayText::label(credential.credential_type())
+                title: DisplayText::label(credential.credential_type().as_str())
                     .map_err(DisplayError::Text)?,
                 issuer,
                 logo: None,
@@ -108,13 +108,15 @@ impl DisplayCache {
     /// The OpenID4VCI display metadata of `credential`'s configuration.
     pub(crate) fn issued(&self, credential: &Credential) -> Option<&IssuerMetadata> {
         let issuer = credential.issuer()?;
-        self.issuer(issuer, credential.configuration_id()?)
+        self.issuer(issuer.as_str(), credential.configuration_id()?.as_str())
     }
 
     /// The Type Metadata of an SD-JWT VC's `vct` and of the types it extends.
     pub(crate) fn types_of(&self, credential: &Credential) -> Vec<&TypeMetadata> {
         match credential.format() {
-            Format::SdJwtVc => self.type_chain(credential.credential_type()).collect(),
+            Format::SdJwtVc => self
+                .type_chain(credential.credential_type().as_str())
+                .collect(),
             Format::Mdoc => Vec::new(),
         }
     }

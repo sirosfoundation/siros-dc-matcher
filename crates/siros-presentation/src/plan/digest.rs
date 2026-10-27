@@ -200,7 +200,7 @@ impl Encode for Answer {
             Self::Proof(choice) => Value::Array(vec![
                 Value::Unsigned(1),
                 Value::Unsigned(choice.option().value() as u64),
-                Value::text(choice.system().id()),
+                Value::text(choice.system().id().as_str()),
                 Value::text(choice.backend().as_str()),
             ]),
         }

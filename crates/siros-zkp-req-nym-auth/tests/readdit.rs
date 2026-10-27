@@ -19,11 +19,13 @@ use serde_json::{json, Value};
 use siros_codec::date::DateTime;
 use siros_mdoc::{Mdoc, P256Key};
 use siros_oid4vp::ec_jwk_thumbprint;
+use siros_zkp_req::ZkProof;
 use siros_zkp_req_nym_auth::attestation::TestedAttestation;
 use siros_zkp_req_nym_auth::catalogue::MDOC_DOCTYPE;
 use siros_zkp_req_nym_auth::presenter::Prepared;
 use siros_zkp_req_nym_auth::prover::ProofOutput;
 use siros_zkp_req_nym_auth::system::NymAuthSystem;
+use siros_zkp_req_nym_auth::verifier_id::PseudonymValue;
 use support::*;
 
 fn facts() -> Value {
@@ -72,17 +74,17 @@ fn our_credential(facts: &Value) -> Value {
     let credential = attestation.credential();
     let mdoc = credential.mdoc();
     json!({
-        "sig_structure": hex(mdoc.sig_structure()),
-        "issuer_signature": hex(mdoc.issuer_signature()),
+        "sig_structure": hex(mdoc.sig_structure().as_bytes()),
+        "issuer_signature": hex(mdoc.issuer_signature().as_bytes()),
         "birth_date_item": hex(mdoc.birth_date().bytes()),
         "ssc_item": hex(mdoc.ssc().bytes()),
-        "document_signer": hex(mdoc.document_signer()),
+        "document_signer": hex(credential.signer().certificate().der()),
         "doc_type": MDOC_DOCTYPE,
         "device_key": key(mdoc.device_key()),
         "valid_from": mdoc.valid_from().to_string(),
         "valid_until": mdoc.valid_until().to_string(),
         "birth_date": mdoc.birth_date().value().to_string(),
-        "ssc": hex(mdoc.ssc().value()),
+        "ssc": hex(mdoc.ssc().value().as_bytes()),
         "digests_listed": true,
         "issuer_key": key(credential.signer().key()),
     })
@@ -110,9 +112,10 @@ fn prepared_for(facts: &Value, system: NymAuthSystem) -> Prepared {
 /// A prover's output with the pseudonym readdit computed. The presenter assembles a
 /// presentation only with the catalogue's pseudonym, so assembling it shows the two agree.
 fn readdit_output(facts: &Value, reference: &str, zk_proof: Vec<u8>) -> ProofOutput {
+    let pseudonym = unhex(&facts[reference]["pseudonym"]);
     ProofOutput {
-        zk_proof,
-        pseudonym: unhex(&facts[reference]["pseudonym"]).try_into().unwrap(),
+        zk_proof: ZkProof::new(zk_proof),
+        pseudonym: PseudonymValue::try_from(pseudonym.as_slice()).unwrap(),
     }
 }
 
@@ -132,15 +135,15 @@ fn the_wallet_reaches_readdits_values() {
         assert_eq!(statement.system, system);
         assert_eq!(statement.proof_time, proof_time(&facts));
         assert_eq!(
-            hex(&statement.issuer_certificate),
+            hex(statement.issuer.certificate().der()),
             credential["document_signer"]
         );
         let ours = json!({
-            "session_transcript": hex(&statement.session_transcript),
-            "device_message": hex(prepared.data_to_sign()),
-            "challenge_digest": hex(&statement.challenge_digest),
-            "verifier_input": hex(&statement.verifier_input),
-            "issuer_key": key(&statement.issuer_key),
+            "session_transcript": hex(statement.session_transcript.as_bytes()),
+            "device_message": hex(prepared.data_to_sign().as_bytes()),
+            "challenge_digest": hex(statement.challenge_digest.as_bytes()),
+            "verifier_input": hex(statement.verifier_input.as_bytes()),
+            "issuer_key": key(statement.issuer.key()),
         });
         let elsewhere = ["mdoc", "pseudonym", "presentation_v0_4"];
         assert_agrees(reference, &facts[reference], &ours, &elsewhere);

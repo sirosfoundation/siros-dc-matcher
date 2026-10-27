@@ -24,7 +24,8 @@ use std::collections::BTreeMap;
 
 use serde_json::Value;
 use siros_dcql::{
-    Credential as _, CredentialQuery, CryptographicBinding, PathComponent, PathError,
+    Credential as _, CredentialFormat, CredentialQuery, CredentialRef, CryptographicBinding,
+    PathComponent, PathError,
 };
 
 use crate::circuit_capabilities::{Capabilities, RequestedItem};
@@ -33,8 +34,12 @@ use crate::profile::{
     Capability, MatchProfile, Op, UnknownFormat, CAPABILITIES_PARAM, CREDENTIAL_TYPE_PARAM,
     FUNCTIONS_PARAM, SYSTEM_ID_PARAM, ZKP_REQ_CAPABILITY, ZKP_REQ_FORMAT,
 };
+use siros_dcql::Vct;
 use siros_oid4vp::UnverifiedQuery;
-use siros_zkp_req::{usable_backend, CredentialType, QueryOption, ZkpFormats, ZkpReqQuery};
+use siros_zkp_req::{
+    usable_backend, CredentialType, ProofBackend, QueryOption, SystemId, W3cType, ZkpFormats,
+    ZkpReqQuery,
+};
 use siros_zkp_req_nym_auth::catalogue::NymAuthQuery;
 
 /// A credential from the registered blob, wrapped so DCQL can evaluate it.
@@ -48,11 +53,11 @@ pub struct BlobCredential<'a> {
 }
 
 impl siros_dcql::Credential for BlobCredential<'_> {
-    fn id(&self) -> &str {
+    fn id(&self) -> &CredentialRef {
         &self.credential.id
     }
 
-    fn format(&self) -> &str {
+    fn format(&self) -> &CredentialFormat {
         &self.credential.format
     }
 
@@ -175,7 +180,7 @@ pub struct ZkpReqSelection<'a> {
     /// The answered option: the first the Verifier prefers that a circuit serves.
     pub option: QueryOption,
     /// The proof backend of the pair: the first the Verifier lists that the circuit runs on.
-    pub proof_backend: String,
+    pub proof_backend: ProofBackend,
 }
 
 impl ZkpReqSelection<'_> {
@@ -184,13 +189,14 @@ impl ZkpReqSelection<'_> {
     /// `_req_sets`. Everything comes from the unauthenticated request; the wallet checks it.
     #[must_use]
     pub fn to_json(&self) -> Value {
+        let items: Vec<usize> = self.option.items().iter().map(|i| i.value()).collect();
         let mut out = serde_json::json!({
             "circuit": self.capability,
-            "proof_backend": self.proof_backend,
-            "items": self.option.items,
+            "proof_backend": self.proof_backend.as_str(),
+            "items": items,
         });
-        if let Some(req_set) = self.option.req_set {
-            out["req_set"] = req_set.into();
+        if let Some(req_set) = self.option.req_set() {
+            out["req_set"] = req_set.value().into();
         }
         out
     }
@@ -200,16 +206,16 @@ impl ZkpReqSelection<'_> {
 struct Circuit<'p, 'a> {
     policy: &'p ProfilePolicy<'a>,
     capability: &'a Capability,
-    system_id: &'a str,
+    system_id: SystemId,
 }
 
 impl siros_zkp_req::System for Circuit<'_, '_> {
-    fn id(&self) -> &str {
-        self.system_id
+    fn id(&self) -> SystemId {
+        self.system_id.clone()
     }
 
-    fn runs_on(&self, backend: &str) -> bool {
-        self.capability.system == backend
+    fn runs_on(&self, backend: &ProofBackend) -> bool {
+        self.capability.system == backend.as_str()
     }
 
     fn proves_over(&self, credential_type: &CredentialType) -> bool {
@@ -271,18 +277,18 @@ impl<'a> ProfilePolicy<'a> {
         let parsed = NymAuthQuery::from_query(parsed).ok()?.into_query();
         let held = self.profile.capabilities.get(ZKP_REQ_CAPABILITY)?;
         // zkp_req, Section 2.1: the first option the wallet can answer.
-        let (capability, option, proof_backend) = parsed.options.iter().find_map(|option| {
+        let (capability, option, proof_backend) = parsed.options().iter().find_map(|option| {
             held.iter().find_map(|capability| {
                 let circuit = Circuit {
                     policy: self,
                     capability,
-                    system_id: capability.params.get(SYSTEM_ID_PARAM)?,
+                    system_id: SystemId::new(capability.params.get(SYSTEM_ID_PARAM)?),
                 };
-                let backend = usable_backend(&formats, &parsed.credential_type, &circuit, |c| {
+                let backend = usable_backend(&formats, parsed.credential_type(), &circuit, |c| {
                     self.circuit_supports(c.capability, &parsed, option)
                 })
                 .ok()?;
-                Some((capability, option.clone(), backend.to_owned()))
+                Some((capability, option.clone(), backend.clone()))
             })
         })?;
         Some(ZkpReqSelection {
@@ -429,9 +435,9 @@ fn satisfies(held: &Capability, requested: &Value) -> bool {
 fn requested_types(credential_type: &CredentialType) -> Vec<&str> {
     match credential_type {
         CredentialType::MsoMdoc { doctype } => vec![doctype.as_str()],
-        CredentialType::SdJwt { vct_values } => vct_values.iter().map(String::as_str).collect(),
+        CredentialType::SdJwt { vct_values } => vct_values.iter().map(Vct::as_str).collect(),
         CredentialType::W3c { type_values, .. } => {
-            type_values.iter().flatten().map(String::as_str).collect()
+            type_values.iter().flatten().map(W3cType::as_str).collect()
         }
         CredentialType::Profiled { meta, .. } => meta
             .get("schema_id_value")
@@ -483,12 +489,12 @@ impl ProfilePolicy<'_> {
         option: &QueryOption,
     ) -> Result<(), ()> {
         let items: Vec<RequestedItem<'_>> = option
-            .items
+            .items()
             .iter()
-            .filter_map(|&i| query.items.get(i))
+            .filter_map(|&i| query.item(i))
             .map(|item| RequestedItem {
-                function_id: &item.fn_id,
-                params: &item.params,
+                function_id: item.fn_id().as_str(),
+                params: item.params(),
             })
             .collect();
         let served = match (
@@ -571,7 +577,7 @@ impl siros_dcql::Policy<BlobCredential<'_>> for ProfilePolicy<'_> {
 
         match self.profile.format_rule(query.format().as_str()) {
             Some(rule) => {
-                if !rule.stored_formats.iter().any(|f| f == stored) {
+                if !rule.stored_formats.iter().any(|f| *stored == f.as_str()) {
                     return false;
                 }
             }
@@ -589,7 +595,8 @@ impl siros_dcql::Policy<BlobCredential<'_>> for ProfilePolicy<'_> {
         if *query.format() == ZKP_REQ_FORMAT {
             match self.zkp_req_selection(query) {
                 // The proof is made over the stored attestation itself.
-                Some(selection) if selection.query.credential_type.source_format() == stored => {}
+                Some(selection) if *stored == selection.query.credential_type().source_format() => {
+                }
                 _ => return false,
             }
         } else if is_nym_auth(credential.credential) && discloses_nym_auth_secrets(query) {
@@ -660,7 +667,7 @@ fn credential_field<'a>(cred: &'a Credential, field: &str) -> Option<&'a str> {
     match field {
         "doctype" => cred.doctype.as_deref(),
         "vct" => cred.vct.as_deref(),
-        "format" => Some(&cred.format),
+        "format" => Some(cred.format.as_str()),
         _ => None,
     }
 }

@@ -34,6 +34,7 @@ pub mod authority;
 mod combinations;
 pub mod eval;
 pub mod id;
+pub mod meta;
 pub mod path;
 pub mod query;
 mod result;
@@ -43,13 +44,14 @@ pub use authority::{
 };
 pub use combinations::{Combination, Combinations, Dropped};
 pub use eval::{execute, select_claims, Credential, CryptographicBinding, ExactFormat, Policy};
-pub use id::{ClaimId, ClaimIdError, QueryId, QueryIdError};
+pub use id::{foreign_character, ClaimId, ClaimIdError, QueryId, QueryIdError};
+pub use meta::{CredentialFormat, CredentialRef, DocType, Vct};
 pub use path::{
     mdoc_components, resolve, resolve_json, ClaimNode, ComponentIndex, Lookup, PathComponent,
     PathError,
 };
 pub use query::{
-    ClaimsQuery, CredentialFormat, CredentialQuery, CredentialSetQuery, DcqlQuery, HolderBinding,
-    Multiplicity, QueryError, SetRequirement,
+    ClaimsQuery, CredentialQuery, CredentialSetQuery, DcqlQuery, HolderBinding, Multiplicity,
+    QueryError, SetRequirement,
 };
 pub use result::{Candidate, QueryMatch, QueryResult, Satisfaction, SelectedClaim};

@@ -257,5 +257,8 @@ pub fn present(
     device: u8,
     prover: &dyn NymAuthProver,
 ) -> Result<ZkpPresentation, ProveError> {
-    prepared.prove(&device_signature(device, prepared.data_to_sign()), prover)
+    prepared.prove(
+        &device_signature(device, prepared.data_to_sign().as_bytes()),
+        prover,
+    )
 }

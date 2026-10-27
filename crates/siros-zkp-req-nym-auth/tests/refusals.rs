@@ -11,24 +11,31 @@ mod refusal_cases;
 mod support;
 
 use serde_json::{json, Value};
-use siros_codec::cbor::Value as Cbor;
+use siros_codec::cbor::{CborError, Unsupported as CborUnsupported, Value as Cbor};
 use siros_codec::date::DateTime;
-use siros_oid4vp::ClientId;
+use siros_dcql::QueryIdError;
+use siros_oid4vp::{ClientId, Origin};
 use siros_trust::Certificate;
 use siros_zkp_req::{
-    EncodingError, PairRefusal, ProofEnvelope, RequestRule, StructureRejection, ZkpFormats,
-    ZkpPresentation, ZkpReqQuery,
+    ArrayIndex, EncodingError, IdentifierFault, InputName, ItemIndex, MemberFault, OptionFault,
+    PairRefusal, ProofBackend, ProofContent, ProofEnvelope, ReqSetIndex, RequestRule, ResultKey,
+    ReturnFault, ReturnHandleError, StructureRejection, ZkProof, ZkpFormats, ZkpPresentation,
+    ZkpReqQuery,
 };
 use siros_zkp_req_nym_auth::attestation::{SecretSeed, Unusable};
-use siros_zkp_req_nym_auth::catalogue::{CatalogueRule, NymAuthQuery};
+use siros_zkp_req_nym_auth::catalogue::{
+    CatalogueRule, ContextFault, NymAuthQuery, ParamFault, Prf,
+};
 use siros_zkp_req_nym_auth::outcome::{CredentialCode, InvalidRequest, ItemCode, ZkpError};
-use siros_zkp_req_nym_auth::policy::{check_request, Channel, PolicyRule};
+use siros_zkp_req_nym_auth::policy::PolicyRule;
 use siros_zkp_req_nym_auth::presenter::{Answer, ProveError, Unanswerable};
 use siros_zkp_req_nym_auth::prover::{ProofFailure, ProverFailure};
+use siros_zkp_req_nym_auth::request_object::{check_request, Channel, Signing};
 use siros_zkp_req_nym_auth::system::{NymAuthSystem, Unsupported};
-use siros_zkp_req_nym_auth::verifier_id::{Intermediary, VerifierId, VerifierIdRule};
+use siros_zkp_req_nym_auth::verifier_id::{Intermediary, LengthError, VerifierId, VerifierIdRule};
 use siros_zkp_req_nym_auth::verify::{
-    verify, IssuerKeySetError, ProofTimeError, Rejection, Tolerance, VerifyInput,
+    verify, IssuerKeySetError, OwnQueryFault, ProofEncodingFault, ProofTimeError, Rejection,
+    ResultsFault, Tolerance, VerifyInput,
 };
 use support::*;
 use zeroize::Zeroizing;
@@ -145,10 +152,10 @@ fn prove(device: u8, fail: Option<ProverFailure>) -> Got {
     }
 }
 
-fn policy(edit: impl FnOnce(&mut Value), signed: bool, channel: Channel) -> Got {
+fn policy(edit: impl FnOnce(&mut Value), signing: Signing, channel: Channel) -> Got {
     let mut request = request_object(&query(None, false), NONCE);
     edit(&mut request);
-    match check_request(&request, signed, channel) {
+    match check_request(&request, signing, channel) {
         Ok(_) => Got::Accepted,
         Err(rule) => Got::Policy(rule),
     }
@@ -185,7 +192,7 @@ struct Verifying {
     query: Value,
     metadata: Value,
     trust_anchors: Vec<Certificate>,
-    now: i64,
+    now: DateTime,
 }
 
 impl Default for Verifying {
@@ -194,7 +201,7 @@ impl Default for Verifying {
             query: sets_query(),
             metadata: client_metadata(),
             trust_anchors: vec![Certificate::parse(&ds().der).unwrap()],
-            now: NOW + 5,
+            now: DateTime::from_unix(NOW + 5).unwrap(),
         }
     }
 }
@@ -207,10 +214,7 @@ fn verified(v: Verifying, bytes: &[u8]) -> Got {
             session: &session(&v.query, NONCE),
             presentation: bytes,
             now: v.now,
-            tolerance: Tolerance {
-                future: 60,
-                past: 600,
-            },
+            tolerance: Tolerance::seconds(60, 600),
             trust_anchors: &v.trust_anchors,
         },
         &TestVerifier,
@@ -244,17 +248,23 @@ fn edit_envelope(p: &mut ZkpPresentation, edit: impl FnOnce(&mut ProofEnvelope))
 
 fn set_input(envelope: &mut ProofEnvelope, name: &str, value: Cbor) {
     for (k, v) in &mut envelope.inputs {
-        if k == name {
+        if k.as_str() == name {
             *v = value.clone();
         }
     }
 }
 
 fn set_result(p: &mut ZkpPresentation, handle: &str, value: Option<Cbor>) {
-    p.results.retain(|(k, _)| k != handle);
+    p.results.retain(|(k, _)| k.as_str() != handle);
     if let Some(value) = value {
-        p.results.push((handle.to_owned(), value));
+        p.results.push((ResultKey::new(handle), value));
     }
+}
+
+/// `zk_proof` without its last byte.
+fn shortened(zk_proof: &ZkProof) -> ZkProof {
+    let bytes = zk_proof.as_bytes();
+    ZkProof::new(bytes[..bytes.len() - 1].to_vec())
 }
 
 fn credential_error(code: CredentialCode) -> Got {
@@ -268,7 +278,10 @@ fn every_refusal_rule() {
     assert_eq!(match_query_edit(|_| {}), Got::Accepted);
     assert_eq!(prove(Spec::default().device, None), Got::Accepted);
     assert_eq!(verify_edit(|_| {}), Got::Accepted);
-    assert_eq!(policy(|_| {}, true, Channel::Redirect), Got::Accepted);
+    assert_eq!(
+        policy(|_| {}, Signing::Signed, Channel::Redirect),
+        Got::Accepted
+    );
     let failures: Vec<String> = cases
         .into_iter()
         .filter(|(_, got, want)| got != want)
@@ -284,6 +297,6 @@ fn edited_no_sets() -> Vec<u8> {
         &query(Some("18+"), true),
     ))
     .unwrap();
-    p.req_set = Some(0);
+    p.req_set = Some(ReqSetIndex::new(0));
     p.encode()
 }

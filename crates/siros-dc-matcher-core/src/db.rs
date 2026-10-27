@@ -26,6 +26,7 @@
 //! stated plainly in the README rather than left to be rediscovered.
 
 use serde::{Deserialize, Serialize};
+use siros_dcql::{CredentialFormat, CredentialRef};
 
 use crate::profile::MatchProfile;
 
@@ -62,12 +63,12 @@ pub struct Credential {
     ///
     /// Opaque to the matcher. It must be meaningful to the wallet, and must
     /// not be a value the wallet would mind the platform storing.
-    pub id: String,
+    pub id: CredentialRef,
     /// Storage format, e.g. `mso_mdoc` or `dc+sd-jwt`.
     ///
     /// The format a *verifier asks for* is a separate thing, mapped onto this
     /// by the profile — see [`crate::profile::FormatRule`].
-    pub format: String,
+    pub format: CredentialFormat,
     /// ISO mdoc docType, when this is an mdoc.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub doctype: Option<String>,

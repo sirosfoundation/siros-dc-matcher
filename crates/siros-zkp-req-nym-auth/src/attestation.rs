@@ -17,7 +17,7 @@ use crate::verifier_id::sha256;
 
 /// A Document Signer certificate with the P-256 key the issuer signs with: the first of an
 /// mdoc's `x5chain`, or the `issuer_key_set` of a presentation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DocumentSigner {
     certificate: Certificate,
     key: P256Key,
@@ -43,6 +43,7 @@ pub enum DocumentSignerError {
 
 impl DocumentSignerError {
     /// A stable identifier.
+    #[must_use]
     pub fn code(self) -> &'static str {
         match self {
             Self::Certificate(e) => e.code(),
@@ -108,7 +109,7 @@ impl Credential {
 }
 
 /// Why a credential cannot be read in the nym_auth form: `credential_form`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Unreadable {
     /// The mdoc.
     Form(FormError),
@@ -211,14 +212,19 @@ impl TestedAttestation {
     /// [`Unusable`]: another `docType`, a credential out of the nym_auth form, or the failed
     /// tests.
     pub fn of(mdoc: &Mdoc, proof_time: DateTime) -> Result<Self, Unusable> {
+        let document_signer = mdoc.issuer_auth().x5chain().document_signer();
         let mdoc = match mdoc::read_mdoc(mdoc) {
             Ok(Reading::NymAuth(mdoc)) => *mdoc,
             Ok(Reading::OtherDocType) => return Err(Unusable::OtherDocType),
             Err(e) => return Err(Unusable::Unreadable(Unreadable::Form(e))),
         };
-        let signer = DocumentSigner::parse(mdoc.document_signer())
+        let signer = DocumentSigner::parse(document_signer)
             .map_err(|e| Unusable::Unreadable(Unreadable::Signer(e)))?;
-        let signed = es256_verifies(signer.key(), mdoc.sig_structure(), mdoc.issuer_signature());
+        let signed = es256_verifies(
+            signer.key(),
+            mdoc.sig_structure().as_bytes(),
+            mdoc.issuer_signature(),
+        );
         let valid = mdoc.valid_from() <= proof_time && proof_time < mdoc.valid_until();
         let codes: Vec<CredentialCode> = [
             (signed, CredentialCode::IssuerSignature),
@@ -261,6 +267,7 @@ pub enum OtherIssuer {
 
 impl OtherIssuer {
     /// A stable identifier.
+    #[must_use]
     pub fn code(self) -> &'static str {
         match self {
             Self::Certificate => "admission_other_certificate",
@@ -300,7 +307,7 @@ impl UsableAttestation {
         if issuer.leaf() != Some(tested.credential().signer().certificate()) {
             return Err(OtherIssuer::Certificate);
         }
-        if *issuer.query() != query.query().id {
+        if issuer.query() != query.query().id() {
             return Err(OtherIssuer::Query);
         }
         Ok(Self { tested, issuer })
@@ -328,6 +335,7 @@ pub struct SeedMismatch;
 
 impl SeedMismatch {
     /// A stable identifier.
+    #[must_use]
     pub fn code(self) -> &'static str {
         "seed_mismatch"
     }
@@ -372,7 +380,7 @@ impl OpenedSeed {
     ///
     /// [`SeedMismatch`] when `SHA-256(secret_seed)` is not `ssc`.
     pub fn open(credential: &Credential, secret_seed: &SecretSeed) -> Result<Self, SeedMismatch> {
-        if sha256(&*secret_seed.0) == *credential.mdoc().ssc().value() {
+        if sha256(&*secret_seed.0) == *credential.mdoc().ssc().value().as_bytes() {
             Ok(Self(secret_seed.0.clone()))
         } else {
             Err(SeedMismatch)

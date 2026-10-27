@@ -93,7 +93,7 @@ fn run(db: &CredentialDatabase, request: &[u8]) -> Outcome {
         ids: matched
             .candidates()
             .iter()
-            .map(|c| c.credential_id().to_owned())
+            .map(|c| c.credential_id().as_str().to_owned())
             .collect(),
         claims: first.as_ref().map(|r| r.claims.clone()).unwrap_or_default(),
         selection: first.and_then(|r| r.zkp_req.map(|z| z.to_json())),

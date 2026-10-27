@@ -8,9 +8,9 @@
 //! | Module | Defines | `zkp_req` |
 //! | --- | --- | --- |
 //! | [`query`] | The Credential Query, `_req` and `_req_sets` | Sections 1.1, 2, 2.1 |
+//! | [`ids`] | The identifiers and positions of queries and presentations | Sections 1.2, 2, 4 |
 //! | [`formats`] | `vp_formats_supported.zkp_req` | Section 1.2 |
 //! | [`select`] | The usable pair of a system and a proof backend | Section 1.3 |
-//! | [`consent`] | Match, one consent screen, prove; the request's error code | Section 5 |
 //! | [`presentation`] | `ZkpPresentation`, the backends' `Proof`, the `vp_token` | Sections 3, 4, 6.1 |
 //! | [`structure`] | The Verifier's checks of a presentation, steps 1 to 5 | Section 4.1 |
 //! | [`vp_token`] | The presentations of a query in a JSON `vp_token` | Section 6.1 |
@@ -32,8 +32,9 @@
     clippy::panic
 )]
 
-pub mod consent;
 pub mod formats;
+pub mod ids;
+mod json;
 pub mod outcome;
 pub mod presentation;
 pub mod query;
@@ -41,13 +42,17 @@ pub mod select;
 pub mod structure;
 pub mod vp_token;
 
-pub use consent::{failure_code, Candidate, Judged, Match, OptionRefusal, UserInput};
 pub use formats::ZkpFormats;
-pub use outcome::{ErrorCode, RequestRule};
-pub use presentation::{
-    vp_token_cbor, vp_token_json, EncodingError, ProofEnvelope, ZkpPresentation,
+pub use ids::{
+    ArrayIndex, FnId, FnIdError, InputName, ItemIndex, PresentationIndex, ProofBackend,
+    ReqSetIndex, ResultKey, ReturnHandle, ReturnHandleError, SystemId, W3cType,
 };
-pub use query::{CredentialType, QueryOption, ReqItem, ReturnHandle, ZkpReqQuery};
+pub use outcome::{ErrorCode, IdentifierFault, MemberFault, OptionFault, RequestRule, ReturnFault};
+pub use presentation::{
+    vp_token_cbor, vp_token_json, EncodingError, Member, ProofContent, ProofEnvelope, ZkProof,
+    ZkpPresentation,
+};
+pub use query::{CredentialType, QueryOption, ReqItem, ReqSets, ZkpReqQuery};
 pub use select::{usable_backend, PairRefusal, System};
 pub use structure::{answered_option, StructureRejection};
 pub use vp_token::{presentations_of, VpTokenError};

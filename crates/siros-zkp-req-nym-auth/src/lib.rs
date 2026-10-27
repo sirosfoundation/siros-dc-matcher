@@ -10,7 +10,8 @@
 //! | [`age`] | `range`, E and C | `age_check` |
 //! | [`verifier_id`] | `verifier_id`, `verifier_input`, the `sha-256` pseudonym | `pseudonym` |
 //! | [`system`] | The systems and the options each supports | System rulebooks, Sections 1 to 3 |
-//! | [`policy`] | Signed requests, encrypted responses | Binding, Response confidentiality |
+//! | [`policy`] | The rules of signed requests and encrypted responses | Binding, Response confidentiality |
+//! | [`request_object`] | A Request Object the host validated, checked against the policy, and its session | Binding, Response confidentiality |
 //! | [`request`] | The verified request that meets the policy (N2) | Binding, Response confidentiality, Verifier identity |
 //! | [`pair`] | The options of a query and the usable pair of a system for one | `zkp_req`, Section 1.3 |
 //! | [`mdoc`] | The nym_auth form of the ISO/IEC 18013-5 attestation | Attestation |
@@ -64,6 +65,8 @@ pub mod presenter;
 pub mod prover;
 #[cfg(feature = "request")]
 pub mod request;
+#[cfg(feature = "credential")]
+pub mod request_object;
 #[cfg(feature = "credential")]
 pub mod verify;
 

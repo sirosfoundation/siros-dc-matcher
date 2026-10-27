@@ -2,7 +2,9 @@
 
 use serde_json::Value;
 
-use crate::outcome::RequestRule;
+use crate::ids::{ProofBackend, SystemId};
+use crate::json::non_empty_strings;
+use crate::outcome::{MemberFault, RequestRule};
 
 /// What the Verifier says it can verify.
 ///
@@ -10,10 +12,8 @@ use crate::outcome::RequestRule;
 /// tells Wallets to ignore those, so they never match.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ZkpFormats {
-    /// `proof_backend_values`.
-    pub proof_backends: Vec<String>,
-    /// `system_id_values`.
-    pub systems: Vec<String>,
+    proof_backends: Vec<ProofBackend>,
+    systems: Vec<SystemId>,
 }
 
 impl ZkpFormats {
@@ -21,38 +21,46 @@ impl ZkpFormats {
     ///
     /// # Errors
     ///
-    /// [`RequestRule::FormatsMissing`] when the entry is absent: Section 1.2 says the Verifier
-    /// MUST send both lists. The list rules otherwise.
+    /// [`RequestRule::FormatsMissing`] when the entry is absent or not an object: Section 1.2
+    /// says the Verifier MUST send both lists. The list rules otherwise.
     pub fn from_client_metadata(client_metadata: &Value) -> Result<Self, RequestRule> {
-        let entry = client_metadata
+        let entry = match client_metadata
             .get("vp_formats_supported")
             .and_then(|f| f.get("zkp_req"))
-            .and_then(Value::as_object)
-            .ok_or(RequestRule::FormatsMissing)?;
+        {
+            None => return Err(RequestRule::FormatsMissing(MemberFault::Absent)),
+            Some(Value::Object(entry)) => entry,
+            Some(_) => return Err(RequestRule::FormatsMissing(MemberFault::WrongType)),
+        };
         Ok(Self {
-            proof_backends: list(entry.get("proof_backend_values"))
-                .ok_or(RequestRule::ProofBackendValuesInvalid)?,
-            systems: list(entry.get("system_id_values"))
-                .ok_or(RequestRule::SystemIdValuesInvalid)?,
+            proof_backends: non_empty_strings(entry.get("proof_backend_values"), ProofBackend::new)
+                .map_err(RequestRule::ProofBackendValuesInvalid)?,
+            systems: non_empty_strings(entry.get("system_id_values"), SystemId::new)
+                .map_err(RequestRule::SystemIdValuesInvalid)?,
         })
     }
 
+    /// `proof_backend_values`, in the Verifier's order.
+    #[must_use]
+    pub fn proof_backends(&self) -> &[ProofBackend] {
+        &self.proof_backends
+    }
+
+    /// `system_id_values`, in the Verifier's order.
+    #[must_use]
+    pub fn systems(&self) -> &[SystemId] {
+        &self.systems
+    }
+
     /// Whether the Verifier lists `system`.
-    pub fn lists_system(&self, system: &str) -> bool {
-        self.systems.iter().any(|s| s == system)
+    #[must_use]
+    pub fn lists_system(&self, system: &SystemId) -> bool {
+        self.systems.contains(system)
     }
 
     /// Whether the Verifier lists `backend`.
-    pub fn lists_backend(&self, backend: &str) -> bool {
-        self.proof_backends.iter().any(|b| b == backend)
+    #[must_use]
+    pub fn lists_backend(&self, backend: &ProofBackend) -> bool {
+        self.proof_backends.contains(backend)
     }
-}
-
-fn list(value: Option<&Value>) -> Option<Vec<String>> {
-    let list: Vec<String> = value?
-        .as_array()?
-        .iter()
-        .map(|v| v.as_str().map(str::to_owned))
-        .collect::<Option<_>>()?;
-    (!list.is_empty()).then_some(list)
 }

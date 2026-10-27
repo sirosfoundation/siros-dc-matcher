@@ -3,7 +3,7 @@
 
 use std::fmt;
 
-use siros_zkp_req::RequestRule;
+use siros_zkp_req::{ItemIndex, ReqSetIndex, RequestRule};
 
 use crate::catalogue::CatalogueRule;
 
@@ -97,9 +97,9 @@ pub enum ZkpError {
     /// An item fails.
     Item {
         /// The option's index in `_req_sets`, `None` without them.
-        option: Option<usize>,
+        option: Option<ReqSetIndex>,
         /// The item's `_req` index.
-        item: usize,
+        item: ItemIndex,
         /// The failure.
         code: ItemCode,
     },

@@ -2,30 +2,19 @@
 
 use siros_codec::base64url;
 use siros_codec::date::DateTime;
-use siros_dcql::CryptographicBinding;
+use siros_dcql::{CryptographicBinding, Vct};
 use siros_mdoc::P256Key;
 use siros_sdjwt::{Claim, ClaimValue, Element, Object, SdJwt};
 
-use crate::error::{CredentialError, HolderKeyError};
+use crate::error::{
+    ClaimFault, Coordinate, CoordinateFault, CredentialError, HolderKeyError, RegisteredClaim,
+};
 use crate::usable::Validity;
-
-/// The registered claims that, with their sub-claims, are never selectively disclosed
-/// (Section 2.2.2.3).
-const PERMANENT: [&str; 8] = [
-    "iss",
-    "nbf",
-    "exp",
-    "cnf",
-    "vct",
-    "vct#integrity",
-    "aka_vcts",
-    "status",
-];
 
 /// An SD-JWT VC: an SD-JWT with a string `vct`, its registered claims permanently disclosed.
 pub(crate) struct SdJwtVc {
     sd_jwt: SdJwt,
-    vct: String,
+    vct: Vct,
     holder_key: Option<P256Key>,
     validity: Validity,
 }
@@ -35,14 +24,16 @@ impl SdJwtVc {
     pub(crate) fn read(data: &str) -> Result<Self, CredentialError> {
         let sd_jwt = SdJwt::parse(data)?;
         let claims = sd_jwt.claims();
-        for name in PERMANENT {
-            if claims.get(name).is_some_and(disclosed) {
-                return Err(CredentialError::SelectivelyDisclosed(name));
-            }
+        if let Some(claim) = RegisteredClaim::ALL
+            .into_iter()
+            .find(|claim| claims.get(claim.name()).is_some_and(disclosed))
+        {
+            return Err(CredentialError::SelectivelyDisclosed(claim));
         }
         let vct = match claims.get("vct").map(Claim::value) {
-            Some(ClaimValue::String(vct)) => vct.clone(),
-            _ => return Err(CredentialError::Vct),
+            Some(ClaimValue::String(vct)) => Vct::new(vct),
+            Some(_) => return Err(CredentialError::Vct(ClaimFault::WrongType)),
+            None => return Err(CredentialError::Vct(ClaimFault::Absent)),
         };
         let holder_key = match claims.get("cnf").map(Claim::value) {
             None => None,
@@ -52,8 +43,8 @@ impl SdJwtVc {
             Some(_) => return Err(CredentialError::Cnf),
         };
         let validity = Validity::new(
-            numeric_date(claims.get("nbf"), "nbf")?,
-            numeric_date(claims.get("exp"), "exp")?,
+            numeric_date(claims.get("nbf"), RegisteredClaim::Nbf)?,
+            numeric_date(claims.get("exp"), RegisteredClaim::Exp)?,
         );
         Ok(Self {
             sd_jwt,
@@ -67,7 +58,7 @@ impl SdJwtVc {
         &self.sd_jwt
     }
 
-    pub(crate) fn vct(&self) -> &str {
+    pub(crate) fn vct(&self) -> &Vct {
         &self.vct
     }
 
@@ -101,16 +92,23 @@ fn p256_jwk(cnf: &Object) -> Result<P256Key, HolderKeyError> {
         Some(ClaimValue::String(text)) => Some(text.as_str()),
         _ => None,
     };
-    if text("kty") != Some("EC") || text("crv") != Some("P-256") {
+    if text("kty") != Some("EC") {
         return Err(HolderKeyError::KeyType);
     }
-    let coordinate = |name: &str| -> Result<[u8; 32], HolderKeyError> {
-        text(name)
-            .and_then(|text| base64url::decode(text).ok())
-            .and_then(|bytes| <[u8; 32]>::try_from(bytes).ok())
-            .ok_or(HolderKeyError::Coordinate)
+    if text("crv") != Some("P-256") {
+        return Err(HolderKeyError::Curve);
+    }
+    let coordinate = |which: Coordinate, name: &str| -> Result<[u8; 32], HolderKeyError> {
+        let fault = |fault| HolderKeyError::Coordinate(which, fault);
+        let bytes = base64url::decode(text(name).ok_or(fault(CoordinateFault::NotString))?)
+            .map_err(|e| fault(CoordinateFault::Base64(e)))?;
+        <[u8; 32]>::try_from(bytes.as_slice())
+            .map_err(|_| fault(CoordinateFault::Length(bytes.len())))
     };
-    Ok(P256Key::new(coordinate("x")?, coordinate("y")?))
+    Ok(P256Key::new(
+        coordinate(Coordinate::X, "x")?,
+        coordinate(Coordinate::Y, "y")?,
+    ))
 }
 
 /// Whether a disclosure reveals `claim` or one of its sub-claims.
@@ -132,7 +130,7 @@ fn disclosed(claim: &Claim) -> bool {
 /// and `now ≥ ⌈t⌉` agree, and so do `now < t` and `now < ⌈t⌉`.
 fn numeric_date(
     claim: Option<&Claim>,
-    name: &'static str,
+    name: RegisteredClaim,
 ) -> Result<Option<DateTime>, CredentialError> {
     let Some(claim) = claim else {
         return Ok(None);

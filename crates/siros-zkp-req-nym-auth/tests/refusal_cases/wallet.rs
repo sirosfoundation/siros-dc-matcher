@@ -60,7 +60,7 @@ pub fn cases() -> Vec<Case> {
             ),
             Got::Unanswerable(Unanswerable::Failed(vec![ZkpError::Item {
                 option: None,
-                item: 1,
+                item: ItemIndex::new(1),
                 code: ItemCode::AgeOutOfRange,
             }])),
         ),
@@ -69,7 +69,7 @@ pub fn cases() -> Vec<Case> {
             match_credential(Spec::default(), None, [0x5a; 16]),
             Got::Unanswerable(Unanswerable::Failed(vec![ZkpError::Item {
                 option: None,
-                item: 0,
+                item: ItemIndex::new(0),
                 code: ItemCode::SeedMismatch,
             }])),
         ),

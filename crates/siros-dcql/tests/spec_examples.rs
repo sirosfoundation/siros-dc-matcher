@@ -9,8 +9,8 @@
 
 use serde_json::{json, Value};
 use siros_dcql::{
-    execute, CryptographicBinding, DcqlQuery, ExactFormat, PathComponent, PathError, QueryResult,
-    Satisfaction, SetRequirement,
+    execute, CredentialFormat, CredentialRef, CryptographicBinding, DcqlQuery, ExactFormat,
+    PathComponent, PathError, QueryResult, Satisfaction, SetRequirement,
 };
 
 /// Whether the wallet can satisfy the request.
@@ -29,16 +29,17 @@ fn vector(name: &str) -> DcqlQuery {
 
 /// An mdoc, resolved with the §7.2 two-component rules.
 struct Mdoc {
-    id: String,
+    id: CredentialRef,
+    format: CredentialFormat,
     namespaces: Value,
 }
 
 impl siros_dcql::Credential for Mdoc {
-    fn id(&self) -> &str {
+    fn id(&self) -> &CredentialRef {
         &self.id
     }
-    fn format(&self) -> &str {
-        "mso_mdoc"
+    fn format(&self) -> &CredentialFormat {
+        &self.format
     }
     fn claim(&self, path: &[PathComponent]) -> Result<Vec<Value>, PathError> {
         let (ns, element) = siros_dcql::mdoc_components(path)?;
@@ -56,16 +57,16 @@ impl siros_dcql::Credential for Mdoc {
 
 /// A JSON credential, resolved with the §7.1 rules.
 struct Json {
-    id: String,
-    format: String,
+    id: CredentialRef,
+    format: CredentialFormat,
     body: Value,
 }
 
 impl siros_dcql::Credential for Json {
-    fn id(&self) -> &str {
+    fn id(&self) -> &CredentialRef {
         &self.id
     }
-    fn format(&self) -> &str {
+    fn format(&self) -> &CredentialFormat {
         &self.format
     }
     fn claim(&self, path: &[PathComponent]) -> Result<Vec<Value>, PathError> {
@@ -79,8 +80,8 @@ impl siros_dcql::Credential for Json {
 
 fn json_cred(id: &str, format: &str, body: Value) -> Json {
     Json {
-        id: id.into(),
-        format: format.into(),
+        id: CredentialRef::new(id),
+        format: CredentialFormat::new(format),
         body,
     }
 }
@@ -238,7 +239,8 @@ fn complex_mdoc_resolves_dotted_namespaces() {
             .insert(element.to_string(), json!("value"));
     }
     let held = [Mdoc {
-        id: "mdl-1".into(),
+        id: CredentialRef::new("mdl-1"),
+        format: CredentialFormat::new("mso_mdoc"),
         namespaces: Value::Object(ns),
     }];
 

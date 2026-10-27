@@ -63,7 +63,7 @@ impl<'q> Answer<'q> {
         attestation: UsableAttestation,
         secret_seed: &SecretSeed,
     ) -> Result<Self, Unanswerable> {
-        if *attestation.issuer().query() != pair.option().query().query().id {
+        if attestation.issuer().query() != pair.option().query().query().id() {
             return Err(Unanswerable::OtherQuery);
         }
         if attestation.proof_time().date() != pair.date() {
@@ -112,8 +112,8 @@ fn opened_seed(
         Ok(_) => Err(assertions),
         Err(SeedMismatch) => {
             let seed = ZkpError::Item {
-                option: option.option().req_set,
-                item: pair.pseudonym().0,
+                option: option.option().req_set(),
+                item: pair.pseudonym().index,
                 code: ItemCode::SeedMismatch,
             };
             Err(assertions.into_iter().chain([seed]).collect())

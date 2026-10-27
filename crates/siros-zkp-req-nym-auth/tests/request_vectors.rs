@@ -29,17 +29,18 @@ fn rule_json(rule: CatalogueRule) -> Value {
         CatalogueRule::FunctionUnknown { item }
         | CatalogueRule::ParamUnknown { item }
         | CatalogueRule::PseudonymReturnMissing { item }
-        | CatalogueRule::ConfigInvalid { item }
-        | CatalogueRule::VerInvalid { item }
-        | CatalogueRule::PrfInvalid { item }
-        | CatalogueRule::VerifierContextInvalid { item }
-        | CatalogueRule::RangeSyntax { item }
-        | CatalogueRule::RangeInverted { item } => out["item"] = item.into(),
+        | CatalogueRule::ConfigInvalid { item, .. }
+        | CatalogueRule::VerInvalid { item, .. }
+        | CatalogueRule::PrfInvalid { item, .. }
+        | CatalogueRule::PrfUndefined { item, .. }
+        | CatalogueRule::VerifierContextInvalid { item, .. }
+        | CatalogueRule::RangeSyntax { item, .. }
+        | CatalogueRule::RangeInverted { item } => out["item"] = item.value().into(),
         CatalogueRule::PseudonymRepeated { option }
         | CatalogueRule::AgeCheckRepeated { option } => {
-            out["option"] = option.into();
+            out["option"] = option.map(|option| option.value()).into();
         }
-        CatalogueRule::SchemaIdInvalid | CatalogueRule::HolderBindingWaived => {}
+        CatalogueRule::SchemaIdInvalid(_) | CatalogueRule::HolderBindingWaived => {}
     }
     out
 }

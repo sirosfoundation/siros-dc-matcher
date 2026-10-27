@@ -202,7 +202,7 @@ fn classify(value: &Cbor) -> (TypedValue<'_>, Option<CredentialError>) {
                 other => (cbor(other), Some(CredentialError::Tdate)),
             }
         }
-        Cbor::Tag(_, inner) => return (cbor(inner), Some(CredentialError::Tag)),
+        Cbor::Tag(tag, inner) => return (cbor(inner), Some(CredentialError::Tag(*tag))),
         Cbor::Bool(b) => TypedValue::Bool(*b),
         Cbor::Null => TypedValue::Null,
         Cbor::Encoded(_) => return (TypedValue::Null, Some(CredentialError::Undefined)),

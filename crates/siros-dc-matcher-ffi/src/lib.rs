@@ -270,8 +270,8 @@ impl SirosBlobBuilder {
                 None => None,
             };
             credentials.push(Credential {
-                id: c.id.clone(),
-                format: c.format.clone(),
+                id: c.id.as_str().into(),
+                format: c.format.as_str().into(),
                 doctype: c.doctype.clone(),
                 vct: c.vct.clone(),
                 title: c.title.clone(),

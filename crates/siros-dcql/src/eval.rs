@@ -13,6 +13,7 @@
 
 use serde_json::Value;
 
+use crate::meta::{CredentialFormat, CredentialRef};
 use crate::path::{PathComponent, PathError};
 use crate::query::{ClaimsQuery, CredentialQuery, DcqlQuery, HolderBinding, SetRequirement};
 use crate::result::{Candidate, QueryMatch, QueryResult, Satisfaction, SelectedClaim};
@@ -20,9 +21,9 @@ use crate::result::{Candidate, QueryMatch, QueryResult, Satisfaction, SelectedCl
 /// A credential the wallet holds, as far as DCQL is concerned.
 pub trait Credential {
     /// Stable identifier, echoed back in match results.
-    fn id(&self) -> &str;
+    fn id(&self) -> &CredentialRef;
     /// Storage format, e.g. `mso_mdoc`.
-    fn format(&self) -> &str;
+    fn format(&self) -> &CredentialFormat;
     /// Resolve a claims path pointer (§7) against this credential.
     ///
     /// # Errors
@@ -124,9 +125,7 @@ fn candidates<C: Credential>(
                 || c.binding() == CryptographicBinding::Bound
         })
         .filter(|c| policy.matches(cq, *c))
-        .filter_map(|c| {
-            select_claims(cq, c).map(|claims| Candidate::new(c.id().to_owned(), claims))
-        })
+        .filter_map(|c| select_claims(cq, c).map(|claims| Candidate::new(c.id().clone(), claims)))
         .collect()
 }
 

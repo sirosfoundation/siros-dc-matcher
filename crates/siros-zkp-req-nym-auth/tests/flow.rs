@@ -15,17 +15,17 @@ mod support;
 use ciborium::value::Value as Ciborium;
 use serde_json::{json, Value};
 use siros_codec::cbor::Value as Cbor;
+use siros_codec::date::DateTime;
 use siros_trust::Certificate;
-use siros_zkp_req::ZkpPresentation;
+use siros_zkp_req::{ProofEnvelope, ReqSetIndex, ZkpPresentation};
 use siros_zkp_req_nym_auth::prover::ProofFailure;
 use siros_zkp_req_nym_auth::system::NymAuthSystem;
 use siros_zkp_req_nym_auth::verify::{verify, Rejection, Tolerance, VerifyInput};
 use support::*;
 
-const TOLERANCE: Tolerance = Tolerance {
-    future: 60,
-    past: 600,
-};
+fn tolerance() -> Tolerance {
+    Tolerance::seconds(60, 600)
+}
 
 /// Two options: the pseudonym with an age check, or the pseudonym alone.
 fn two_option_query() -> Value {
@@ -60,8 +60,8 @@ fn verify_with(
             client_metadata: &client_metadata(),
             session: &session(query, nonce),
             presentation: bytes,
-            now: NOW + 5,
-            tolerance: TOLERANCE,
+            now: DateTime::from_unix(NOW + 5).unwrap(),
+            tolerance: tolerance(),
             trust_anchors,
         },
         &TestVerifier,
@@ -86,10 +86,13 @@ fn assert_draft_shape(bytes: &[u8], system: NymAuthSystem, ds_der: &[u8]) -> [u8
         keys,
         ["proof", "proof_backend", "req_set", "results", "system_id"]
     );
-    assert_eq!(map_get(top, "system_id").as_text(), Some(system.id()));
+    assert_eq!(
+        map_get(top, "system_id").as_text(),
+        Some(system.id().as_str())
+    );
     assert_eq!(
         map_get(top, "proof_backend").as_text(),
-        Some(system.backends()[0])
+        Some(system.backends()[0].as_str())
     );
     assert_eq!(map_get(top, "req_set").as_integer(), Some(0.into()));
     let proof: Ciborium =
@@ -129,15 +132,15 @@ fn honest_path_per_system() {
     let trust_anchors = vec![Certificate::parse(&ds.der).unwrap()];
     for system in NymAuthSystem::ALL {
         let presented = present_with(system, &query, &ds);
-        assert_eq!(presented.req_set, Some(0));
+        assert_eq!(presented.req_set, Some(ReqSetIndex::new(0)));
         assert_eq!(presented.system_id, system.id());
         let bytes = presented.encode();
         let nym = assert_draft_shape(&bytes, system, &ds.der);
         assert_eq!(nym, expected_pseudonym(&SEED, CLIENT_ID));
         let verified = verify_with(&query, NONCE, &bytes, &trust_anchors).unwrap();
         assert_eq!(verified.system, system);
-        assert_eq!(verified.req_set, Some(0));
-        assert_eq!(verified.issuer_certificate, ds.der);
+        assert_eq!(verified.req_set, Some(ReqSetIndex::new(0)));
+        assert_eq!(verified.issuer.certificate().der(), ds.der);
     }
 }
 
@@ -150,7 +153,7 @@ fn edited(bytes: &[u8], edit: impl FnOnce(&mut ZkpPresentation)) -> Vec<u8> {
 
 /// The `proof` with `proof_time` one second later: still within the tolerance.
 fn later_proof_time(p: &mut ZkpPresentation) {
-    let mut envelope = siros_zkp_req::ProofEnvelope::decode(&p.proof).unwrap();
+    let mut envelope = ProofEnvelope::decode(&p.proof).unwrap();
     for (name, value) in &mut envelope.inputs {
         if name == "proof_time" {
             *value = Cbor::Tag(0, Box::new(Cbor::text("2026-10-09T12:00:01Z")));

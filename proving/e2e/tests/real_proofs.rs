@@ -17,9 +17,11 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 use siros_codec::cbor::Value as Cbor;
+use siros_codec::date::DateTime;
 use siros_trust::Certificate;
 use siros_zkp_backend_longfellow::{LongfellowProver, LongfellowVerifier};
 use siros_zkp_backend_vega::VegaNymAuth;
+use siros_zkp_req::ZkProof;
 use siros_zkp_req_nym_auth::prover::{
     NymAuthProofVerifier, NymAuthProver, ProofFailure, Statement,
 };
@@ -28,12 +30,12 @@ use siros_zkp_req_nym_auth::testing::{
     client_metadata, device_signature, expected_pseudonym, issue, prepared, query, session,
     verified_request, Issuer, Spec, CLIENT_ID, NONCE, NOW, SEED,
 };
+use siros_zkp_req_nym_auth::verifier_id::PseudonymValue;
 use siros_zkp_req_nym_auth::verify::{verify, Rejection, Tolerance, Verified, VerifyInput};
 
-const TOLERANCE: Tolerance = Tolerance {
-    future: 60,
-    past: 600,
-};
+fn tolerance() -> Tolerance {
+    Tolerance::seconds(60, 600)
+}
 
 fn artifact(path: &str) -> Vec<u8> {
     let file = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -61,7 +63,7 @@ struct Proved {
     query: Value,
     trust_anchors: [Certificate; 1],
     statement: Statement,
-    zk_proof: Vec<u8>,
+    zk_proof: ZkProof,
     presentation: Vec<u8>,
 }
 
@@ -72,10 +74,13 @@ fn prove(backend: &Backend<'_>, range: &str) -> Proved {
     let query = query(Some(range), true);
     let request = verified_request(&query, NONCE);
     let prepared = prepared(backend.system, &query, &data, &SEED, &request).unwrap();
-    let signature = device_signature(Spec::default().device, prepared.data_to_sign());
+    let signature = device_signature(Spec::default().device, prepared.data_to_sign().as_bytes());
     let job = prepared.job(&signature).unwrap();
     let output = backend.prover.prove(&job).unwrap();
-    assert_eq!(output.pseudonym, expected_pseudonym(&SEED, CLIENT_ID));
+    assert_eq!(
+        output.pseudonym,
+        PseudonymValue::new(expected_pseudonym(&SEED, CLIENT_ID))
+    );
     Proved {
         presentation: prepared.assemble(&output).unwrap().encode(),
         query,
@@ -93,8 +98,8 @@ fn verify_in(backend: &Backend<'_>, proved: &Proved, nonce: &str) -> Result<Veri
             client_metadata: &client_metadata(),
             session: &session(&proved.query, nonce),
             presentation: &proved.presentation,
-            now: NOW + 5,
-            tolerance: TOLERANCE,
+            now: DateTime::from_unix(NOW + 5).unwrap(),
+            tolerance: tolerance(),
             trust_anchors: &proved.trust_anchors,
         },
         backend.verifier,
@@ -108,7 +113,7 @@ fn accepted(backend: &Backend<'_>, proved: &Proved) {
     assert!(verified
         .results
         .iter()
-        .any(|(handle, value)| handle == "nym" && *value == Cbor::Bytes(pseudonym.clone())));
+        .any(|(handle, value)| *handle == "nym" && *value == Cbor::Bytes(pseudonym.clone())));
 }
 
 fn run(backend: &Backend<'_>) {
@@ -118,12 +123,13 @@ fn run(backend: &Backend<'_>) {
         verify_in(backend, &proved, "aNotherNonce-0123456789").unwrap_err(),
         Rejection::Proof(backend.other_session)
     );
-    let pseudonym = expected_pseudonym(&SEED, CLIENT_ID);
-    let short = &proved.zk_proof[..proved.zk_proof.len() - 1];
+    let pseudonym = PseudonymValue::new(expected_pseudonym(&SEED, CLIENT_ID));
+    let bytes = proved.zk_proof.as_bytes();
+    let short = ZkProof::new(bytes[..bytes.len() - 1].to_vec());
     assert_eq!(
         backend
             .verifier
-            .verify(&proved.statement, &pseudonym, short),
+            .verify(&proved.statement, &pseudonym, &short),
         Err(ProofFailure::Encoding)
     );
     // E in year 0000: 0000-10-10 at the proof date 2026-10-09.

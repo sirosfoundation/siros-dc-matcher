@@ -111,6 +111,44 @@ against the 307,200-byte budget (303,914 before).
   Bindings are regenerated.
 - **BREAKING (browser):** `siros-zkp-req-wasm` keeps `ZkpProvers` and `vpTokenJson`;
   `matchQuery`, `session` and `prepare` are removed.
+- **BREAKING (Rust API):** `siros-zkp-req` types every value it reads. `ZkpReqQuery`,
+  `ReqItem`, `QueryOption` and `ZkpFormats` keep their fields private behind accessors; ids are
+  `FnId`, `ReturnHandle`, `SystemId`, `ProofBackend`, `ResultKey`, `InputName` and `W3cType`,
+  positions are `ItemIndex`, `ReqSetIndex`, `PresentationIndex` and `ArrayIndex`, and
+  `has_req_sets`, `require_holder_binding` and `multiple` are `ReqSets`, `HolderBinding` and
+  `Multiplicity`. A `RequestRule` carries what breaks it (`MemberFault`, `IdentifierFault`,
+  `ReturnFault`, `OptionFault`); its codes are unchanged. `ZkpPresentation` and `ProofEnvelope`
+  hold `ProofContent`, `ZkProof` and typed keys; a `req_set` beyond the platform's indexes is
+  `EncodingError::OutOfRange`. `System` gives a `SystemId` and judges a `ProofBackend`;
+  `answered_option` takes the Verifier's system of an identifier and returns it with the
+  option. `VpTokenError` carries the JSON and base64url errors. The unused consent model
+  (`Candidate`, `Judged`, `Match`, `OptionRefusal`, `UserInput`, `failure_code`) is removed.
+- **BREAKING (Rust API):** `siros-mdoc` types its names and values: `DocType` (from
+  `siros-dcql`), `NameSpace`, `ElementIdentifier`, `DigestId`, `ItemDigest`, `CoseAlgorithm`,
+  `SigStructure`, `MessageDigest`, `Es256Signature` and `SessionTranscript`.
+  `device_signing_input` takes a `SessionTranscript` and a `DocType` and gives a
+  `SigStructure`, whose `digest` replaces `device_signing_digest`. Every `MdocError` carries
+  its fault; its codes are unchanged.
+- **BREAKING (Rust API):** `siros-credential` gives `credential_type()` as a `CredentialType`
+  (`Vct` or `DocType`), `issuer()` as an `IssuerIdentifier` and `configuration_id()` as a
+  `ConfigurationId`. `CredentialError` names the `RegisteredClaim` and the tag it refuses, and
+  `HolderKeyError` the coordinate and its fault.
+- **BREAKING (nym_auth):** the catalogue's `Item` is an enum whose `pseudonym` holds its
+  `return`; `Pseudonym` and `AgeCheck` read through accessors and `verifier_context` is a
+  `VerifierContext`. A `CatalogueRule` carries what breaks it (`ParamFault`, `ContextFault`,
+  `PrfUndefined`); its codes are unchanged. `Statement` holds the `DocumentSigner`, a
+  `ProofBackend`, `VerifierInput`, `SessionTranscript` and `MessageDigest`, and loses
+  `doc_type`; `ProofOutput` and the verifier take `ZkProof` and `PseudonymValue`. `Prepared`
+  signs a `SigStructure` for a `KeyId` and proves with an `Es256Signature`;
+  `HostError::SignatureLength` is gone. `check_request` and the session values move to
+  `request_object` (feature `credential`) and take `Signing`; `Channel::DcApi` holds an
+  `Origin`. `Rejection` names its fault (`OwnQueryFault`, `ProofEncodingFault`,
+  `ResultsFault`, `IssuerKeySetError::Expired`), `VerifyInput::now` is a `DateTime`, and
+  `Tolerance::seconds(future, past)` replaces its public fields. `MAX_ZK_PROOF` moves to
+  `system`, with `NymAuthSystem::admits_zk_proof`.
+- **BREAKING (FFI):** `zkp_req_verify` refuses a clock outside the years 0000 to 9999 and a
+  negative tolerance as host errors (`now_out_of_range`, `tolerance_out_of_range`), and
+  `zkp_req_vp_token_json` and `zkp_req_vp_token_cbor` refuse a query id outside §6.1.
 - Vector set digest: `1e2b5b3dc8107d8ce1f7a7d36461d70f66c6734e0bcaa1ebcfa82c8c261a03f8`.
 
 ### Fixed

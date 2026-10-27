@@ -109,7 +109,7 @@ impl<'c> ScaMetadata<'c> {
         if credential.format() != Format::SdJwtVc {
             return Err(TransactionDataError::NotSdJwtVc);
         }
-        let url = HttpsUrl::parse(credential.credential_type())
+        let url = HttpsUrl::parse(credential.credential_type().as_str())
             .ok_or(TransactionDataError::VctNotHttps)?;
         Ok(Fetch::get(url, MediaType::JSON, MAX_DOCUMENT))
     }
@@ -141,7 +141,7 @@ impl<'c> ScaMetadata<'c> {
         };
         let mut fields = object.into_fields();
         match fields.take("vct") {
-            Some(Json::String(vct)) if vct == credential.credential_type() => {}
+            Some(Json::String(vct)) if vct == credential.credential_type().as_str() => {}
             Some(Json::String(_)) => return Err(TransactionDataError::VctMismatch),
             _ => return Err(malformed("vct")),
         }

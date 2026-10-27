@@ -2,6 +2,7 @@
 //! the request can be satisfied.
 
 use crate::id::{ClaimId, QueryId};
+use crate::meta::CredentialRef;
 use crate::path::PathComponent;
 use crate::query::{CredentialSetQuery, Multiplicity};
 
@@ -15,7 +16,7 @@ pub struct SelectedClaim {
 /// One credential that satisfies one credential query.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Candidate {
-    credential_id: String,
+    credential_id: CredentialRef,
     claims: Vec<SelectedClaim>,
 }
 
@@ -70,7 +71,7 @@ impl SelectedClaim {
 }
 
 impl Candidate {
-    pub(crate) fn new(credential_id: String, claims: Vec<SelectedClaim>) -> Self {
+    pub(crate) fn new(credential_id: CredentialRef, claims: Vec<SelectedClaim>) -> Self {
         Self {
             credential_id,
             claims,
@@ -79,7 +80,7 @@ impl Candidate {
 
     /// The credential's own identifier.
     #[must_use]
-    pub fn credential_id(&self) -> &str {
+    pub fn credential_id(&self) -> &CredentialRef {
         &self.credential_id
     }
 

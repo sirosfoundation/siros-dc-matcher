@@ -339,7 +339,7 @@ fn evaluate(
             .map(|cq| resolve(&policy, cq, candidate));
         FfiMatchedCredential {
             query_id: query_id.to_owned(),
-            credential_id: candidate.credential_id().to_owned(),
+            credential_id: candidate.credential_id().as_str().to_owned(),
             claims: resolved
                 .as_ref()
                 .map(|r| r.claims.clone())

@@ -2543,6 +2543,7 @@ dependencies = [
  "rustc-hash",
  "sha2",
  "siros-codec",
+ "siros-dcql",
 ]
 
 [[package]]

@@ -12,7 +12,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use serde_json::{json, Value};
-use siros_zkp_req::{RequestRule, ZkpFormats, ZkpReqQuery};
+use siros_zkp_req::{ReqSets, RequestRule, ZkpFormats, ZkpReqQuery};
 
 /// A JSON member, or the JSON a text member holds; text that is not JSON reads as `null`.
 fn member(vector: &Value, value_key: &str, text_key: &str) -> Value {
@@ -28,11 +28,11 @@ fn rule_json(rule: RequestRule) -> Value {
     match rule {
         RequestRule::ItemNotObject { item }
         | RequestRule::ItemMemberUnknown { item }
-        | RequestRule::FnIdInvalid { item }
+        | RequestRule::FnIdInvalid { item, .. }
         | RequestRule::ParamsNotObject { item }
-        | RequestRule::ReturnInvalid { item }
-        | RequestRule::ReturnRepeated { item } => out["item"] = item.into(),
-        RequestRule::OptionInvalid { option } => out["option"] = option.into(),
+        | RequestRule::ReturnInvalid { item, .. }
+        | RequestRule::ReturnRepeated { item } => out["item"] = item.value().into(),
+        RequestRule::OptionInvalid { option, .. } => out["option"] = option.value().into(),
         _ => {}
     }
     out
@@ -48,8 +48,13 @@ fn verdict(vector: &Value) -> Value {
     if let Err(rule) = ZkpFormats::from_client_metadata(&metadata) {
         return rule_json(rule);
     }
-    let options: Vec<&Vec<usize>> = parsed.options.iter().map(|o| &o.items).collect();
-    json!({"valid": {"options": options, "req_sets": parsed.has_req_sets}})
+    let options: Vec<Vec<usize>> = parsed
+        .options()
+        .iter()
+        .map(|o| o.items().iter().map(|i| i.value()).collect())
+        .collect();
+    let req_sets = parsed.req_sets() == ReqSets::Present;
+    json!({"valid": {"options": options, "req_sets": req_sets}})
 }
 
 #[test]

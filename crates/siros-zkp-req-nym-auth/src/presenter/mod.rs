@@ -19,9 +19,6 @@ pub use answer::{Answer, Unanswerable};
 #[cfg(feature = "request")]
 pub use proving::{HostError, Prepared, ProveError};
 
-/// The largest `zk_proof` the proof backends read (`longfellow-libzk-v1`, `vega-v1`).
-pub const MAX_ZK_PROOF: usize = 1 << 20;
-
 /// The session a presentation is bound to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Session {

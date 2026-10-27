@@ -203,7 +203,7 @@ fn run(input: &Input<'_>, sets: &mut impl SetSink) {
             .map(|(query_id, candidate)| {
                 db.credentials
                     .iter()
-                    .find(|c| c.id == candidate.credential_id())
+                    .find(|c| c.id == *candidate.credential_id())
                     .map(|credential| (query_id, candidate, credential))
             })
             .collect();
@@ -275,7 +275,7 @@ fn run(input: &Input<'_>, sets: &mut impl SetSink) {
                 None => disclosed_fields(credential, candidate),
             };
             members.push(Member {
-                credential_id: &credential.id,
+                credential_id: credential.id.as_str(),
                 title: &credential.title,
                 subtitle: &credential.subtitle,
                 data,

@@ -15,6 +15,7 @@ crypto = ["dep:p256"]
 
 [dependencies]
 siros-codec = { workspace = true }
+siros-dcql = { workspace = true }
 rustc-hash = { workspace = true }
 sha2 = "0.10.9"
 p256 = { version = "0.13.2", default-features = false, features = ["ecdsa", "alloc"], optional = true }

@@ -64,7 +64,7 @@ fn matches(db: &CredentialDatabase, query: &DcqlQuery) -> Vec<String> {
         .map(|m| {
             m.candidates()
                 .iter()
-                .map(|c| c.credential_id().to_owned())
+                .map(|c| c.credential_id().as_str().to_owned())
                 .collect()
         })
         .unwrap_or_default()

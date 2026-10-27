@@ -8,14 +8,16 @@ use std::sync::Arc;
 
 use serde_json::Value;
 use siros_codec::cbor::Value as Cbor;
-use siros_codec::date::Date;
-use siros_oid4vp::{ec_jwk_thumbprint, ClientId, SemanticIdentifier};
+use siros_codec::date::{Date, DateTime};
+use siros_dcql::QueryId;
+use siros_oid4vp::{ec_jwk_thumbprint, ClientId, JwkThumbprint, Origin, SemanticIdentifier};
 use siros_trust::Certificate;
-use siros_zkp_req::{ErrorCode, ZkpPresentation};
-use siros_zkp_req_nym_auth::policy::{check_request, Channel};
+use siros_zkp_req::{ErrorCode, ReqSetIndex, ResultKey, ZkProof, ZkpPresentation};
+use siros_zkp_req_nym_auth::catalogue::MDOC_DOCTYPE;
 use siros_zkp_req_nym_auth::presenter::Session;
 use siros_zkp_req_nym_auth::prover::{NymAuthProofVerifier, ProofFailure, Statement};
-use siros_zkp_req_nym_auth::verifier_id::{Intermediary, VerifierId};
+use siros_zkp_req_nym_auth::request_object::{check_request, Channel, Signing};
+use siros_zkp_req_nym_auth::verifier_id::{Intermediary, PseudonymValue, VerifierId};
 use siros_zkp_req_nym_auth::verify::{verify, Rejection, Tolerance, VerifyInput};
 
 /// Why a `zkp_req` call gave no result. `error_code` is what the wallet sends the verifier
@@ -46,11 +48,6 @@ pub enum ZkpReqError {
         /// The failed check, for the logs. Its wording may change; match on `code`.
         detail: String,
     },
-}
-
-/// An index across the boundary: `usize` fits `u64` on every target.
-fn index(i: usize) -> u64 {
-    i as u64
 }
 
 fn host(code: &str) -> ZkpReqError {
@@ -134,13 +131,22 @@ pub fn zkp_req_session(
 ) -> Result<Arc<FfiSession>, ZkpReqError> {
     let request = json(&request_object_json, "request_object_not_json")?;
     let channel = match channel {
-        FfiChannel::DcApi { origin } => Channel::DcApi { origin },
+        FfiChannel::DcApi { origin } => Channel::DcApi {
+            origin: Origin::new(&origin),
+        },
         FfiChannel::Redirect => Channel::Redirect,
     };
-    let checked = check_request(&request, signed, channel).map_err(|r| invalid(r.code()))?;
-    let thumbprint: [u8; 32] = jwk_thumbprint
-        .try_into()
-        .map_err(|_| host("thumbprint_length"))?;
+    let signing = if signed {
+        Signing::Signed
+    } else {
+        Signing::Unsigned
+    };
+    let checked = check_request(&request, signing, channel).map_err(|r| invalid(r.code()))?;
+    let thumbprint = JwkThumbprint::new(
+        jwk_thumbprint
+            .try_into()
+            .map_err(|_| host("thumbprint_length"))?,
+    );
     let handover = checked
         .handover(&thumbprint)
         .map_err(|_| host("thumbprint_not_in_request"))?;
@@ -154,7 +160,7 @@ pub fn zkp_req_session(
         FfiVerifierIdForm::X509SanDns {
             registration_names_intermediary,
         } => {
-            let client_id = ClientId::parse(&checked.client_id).map_err(|e| invalid(e.code()))?;
+            let client_id = ClientId::parse(checked.client_id()).map_err(|e| invalid(e.code()))?;
             let intermediary = if registration_names_intermediary {
                 Intermediary::Named
             } else {
@@ -218,18 +224,18 @@ fn full_date(d: Option<Date>) -> Option<String> {
 impl From<&Statement> for FfiStatement {
     fn from(s: &Statement) -> Self {
         Self {
-            system_id: s.system.id().to_owned(),
-            proof_backend: s.proof_backend.clone(),
-            doc_type: s.doc_type.to_owned(),
-            issuer_certificate: s.issuer_certificate.clone(),
-            issuer_key_x: s.issuer_key.x().to_vec(),
-            issuer_key_y: s.issuer_key.y().to_vec(),
+            system_id: s.system.id().as_str().to_owned(),
+            proof_backend: s.proof_backend.as_str().to_owned(),
+            doc_type: MDOC_DOCTYPE.to_owned(),
+            issuer_certificate: s.issuer.certificate().der().to_vec(),
+            issuer_key_x: s.issuer.key().x().to_vec(),
+            issuer_key_y: s.issuer.key().y().to_vec(),
             proof_time: s.proof_time.to_string(),
             earliest: full_date(s.earliest),
             cutoff: full_date(s.cutoff),
-            verifier_input: s.verifier_input.to_vec(),
-            session_transcript: s.session_transcript.clone(),
-            challenge_digest: s.challenge_digest.to_vec(),
+            verifier_input: s.verifier_input.as_bytes().to_vec(),
+            session_transcript: s.session_transcript.as_bytes().to_vec(),
+            challenge_digest: s.challenge_digest.as_bytes().to_vec(),
         }
     }
 }
@@ -245,16 +251,17 @@ pub struct FfiVpTokenEntry {
 
 fn answers(
     entries: Vec<FfiVpTokenEntry>,
-) -> Result<Vec<(String, Vec<ZkpPresentation>)>, ZkpReqError> {
+) -> Result<Vec<(QueryId, Vec<ZkpPresentation>)>, ZkpReqError> {
     entries
         .into_iter()
         .map(|e| {
+            let query_id = QueryId::parse(&e.query_id).map_err(|e| host(e.code()))?;
             let presentations = e
                 .presentations
                 .iter()
                 .map(|p| ZkpPresentation::decode(p).map_err(|_| host("presentation_not_cbor")))
                 .collect::<Result<_, _>>()?;
-            Ok((e.query_id, presentations))
+            Ok((query_id, presentations))
         })
         .collect()
 }
@@ -314,13 +321,14 @@ impl NymAuthProofVerifier for ForeignVerifier {
     fn verify(
         &self,
         statement: &Statement,
-        pseudonym: &[u8; 32],
-        zk_proof: &[u8],
+        pseudonym: &PseudonymValue,
+        zk_proof: &ZkProof,
     ) -> Result<(), ProofFailure> {
-        match self
-            .0
-            .verify(statement.into(), pseudonym.to_vec(), zk_proof.to_vec())
-        {
+        match self.0.verify(
+            statement.into(),
+            pseudonym.as_bytes().to_vec(),
+            zk_proof.as_bytes().to_vec(),
+        ) {
             FfiProofCheck::Accepted => Ok(()),
             FfiProofCheck::Encoding => Err(ProofFailure::Encoding),
             FfiProofCheck::Invalid => Err(ProofFailure::Invalid),
@@ -389,6 +397,9 @@ pub fn zkp_req_verify(
         .iter()
         .map(|der| Certificate::parse(der).map_err(|e| host(e.code())))
         .collect::<Result<_, _>>()?;
+    let now = DateTime::from_unix(now).ok_or_else(|| host("now_out_of_range"))?;
+    let seconds = |s: i64| u32::try_from(s).map_err(|_| host("tolerance_out_of_range"));
+    let tolerance = Tolerance::seconds(seconds(tolerance_future)?, seconds(tolerance_past)?);
     let verified = verify(
         &VerifyInput {
             query: &query,
@@ -396,28 +407,25 @@ pub fn zkp_req_verify(
             session: &session.0,
             presentation: &presentation,
             now,
-            tolerance: Tolerance {
-                future: tolerance_future,
-                past: tolerance_past,
-            },
+            tolerance,
             trust_anchors: &trust_anchors,
         },
         &ForeignVerifier(verifier),
     )
     .map_err(|r| rejection(&r))?;
     Ok(FfiVerified {
-        system_id: verified.system.id().to_owned(),
-        proof_backend: verified.proof_backend,
-        req_set: verified.req_set.map(index),
+        system_id: verified.system.id().as_str().to_owned(),
+        proof_backend: verified.proof_backend.as_str().to_owned(),
+        req_set: verified.req_set.map(ReqSetIndex::as_u64),
         results: verified
             .results
             .iter()
-            .map(|(handle, value): &(String, Cbor)| FfiResult {
-                handle: handle.clone(),
+            .map(|(handle, value): &(ResultKey, Cbor)| FfiResult {
+                handle: handle.as_str().to_owned(),
                 value: value.encode(),
             })
             .collect(),
-        issuer_certificate: verified.issuer_certificate,
+        issuer_certificate: verified.issuer.certificate().der().to_vec(),
         proof_time: verified.proof_time.to_string(),
     })
 }

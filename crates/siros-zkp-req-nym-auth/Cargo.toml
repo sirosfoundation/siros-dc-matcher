@@ -16,6 +16,7 @@ default = ["credential"]
 credential = [
     "dep:siros-mdoc",
     "siros-mdoc/crypto",
+    "siros-oid4vp/crypto",
     "dep:siros-trust",
     "siros-trust/chain",
     "dep:zeroize",

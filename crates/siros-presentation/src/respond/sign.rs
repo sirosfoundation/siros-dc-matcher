@@ -3,7 +3,7 @@
 use std::fmt;
 
 use siros_credential::Credential;
-use siros_mdoc::{es256_verifies, P256Key};
+use siros_mdoc::{es256_verifies, Es256Signature, P256Key};
 use siros_wallet_state::KeyId;
 
 use crate::error::PresentationError;
@@ -46,11 +46,11 @@ pub struct Sign {
 
 /// A signature that verifies under the holder key of its `Sign` effect.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct VerifiedSignature([u8; 64]);
+pub(crate) struct VerifiedSignature(Es256Signature);
 
 impl VerifiedSignature {
-    /// `r ‖ s`.
-    pub(crate) fn bytes(&self) -> &[u8; 64] {
+    /// The signature.
+    pub(crate) fn signature(&self) -> &Es256Signature {
         &self.0
     }
 }
@@ -131,10 +131,8 @@ impl Sign {
 
     /// The signature `signature`, `r ‖ s`, when it verifies under the holder key (A5).
     fn verified(&self, signature: Vec<u8>) -> Result<VerifiedSignature, SignatureError> {
-        let length = signature.len();
-        let signature: [u8; 64] = signature
-            .try_into()
-            .map_err(|_| SignatureError::Length(self.id, length))?;
+        let signature = Es256Signature::parse(&signature)
+            .map_err(|length| SignatureError::Length(self.id, length.0))?;
         if es256_verifies(&self.holder, &self.input.0, &signature) {
             Ok(VerifiedSignature(signature))
         } else {

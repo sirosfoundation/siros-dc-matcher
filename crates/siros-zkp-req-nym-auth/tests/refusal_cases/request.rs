@@ -16,7 +16,9 @@ pub fn cases() -> Vec<Case> {
         (
             "query_id_invalid",
             match_query_edit(|q| q["id"] = json!("")),
-            protocol(RequestRule::QueryIdInvalid),
+            protocol(RequestRule::QueryIdInvalid(IdentifierFault::Syntax(
+                QueryIdError::Empty,
+            ))),
         ),
         (
             "format_not_zkp_req",
@@ -36,62 +38,79 @@ pub fn cases() -> Vec<Case> {
         (
             "meta_invalid",
             match_query_edit(|q| q["meta"] = json!("mso_mdoc")),
-            protocol(RequestRule::MetaInvalid),
+            protocol(RequestRule::MetaInvalid(MemberFault::WrongType)),
         ),
         (
             "source_format_invalid",
             match_query_edit(|q| q["meta"] = json!({"doctype_value": DOCTYPE})),
-            protocol(RequestRule::SourceFormatInvalid),
+            protocol(RequestRule::SourceFormatInvalid(MemberFault::Absent)),
         ),
         (
             "type_value_invalid",
             match_query_edit(|q| q["meta"] = json!({"source_format": "mso_mdoc"})),
-            protocol(RequestRule::TypeValueInvalid),
+            protocol(RequestRule::TypeValueInvalid(MemberFault::Absent)),
         ),
         (
             "req_invalid",
             match_query_edit(|q| q["_req"] = json!([])),
-            protocol(RequestRule::ReqInvalid),
+            protocol(RequestRule::ReqInvalid(MemberFault::Empty)),
         ),
         (
             "item_not_object",
             match_query_edit(|q| q["_req"][1] = json!(1)),
-            protocol(RequestRule::ItemNotObject { item: 1 }),
+            protocol(RequestRule::ItemNotObject {
+                item: ItemIndex::new(1),
+            }),
         ),
         (
             "item_member_unknown",
             match_query_edit(|q| item(q, 0, "id", json!("x"))),
-            protocol(RequestRule::ItemMemberUnknown { item: 0 }),
+            protocol(RequestRule::ItemMemberUnknown {
+                item: ItemIndex::new(0),
+            }),
         ),
         (
             "fn_id_invalid",
             match_query_edit(|q| item(q, 1, "fn_id", json!(7))),
-            protocol(RequestRule::FnIdInvalid { item: 1 }),
+            protocol(RequestRule::FnIdInvalid {
+                item: ItemIndex::new(1),
+                fault: IdentifierFault::NotString,
+            }),
         ),
         (
             "params_not_object",
             match_query_edit(|q| item(q, 1, "params", json!([]))),
-            protocol(RequestRule::ParamsNotObject { item: 1 }),
+            protocol(RequestRule::ParamsNotObject {
+                item: ItemIndex::new(1),
+            }),
         ),
         (
             "return_invalid",
             match_query_edit(|q| item(q, 0, "return", json!("a b"))),
-            protocol(RequestRule::ReturnInvalid { item: 0 }),
+            protocol(RequestRule::ReturnInvalid {
+                item: ItemIndex::new(0),
+                fault: ReturnFault::Syntax(ReturnHandleError::Character(' ')),
+            }),
         ),
         (
             "return_repeated",
             match_query_edit(|q| item(q, 1, "return", json!("nym"))),
-            protocol(RequestRule::ReturnRepeated { item: 1 }),
+            protocol(RequestRule::ReturnRepeated {
+                item: ItemIndex::new(1),
+            }),
         ),
         (
             "req_sets_invalid",
             match_query_edit(|q| q["_req_sets"] = json!([])),
-            protocol(RequestRule::ReqSetsInvalid),
+            protocol(RequestRule::ReqSetsInvalid(MemberFault::Empty)),
         ),
         (
             "option_invalid",
             match_query_edit(|q| q["_req_sets"] = json!([[0], [0, 0]])),
-            protocol(RequestRule::OptionInvalid { option: 1 }),
+            protocol(RequestRule::OptionInvalid {
+                option: ReqSetIndex::new(1),
+                fault: OptionFault::Repeated(ItemIndex::new(0)),
+            }),
         ),
         (
             "holder_binding_invalid",
@@ -101,27 +120,29 @@ pub fn cases() -> Vec<Case> {
         (
             "formats_missing",
             match_metadata_edit(|m| m["vp_formats_supported"] = json!({})),
-            protocol(RequestRule::FormatsMissing),
+            protocol(RequestRule::FormatsMissing(MemberFault::Absent)),
         ),
         (
             "proof_backend_values_invalid",
             match_metadata_edit(|m| {
                 m["vp_formats_supported"]["zkp_req"]["proof_backend_values"] = json!([])
             }),
-            protocol(RequestRule::ProofBackendValuesInvalid),
+            protocol(RequestRule::ProofBackendValuesInvalid(MemberFault::Empty)),
         ),
         (
             "system_id_values_invalid",
             match_metadata_edit(|m| {
                 m["vp_formats_supported"]["zkp_req"]["system_id_values"] = json!(["a", 1])
             }),
-            protocol(RequestRule::SystemIdValuesInvalid),
+            protocol(RequestRule::SystemIdValuesInvalid(MemberFault::Entry(
+                ArrayIndex::new(1),
+            ))),
         ),
         // The nym_auth catalogue: invalid_request.
         (
             "schema_id_invalid",
             match_query_edit(|q| q["meta"] = json!({"source_format": "bbs_cd"})),
-            catalogue(CatalogueRule::SchemaIdInvalid),
+            catalogue(CatalogueRule::SchemaIdInvalid(ParamFault::Absent)),
         ),
         (
             "holder_binding_waived",
@@ -131,49 +152,72 @@ pub fn cases() -> Vec<Case> {
         (
             "function_unknown",
             match_query_edit(|q| item(q, 1, "fn_id", json!("valid_on"))),
-            catalogue(CatalogueRule::FunctionUnknown { item: 1 }),
+            catalogue(CatalogueRule::FunctionUnknown {
+                item: ItemIndex::new(1),
+            }),
         ),
         (
             "param_unknown",
             match_query_edit(|q| param(q, 0, "verifier_id_type", json!("x509_san_dns"))),
-            catalogue(CatalogueRule::ParamUnknown { item: 0 }),
+            catalogue(CatalogueRule::ParamUnknown {
+                item: ItemIndex::new(0),
+            }),
         ),
         (
             "pseudonym_return_missing",
             match_query_edit(|q| {
                 q["_req"][0].as_object_mut().unwrap().remove("return");
             }),
-            catalogue(CatalogueRule::PseudonymReturnMissing { item: 0 }),
+            catalogue(CatalogueRule::PseudonymReturnMissing {
+                item: ItemIndex::new(0),
+            }),
         ),
         (
             "config_invalid",
             match_query_edit(|q| param(q, 0, "config", json!("known-offender-matching"))),
-            catalogue(CatalogueRule::ConfigInvalid { item: 0 }),
+            catalogue(CatalogueRule::ConfigInvalid {
+                item: ItemIndex::new(0),
+                fault: ParamFault::Value,
+            }),
         ),
         (
             "ver_invalid",
             match_query_edit(|q| param(q, 0, "ver", json!(2))),
-            catalogue(CatalogueRule::VerInvalid { item: 0 }),
+            catalogue(CatalogueRule::VerInvalid {
+                item: ItemIndex::new(0),
+                fault: ParamFault::Value,
+            }),
         ),
         (
             "prf_invalid",
             match_query_edit(|q| param(q, 0, "prf", json!("hashdh-bls12381g1"))),
-            catalogue(CatalogueRule::PrfInvalid { item: 0 }),
+            catalogue(CatalogueRule::PrfUndefined {
+                item: ItemIndex::new(0),
+                prf: Prf::HashdhBls12381G1,
+            }),
         ),
         (
             "verifier_context_invalid",
             match_query_edit(|q| param(q, 0, "verifier_context", json!("account 7"))),
-            catalogue(CatalogueRule::VerifierContextInvalid { item: 0 }),
+            catalogue(CatalogueRule::VerifierContextInvalid {
+                item: ItemIndex::new(0),
+                fault: ContextFault::Forbidden,
+            }),
         ),
         (
             "range_syntax",
             match_query_edit(|q| param(q, 1, "range", json!("18"))),
-            catalogue(CatalogueRule::RangeSyntax { item: 1 }),
+            catalogue(CatalogueRule::RangeSyntax {
+                item: ItemIndex::new(1),
+                fault: ParamFault::Value,
+            }),
         ),
         (
             "range_inverted",
             match_query_edit(|q| param(q, 1, "range", json!("17-13"))),
-            catalogue(CatalogueRule::RangeInverted { item: 1 }),
+            catalogue(CatalogueRule::RangeInverted {
+                item: ItemIndex::new(1),
+            }),
         ),
         (
             "pseudonym_repeated",
@@ -195,12 +239,12 @@ pub fn cases() -> Vec<Case> {
         // The catalogue's Binding and Response confidentiality: invalid_request.
         (
             "unsigned",
-            policy(|_| {}, false, Channel::Redirect),
+            policy(|_| {}, Signing::Unsigned, Channel::Redirect),
             Got::Policy(PolicyRule::Unsigned),
         ),
         (
             "request_object_not_object",
-            policy(|r| *r = json!("jwt"), true, Channel::Redirect),
+            policy(|r| *r = json!("jwt"), Signing::Signed, Channel::Redirect),
             Got::Policy(PolicyRule::NotObject),
         ),
         (
@@ -209,21 +253,25 @@ pub fn cases() -> Vec<Case> {
                 |r| {
                     r.as_object_mut().unwrap().remove("client_id");
                 },
-                true,
+                Signing::Signed,
                 Channel::Redirect,
             ),
             Got::Policy(PolicyRule::ClientIdMissing),
         ),
         (
             "nonce_missing",
-            policy(|r| r["nonce"] = json!(""), true, Channel::Redirect),
+            policy(
+                |r| r["nonce"] = json!(""),
+                Signing::Signed,
+                Channel::Redirect,
+            ),
             Got::Policy(PolicyRule::NonceMissing),
         ),
         (
             "response_mode",
             policy(
                 |r| r["response_mode"] = json!("direct_post"),
-                true,
+                Signing::Signed,
                 Channel::Redirect,
             ),
             Got::Policy(PolicyRule::ResponseMode),
@@ -234,7 +282,7 @@ pub fn cases() -> Vec<Case> {
                 |r| {
                     r.as_object_mut().unwrap().remove("response_uri");
                 },
-                true,
+                Signing::Signed,
                 Channel::Redirect,
             ),
             Got::Policy(PolicyRule::ResponseUriMissing),
@@ -246,9 +294,9 @@ pub fn cases() -> Vec<Case> {
                     r["response_mode"] = json!("dc_api.jwt");
                     r["expected_origins"] = json!(["https://rp.example"]);
                 },
-                true,
+                Signing::Signed,
                 Channel::DcApi {
-                    origin: "https://evil.example".into(),
+                    origin: Origin::new("https://evil.example"),
                 },
             ),
             Got::Policy(PolicyRule::OriginNotExpected),
@@ -257,7 +305,7 @@ pub fn cases() -> Vec<Case> {
             "encryption_key_missing",
             policy(
                 |r| r["client_metadata"]["jwks"] = json!({"keys": []}),
-                true,
+                Signing::Signed,
                 Channel::Redirect,
             ),
             Got::Policy(PolicyRule::EncryptionKeyMissing),

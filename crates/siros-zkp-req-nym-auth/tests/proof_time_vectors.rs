@@ -39,10 +39,8 @@ fn proof_time_vectors() {
         assert_eq!(DateTime::parse(e["text"].as_str().unwrap()), None, "{e}");
     }
     for e in v["tolerance"].as_array().unwrap() {
-        let tolerance = Tolerance {
-            future: e["future_secs"].as_i64().unwrap(),
-            past: e["past_secs"].as_i64().unwrap(),
-        };
+        let seconds = |name: &str| u32::try_from(e[name].as_u64().unwrap()).unwrap();
+        let tolerance = Tolerance::seconds(seconds("future_secs"), seconds("past_secs"));
         let now = DateTime::from_unix(e["now_secs"].as_i64().unwrap()).unwrap();
         let admitted = DateTime::parse(e["proof_time"].as_str().unwrap())
             .is_some_and(|t| tolerance.admits(now, t));

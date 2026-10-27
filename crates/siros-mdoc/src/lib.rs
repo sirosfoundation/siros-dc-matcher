@@ -25,23 +25,35 @@
 )]
 
 mod device;
+mod device_key;
 mod disclosure;
 mod error;
 mod issuer_auth;
+mod key_authorizations;
 mod mdoc;
 mod mso;
+mod names;
+mod signature;
 
 #[cfg(feature = "crypto")]
 mod es256;
 
-pub use device::{
-    device_signing_digest, device_signing_input, DeviceNameSpaces, DeviceSignedElement,
-};
+pub use device::{device_signing_input, DeviceNameSpaces, DeviceSignedElement};
+pub use device_key::{P256Key, PointError};
 pub use disclosure::{Disclosure, ElementId};
-pub use error::{DisclosureError, MdocError};
+pub use error::{
+    AlgorithmFault, DeviceKeyFault, DisclosureError, DocTypeFault, EnvelopeFault, IssuerAuthFault,
+    ItemFault, ItemMember, KeyAuthorizationsFault, MdocError, MemberFault, NameFault,
+    NameSpacesFault, NamesFault, PayloadFault, ValidityFault, ValidityTime, ValueDigestsFault,
+};
 pub use issuer_auth::{IssuerAuth, X5Chain};
+pub use key_authorizations::KeyAuthorizations;
 pub use mdoc::{IssuerNameSpace, IssuerSignedItem, Mdoc};
-pub use mso::{DigestAlgorithm, KeyAuthorizations, Mso, P256Key, PointError, Validity};
+pub use mso::{DigestAlgorithm, ItemDigest, Mso, Validity};
+pub use names::{DigestId, ElementIdentifier, NameSpace};
+pub use signature::{
+    CoseAlgorithm, Es256Signature, MessageDigest, SessionTranscript, SigStructure, SignatureLength,
+};
 
 #[cfg(feature = "crypto")]
 pub use es256::es256_verifies;

@@ -76,7 +76,7 @@ impl MatchCredential for UsableCredential<'_> {
     }
 
     fn credential_type(&self) -> &str {
-        self.credential().credential_type()
+        self.credential().credential_type().as_str()
     }
 
     /// Held for an SD-JWT VC with a P-256 `cnf.jwk`, or an mdoc, whose entry names its key pair.

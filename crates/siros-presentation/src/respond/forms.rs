@@ -73,7 +73,9 @@ impl Unsigned for KeyBinding {
         signature: &VerifiedSignature,
         _prover: &dyn NymAuthProver,
     ) -> Result<Presentation, PresentationError> {
-        Ok(Presentation::text(self.assemble(signature.bytes())))
+        Ok(Presentation::text(
+            self.assemble(signature.signature().as_bytes()),
+        ))
     }
 }
 
@@ -94,7 +96,7 @@ impl Unsigned for DeviceResponse<'_> {
         signature: &VerifiedSignature,
         _prover: &dyn NymAuthProver,
     ) -> Result<Presentation, PresentationError> {
-        let response = self.disclosure.device_response(signature.bytes());
+        let response = self.disclosure.device_response(signature.signature());
         Ok(Presentation::text(base64url::encode(&response).into()))
     }
 }
@@ -102,7 +104,7 @@ impl Unsigned for DeviceResponse<'_> {
 /// A nym_auth statement, whose device signature the prover's job needs.
 impl Unsigned for NymPrepared {
     fn signing_input(&self) -> SigningInput {
-        SigningInput::new(self.data_to_sign().to_vec())
+        SigningInput::new(self.data_to_sign().as_bytes().to_vec())
     }
 
     fn present(
@@ -110,7 +112,7 @@ impl Unsigned for NymPrepared {
         signature: &VerifiedSignature,
         prover: &dyn NymAuthProver,
     ) -> Result<Presentation, PresentationError> {
-        let proof = self.prove(signature.bytes(), prover)?;
+        let proof = self.prove(signature.signature(), prover)?;
         Ok(Presentation::cbor_map(proof.encode())?)
     }
 }

@@ -512,7 +512,7 @@ fn dropped_combinations_are_reported_in_metadata() {
     let mut db = wallet(None);
     for i in 2..=40 {
         let mut extra = db.credentials[0].clone();
-        extra.id = format!("mdl-{i}");
+        extra.id = format!("mdl-{i}").as_str().into();
         db.credentials.push(extra);
     }
 

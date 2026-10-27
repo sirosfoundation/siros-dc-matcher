@@ -10,6 +10,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_bytes::ByteBuf;
+use siros_dcql::QueryId;
 use siros_zkp_backend_longfellow::{self as longfellow, LongfellowProver};
 use siros_zkp_backend_vega::{self as vega, VegaNymAuth};
 use siros_zkp_req::{ErrorCode, ZkpPresentation};
@@ -102,7 +103,7 @@ impl ZkpProvers {
         ]
         .into_iter()
         .filter(|(_, loaded)| *loaded)
-        .map(|(system, _)| system.id().to_owned())
+        .map(|(system, _)| system.id().as_str().to_owned())
         .collect()
     }
 }
@@ -135,12 +136,13 @@ pub fn vp_token_json(entries: JsValue) -> Result<String, JsValue> {
     let answers = entries
         .into_iter()
         .map(|e| {
+            let query_id = QueryId::parse(&e.query_id).map_err(|e| host(e.code()))?;
             let presentations = e
                 .presentations
                 .iter()
                 .map(|p| ZkpPresentation::decode(p).map_err(|_| host("presentation_not_cbor")))
                 .collect::<Result<Vec<_>, _>>()?;
-            Ok((e.query_id, presentations))
+            Ok((query_id, presentations))
         })
         .collect::<Result<Vec<_>, JsValue>>()?;
     Ok(siros_zkp_req::vp_token_json(&answers).to_string())

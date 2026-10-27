@@ -221,7 +221,7 @@ fn per_query_candidates_are_complete_when_combinations_are_capped() {
     let template = db.credentials[0].clone();
     for i in 2..=40 {
         let mut extra = template.clone();
-        extra.id = format!("mdl-{i}");
+        extra.id = format!("mdl-{i}").as_str().into();
         db.credentials.push(extra);
     }
     let blob = db.to_cbor().expect("encoding");
@@ -420,7 +420,7 @@ fn identical_licences(n: usize) -> Vec<u8> {
     let mut db = CredentialDatabase::new(MatchProfile::siros_default());
     for i in 0..n {
         db.credentials.push(Credential {
-            id: format!("mdl-{i}"),
+            id: format!("mdl-{i}").as_str().into(),
             format: "mso_mdoc".into(),
             doctype: Some("org.iso.18013.5.1.mDL".into()),
             vct: None,

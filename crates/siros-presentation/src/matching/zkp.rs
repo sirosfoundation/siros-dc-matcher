@@ -8,10 +8,11 @@ use serde_json::Value;
 use siros_codec::date::Date;
 use siros_credential::Format;
 use siros_zkp_req::{
-    CredentialType, ErrorCode, PairRefusal, QueryOption, RequestRule, ZkpFormats, ZkpReqQuery,
+    CredentialType, ErrorCode, PairRefusal, ProofBackend, QueryOption, RequestRule, ZkpFormats,
+    ZkpReqQuery,
 };
 use siros_zkp_req_nym_auth::catalogue::{CatalogueRule, NymAuthQuery};
-use siros_zkp_req_nym_auth::pair::{NymAuthOption, ProofBackend, UsablePair};
+use siros_zkp_req_nym_auth::pair::{NymAuthOption, UsablePair};
 use siros_zkp_req_nym_auth::policy::RequestRefusal;
 use siros_zkp_req_nym_auth::system::{pair_code, NymAuthSystem, Unsupported};
 
@@ -197,7 +198,7 @@ impl ZkpQuery {
     pub fn option(&self, choice: &ProofChoice) -> Result<&QueryOption, ChoiceError> {
         self.query
             .query()
-            .options
+            .options()
             .get(choice.option.value())
             .ok_or(ChoiceError::OptionUnknown(choice.option))
     }
@@ -219,14 +220,14 @@ impl ZkpQuery {
     /// The instances of `instances` the query's systems prove over: mdocs of the query's
     /// `docType` whose key the wallet holds, the catalogue requiring holder binding.
     pub(crate) fn provable<C: MatchCredential + Clone>(&self, instances: &[&C]) -> Vec<C> {
-        let CredentialType::MsoMdoc { doctype } = &self.query.query().credential_type else {
+        let CredentialType::MsoMdoc { doctype } = self.query.query().credential_type() else {
             return Vec::new();
         };
         instances
             .iter()
             .filter(|credential| {
                 credential.format() == Format::Mdoc
-                    && credential.credential_type() == doctype
+                    && credential.credential_type() == doctype.as_str()
                     && credential.key_holding() == KeyHolding::Held
             })
             .map(|credential| (*credential).clone())

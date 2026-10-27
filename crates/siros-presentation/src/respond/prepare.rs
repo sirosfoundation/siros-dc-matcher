@@ -6,7 +6,7 @@ use rand_core::CryptoRngCore;
 use serde_json::Value;
 use siros_credential::{Credential, Parsed, UsableCredential};
 use siros_dcql::mdoc_components;
-use siros_mdoc::{ElementId, Mdoc};
+use siros_mdoc::{ElementId, Mdoc, SessionTranscript};
 use siros_oid4vp::{Presentation, VerifiedRequest};
 use siros_sdjwt::SdJwt;
 use siros_transaction_data::{Amr, Jti, KbJwtInputs, MemberBinding};
@@ -242,8 +242,9 @@ impl<'p, 'a> Chosen<'p, 'a> {
             })
             .try_collect()?;
         let disclosure = mdoc.disclose(&elements, Vec::new())?;
-        let transcript = self.planned.input.request.handover().session_transcript();
-        let input = SigningInput::new(disclosure.signing_input(&transcript));
+        let transcript =
+            SessionTranscript::new(self.planned.input.request.handover().session_transcript());
+        let input = SigningInput::new(disclosure.signing_input(&transcript).as_bytes().to_vec());
         Ok(Form::unsigned(DeviceResponse { disclosure, input }, id))
     }
 

@@ -25,14 +25,14 @@ pub use presenting::{nym_query, prepared, present, usable, verified_request, Pre
 use std::str::FromStr;
 use std::time::Duration;
 
-use crate::policy::{check_request, Channel};
 use crate::presenter::Session;
 use crate::prover::{
     NymAuthProofVerifier, NymAuthProver, ProofFailure, ProofJob, ProofOutput, ProverFailure,
     Statement,
 };
+use crate::request_object::{check_request, Channel, Signing};
 use crate::system::NymAuthSystem;
-use crate::verifier_id::{Intermediary, VerifierId};
+use crate::verifier_id::{Intermediary, PseudonymValue, VerifierId};
 use der::asn1::{GeneralizedTime, UtcTime};
 use der::Encode;
 use p256::ecdsa::signature::Signer as _;
@@ -42,7 +42,9 @@ use sha2::{Digest, Sha256};
 use siros_codec::base64url;
 use siros_codec::cbor::Value as Cbor;
 use siros_codec::date::DateTime;
+use siros_mdoc::Es256Signature;
 use siros_oid4vp::{ec_jwk_thumbprint, ClientId};
+use siros_zkp_req::ZkProof;
 use x509_cert::builder::{Builder, CertificateBuilder, Profile};
 use x509_cert::name::Name;
 use x509_cert::serial_number::SerialNumber;
@@ -314,22 +316,27 @@ pub fn request_object(query: &Value, nonce: &str) -> Value {
 
 /// The session of a redirect request with this nonce.
 pub fn session(query: &Value, nonce: &str) -> Session {
-    let checked = check_request(&request_object(query, nonce), true, Channel::Redirect).unwrap();
+    let checked = check_request(
+        &request_object(query, nonce),
+        Signing::Signed,
+        Channel::Redirect,
+    )
+    .unwrap();
     let thumbprint = ec_jwk_thumbprint(&encryption_jwk()).unwrap();
     Session {
-        handover: checked.handover(thumbprint.as_bytes()).unwrap(),
+        handover: checked.handover(&thumbprint).unwrap(),
         verifier_id: VerifierId::x509_san_dns(
-            &ClientId::parse(&checked.client_id).unwrap(),
+            &ClientId::parse(checked.client_id()).unwrap(),
             Intermediary::Absent,
         )
         .unwrap(),
     }
 }
 
-/// The ES256 signature, `r ‖ s`, of `data` by the device key of scalar `device`.
-pub fn device_signature(device: u8, data: &[u8]) -> Vec<u8> {
+/// The ES256 signature of `data` by the device key of scalar `device`.
+pub fn device_signature(device: u8, data: &[u8]) -> Es256Signature {
     let signature: Signature = key(device).sign(data);
-    signature.to_bytes().to_vec()
+    Es256Signature::new(signature.to_bytes().into())
 }
 
 /// The pseudonym of `SHA256(DST ‖ seed ‖ 0^32 ‖ SHA256(verifier_id))`, written out.
@@ -343,23 +350,22 @@ pub fn expected_pseudonym(seed: &[u8; 16], verifier_id: &str) -> [u8; 32] {
 
 /// A digest of every public value and the pseudonym: a test proof binds them as a real proof
 /// does, so a verifier with any other value refuses it.
-fn binding(statement: &Statement, pseudonym: &[u8; 32]) -> [u8; 32] {
+fn binding(statement: &Statement, pseudonym: &PseudonymValue) -> [u8; 32] {
     let date = |d: Option<siros_codec::date::Date>| d.map_or("-".to_owned(), |d| d.to_string());
     let mut h = Sha256::new();
     for part in [
-        statement.system.id().as_bytes(),
-        statement.proof_backend.as_bytes(),
-        statement.doc_type.as_bytes(),
-        &statement.issuer_certificate,
-        statement.issuer_key.x(),
-        statement.issuer_key.y(),
+        statement.system.id().as_str().as_bytes(),
+        statement.proof_backend.as_str().as_bytes(),
+        statement.issuer.certificate().der(),
+        statement.issuer.key().x(),
+        statement.issuer.key().y(),
         statement.proof_time.to_string().as_bytes(),
         date(statement.earliest).as_bytes(),
         date(statement.cutoff).as_bytes(),
-        &statement.verifier_input,
-        &statement.session_transcript,
-        &statement.challenge_digest,
-        pseudonym,
+        statement.verifier_input.as_bytes(),
+        statement.session_transcript.as_bytes(),
+        statement.challenge_digest.as_bytes(),
+        pseudonym.as_bytes(),
     ] {
         h.update((part.len() as u64).to_be_bytes());
         h.update(part);
@@ -387,8 +393,8 @@ impl NymAuthProver for TestProver {
             let mut message = b"nym_auth/v1/known-offender-matching-ssc".to_vec();
             message.extend_from_slice(job.secret_seed());
             message.extend_from_slice(&[0; 32]);
-            message.extend_from_slice(&job.statement().verifier_input);
-            sha256(&message)
+            message.extend_from_slice(job.statement().verifier_input.as_bytes());
+            PseudonymValue::new(sha256(&message))
         };
         let digest = binding(job.statement(), &pseudonym);
         let zk_proof = digest
@@ -398,7 +404,7 @@ impl NymAuthProver for TestProver {
             .take(proof_len(job.statement().system))
             .collect();
         Ok(ProofOutput {
-            zk_proof,
+            zk_proof: ZkProof::new(zk_proof),
             pseudonym,
         })
     }
@@ -411,9 +417,10 @@ impl NymAuthProofVerifier for TestVerifier {
     fn verify(
         &self,
         statement: &Statement,
-        pseudonym: &[u8; 32],
-        zk_proof: &[u8],
+        pseudonym: &PseudonymValue,
+        zk_proof: &ZkProof,
     ) -> Result<(), ProofFailure> {
+        let zk_proof = zk_proof.as_bytes();
         if zk_proof.len() != proof_len(statement.system) {
             return Err(ProofFailure::Encoding);
         }
