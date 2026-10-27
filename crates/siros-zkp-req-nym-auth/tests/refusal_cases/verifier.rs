@@ -1,6 +1,6 @@
 //! The Verifier's refusals.
 
-use siros_trust::CertificateError;
+use siros_trust::{CertificateError, ChainIndex, PathRefusal};
 use siros_zkp_req_nym_auth::attestation::DocumentSignerError;
 use x509_cert::der::Decode;
 
@@ -197,7 +197,9 @@ pub fn cases() -> Vec<Case> {
                 },
                 |_| {},
             ),
-            Got::Verify(Rejection::IssuerKeySet(IssuerKeySetError::Untrusted)),
+            Got::Verify(Rejection::IssuerKeySet(IssuerKeySetError::Untrusted(
+                PathRefusal::IssuerName(ChainIndex::new(0)),
+            ))),
         ),
         (
             "proof_time: malformed",

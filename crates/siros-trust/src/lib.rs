@@ -6,7 +6,7 @@
 //! | --- | --- |
 //! | TR1: the store, constructible only by parsing its record | [`TrustStore::parse`] |
 //! | TR2: the issuer chain, its certificates and their AuthorityKeyIdentifier keyIdentifiers | [`IssuerChain::parse`], [`Certificate`] |
-//! | TR3: the resolution, per Credential Query and issuer at a time, into the [`AdmittedIssuer`] witness; a malformed `aki` value makes the query invalid | [`QueryAuthorities::of`], [`AdmittedIssuer::resolve`], [`StoreEntry::validates`] |
+//! | TR3: the resolution, per Credential Query and issuer at a time, into the [`AdmittedIssuer`] witness; a malformed `aki` value makes the query invalid | [`QueryAuthorities::of`], [`AdmittedIssuer::resolve`], [`TrustPath::new`] |
 //! | TR5: the facts the wallet records at registration, and the picker's admission from them alone | [`IssuerFacts::at`], [`Admission::of`] over [`IssuerFacts`] |
 //!
 //! One rule serves both sides: [`QueryAuthorities::admit`] over an [`Issuer`]. The wallet's
@@ -54,13 +54,13 @@ mod store;
 pub use admitted::{AdmittedIssuer, ChainRefusal};
 #[cfg(feature = "chain")]
 pub use certificate::{
-    AuthorityKeyIdentifierFault, Certificate, CertificateError, CertificateRole, IssuanceRefusal,
-    NameField, PublicKeyFault, ValidityTime,
+    Certificate, CertificateError, CertificateRole, DistinguishedName, IssuanceRefusal,
+    KeyIdentifierFault, NameField, PublicKeyFault, ValidityTime,
 };
 #[cfg(feature = "chain")]
 pub use chain::{ChainError, IssuerChain};
 #[cfg(feature = "chain")]
-pub use path::{OnPath, PathRefusal};
+pub use path::{OnPath, PathRefusal, TrustPath};
 #[cfg(feature = "chain")]
 pub use position::{CertificateIndex, ChainIndex, EntryIndex};
 #[cfg(feature = "chain")]

@@ -3,8 +3,8 @@
 
 use std::fmt;
 
-use der::asn1::ObjectIdentifier;
-use der::{Decode, Encode};
+use der::asn1::{ObjectIdentifier, OctetString};
+use der::{Decode, Encode, Header, Reader, SliceReader, Tag};
 use p256::ecdsa::signature::Verifier;
 use siros_codec::date::DateTime;
 use x509_cert::ext::pkix::{AuthorityKeyIdentifier, BasicConstraints};
@@ -27,6 +27,21 @@ const ECDSA_SHA384: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.100
 const BASIC_CONSTRAINTS: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.19");
 /// `id-ce-authorityKeyIdentifier` (RFC 5280, Section 4.2.1.1).
 const AUTHORITY_KEY_IDENTIFIER: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.35");
+/// `id-ce-subjectKeyIdentifier` (RFC 5280, Section 4.2.1.2).
+const SUBJECT_KEY_IDENTIFIER: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.14");
+
+/// A certificate's issuer or subject name: its DER encoding. Two names are one when their
+/// encodings are.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct DistinguishedName(Vec<u8>);
+
+impl DistinguishedName {
+    /// The DER encoding.
+    #[must_use]
+    pub fn as_der(&self) -> &[u8] {
+        &self.0
+    }
+}
 
 /// A DER X.509 certificate.
 #[derive(Debug, Clone)]
@@ -35,12 +50,13 @@ pub struct Certificate {
     tbs: Vec<u8>,
     signature: Vec<u8>,
     algorithm: SignatureAlgorithm,
-    issuer: Vec<u8>,
-    subject: Vec<u8>,
+    issuer: DistinguishedName,
+    subject: DistinguishedName,
     not_before: DateTime,
     not_after: DateTime,
     key: SubjectKey,
     authority_key_identifier: Option<KeyIdentifier>,
+    subject_key_identifier: Option<KeyIdentifier>,
     role: CertificateRole,
 }
 
@@ -105,9 +121,9 @@ pub enum PublicKeyFault {
     P384,
 }
 
-/// Why the AuthorityKeyIdentifier extension gives no keyIdentifier.
+/// Why a key identifier extension gives no keyIdentifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AuthorityKeyIdentifierFault {
+pub enum KeyIdentifierFault {
     /// The extension does not decode.
     Der(der::Error),
     /// The keyIdentifier is no keyIdentifier.
@@ -135,7 +151,9 @@ pub enum CertificateError {
     /// basicConstraints does not decode.
     BasicConstraints(der::Error),
     /// The AuthorityKeyIdentifier extension gives no keyIdentifier.
-    AuthorityKeyIdentifier(AuthorityKeyIdentifierFault),
+    AuthorityKeyIdentifier(KeyIdentifierFault),
+    /// The SubjectKeyIdentifier extension gives no keyIdentifier.
+    SubjectKeyIdentifier(KeyIdentifierFault),
 }
 
 impl CertificateError {
@@ -152,6 +170,7 @@ impl CertificateError {
             Self::ExtensionRepeated(_) => "certificate_extension_repeated",
             Self::BasicConstraints(_) => "certificate_basic_constraints",
             Self::AuthorityKeyIdentifier(_) => "certificate_authority_key_identifier",
+            Self::SubjectKeyIdentifier(_) => "certificate_subject_key_identifier",
         }
     }
 }
@@ -168,8 +187,10 @@ impl std::error::Error for CertificateError {
             Self::Der(e)
             | Self::Name(_, e)
             | Self::BasicConstraints(e)
-            | Self::AuthorityKeyIdentifier(AuthorityKeyIdentifierFault::Der(e)) => Some(e),
-            Self::AuthorityKeyIdentifier(AuthorityKeyIdentifierFault::KeyIdentifier(e)) => Some(e),
+            | Self::AuthorityKeyIdentifier(KeyIdentifierFault::Der(e))
+            | Self::SubjectKeyIdentifier(KeyIdentifierFault::Der(e)) => Some(e),
+            Self::AuthorityKeyIdentifier(KeyIdentifierFault::KeyIdentifier(e))
+            | Self::SubjectKeyIdentifier(KeyIdentifierFault::KeyIdentifier(e)) => Some(e),
             Self::AlgorithmMismatch
             | Self::Signature
             | Self::Validity(_)
@@ -236,12 +257,13 @@ impl Certificate {
         };
         let name = |field: NameField, name: &x509_cert::name::Name| {
             name.to_der()
+                .map(DistinguishedName)
                 .map_err(|error| CertificateError::Name(field, error))
         };
         let validity = &tbs_certificate.validity;
         Ok(Self {
             der: der.to_vec(),
-            tbs: tbs_certificate.to_der().map_err(CertificateError::Der)?,
+            tbs: tbs_bytes(der).map_err(CertificateError::Der)?.to_vec(),
             signature: certificate
                 .signature
                 .as_bytes()
@@ -255,6 +277,7 @@ impl Certificate {
             key: SubjectKey::read(&tbs_certificate.subject_public_key_info)
                 .map_err(CertificateError::PublicKey)?,
             authority_key_identifier: extensions.authority_key_identifier,
+            subject_key_identifier: extensions.subject_key_identifier,
             role: extensions.role,
         })
     }
@@ -270,6 +293,24 @@ impl Certificate {
     #[must_use]
     pub fn authority_key_identifier(&self) -> Option<&KeyIdentifier> {
         self.authority_key_identifier.as_ref()
+    }
+
+    /// The keyIdentifier of the SubjectKeyIdentifier extension, when the certificate has one.
+    #[must_use]
+    pub fn subject_key_identifier(&self) -> Option<&KeyIdentifier> {
+        self.subject_key_identifier.as_ref()
+    }
+
+    /// The issuer's name.
+    #[must_use]
+    pub fn issuer(&self) -> &DistinguishedName {
+        &self.issuer
+    }
+
+    /// The subject's name.
+    #[must_use]
+    pub fn subject(&self) -> &DistinguishedName {
+        &self.subject
     }
 
     /// Whether the subject is a certificate authority.
@@ -290,7 +331,7 @@ impl Certificate {
     /// Whether `time` lies in the validity period, both ends included (RFC 5280, Section
     /// 4.1.2.5).
     #[must_use]
-    pub fn valid_at(&self, time: DateTime) -> bool {
+    pub(crate) fn valid_at(&self, time: DateTime) -> bool {
         self.not_before <= time && time <= self.not_after
     }
 
@@ -306,7 +347,7 @@ impl Certificate {
     /// # Errors
     ///
     /// [`IssuanceRefusal`]: the first of these that fails.
-    pub fn issued_by(&self, issuer: &Self) -> Result<(), IssuanceRefusal> {
+    pub(crate) fn issued_by(&self, issuer: &Self) -> Result<(), IssuanceRefusal> {
         if !self.names_as_issuer(issuer) {
             return Err(IssuanceRefusal::IssuerName);
         }
@@ -387,6 +428,7 @@ impl SubjectKey {
 struct Extensions {
     role: CertificateRole,
     authority_key_identifier: Option<KeyIdentifier>,
+    subject_key_identifier: Option<KeyIdentifier>,
 }
 
 impl Extensions {
@@ -394,6 +436,7 @@ impl Extensions {
     const NONE: Self = Self {
         role: CertificateRole::EndEntity,
         authority_key_identifier: None,
+        subject_key_identifier: None,
     };
 
     fn read(extensions: &[x509_cert::ext::Extension]) -> Result<Self, CertificateError> {
@@ -425,24 +468,42 @@ impl Extensions {
             .transpose()
             .map_err(CertificateError::AuthorityKeyIdentifier)?
             .flatten();
+        let subject_key_identifier = value(SUBJECT_KEY_IDENTIFIER)
+            .map(subject_key_identifier)
+            .transpose()
+            .map_err(CertificateError::SubjectKeyIdentifier)?;
         Ok(Self {
             role,
             authority_key_identifier,
+            subject_key_identifier,
         })
     }
 }
 
 /// The keyIdentifier of the AuthorityKeyIdentifier extension `bytes`; `None` without one.
-fn authority_key_identifier(
-    bytes: &[u8],
-) -> Result<Option<KeyIdentifier>, AuthorityKeyIdentifierFault> {
-    let extension =
-        AuthorityKeyIdentifier::from_der(bytes).map_err(AuthorityKeyIdentifierFault::Der)?;
+fn authority_key_identifier(bytes: &[u8]) -> Result<Option<KeyIdentifier>, KeyIdentifierFault> {
+    let extension = AuthorityKeyIdentifier::from_der(bytes).map_err(KeyIdentifierFault::Der)?;
     extension
         .key_identifier
         .map(|key_identifier| KeyIdentifier::new(key_identifier.as_bytes()))
         .transpose()
-        .map_err(AuthorityKeyIdentifierFault::KeyIdentifier)
+        .map_err(KeyIdentifierFault::KeyIdentifier)
+}
+
+/// The keyIdentifier of the SubjectKeyIdentifier extension `bytes`: an OCTET STRING.
+fn subject_key_identifier(bytes: &[u8]) -> Result<KeyIdentifier, KeyIdentifierFault> {
+    let key_identifier = OctetString::from_der(bytes).map_err(KeyIdentifierFault::Der)?;
+    KeyIdentifier::new(key_identifier.as_bytes()).map_err(KeyIdentifierFault::KeyIdentifier)
+}
+
+/// The `tbsCertificate` of the certificate `der`, as written: the bytes its signature covers.
+fn tbs_bytes(der: &[u8]) -> Result<&[u8], der::Error> {
+    let mut reader = SliceReader::new(der)?;
+    let header = Header::decode(&mut reader)?;
+    if header.tag != Tag::Sequence {
+        return Err(header.tag.unexpected_error(Some(Tag::Sequence)));
+    }
+    reader.tlv_bytes()
 }
 
 /// `time`, the time `which` of the validity period, as a UTC time of the years 0000 to 9999.

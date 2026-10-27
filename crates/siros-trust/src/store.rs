@@ -1,5 +1,5 @@
 //! The trust store the host provisions (TR1, TR4): for each authority a Verifier may name, the
-//! certificates an issuer chain validates up to.
+//! certificates to which an issuer chain has a path.
 
 use std::fmt;
 

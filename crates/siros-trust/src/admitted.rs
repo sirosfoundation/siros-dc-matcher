@@ -12,7 +12,7 @@ use crate::authority::{KeyIdentifier, QueryAuthorities, StoreAuthority};
 use crate::certificate::Certificate;
 use crate::chain::IssuerChain;
 use crate::facts::IssuerFacts;
-use crate::path::PathRefusal;
+use crate::path::{PathRefusal, TrustPath};
 use crate::store::TrustStore;
 
 /// Why an authority does not admit a credential's issuer, from its chain and the store.
@@ -24,7 +24,7 @@ pub enum ChainRefusal {
     KeyIdentifierAbsent,
     /// The store has no entry of the authority's type and value.
     NoStoreEntry,
-    /// The chain does not validate up to a certificate of the entry.
+    /// The chain has no path to a certificate of the entry.
     Path(PathRefusal),
 }
 
@@ -75,10 +75,12 @@ impl Issuer for ChainAt<'_> {
     }
 
     fn admitted_by(&self, authority: &StoreAuthority) -> Result<(), ChainRefusal> {
-        self.store
+        let entry = self
+            .store
             .entry(authority)
-            .ok_or(ChainRefusal::NoStoreEntry)?
-            .validates(self.chain, self.time)
+            .ok_or(ChainRefusal::NoStoreEntry)?;
+        TrustPath::new(self.chain, entry.certificates(), self.time)
+            .map(|_path| ())
             .map_err(ChainRefusal::Path)
     }
 }
@@ -192,7 +194,7 @@ impl AdmittedIssuer {
 impl IssuerFacts {
     /// The registration facts of the credential whose issuer chain is `chain`, against `store`
     /// at `time` (TR5): the keyIdentifiers its AuthorityKeyIdentifier extensions name, and the
-    /// authorities whose store entries it validates up to. A credential without a chain has
+    /// authorities to whose store entries it has a path. A credential without a chain has
     /// none.
     #[must_use]
     pub fn at(chain: Option<&IssuerChain>, store: &TrustStore, time: DateTime) -> Self {
@@ -204,7 +206,7 @@ impl IssuerFacts {
             store
                 .entries()
                 .iter()
-                .filter(|entry| entry.validates(chain, time).is_ok())
+                .filter(|entry| TrustPath::new(chain, entry.certificates(), time).is_ok())
                 .map(|entry| entry.authority().clone())
                 .collect(),
         )

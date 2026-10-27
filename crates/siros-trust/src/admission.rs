@@ -22,7 +22,7 @@ pub trait Issuer {
     fn names(&self, key_identifier: &KeyIdentifier) -> Result<(), Self::Refusal>;
 
     /// Whether the trust store entry of `authority` admits the issuer: the chain's first
-    /// certificate validates up to one of its certificates.
+    /// certificate has a path to one of its certificates.
     ///
     /// # Errors
     ///

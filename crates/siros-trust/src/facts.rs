@@ -8,7 +8,7 @@ use crate::authority::{KeyIdentifier, StoreAuthority};
 
 /// A credential's issuer facts at the time the wallet registered it: the AuthorityKeyIdentifier
 /// keyIdentifiers of its chain, and the trust store entries whose certificates its chain
-/// validates up to.
+/// has a path to.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct IssuerFacts {
     key_identifiers: Vec<KeyIdentifier>,

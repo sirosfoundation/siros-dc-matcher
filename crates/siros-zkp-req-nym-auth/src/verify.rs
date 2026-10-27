@@ -9,7 +9,7 @@ use serde_json::Value;
 use siros_codec::cbor::Value as Cbor;
 use siros_codec::date::DateTime;
 use siros_mdoc::{device_signing_input, DeviceNameSpaces, SessionTranscript};
-use siros_trust::Certificate;
+use siros_trust::{Certificate, IssuerChain, PathRefusal, TrustPath};
 use siros_zkp_req::{
     answered_option, EncodingError, InputName, ProofBackend, ProofEnvelope, QueryOption,
     ReqSetIndex, ResultKey, StructureRejection, ZkProof, ZkpFormats, ZkpPresentation, ZkpReqQuery,
@@ -112,10 +112,8 @@ pub enum IssuerKeySetError {
     Count(usize),
     /// The certificate is not one of the systems' form.
     Certificate(DocumentSignerError),
-    /// The certificate is none of the `trust_anchors`, and none of them issued it.
-    Untrusted,
-    /// The certificate is not valid at the Verifier's clock.
-    Expired,
+    /// The certificate has no path to the Verifier's `trust_anchors` at its clock (TR3).
+    Untrusted(PathRefusal),
 }
 
 /// Why `proof_time` is refused.
@@ -257,13 +255,9 @@ pub fn verify(
     if !input.tolerance.admits(input.now, checked.proof_time) {
         return Err(Rejection::ProofTime(ProofTimeError::Tolerance));
     }
-    let certificate = checked.signer.certificate();
-    if !chains_to(certificate, input.trust_anchors) {
-        return Err(Rejection::IssuerKeySet(IssuerKeySetError::Untrusted));
-    }
-    if !certificate.valid_at(input.now) {
-        return Err(Rejection::IssuerKeySet(IssuerKeySetError::Expired));
-    }
+    let chain = IssuerChain::new(checked.signer.certificate().clone(), Vec::new());
+    TrustPath::new(&chain, input.trust_anchors, input.now)
+        .map_err(|refusal| Rejection::IssuerKeySet(IssuerKeySetError::Untrusted(refusal)))?;
     let (earliest, cutoff) = checked
         .bounds
         .dates()
@@ -349,13 +343,6 @@ fn input_of<'e>(envelope: &'e ProofEnvelope, name: &InputName) -> Result<&'e Cbo
         .find(|(k, _)| k == name)
         .map(|(_, v)| v)
         .ok_or_else(|| encoding(ProofEncodingFault::InputMissing(name.clone())))
-}
-
-/// Whether the Verifier's `trust_anchors` hold `certificate`, or one of them issued it.
-fn chains_to(certificate: &Certificate, trust_anchors: &[Certificate]) -> bool {
-    trust_anchors
-        .iter()
-        .any(|anchor| anchor == certificate || certificate.issued_by(anchor).is_ok())
 }
 
 /// `issuer_key_set`: `[ bstr ]`, exactly one DER certificate with a P-256 key.

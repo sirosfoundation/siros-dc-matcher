@@ -89,6 +89,7 @@ pub struct Cert {
     ca: Option<bool>,
     aki: Option<Vec<u8>>,
     sha512_declared: bool,
+    explicit_false_critical: bool,
 }
 
 impl Cert {
@@ -104,6 +105,7 @@ impl Cert {
             ca: Some(true),
             aki: None,
             sha512_declared: false,
+            explicit_false_critical: false,
         }
     }
 
@@ -118,6 +120,7 @@ impl Cert {
             ca: None,
             aki: None,
             sha512_declared: false,
+            explicit_false_critical: false,
         }
     }
 
@@ -154,7 +157,23 @@ impl Cert {
         self
     }
 
+    /// Each extension writes `critical` FALSE out, where DER omits the default; the signer signs
+    /// the bytes as written.
+    pub fn explicit_false_critical(mut self) -> Self {
+        self.explicit_false_critical = true;
+        self
+    }
+
     pub fn der(&self) -> Vec<u8> {
+        let der = self.built();
+        if self.explicit_false_critical {
+            explicit_false_critical(&der, &self.signer)
+        } else {
+            der
+        }
+    }
+
+    fn built(&self) -> Vec<u8> {
         let time = |text: &str| {
             let unix = Duration::from_secs(at(text).unix() as u64);
             Time::GeneralTime(GeneralizedTime::from_unix_duration(unix).unwrap())
@@ -208,6 +227,91 @@ impl Cert {
         }
         builder.build::<Signature>().unwrap().to_der().unwrap()
     }
+}
+
+/// The content of the TLV `tlv`, a DER tag of one byte and its length.
+fn content(tlv: &[u8]) -> &[u8] {
+    let (length, header) = match tlv[1] {
+        short @ 0..=0x7f => (usize::from(short), 2),
+        long => {
+            let count = usize::from(long & 0x7f);
+            let length = tlv[2..2 + count]
+                .iter()
+                .fold(0, |n, b| (n << 8) | usize::from(*b));
+            (length, 2 + count)
+        }
+    };
+    &tlv[header..header + length]
+}
+
+/// The TLVs of `content`, in order.
+fn tlvs(mut content: &[u8]) -> Vec<&[u8]> {
+    let mut out = Vec::new();
+    while !content.is_empty() {
+        let inner = self::content(content);
+        let end = inner.as_ptr() as usize - content.as_ptr() as usize + inner.len();
+        out.push(&content[..end]);
+        content = &content[end..];
+    }
+    out
+}
+
+/// The TLV of tag `tag` and content `content`.
+fn tlv(tag: u8, content: &[u8]) -> Vec<u8> {
+    let mut out = vec![tag];
+    match u8::try_from(content.len()) {
+        Ok(short) if short < 0x80 => out.push(short),
+        _ => {
+            let bytes = content.len().to_be_bytes();
+            let skip = bytes.iter().take_while(|b| **b == 0).count();
+            out.push(0x80 | (bytes.len() - skip) as u8);
+            out.extend_from_slice(&bytes[skip..]);
+        }
+    }
+    out.extend_from_slice(content);
+    out
+}
+
+/// `der` with `critical` FALSE written out in each extension, in place of the default or of
+/// the builder's TRUE, signed again by `signer`.
+fn explicit_false_critical(der: &[u8], signer: &Key) -> Vec<u8> {
+    let parts = tlvs(content(der));
+    let fields: Vec<u8> = tlvs(content(parts[0]))
+        .into_iter()
+        .flat_map(|field| {
+            if field[0] != 0xa3 {
+                return field.to_vec();
+            }
+            let extensions: Vec<u8> = tlvs(content(content(field)))
+                .into_iter()
+                .flat_map(|extension| {
+                    let members = tlvs(content(extension));
+                    let mut written = members[0].to_vec();
+                    written.extend_from_slice(&[0x01, 0x01, 0x00]);
+                    written.extend_from_slice(members[members.len() - 1]);
+                    tlv(0x30, &written)
+                })
+                .collect();
+            tlv(0xa3, &tlv(0x30, &extensions))
+        })
+        .collect();
+    let tbs = tlv(0x30, &fields);
+    let signature = match signer {
+        Key::P256(key) => {
+            let signature: p256::ecdsa::DerSignature = key.sign(&tbs);
+            signature.to_bytes().to_vec()
+        }
+        Key::P384(key) => {
+            let signature: p384::ecdsa::DerSignature = key.sign(&tbs);
+            signature.to_bytes().to_vec()
+        }
+    };
+    let mut bits = vec![0x00];
+    bits.extend_from_slice(&signature);
+    let mut certificate = tbs;
+    certificate.extend_from_slice(parts[1]);
+    certificate.extend_from_slice(&tlv(0x03, &bits));
+    tlv(0x30, &certificate)
 }
 
 /// The chain of `certificates`, the signer's first.

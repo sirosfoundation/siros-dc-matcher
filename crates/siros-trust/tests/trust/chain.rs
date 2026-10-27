@@ -106,6 +106,26 @@ fn cases() -> Vec<Case> {
             Ok(listed()),
         ),
         case(
+            "an ISO/IEC 18013-5 link certificate: the new IACA key, signed by the listed one",
+            {
+                let link = Cert::issued_by("Test IACA", Key::p256(0x35), &iaca).ca(Some(true));
+                let document_signer =
+                    Cert::issued_by("Test Document Signer", Key::p256(0x32), &link);
+                (
+                    chain(&[&document_signer, &link]),
+                    store(&[("etsi_tl", LIST, &[&iaca])]),
+                )
+            },
+            etsi_tl(LIST),
+            Ok(listed()),
+        ),
+        case(
+            "a Document Signer whose basicConstraints writes critical FALSE out",
+            signed_by(&iaca, |ds| ds.ca(Some(false)).explicit_false_critical()),
+            etsi_tl(LIST),
+            Ok(listed()),
+        ),
+        case(
             "an expired leaf",
             signed_by(&iaca, |ds| {
                 ds.valid("2025-01-01T00:00:00Z", "2026-10-26T11:59:59Z")
@@ -134,7 +154,10 @@ fn cases() -> Vec<Case> {
             "a wrong signature",
             signed_by(&iaca, |ds| ds.signed_with(Key::p256(0x39))),
             etsi_tl(LIST),
-            path(PathRefusal::Signature(first)),
+            path(PathRefusal::Signature {
+                certificate: first,
+                signer: anchor,
+            }),
         ),
         case(
             "an issuer-name mismatch",

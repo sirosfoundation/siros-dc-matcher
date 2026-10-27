@@ -78,6 +78,12 @@ impl IssuerChain {
         Ok(Self { leaf, issuers })
     }
 
+    /// The chain of the parsed certificates `leaf`, the signer's, and `issuers` after it.
+    #[must_use]
+    pub fn new(leaf: Certificate, issuers: Vec<Certificate>) -> Self {
+        Self { leaf, issuers }
+    }
+
     /// The certificates, the signer's first.
     pub fn certificates(&self) -> impl Iterator<Item = &Certificate> {
         std::iter::once(&self.leaf).chain(&self.issuers)
@@ -87,11 +93,6 @@ impl IssuerChain {
     #[must_use]
     pub fn leaf(&self) -> &Certificate {
         &self.leaf
-    }
-
-    /// The certificates after the first, in the chain's order.
-    pub(crate) fn issuers(&self) -> &[Certificate] {
-        &self.issuers
     }
 
     /// The keyIdentifiers the chain's AuthorityKeyIdentifier extensions name, in the chain's
