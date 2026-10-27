@@ -81,8 +81,10 @@ Dependencies point downward through the layers:
 A component MUST NOT depend on a component of its own or a higher layer, except these:
 - Every other L1 component may depend on DCQL, for the request vocabulary it holds (Q5).
 - nym_auth depends on `zkp_req`, mdoc, OpenID4VP and trust.
+- Credential depends on wallet state (C1).
 - Transaction data depends on credential and display.
-- Display depends on credential.
+- Display depends on credential and wallet state.
+- Within L4, a facade depends on the components it exposes.
 
 ### 4.1 Host (each platform)
 
