@@ -2509,6 +2509,7 @@ dependencies = [
  "siros-display",
  "siros-oid4vp",
  "siros-wallet-state",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
