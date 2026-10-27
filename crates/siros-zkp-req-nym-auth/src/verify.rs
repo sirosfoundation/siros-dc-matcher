@@ -112,7 +112,7 @@ pub enum IssuerKeySetError {
     Count(usize),
     /// The certificate is not one of the systems' form.
     Certificate(DocumentSignerError),
-    /// The certificate is none of the trust anchors, and none of them issued it.
+    /// The certificate is none of the `trust_anchors`, and none of them issued it.
     Untrusted,
     /// The certificate is not valid at the Verifier's clock.
     Expired,
