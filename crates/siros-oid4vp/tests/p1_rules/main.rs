@@ -310,6 +310,27 @@ fn fixtures() -> Vec<Fixture> {
             )),
         },
         Fixture {
+            rule: "an encrypted mode passes over a P-256 key that does not read",
+            state: signed_dc_api(
+                {
+                    let mut payload = dc_api_payload(&x509);
+                    payload["response_mode"] = "dc_api.jwt".into();
+                    let mut usable = jwk(key(8).verifying_key());
+                    usable["alg"] = "ECDH-ES".into();
+                    let mut unreadable = usable.clone();
+                    unreadable["y"] = b64(&[1; 31]).into();
+                    payload["client_metadata"] = json!({"jwks": {"keys": [unreadable, usable]}});
+                    payload
+                },
+                ORIGIN,
+            ),
+            answer: honest(Host::trusting()),
+            expect: Expect::Verified {
+                client_id: "x509_san_dns:verifier.example",
+                trusted: true,
+            },
+        },
+        Fixture {
             rule: "an encrypted mode has an enc this wallet supports",
             state: unsigned_dc_api(|data| {
                 data["response_mode"] = "dc_api.jwt".into();

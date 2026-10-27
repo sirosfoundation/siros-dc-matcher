@@ -28,7 +28,7 @@ pub struct Member<'a> {
     pub data: String,
     /// Image bytes. The host drops an entry without them.
     pub icon: &'a [u8],
-    /// Why the verifier is asking, shown with the entry (§6.2 `purpose`).
+    /// Why the verifier is asking, shown with the entry: the credential sets' `purpose`.
     ///
     /// `None` and `Some("")` differ to the host: it renders the *presence*
     /// of this field, so an empty string produces a label with nothing in

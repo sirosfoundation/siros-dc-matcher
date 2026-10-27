@@ -518,7 +518,7 @@ fn origins_client_id_and_metadata_are_none_when_absent() {
     assert_eq!(ctx.client_metadata(), None);
 }
 
-/// The rulebook example puts an object under `claims`: DCQL refuses the request, a `zkp_req`
+/// The rulebook v0.4 example puts an object under `claims`: DCQL refuses the request, a `zkp_req`
 /// query's among them.
 #[test]
 fn object_claims_are_malformed_in_every_format() {

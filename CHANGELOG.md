@@ -17,7 +17,7 @@ presentations follow the draft, the DCQL parse enforces OpenID4VP 1.0, Section 6
 `zkp_req_plan`, and the vectors move to the crates that own their rules. Consumers that keep a
 copy of the vectors (siros-sdk-kotlin, siros-sdk-swift) must re-copy them from the new
 directories; the vector set digest below identifies them. `matcher.wasm` is 295,694 bytes
-against the 307,200-byte budget (303,914 before).
+against the 307,200-byte budget (303,418 at v0.11.0).
 
 ### Changed
 
@@ -61,31 +61,34 @@ against the 307,200-byte budget (303,914 before).
   `UnverifiedRequest`, which holds the request's parsed `DcqlQuery`. An entry reads only under
   the three protocols of OpenID4VP 1.0, A.1; a profile label outside them reads as no protocol.
   `UnverifiedRequest::first_registered` and `diagnose` take the registration as a label
-  predicate. `ProfilePolicy::with_client_metadata` takes the request's `client_metadata`, which
-  a `zkp_req` query is matched against; the query's `_req` and `_req_sets` are extension members
-  of its DCQL `CredentialQuery`. `first_supported_request` and the entry predicate are removed.
-  `DecodeError::Malformed` is `Truncated`, `Syntax`, `Shape` or `TooDeep`.
-- **BREAKING (Rust API):** `siros-dcql` 0.12.0 constructs a query only by parsing, one pass over
-  its JSON value: its fields are private, read through accessors, and `DcqlQuery::validate` is
-  gone. The parse enforces OpenID4VP 1.0, Section 6. It refuses a member of the wrong JSON type
-  and an absent REQUIRED member, `meta` among them; an empty `credentials`, `claims`,
-  `claim_sets`, `credential_sets`, `options`, `trusted_authorities` or `values`; a `values`
-  element other than a string, an integer or a boolean; an id outside the characters of
-  Sections 6.1 and 6.3, or repeated; a claims query without `id` in a Credential Query with
-  `claim_sets`; `claim_sets` without `claims`; a `claim_sets` or `credential_sets` option naming
-  an unknown id; a claims path that is no claims path pointer; and an `mso_mdoc` claims path
+  predicate. `ProfilePolicy::with_context(&RequestContext)` is
+  `ProfilePolicy::with_client_metadata`, which takes the request's `client_metadata`, the lists a
+  `zkp_req` query is matched against; the query's `_req` and `_req_sets` are extension members of
+  its DCQL `CredentialQuery`. `first_supported_request` and the entry predicate are removed. The
+  public modules `base64url` and `purpose` are removed: siros-codec's `base64url` and
+  siros-display's `purpose` hold them. `DecodeError::Malformed` is `Truncated`, `Syntax`, `Shape`
+  or `TooDeep`.
+- **BREAKING (Rust API):** `siros-dcql` 0.12.0 constructs a query only by parsing, one pass over its
+  JSON value: its fields are private, read through accessors, and `DcqlQuery::validate` is gone. The
+  parse enforces OpenID4VP 1.0, Section 6. It refuses a member of the wrong JSON type, `null`
+  included, and an absent REQUIRED member, `meta` among them; an empty `credentials`, `claims`,
+  `claim_sets`, `credential_sets`, `options`, `credential_sets` option, `trusted_authorities` or
+  `values`; a `values` element other than a string, an integer or a boolean; an id outside the
+  characters of Sections 6.1 and 6.3, or repeated; a claims query without `id` in a Credential Query
+  with `claim_sets`; `claim_sets` without `claims`; a `claim_sets` or `credential_sets` option
+  naming an unknown id; a claims path that is no claims path pointer; and an `mso_mdoc` claims path
   other than two strings. Ids are `QueryId`s and `ClaimId`s, a claims path is a `ClaimPath`,
   `trusted_authorities` is a `TrustedAuthorities`, and `multiple`,
   `require_cryptographic_holder_binding` and `required` are enums. A Credential Query keeps its
-  other members as extension members (`CredentialQuery::extension`), and
-  `CredentialQuery::parse` reads one alone. A claims path processing error other than an empty
-  selection reaches the caller (`select_claims`, `QueryMatch::refusals`), and
-  `DcqlQuery::from_json` refuses with a `QueryTextError`. See
-  [its changelog](crates/siros-dcql/CHANGELOG.md).
+  other members as extension members (`CredentialQuery::extension`), and `CredentialQuery::parse`
+  reads one alone. A claims path processing error other than an empty selection reaches the caller
+  (`select_claims`, `QueryMatch::refusals`), and `DcqlQuery::from_json` refuses with a
+  `QueryTextError`. See [its changelog](crates/siros-dcql/CHANGELOG.md).
 - **BREAKING (FFI):** `match_dcql`, `match_dcql_with_context` and `match_dc_api_request` fail
   with `MatchError::Request` for a query the DCQL parse refuses, as listed above: among them a
   Credential Query without `meta`, a malformed `trusted_authorities` (`[{"type": "aki"}]` or
-  `[]`), an empty `claims`, and an object under `claims`, a `zkp_req` query's included. v0.11.0
+  `[]`), a `null` member, an empty `claims`, and an object under `claims`, a `zkp_req` query's
+  included. v0.11.0
   matched such a query: for the mDL fixture under a malformed `trusted_authorities`, its
   `match_dcql` gave `Ok` with `satisfiable: true` and one combination, and a `zkp_req` query
   with an object under `claims` gave `Ok` with `satisfiable: false`.
@@ -114,7 +117,9 @@ against the 307,200-byte budget (303,914 before).
   serde_json reports of text that is no JSON. With the feature `json` it holds the strict JSON
   reader, `Json::parse_unique`: one value, members in document order, each member name once per
   object, every number with the text its writer chose (`JsonNumber`), at most `json::MAX_DEPTH`
-  (64) levels; it refuses with the first `JsonFault` in document order. `siros-wallet-state`
+  (64) levels. It refuses with a `JsonFault`: a text fault anywhere in the bytes comes first,
+  then the first, in document order, of a number beyond binary64, nesting too deep and a member
+  name an object repeats. `siros-wallet-state`
   reads the wallet state with its own reader, where a repeated name keeps its last value, as
   `JSON.parse` in `wallet-frontend` does. The crate holds the internals the components share:
   `member::MemberFault` with its `ArrayIndex`, `chain::CertificateChain` (the DER chain an mdoc
@@ -188,9 +193,10 @@ against the 307,200-byte budget (303,914 before).
   `JsonTextError` of a parameter or a DC API request that is no JSON, the `Utf8Error` and
   `der::Error` of what does not decode, the `VerifierInfoRule` a `verifier_info` breaks, the
   `LeafKeyFault` of an `x5c` leaf key, the `ClaimsFault` of a Verifier Attestation's claims, and
-  the `JwkFault` of a JWK that is no P-256 key: the host's resolved key (`ResolvedKeyInvalid`)
-  or the first P-256 `ECDH-ES` encryption key of `jwks` (`EncryptionKeyInvalid`), where keys of
-  other types and curves are passed over.
+  the `JwkFault` of a JWK that is no P-256 key: the host's resolved key (`ResolvedKeyInvalid`),
+  or, when no `ECDH-ES` encryption key of `jwks` is usable, the first that names P-256
+  (`EncryptionKeyInvalid`). A key that does not read is passed over, as a key of another type or
+  curve is (RFC 7517, Section 5).
 - `siros-transaction-data`, the `transaction_data` request parameter (OpenID4VP 1.0, Section
   5.1) for the wallet core. It parses entries of the four EC TS12 v1.0.1 types into typed
   payloads, binds each entry to one credential of an offer (`Entry::carried_by`, `Entry::names`,
@@ -343,12 +349,11 @@ against the 307,200-byte budget (303,914 before).
   `nonce_missing`. `zkp_req_verify` refuses a trust anchor that does not parse, a clock outside
   the years 0000 to 9999 and a negative tolerance as host errors (`now_out_of_range`,
   `tolerance_out_of_range`), and `zkp_req_vp_token_json` and `zkp_req_vp_token_cbor` refuse a
-  query id outside §6.1. No FFI function produces a nym_auth proof until the facades wave
-  exposes the wallet's plan.
+  query id outside §6.1. No FFI function produces a nym_auth proof.
 - `siros-zkp-req-wasm` (in `proving/`), the browser module with both provers on one thread:
   `ZkpProvers` loads the artifacts and names the loaded systems, and `vpTokenJson` writes the
   `vp_token`. CI lints and builds it for `wasm32-unknown-unknown` and checks its imports. No
-  browser export produces a nym_auth proof until the facades wave.
+  browser export produces a nym_auth proof.
 - Vectors: 49 protocol request vectors (`crates/siros-zkp-req/tests/vectors/request`), 72
   catalogue request vectors and 149 presentation vectors
   (`crates/siros-zkp-req-nym-auth/tests/vectors/`, the latter from
@@ -381,7 +386,7 @@ are versioned 0.11.0 to match the release; `siros-dcql` has no change.
 Consumers that keep a copy of the vectors (siros-sdk-kotlin, siros-sdk-swift)
 must re-copy `zkp_req`, `zkp_req_response`, `zkp_req_unsat` and `proof_time`
 from the v0.11.0 tag; the vector set digest below identifies them.
-`matcher.wasm` is 303,480 bytes against the 307,200-byte budget.
+`matcher.wasm` is 303,418 bytes against the 307,200-byte budget.
 
 ### Changed
 

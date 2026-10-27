@@ -140,10 +140,34 @@ fn the_parse_refuses_what_section_6_forbids() {
     let first = Position::new(0);
     let credential = |field| Member::CredentialMember(first, field);
     let claim = |field| Member::ClaimMember(first, first, field);
-    let cases: [(&str, QueryError); 14] = [
+    let cases: [(&str, QueryError); 20] = [
         (
             r#"{"credentials":[]}"#,
             form(Member::Credentials, FormFault::Empty),
+        ),
+        (
+            r#"{"credentials":[["pid"]]}"#,
+            form(Member::Credential(first), FormFault::WrongType),
+        ),
+        (
+            r#"{"credentials":[{"id":"pid","format":"mso_mdoc","meta":"mso_mdoc"}]}"#,
+            form(credential(CredentialMember::Meta), FormFault::WrongType),
+        ),
+        (
+            r#"{"credentials":[{"id":"pid","format":"dc+sd-jwt","meta":{},"claims":"given_name"}]}"#,
+            form(credential(CredentialMember::Claims), FormFault::WrongType),
+        ),
+        (
+            r#"{"credentials":[{"id":"pid","format":"mso_mdoc","meta":{},
+                "require_cryptographic_holder_binding":"yes"}]}"#,
+            form(
+                credential(CredentialMember::HolderBinding),
+                FormFault::WrongType,
+            ),
+        ),
+        (
+            r#"{"credentials":[{"id":"pid","format":"mso_mdoc","meta":{}}],"credential_sets":null}"#,
+            form(Member::CredentialSets, FormFault::WrongType),
         ),
         (
             r#"{"credentials":[{"id":"pid","format":"mso_mdoc"}]}"#,
@@ -186,6 +210,14 @@ fn the_parse_refuses_what_section_6_forbids() {
             form(
                 Member::CredentialSetMember(first, SetMember::Options),
                 FormFault::Empty,
+            ),
+        ),
+        (
+            r#"{"credentials":[{"id":"pid","format":"mso_mdoc","meta":{}}],
+                "credential_sets":[{"options":[[]]}]}"#,
+            form(
+                Member::CredentialSetMember(first, SetMember::Options),
+                FormFault::Entry(first),
             ),
         ),
         (
@@ -296,7 +328,7 @@ fn realistic_query_round_trips() {
 }
 
 /// §6.1.1: `trusted_authorities` is a non-empty array of objects, each with a string `type` and
-/// a non-empty array of string `values`. One rule per row; `null` reads as an absent member.
+/// a non-empty array of string `values`. One rule per row; `null` is a member of the wrong type.
 #[test]
 fn trusted_authorities_follow_section_6_1_1() {
     let cases = [
@@ -304,7 +336,7 @@ fn trusted_authorities_follow_section_6_1_1() {
             json!([{"type": "aki", "values": ["s9tIpPmhxdiuNkHMEWNpYim8S8Y"]}]),
             None,
         ),
-        (Value::Null, None),
+        (Value::Null, Some(TrustedAuthorityError::NotArray)),
         (
             json!({"type": "aki"}),
             Some(TrustedAuthorityError::NotArray),

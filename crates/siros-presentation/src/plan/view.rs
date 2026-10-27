@@ -112,7 +112,7 @@ impl OfferView {
         &self.offer
     }
 
-    /// The purposes of the credential sets the offer satisfies, as one line (Section 6.2).
+    /// The `purpose` of the credential sets the offer satisfies, as one line.
     pub fn purpose(&self) -> Option<&str> {
         self.purpose.as_deref()
     }

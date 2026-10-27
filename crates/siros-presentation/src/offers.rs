@@ -97,7 +97,7 @@ pub enum Refusal<E> {
 }
 
 impl Offer {
-    /// The `purpose` of each credential set the offer satisfies, in set order (Section 6.2).
+    /// The `purpose` of each credential set the offer satisfies, in set order.
     pub fn purposes(&self) -> &[Value] {
         &self.purposes
     }
