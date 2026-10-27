@@ -17,6 +17,9 @@ use siros_codec::Base64Error;
 use siros_dcql::{DcqlQuery, QueryError};
 
 use crate::protocol::Protocol;
+use crate::request::{
+    AttestationFormat, RequestSignature, ResponseMode, TransactionDataInvalid, TransactionDataItem,
+};
 
 /// Why one protocol's request data yielded no request.
 ///
@@ -45,6 +48,8 @@ pub enum NoQuery {
     PayloadHasNoDcqlQuery,
     /// A `dcql_query` was found but does not parse as DCQL.
     Malformed(QueryError),
+    /// `transaction_data` is no non-empty array of strings (Section 5.1).
+    TransactionData(TransactionDataInvalid),
     /// The protocol is none of the three of OpenID4VP 1.0, A.1.
     NoParser,
 }
@@ -64,6 +69,7 @@ impl NoQuery {
             Self::PayloadNotJson(_) => "payload_not_json",
             Self::PayloadHasNoDcqlQuery => "payload_has_no_dcql_query",
             Self::Malformed(_) => "dcql_query_malformed",
+            Self::TransactionData(invalid) => invalid.code(),
             Self::NoParser => "protocol_unsupported",
         }
     }
@@ -90,6 +96,7 @@ impl NoQuery {
             Self::PayloadNotJson(_) => "JWS payload is not JSON".into(),
             Self::PayloadHasNoDcqlQuery => "JWS payload has no `dcql_query`".into(),
             Self::Malformed(e) => format!("dcql_query failed to parse: {e}"),
+            Self::TransactionData(_) => "transaction_data is no non-empty array of strings".into(),
             Self::NoParser => "no parser for this protocol in this build".into(),
         }
     }
@@ -120,14 +127,16 @@ pub enum PayloadFault {
 /// One DC API request entry, read without verification (OpenID4VP 1.0, Appendix A).
 ///
 /// Its existence guarantees a protocol of A.1 and a `data` in the shape that protocol names,
-/// carrying a `dcql_query` that DCQL parses. Every value comes from a payload whose signature
-/// nobody checked.
+/// carrying a `dcql_query` that DCQL parses and, when present, a `transaction_data` that is a
+/// non-empty array of strings. Every value comes from a payload whose signature nobody checked.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UnverifiedRequest {
     protocol: Protocol,
-    /// The request object without its `dcql_query`, which `query` holds.
+    /// The request object without its `dcql_query` and `transaction_data`, which `query` and
+    /// `transaction_data` hold.
     object: Value,
     query: DcqlQuery,
+    transaction_data: Vec<TransactionDataItem>,
 }
 
 impl UnverifiedRequest {
@@ -140,15 +149,26 @@ impl UnverifiedRequest {
     pub fn read(label: &str, data: &Value) -> Result<Self, NoQuery> {
         let protocol = Protocol::from_label(label).ok_or(NoQuery::NoParser)?;
         let mut object = shape::request_object(protocol, data)?.into_owned();
-        let raw = object
-            .as_object_mut()
-            .and_then(|o| o.remove("dcql_query"))
-            .ok_or(NoQuery::PayloadHasNoDcqlQuery)?;
+        let (raw, entries) = match object.as_object_mut() {
+            Some(members) => (
+                members.remove("dcql_query"),
+                members.remove("transaction_data"),
+            ),
+            None => (None, None),
+        };
+        let raw = raw.ok_or(NoQuery::PayloadHasNoDcqlQuery)?;
         let query = DcqlQuery::parse(&raw).map_err(NoQuery::Malformed)?;
+        let transaction_data = match entries {
+            None => Vec::new(),
+            Some(entries) => {
+                TransactionDataItem::list(&entries).map_err(NoQuery::TransactionData)?
+            }
+        };
         Ok(Self {
             protocol,
             object,
             query,
+            transaction_data,
         })
     }
 
@@ -177,6 +197,43 @@ impl UnverifiedRequest {
     #[must_use]
     pub fn protocol(&self) -> Protocol {
         self.protocol
+    }
+
+    /// How the request arrived: a request under a signed protocol arrives as a JWS, whose
+    /// signature intake verifies at selection.
+    #[must_use]
+    pub fn signature(&self) -> RequestSignature {
+        if self.protocol.is_signed() {
+            RequestSignature::Signed
+        } else {
+            RequestSignature::Unsigned
+        }
+    }
+
+    /// The request object's `response_mode`, when it names a Response Mode.
+    #[must_use]
+    pub fn response_mode(&self) -> Option<ResponseMode> {
+        ResponseMode::named(self.object.get("response_mode")?.as_str()?)
+    }
+
+    /// The `format` of each `verifier_info` attestation that names one as a string, in the
+    /// request's order (Section 5.1).
+    #[must_use]
+    pub fn verifier_info_formats(&self) -> Vec<AttestationFormat> {
+        self.object
+            .get("verifier_info")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|attestation| attestation.get("format")?.as_str())
+            .map(AttestationFormat::new)
+            .collect()
+    }
+
+    /// The `transaction_data` strings as received; empty when the request has none.
+    #[must_use]
+    pub fn transaction_data(&self) -> &[TransactionDataItem] {
+        &self.transaction_data
     }
 
     /// The request object's `client_id`, when it is a string.
@@ -244,22 +301,11 @@ fn entry_diagnosis(entry: &Value, registered: &dyn Fn(&str) -> bool) -> String {
     let Some(data) = entry.get("data") else {
         return format!("{protocol}: {}", NoQuery::NoData.reason());
     };
-    match strict_query(protocol, data) {
-        Ok(q) => format!(
+    match UnverifiedRequest::read(protocol, data) {
+        Ok(read) => format!(
             "{protocol}: dcql_query parsed ({} credential queries) - should not have reached here",
-            q.credentials().len()
+            read.query().credentials().len()
         ),
         Err(e) => format!("{protocol}: {}", e.reason()),
     }
-}
-
-/// The entry's `dcql_query` as DCQL proper: what the diagnostic names, since a query the
-/// picker matched produces no diagnostic.
-fn strict_query(label: &str, data: &Value) -> Result<DcqlQuery, NoQuery> {
-    let protocol = Protocol::from_label(label).ok_or(NoQuery::NoParser)?;
-    let object = shape::request_object(protocol, data)?;
-    let raw = object
-        .get("dcql_query")
-        .ok_or(NoQuery::PayloadHasNoDcqlQuery)?;
-    DcqlQuery::parse(raw).map_err(NoQuery::Malformed)
 }

@@ -69,6 +69,11 @@ impl CredentialMetadata {
         served(held.jwt(), held.served_from(), credential, verifier).map(|(metadata, _)| metadata)
     }
 
+    /// The types the metadata lists, in its order.
+    pub(crate) fn types(&self) -> impl Iterator<Item = &TypeId> {
+        self.0.iter().map(|(type_id, _)| type_id)
+    }
+
     /// The definition of `type_id`, when the metadata lists the type.
     pub(crate) fn definition(
         &self,

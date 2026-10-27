@@ -10,6 +10,7 @@ members = [
     "crates/siros-mdoc",
     "crates/siros-oid4vp",
     "crates/siros-presentation",
+    "crates/siros-registration",
     "crates/siros-dc-matcher-core",
     "crates/siros-picker",
     "crates/siros-dc-matcher-ffi",
@@ -41,8 +42,10 @@ siros-dcql = { version = "0.12.0", path = "crates/siros-dcql" }
 siros-display = { path = "crates/siros-display", default-features = false }
 siros-mdoc = { path = "crates/siros-mdoc" }
 siros-oid4vp = { path = "crates/siros-oid4vp" }
+siros-presentation = { path = "crates/siros-presentation", default-features = false }
+siros-registration = { path = "crates/siros-registration" }
 siros-sdjwt = { path = "crates/siros-sdjwt" }
-siros-transaction-data = { path = "crates/siros-transaction-data" }
+siros-transaction-data = { path = "crates/siros-transaction-data", default-features = false }
 siros-trust = { path = "crates/siros-trust", default-features = false }
 siros-wallet-state = { path = "crates/siros-wallet-state" }
 siros-dc-matcher-core = { path = "crates/siros-dc-matcher-core" }

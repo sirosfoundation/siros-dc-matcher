@@ -43,15 +43,23 @@ mod display_rule;
 mod ids;
 mod matching;
 mod offers;
+mod pick;
+mod request;
+mod transactions;
 
 pub use credential::{KeyHolding, MatchCredential};
-pub use display_rule::{Choice, DisplayFacts, Presentability, TransactionData, WalletDisplay};
+pub use display_rule::{
+    Choice, DisplayFacts, HostDisplay, Presentability, Rows, TransactionData, WalletDisplay,
+};
 pub use ids::{AdditionIndex, CandidateIndex, OfferIndex, OptionIndex, QueryIndex, SetIndex};
 pub use matching::{
     Answer, Answered, Answers, Asked, Candidate, ChoiceError, Claims, Excluded, Exclusion, Failure,
     Matching, ProofChoice, QueryRefusal, ZkpQuery, ZkpRefusal,
 };
 pub use offers::{Addition, Member, Offer, Offers, MAX_ADDITIONS, MAX_EXAMINED, MAX_OFFERS};
+pub use pick::{Pick, PickFault};
+pub use request::MatchRequest;
+pub use transactions::{NoOffer, TransactionSource, Transactions};
 
 #[cfg(feature = "wallet")]
 mod error;
@@ -70,6 +78,6 @@ pub use plan::{
 };
 #[cfg(feature = "wallet")]
 pub use respond::{
-    Chosen, Fulfilment, Pick, PickError, Prepared, Response, Selection, Sign, SignId,
-    SignatureError, Subset, SubsetError,
+    Chosen, Fulfilment, PickError, Prepared, Response, Selection, Sign, SignId, SignatureError,
+    Subset, SubsetError,
 };

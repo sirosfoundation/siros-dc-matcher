@@ -1,0 +1,235 @@
+//! Transaction data in the matching (PaSO Core, Section 7.4): the entries of the request, the
+//! entry each candidate of a targeted query takes or why it takes none, and the offers over the
+//! candidates the first match leaves (T1, T4). The wallet's plan and the credential picker run
+//! it alike; the picker's selection defers to the wallet what it cannot verify (K2).
+
+use std::convert::Infallible;
+
+use itertools::Itertools;
+use siros_credential::EntryRef;
+use siros_transaction_data::{
+    check_request, fetched, Entry, EntryPosition, Exclusion, Selection, Step, TransactionDataError,
+};
+
+use crate::credential::MatchCredential;
+use crate::ids::{CandidateIndex, QueryIndex};
+use crate::matching::{Answered, Failure};
+use crate::offers::Offers;
+use crate::request::MatchRequest;
+
+/// What gives a candidate credential the entry it takes: the wallet's sources, or the
+/// definitions the credential picker's registration records.
+pub trait TransactionSource<C> {
+    /// Why the selection defers an entry to the wallet: never, for the wallet's own.
+    type Deferral;
+
+    /// What `credential` takes of `entries`, those that target it in array order (PaSO Core,
+    /// Section 7.4.2, steps 2 and 3). The step is a fetch while the host has not given an
+    /// image.
+    ///
+    /// # Errors
+    ///
+    /// [`TransactionDataError::Unsigned`] when the request arrived unsigned and PaSO metadata
+    /// serves an entry (PaSO Core, Section 3).
+    fn first_match(
+        &self,
+        entries: &[&Entry],
+        credential: &C,
+    ) -> Result<Step<Selection<Self::Deferral>>, TransactionDataError>;
+
+    /// Whether a source defines `entry`'s type for `credential` (OpenID4VP 1.0, Section 5.1),
+    /// though the entry may not be compatible.
+    fn knows(&self, entry: &Entry, credential: &C) -> bool;
+}
+
+/// A candidate of a targeted query, its entry, and what it takes.
+pub(crate) struct Candidacy<D> {
+    pub(crate) query: QueryIndex,
+    pub(crate) candidate: CandidateIndex,
+    pub(crate) credential: EntryRef,
+    pub(crate) selection: Selection<D>,
+}
+
+impl<D> Candidacy<D> {
+    /// The credential and why it takes no entry, when the first match excluded it.
+    fn exclusion(&self) -> Option<Exclusion> {
+        match &self.selection {
+            Selection::Excluded(causes) => Some(Exclusion {
+                credential: self.credential,
+                causes: causes.clone(),
+            }),
+            Selection::Takes(_) | Selection::Deferred(..) => None,
+        }
+    }
+
+    /// Whether the candidate may take an entry: it takes one, or the wallet decides.
+    fn served(&self) -> bool {
+        !matches!(self.selection, Selection::Excluded(_))
+    }
+}
+
+/// The `transaction_data` entries of a request, and the selection of each candidate of a query
+/// they target. `D` is why the selection defers an entry to the wallet.
+pub struct Transactions<D = Infallible> {
+    pub(crate) entries: Vec<Entry>,
+    pub(crate) candidacies: Vec<Candidacy<D>>,
+}
+
+/// Why a request has no offer: its transaction data, or the matching.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NoOffer<U, R> {
+    /// The queries the request's entries target have no candidate: the referenced credentials
+    /// are not available (OpenID4VP 1.0, Section 8.5).
+    CredentialUnavailable,
+    /// Why the matching gives no offer.
+    Unmatched(Failure<U, R>),
+}
+
+impl<D> Transactions<D> {
+    /// The entries of `request` and the first match of each candidate of `answered` whose query
+    /// an entry targets, through `source` (PaSO Core, Sections 7.4.1 and 7.4.2). The step is a
+    /// fetch while the host has not given a document.
+    ///
+    /// # Errors
+    ///
+    /// [`TransactionDataError`]: an entry that does not read; credential sets that break
+    /// Section 7.4.1; an unsigned request a PaSO type or source needs signed; a type no source
+    /// defines for any candidate, unless the first match serves every credential the entry
+    /// targets (OpenID4VP 1.0, Section 5.1); or no compatible candidate left.
+    pub fn read<C: MatchCredential, R>(
+        request: &impl MatchRequest,
+        answered: &Answered<'_, C, R>,
+        source: &impl TransactionSource<C, Deferral = D>,
+    ) -> Result<Step<Self>, TransactionDataError> {
+        let query = request.dcql_query();
+        let entries: Vec<Entry> = request
+            .transaction_data()
+            .iter()
+            .enumerate()
+            .map(|(at, raw)| {
+                let position = EntryPosition::new(at);
+                Entry::parse(position, raw, query)
+                    .map_err(|refusal| TransactionDataError::Entry(position, refusal))
+            })
+            .try_collect()?;
+        check_request(&entries, query, request.signature())?;
+        let mut candidacies = Vec::new();
+        for (index, answers) in answered.indexed() {
+            let targeting: Vec<&Entry> = entries.iter().filter(|e| e.names(answers.id())).collect();
+            if targeting.is_empty() {
+                continue;
+            }
+            for (at, candidate) in answers.candidates().iter().enumerate() {
+                let credential = candidate.credential();
+                let selection = fetched!(source.first_match(&targeting, credential)?);
+                candidacies.push(Candidacy {
+                    query: index,
+                    candidate: CandidateIndex::new(at),
+                    credential: credential.entry(),
+                    selection,
+                });
+            }
+        }
+        let transactions = Self {
+            entries,
+            candidacies,
+        };
+        transactions.known(answered, source)?;
+        transactions.compatible_left()?;
+        Ok(Step::Done(transactions))
+    }
+
+    /// Checks each entry whose type the wallet knows from no source for any candidate it
+    /// targets: the first match then serves every such candidate (OpenID4VP 1.0, Section 5.1;
+    /// PaSO Core, Section 7.4.2).
+    fn known<C: MatchCredential, R>(
+        &self,
+        answered: &Answered<'_, C, R>,
+        source: &impl TransactionSource<C, Deferral = D>,
+    ) -> Result<(), TransactionDataError> {
+        for entry in &self.entries {
+            let targets: Vec<(&Candidacy<D>, &C)> = self
+                .candidacies
+                .iter()
+                .filter_map(|c| {
+                    let answers = answered.answers(c.query).filter(|a| entry.names(a.id()))?;
+                    Some((c, answers.candidate(c.candidate)?.credential()))
+                })
+                .collect();
+            if targets.iter().all(|(c, _)| c.served()) {
+                continue;
+            }
+            if !targets
+                .iter()
+                .any(|(_, credential)| source.knows(entry, credential))
+            {
+                let exclusions = targets.iter().filter_map(|(c, _)| c.exclusion()).collect();
+                return Err(TransactionDataError::TypeUnknown(
+                    entry.position(),
+                    exclusions,
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Checks that a candidate takes an entry when some candidate is targeted (PaSO Core,
+    /// Section 7.4.2, step 4).
+    fn compatible_left(&self) -> Result<(), TransactionDataError> {
+        if self.candidacies.is_empty() || self.candidacies.iter().any(Candidacy::served) {
+            return Ok(());
+        }
+        Err(TransactionDataError::NoCompatibleCredential(
+            self.candidacies
+                .iter()
+                .filter_map(Candidacy::exclusion)
+                .collect(),
+        ))
+    }
+
+    /// Whether the request carries `transaction_data` entries.
+    pub fn carried(&self) -> bool {
+        !self.entries.is_empty()
+    }
+
+    /// Whether `candidate` of `query` may be offered: it takes an entry, the wallet decides, or
+    /// no entry targets its query.
+    pub fn eligible(&self, query: QueryIndex, candidate: CandidateIndex) -> bool {
+        self.selection(query, candidate)
+            .is_none_or(|selection| !matches!(selection, Selection::Excluded(_)))
+    }
+
+    /// What `candidate` of `query` takes; `None` when no entry targets its query.
+    pub fn selection(&self, query: QueryIndex, candidate: CandidateIndex) -> Option<&Selection<D>> {
+        self.candidacies
+            .iter()
+            .find(|c| c.query == query && c.candidate == candidate)
+            .map(|c| &c.selection)
+    }
+
+    /// Whether the request carries entries and none of the queries they target has a
+    /// candidate: the referenced credentials are not available (OpenID4VP 1.0, Section 8.5).
+    fn unavailable(&self) -> bool {
+        !self.entries.is_empty() && self.candidacies.is_empty()
+    }
+
+    /// The offers of `answered` over the candidates the first match leaves.
+    ///
+    /// # Errors
+    ///
+    /// [`NoOffer`] when no offer remains: [`NoOffer::CredentialUnavailable`] when the queries
+    /// the entries target have no candidate, else why the matching gives no offer.
+    pub fn offers<C: MatchCredential, R: Clone>(
+        &self,
+        answered: &Answered<'_, C, R>,
+    ) -> Result<Offers, NoOffer<C::Unadmitted, R>> {
+        let offers = Offers::of(answered, |query, candidate| self.eligible(query, candidate));
+        if !offers.offers().is_empty() {
+            return Ok(offers);
+        }
+        if self.unavailable() {
+            return Err(NoOffer::CredentialUnavailable);
+        }
+        Err(NoOffer::Unmatched(answered.failure()))
+    }
+}

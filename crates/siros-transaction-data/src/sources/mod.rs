@@ -144,4 +144,4 @@ impl Rulebook {
 mod credential;
 
 #[cfg(feature = "wallet")]
-pub(crate) use credential::CredentialSources;
+pub(crate) use credential::{CredentialSources, NotServed};

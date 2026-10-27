@@ -9,6 +9,7 @@ use crate::entry::{DelegationType, Field, PaymentDisplay, VerificationDisplay, V
 use crate::levels::{
     Credman, Credman2, Credman3, Credman5, Credman6, Credman7, EntryKey, V2, V3, V5, V6, V7,
 };
+use crate::picked::Shown;
 use crate::text::C8StringExt;
 use c8str::{C8Str, C8String};
 use core::fmt;
@@ -216,13 +217,18 @@ impl<'a, K: EntryKind> SetEntry<'a, K> {
         }
     }
 
-    /// Whether the entry carries text that a host at `level` does not show:
-    /// payment information below level 3, display text below level 5, a link
-    /// below level 6.
-    pub fn display_skipped(&self, level: u32) -> bool {
-        self.kind.skips_display(level)
+    /// Whether a host at `level` shows every text the entry carries: it
+    /// skips payment information below level 3, display text below level 5,
+    /// and a link below level 6.
+    pub fn shown(&self, level: u32) -> Shown {
+        let skipped = self.kind.skips_display(level)
             || (self.metadata_display_text.is_some() && level < 5)
-            || (self.link.is_some() && level < 6)
+            || (self.link.is_some() && level < 6);
+        if skipped {
+            Shown::Skipped
+        } else {
+            Shown::Full
+        }
     }
 
     /// The standard metadata object, which the host returns to the wallet with
@@ -230,9 +236,9 @@ impl<'a, K: EntryKind> SetEntry<'a, K> {
     /// `{"display_skipped":bool,"host_level":n,"data":<the caller's JSON>}`,
     /// without `data` when the caller sets none.
     pub fn metadata(&self, level: u32) -> C8String {
+        let skipped = self.shown(level) == Shown::Skipped;
         let mut object = C8String::from_str_lossy(&format!(
-            "{{\"display_skipped\":{},\"host_level\":{level}",
-            self.display_skipped(level)
+            "{{\"display_skipped\":{skipped},\"host_level\":{level}"
         ));
         if let Some(data) = self.data {
             object.push_str_lossy(",\"data\":");

@@ -1,7 +1,10 @@
 //! Discovery and validation (PaSO Core, Section 7.4.2): each candidate credential takes the
 //! first entry, in array order, that targets it, whose type it supports in the wallet's
 //! language, whose payload conforms, that renders within the cap, whose resources verify, and
-//! that renders in full. A credential with none is excluded.
+//! that renders in full. A credential with none is excluded. The credential picker, which
+//! verifies no ad-hoc metadata and fetches no image, defers such an entry to the wallet (K2).
+
+use std::convert::Infallible;
 
 use siros_codec::date::DateTime;
 use siros_credential::EntryRef;
@@ -15,8 +18,10 @@ use crate::fetched::{Fetched, Step};
 use crate::hash::AlgClaim;
 use crate::image::ImageFault;
 use crate::payload::{conform, Location, PayloadFault, Typed, ValueFault, Values};
+use crate::payment::Payment;
 use crate::projection::{Projected, Unmatched};
 use crate::render::{layout, Ready, RenderFault, Rendering, MAX_ITEMS};
+use crate::served::Unserved;
 #[cfg(feature = "wallet")]
 use crate::sources::{CredentialMetadataFault, SignedFault, Ts12Fault};
 use crate::sources::{Rulebook, SourceKind};
@@ -53,6 +58,9 @@ pub enum Incompatibility {
     /// The definition of this source breaks PaSO Proof Metadata, Section 3, which makes the
     /// type unsupported by the credential (Section 3.3).
     Definition(SourceKind, DefinitionError),
+    /// The credential's registration records that its sources serve no definition of the type
+    /// (K1).
+    Registered(Unserved),
     /// A localised array has no entry for the wallet's language (PaSO View, Section 4).
     Language(Unmatched),
     /// The entry has no `transaction_data_hashes_alg`, which a TS12 rulebook requires (EC TS12
@@ -86,6 +94,7 @@ impl Incompatibility {
             #[cfg(feature = "wallet")]
             Self::TypeMetadata(fault) => fault.code(),
             Self::Definition(_, error) => error.code(),
+            Self::Registered(unserved) => unserved.code(),
             Self::Language(unmatched) => unmatched.code(),
             Self::HashesAlgAbsent => "transaction_data_hashes_alg_absent",
             Self::Payload(fault) => fault.code(),
@@ -103,6 +112,7 @@ impl Incompatibility {
     pub fn type_defined(&self) -> bool {
         match self {
             Self::Format | Self::TypeUnsupported | Self::TypeUndeclared => false,
+            Self::Registered(unserved) => unserved.type_defined(),
             #[cfg(feature = "wallet")]
             Self::AdHoc(_) | Self::CredentialMetadata(_) | Self::TypeMetadata(_) => true,
             Self::IssuerMetadataNotHeld
@@ -133,21 +143,35 @@ pub trait Definitions {
     fn serve(&self, entry: &Entry) -> Result<Projected, Incompatibility>;
 }
 
-/// An entry a credential takes, with its view.
+/// An entry a credential takes, with its view, and the payee and amount of a payment.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Taken {
     entry: EntryPosition,
     view: TransactionView,
+    payment: Option<Box<Payment>>,
 }
 
 /// What a candidate credential takes: an entry, or nothing, with why each entry that targets it
-/// is not compatible.
+/// is not compatible. `D` is why the credential picker defers an entry to the wallet: the
+/// wallet's own selection defers nothing.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Selection {
+pub enum Selection<D = Infallible> {
     /// The first compatible entry.
     Takes(Taken),
+    /// The entry the credential may take, which the credential picker cannot verify: the wallet
+    /// decides after selection (K2).
+    Deferred(EntryPosition, D),
     /// No entry is compatible, each for its reason: the credential is excluded.
     Excluded(Vec<(EntryPosition, Incompatibility)>),
+}
+
+/// What the credential picker cannot verify of an entry (K2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Deferral {
+    /// The entry's ad-hoc metadata JWT, which the wallet verifies against the trust store.
+    AdHocMetadata,
+    /// An image at an `https` URL, which the wallet fetches and verifies.
+    RemoteImage,
 }
 
 /// A credential the first match excluded, and why each entry that targets it is not compatible.
@@ -170,6 +194,12 @@ impl Taken {
     #[must_use]
     pub fn view(&self) -> &TransactionView {
         &self.view
+    }
+
+    /// The payee and the amount, for an entry of a payment rulebook whose payload names them.
+    #[must_use]
+    pub fn payment(&self) -> Option<&Payment> {
+        self.payment.as_deref()
     }
 }
 
@@ -199,31 +229,63 @@ impl Selector<'_> {
         entries: &[&Entry],
         definitions: &impl Definitions,
     ) -> Result<Step<Selection>, TransactionDataError> {
-        let mut causes = Vec::new();
-        for entry in entries {
-            let projected = match definitions.serve(entry) {
-                Ok(projected) => projected,
-                Err(cause) => {
-                    causes.push((entry.position(), cause));
-                    continue;
-                }
-            };
-            if self.signature == RequestSignature::Unsigned && projected.source().is_paso() {
-                return Err(TransactionDataError::Unsigned(entry.position()));
+        Ok(
+            match first_of(entries, |entry| self.take(entry, definitions))? {
+                Ok(step) => step.map(Selection::Takes),
+                Err(causes) => Step::Done(Selection::Excluded(causes)),
+            },
+        )
+    }
+
+    /// What a credential whose registered definitions `definitions` serves takes of `entries`,
+    /// as the credential picker tells it (K2): the first match of [`Selector::first_match`],
+    /// except that an entry with ad-hoc metadata, and an entry with an image at an `https` URL,
+    /// is [`Selection::Deferred`] to the wallet. The picker's selector holds no fetched image.
+    ///
+    /// # Errors
+    ///
+    /// [`TransactionDataError::Unsigned`] when the request arrived unsigned and PaSO metadata
+    /// serves an entry (PaSO Core, Section 3).
+    pub fn first_match_unverified(
+        &self,
+        entries: &[&Entry],
+        definitions: &impl Definitions,
+    ) -> Result<Selection<Deferral>, TransactionDataError> {
+        let unverified = |entry: &Entry| {
+            let position = entry.position();
+            if entry.metadata().is_some() {
+                return Ok(Ok(Selection::Deferred(position, Deferral::AdHocMetadata)));
             }
-            match self.view(entry, &projected) {
-                Ok(step) => {
-                    return Ok(step.map(|view| {
-                        Selection::Takes(Taken {
-                            entry: entry.position(),
-                            view,
-                        })
-                    }))
-                }
-                Err(cause) => causes.push((entry.position(), cause)),
-            }
+            Ok(self.take(entry, definitions)?.map(|step| match step {
+                Step::Done(taken) => Selection::Takes(taken),
+                Step::Fetch(_) => Selection::Deferred(position, Deferral::RemoteImage),
+            }))
+        };
+        Ok(first_of(entries, unverified)?.unwrap_or_else(Selection::Excluded))
+    }
+
+    /// The entry `entry` for a credential whose definitions `definitions` serves: its view, a
+    /// step that is a fetch while the host has not given an image, or why it is not compatible.
+    fn take(
+        &self,
+        entry: &Entry,
+        definitions: &impl Definitions,
+    ) -> Result<Result<Step<Taken>, Incompatibility>, TransactionDataError> {
+        let projected = match definitions.serve(entry) {
+            Ok(projected) => projected,
+            Err(cause) => return Ok(Err(cause)),
+        };
+        if self.signature == RequestSignature::Unsigned && projected.source().is_paso() {
+            return Err(TransactionDataError::Unsigned(entry.position()));
         }
-        Ok(Step::Done(Selection::Excluded(causes)))
+        Ok(self.view(entry, &projected).map(|step| {
+            step.map(|view| Taken {
+                entry: entry.position(),
+                view,
+                payment: Payment::of(entry.type_id(), projected.rulebook(), entry.payload())
+                    .map(Box::new),
+            })
+        }))
     }
 
     /// The view of `entry` under `projected`: its typed values, then the cap on the items it
@@ -305,4 +367,20 @@ impl Selector<'_> {
             }
         }
     }
+}
+
+/// The first of `entries`, in array order, that `outcome` gives, or why each is not compatible
+/// (Section 7.4.2, steps 2 and 3).
+fn first_of<T>(
+    entries: &[&Entry],
+    mut outcome: impl FnMut(&Entry) -> Result<Result<T, Incompatibility>, TransactionDataError>,
+) -> Result<Result<T, Vec<(EntryPosition, Incompatibility)>>, TransactionDataError> {
+    let mut causes = Vec::new();
+    for entry in entries {
+        match outcome(entry)? {
+            Ok(taken) => return Ok(Ok(taken)),
+            Err(cause) => causes.push((entry.position(), cause)),
+        }
+    }
+    Ok(Err(causes))
 }

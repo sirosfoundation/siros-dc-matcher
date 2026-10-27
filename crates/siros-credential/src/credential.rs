@@ -68,6 +68,16 @@ pub struct EntryRef {
 }
 
 impl EntryRef {
+    /// The entry of `credentialId` `credential_id` in batch `batch_id`, instance `instance_id`,
+    /// as a registration projection records it.
+    pub fn new(credential_id: CredentialId, batch_id: BatchId, instance_id: InstanceId) -> Self {
+        Self {
+            credential_id,
+            batch_id,
+            instance_id,
+        }
+    }
+
     /// `credentialId`.
     pub fn credential_id(&self) -> CredentialId {
         self.credential_id

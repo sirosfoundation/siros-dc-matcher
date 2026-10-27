@@ -27,7 +27,8 @@ use crate::display_rule::TransactionData;
 use crate::error::PresentationError;
 use crate::matching::{Asked, Matching};
 use crate::offers::Offers;
-use transactions::{Transactions, Wallet};
+use crate::transactions::{NoOffer, Transactions};
+use transactions::{context, Wallet};
 use view::Sources;
 
 pub use digest::{DigestError, PlanDigest};
@@ -89,7 +90,7 @@ pub struct Planned<'a> {
     pub(crate) input: PlanInput<'a>,
     pub(crate) nym_auth: Result<NymAuthRequest<'a>, RequestRefusal>,
     pub(crate) answered: Wallet<'a>,
-    pub(crate) transactions: Transactions<'a>,
+    pub(crate) transactions: Transactions,
     pub(crate) view: ConsentView<'a>,
 }
 
@@ -119,7 +120,7 @@ fn planned<'a>(input: &PlanInput<'a>) -> Result<Step<Planned<'a>>, PresentationE
     let nym_auth = NymAuthRequest::new(request, input.verifier_id);
     let policy = nym_auth.as_ref().map(drop).map_err(|refusal| *refusal);
     let answered = answered(input, policy)?;
-    let transactions = fetched!(Transactions::read(input, &answered)?);
+    let transactions = fetched!(Transactions::read(request, &answered, &context(input))?);
     let offers = offers(&answered, &transactions)?;
     let sources = Sources {
         answered: &answered,
@@ -127,11 +128,7 @@ fn planned<'a>(input: &PlanInput<'a>) -> Result<Step<Planned<'a>>, PresentationE
         display: input.display,
         language: input.language,
         background: input.background,
-        transaction_data: if request.transaction_data().is_empty() {
-            TransactionData::Absent
-        } else {
-            TransactionData::Carried
-        },
+        transaction_data: TransactionData::of(&transactions),
     };
     let views = view::offer_views(&offers, &sources)?;
     // A request that is no nym_auth request has no `verifier_id`.
@@ -163,7 +160,7 @@ fn answered<'a>(
     policy: Result<(), RequestRefusal>,
 ) -> Result<Wallet<'a>, PresentationError> {
     let request = input.request;
-    let asked = Asked::new(request.dcql_query(), request.client_metadata());
+    let asked = Asked::of(request);
     let usable: Vec<UsableCredential<'a>> = input
         .credentials
         .iter()
@@ -194,20 +191,13 @@ fn answered<'a>(
 /// [`PresentationError`] when no offer remains:
 /// [`TransactionDataError::CredentialUnavailable`] when the queries the entries target have no
 /// candidate, else why the request has no offer.
-fn offers(
-    answered: &Wallet<'_>,
-    transactions: &Transactions<'_>,
-) -> Result<Offers, PresentationError> {
-    let offers = Offers::of(answered, |query, candidate| {
-        transactions.eligible(query, candidate)
-    });
-    if !offers.offers().is_empty() {
-        return Ok(offers);
-    }
-    if transactions.unavailable() {
-        return Err(TransactionDataError::CredentialUnavailable.into());
-    }
-    Err(answered.failure().into())
+fn offers(answered: &Wallet<'_>, transactions: &Transactions) -> Result<Offers, PresentationError> {
+    transactions
+        .offers(answered)
+        .map_err(|no_offer| match no_offer {
+            NoOffer::CredentialUnavailable => TransactionDataError::CredentialUnavailable.into(),
+            NoOffer::Unmatched(failure) => failure.into(),
+        })
 }
 
 impl<'a> Planned<'a> {

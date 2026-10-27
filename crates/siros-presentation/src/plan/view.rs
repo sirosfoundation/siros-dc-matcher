@@ -10,12 +10,15 @@ use siros_transaction_data::{EntryPosition, TransactionView};
 use siros_wallet_state::CredentialId;
 
 use super::digest::PlanDigest;
-use super::transactions::{offered, Bound, BoundEntry, Offered, Transactions, Wallet};
-use crate::display_rule::{Choice, DisplayFacts, Presentability, TransactionData, WalletDisplay};
+use super::transactions::{offered, Bound, BoundEntry, Offered, Wallet};
+use crate::display_rule::{
+    Choice, DisplayFacts, HostDisplay, Presentability, Rows, TransactionData, WalletDisplay,
+};
 use crate::error::{Inconsistency, PresentationError};
 use crate::ids::SetIndex;
 use crate::matching::{Answer, Candidate};
 use crate::offers::{Addition, Member, Offer, Offers};
+use crate::transactions::Transactions;
 use siros_dcql::QueryId;
 
 /// What the user consents to. It holds no delivered secret and no undisclosable attribute.
@@ -217,7 +220,7 @@ impl CredentialView {
 /// What the view is built from.
 pub(crate) struct Sources<'s, 'a> {
     pub(crate) answered: &'s Wallet<'a>,
-    pub(crate) transactions: &'s Transactions<'a>,
+    pub(crate) transactions: &'s Transactions,
     pub(crate) display: &'s DisplayCache,
     pub(crate) language: &'s Locale,
     pub(crate) background: &'s [CredentialId],
@@ -246,16 +249,10 @@ fn offer_view(offer: &Offer, sources: &Sources<'_, '_>) -> Result<OfferView, Pre
     let facts = DisplayFacts {
         presentability: presentability(&members, sources.background),
         transaction_data: sources.transaction_data,
-        additions: if additions.is_empty() {
-            Choice::Settled
-        } else {
-            Choice::Open
-        },
-        subsets: if offer.members().iter().any(|m| m.candidates().len() > 1) {
-            Choice::Open
-        } else {
-            Choice::Settled
-        },
+        additions: Choice::of_additions(offer),
+        subsets: Choice::of_subsets(offer),
+        rows: Rows::Whole,
+        host: HostDisplay::Full,
     };
     Ok(OfferView {
         offer: offer.clone(),

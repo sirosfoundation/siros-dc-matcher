@@ -87,6 +87,7 @@ version = "0.1.0"
 dependencies = [
  "android-credman-sys",
  "c8str",
+ "serde_json",
 ]
 
 [[package]]
@@ -2561,11 +2562,14 @@ name = "siros-picker"
 version = "0.1.0"
 dependencies = [
  "android-credman",
- "serde_json",
- "siros-dc-matcher-core",
- "siros-dcql",
+ "siros-credential",
  "siros-display",
  "siros-oid4vp",
+ "siros-presentation",
+ "siros-registration",
+ "siros-transaction-data",
+ "siros-wallet-state",
+ "siros-zkp-req-nym-auth",
 ]
 
 [[package]]
@@ -2605,6 +2609,24 @@ dependencies = [
  "siros-zkp-req-nym-auth",
  "x509-cert",
  "zeroize",
+]
+
+[[package]]
+name = "siros-registration"
+version = "0.11.0"
+dependencies = [
+ "serde_json",
+ "siros-codec",
+ "siros-credential",
+ "siros-dcql",
+ "siros-display",
+ "siros-oid4vp",
+ "siros-presentation",
+ "siros-transaction-data",
+ "siros-trust",
+ "siros-wallet-state",
+ "siros-zkp-req",
+ "siros-zkp-req-nym-auth",
 ]
 
 [[package]]

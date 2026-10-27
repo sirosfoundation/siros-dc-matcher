@@ -113,14 +113,3 @@ pub(crate) fn path(value: Option<&Value>) -> Result<ClaimPath, DisplayError> {
     let value = value.ok_or(DisplayError::Claims(EntryFault::MemberMissing))?;
     ClaimPath::parse(value).map_err(DisplayError::ClaimPath)
 }
-
-/// Whether the description path `described` addresses the claim at `path`: the same length,
-/// equal keys and indexes, and `null` addressing any index or `null` of `path`.
-pub(crate) fn describes(described: &ClaimPath, path: &[PathComponent]) -> bool {
-    let described = described.components();
-    described.len() == path.len()
-        && described.iter().zip(path).all(|(d, p)| match (d, p) {
-            (PathComponent::Null, PathComponent::Index(_) | PathComponent::Null) => true,
-            (d, p) => d == p,
-        })
-}

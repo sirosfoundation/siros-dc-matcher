@@ -35,8 +35,9 @@ sets.add_entry_set(&EntrySet::new(set_id, Slot::one(&entry), &[]));
   delegation from 7 (the entry's own, else the host default).
 - Every set entry carries the standard metadata object
   `{"display_skipped":bool,"host_level":n,"data":…}`, which the wallet
-  receives on selection. `display_skipped` is true when the entry carries
-  text the host level does not show; `data` is the caller's JSON.
+  receives on selection and reads with `Picked::parse`. `display_skipped` is
+  true when the entry carries text the host level does not show; `data` is the
+  caller's JSON.
 - `None` reaches the host as NULL and hides the element; `Some` of an empty
   string shows it blank.
 - The caller keeps two set rules: declare a set id once per invocation, and

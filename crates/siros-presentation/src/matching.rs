@@ -13,22 +13,20 @@ use siros_credential::{least_used, Format};
 use siros_dcql::eval::select_claims;
 use siros_dcql::{
     ClaimPath, CredentialFormat, CredentialQuery, CredentialRef, CredentialSetQuery,
-    CryptographicBinding, DcqlQuery, HolderBinding, PathError, QueryId,
+    CryptographicBinding, HolderBinding, PathError, QueryId,
 };
 use siros_trust::QueryAuthorities;
 use siros_wallet_state::PresentationRecord;
-use siros_zkp_req_nym_auth::catalogue::{BBS_SCHEMA_ID, MDOC_DOCTYPE};
+use siros_zkp_req_nym_auth::catalogue::ATTESTATION_TYPES;
 use siros_zkp_req_nym_auth::policy::RequestRefusal;
 use siros_zkp_req_nym_auth::system::NymAuthSystem;
 
 use crate::credential::{KeyHolding, MatchCredential};
 use crate::ids::{CandidateIndex, QueryIndex};
+use crate::request::MatchRequest;
 
 pub use failure::{Failure, QueryRefusal};
 pub use zkp::{ChoiceError, ProofChoice, ZkpQuery, ZkpRefusal};
-
-/// The types of the nym_auth attestations, whose attributes no query but `zkp_req` discloses.
-const NYM_AUTH_TYPES: [&str; 2] = [MDOC_DOCTYPE, BBS_SCHEMA_ID];
 
 /// The request as the matching reads it: its Credential Queries, each with its `id`, its
 /// credential sets, and the Verifier metadata.
@@ -47,8 +45,10 @@ struct AskedQuery<'r> {
 }
 
 impl<'r> Asked<'r> {
-    /// The request of `query`, with its `client_metadata`.
-    pub fn new(query: &'r DcqlQuery, client_metadata: Option<&'r Value>) -> Self {
+    /// The Credential Queries, credential sets and Verifier metadata of `request`: the wallet's
+    /// verified request, or the credential picker's [`siros_oid4vp::UnverifiedRequest`].
+    pub fn of(request: &'r impl MatchRequest) -> Self {
+        let query = request.dcql_query();
         Self {
             queries: query
                 .credentials()
@@ -59,7 +59,7 @@ impl<'r> Asked<'r> {
                 })
                 .collect(),
             credential_sets: query.credential_sets(),
-            client_metadata,
+            client_metadata: request.client_metadata(),
         }
     }
 }
@@ -319,7 +319,7 @@ fn claims<C: MatchCredential>(
         return Ok(None);
     };
     let needs_key = format == Format::Mdoc || holder_binding == HolderBinding::Required;
-    let undisclosable = NYM_AUTH_TYPES.contains(&credential.credential_type());
+    let undisclosable = ATTESTATION_TYPES.contains(&credential.credential_type());
     if credential.format() != format
         || undisclosable
         || (needs_key && credential.key_holding() == KeyHolding::NotHeld)

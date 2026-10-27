@@ -12,11 +12,9 @@ use crate::fetch::HttpsUrl;
 use crate::handover::ec_jwk_thumbprint;
 use crate::jose;
 use crate::protocol::Protocol;
-use crate::request::TransactionDataItem;
+use crate::request::{AttestationFormat, TransactionDataInvalid, TransactionDataItem};
 use crate::values::{Kid, Nonce, Origin, State};
-use crate::verified::{
-    AttestationFormat, Channel, ContentEncryption, Encryption, PostEncoding, VerifiedRequest,
-};
+use crate::verified::{Channel, ContentEncryption, Encryption, PostEncoding, VerifiedRequest};
 
 /// The channel a request arrived on, and who sent it.
 pub(super) enum Arrival<'a> {
@@ -126,12 +124,8 @@ pub(super) fn verified(
     };
     let transaction_data = match params.get("transaction_data") {
         None => Vec::new(),
-        Some(entries) => strings(entries)
-            .filter(|e| !e.is_empty())
-            .ok_or(IntakeError::TransactionDataInvalid)?
-            .into_iter()
-            .map(TransactionDataItem::new)
-            .collect(),
+        Some(entries) => TransactionDataItem::list(entries)
+            .map_err(|TransactionDataInvalid| IntakeError::TransactionDataInvalid)?,
     };
     let metadata = client_metadata.as_ref();
     let channel = match target {
@@ -316,7 +310,7 @@ fn attestation_format(
             return Err(VerifierInfoRule::CredentialIdUnknown);
         }
     }
-    Ok(AttestationFormat(format.to_owned()))
+    Ok(AttestationFormat::new(format))
 }
 
 /// The key and `enc` of an encrypted response, for a JWE and for a `COSE_Encrypt` alike

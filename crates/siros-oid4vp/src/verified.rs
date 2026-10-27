@@ -9,7 +9,7 @@ use crate::fetch::HttpsUrl;
 use crate::handover::{Handover, JwkThumbprint};
 use crate::intake::Verdict;
 use crate::protocol::Protocol;
-use crate::request::{RequestSignature, ResponseMode, TransactionDataItem};
+use crate::request::{AttestationFormat, RequestSignature, ResponseMode, TransactionDataItem};
 use crate::semantic::{SemanticIdError, SemanticIdentifier};
 use crate::values::{Kid, Nonce, Origin, State};
 
@@ -192,18 +192,6 @@ impl AccessCertificate {
     /// breaks the structure of ETSI EN 319 412-1.
     pub fn semantic_identifier(&self) -> Result<&SemanticIdentifier, SemanticIdError> {
         self.semantic_identifier.as_ref().map_err(|e| *e)
-    }
-}
-
-/// The `format` of a `verifier_info` attestation (Section 5.1).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct AttestationFormat(pub(crate) String);
-
-impl AttestationFormat {
-    /// The format identifier.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
     }
 }
 

@@ -1,7 +1,7 @@
 [package]
 name = "siros-picker"
 version = "0.1.0"
-description = "The SIROS DC API matcher, built for the Android Credential Manager WASM sandbox"
+description = "The SIROS credential picker: the matcher Android Credential Manager runs over the wallet's registration"
 publish = false
 edition.workspace = true
 license.workspace = true
@@ -15,12 +15,11 @@ path = "src/main.rs"
 
 [dependencies]
 android-credman = { workspace = true }
-siros-dc-matcher-core = { workspace = true }
-siros-dcql = { workspace = true }
+siros-credential = { workspace = true }
 siros-display = { workspace = true }
 siros-oid4vp = { workspace = true }
-serde_json = { workspace = true }
-
-# The unit tests build wallets from core's fixtures.
-[dev-dependencies]
-siros-dc-matcher-core = { workspace = true, features = ["test-fixtures"] }
+siros-presentation = { workspace = true }
+siros-registration = { workspace = true }
+siros-transaction-data = { workspace = true }
+siros-wallet-state = { workspace = true }
+siros-zkp-req-nym-auth = { workspace = true }

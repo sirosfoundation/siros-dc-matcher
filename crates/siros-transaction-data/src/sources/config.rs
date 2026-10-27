@@ -135,14 +135,27 @@ impl Configuration {
         type_id: &TypeId,
         credential: &Credential,
     ) -> Option<&Definition> {
+        self.applying_to(credential)
+            .find(|entry| entry.type_id == *type_id)
+            .map(|entry| &entry.definition)
+    }
+
+    /// The types configured for `credential`'s type, in the configuration's order.
+    #[cfg(feature = "wallet")]
+    pub(crate) fn types<'c>(&'c self, credential: &Credential) -> impl Iterator<Item = &'c TypeId> {
+        self.applying_to(credential).map(|entry| &entry.type_id)
+    }
+
+    /// The entries that apply to `credential`'s type.
+    #[cfg(feature = "wallet")]
+    fn applying_to<'c>(&'c self, credential: &Credential) -> impl Iterator<Item = &'c Configured> {
         let own = match credential.credential_type() {
             CredentialType::Vct(vct) => ConfiguredType::Vct(vct.clone()),
             CredentialType::DocType(doc_type) => ConfiguredType::DocType(doc_type.clone()),
         };
         self.0
             .iter()
-            .find(|entry| entry.type_id == *type_id && entry.applies_to.contains(&own))
-            .map(|entry| &entry.definition)
+            .filter(move |entry| entry.applies_to.contains(&own))
     }
 }
 

@@ -18,7 +18,7 @@ use siros_oid4vp::{
 };
 use siros_transaction_data::{
     Configuration, Context, Entry, EntryPosition, Fetched, HeldDocument, HeldJwt, HeldMetadata,
-    RowValue, Segment, Selection, ShownLabel, Step, TransactionView,
+    RowValue, Segment, Selection, ShownLabel, SourceInputs, Step, TransactionView,
 };
 use siros_trust::TrustStore;
 use siros_wallet_state::{ConfigurationId, IssuerIdentifier, WalletState};
@@ -344,14 +344,16 @@ impl Host {
         let mut fetches = Vec::new();
         loop {
             let context = Context {
-                trust: &self.trust,
-                held: &held,
+                sources: SourceInputs {
+                    trust: &self.trust,
+                    held: &held,
+                    display: &self.display,
+                    configuration: &self.configuration,
+                    language: &self.language,
+                    now: now(),
+                },
                 fetched: &fetched,
-                display: &self.display,
-                configuration: &self.configuration,
-                language: &self.language,
                 signature: self.signature,
-                now: now(),
             };
             let fetch = match context.first_match(entries, credential) {
                 Ok(Step::Done(selection)) => return (Ok(selection), fetches),
@@ -503,6 +505,7 @@ pub fn mdoc() -> Credential {
 pub fn taken(selection: &Selection) -> &siros_transaction_data::Taken {
     match selection {
         Selection::Takes(taken) => taken,
+        Selection::Deferred(_, never) => match *never {},
         Selection::Excluded(causes) => panic!("excluded: {causes:?}"),
     }
 }

@@ -65,7 +65,9 @@ pub use intake::{
     FormFault, IntakeError, IntakeState, JsonParameter, JwkFault, JwsError, JwsFault, KeyMaterial,
     LeafKeyFault, Step, Trust, TrustAnswer, TrustSubject, Verdict, VerifierInfoRule,
 };
-pub use request::{RequestSignature, ResponseMode, TransactionDataItem};
+pub use request::{
+    AttestationFormat, RequestSignature, ResponseMode, TransactionDataInvalid, TransactionDataItem,
+};
 #[cfg(feature = "crypto")]
 pub use response::{
     concat_kdf, cose_kdf, read_reply, ContentKey, EncryptionFault, Presentation, RedirectUri,
@@ -75,6 +77,5 @@ pub use response::{
 pub use values::{AttestationIssuer, Kid, Nonce, Origin, State, TrustChain};
 #[cfg(feature = "crypto")]
 pub use verified::{
-    AccessCertificate, AttestationFormat, CertificateDer, ContentEncryption, Encryption,
-    VerifiedRequest, VerifierView,
+    AccessCertificate, CertificateDer, ContentEncryption, Encryption, VerifiedRequest, VerifierView,
 };

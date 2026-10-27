@@ -1,9 +1,19 @@
 //! The rules of the signed-request and encrypted-response policy of nym_auth (nym_auth
-//! catalogue, "Binding" and "Response confidentiality").
+//! catalogue, "Binding" and "Response confidentiality"), over a verified request and over the
+//! request the credential picker reads.
 
-use siros_oid4vp::ClientIdError;
+use std::borrow::Borrow;
+
+use siros_oid4vp::{
+    AttestationFormat, ClientId, ClientIdError, ClientIdPrefix, Protocol, ResponseMode,
+    UnverifiedRequest,
+};
 
 use crate::verifier_id::VerifierIdRule;
+
+/// The `format` of a registration certificate in `verifier_info` (ETSI TS 119 472-2 V1.2.1,
+/// OIDFVP-HAIP-COMMON-REQ-RO-15).
+const REGISTRATION_CERTIFICATE: &str = "registration_cert";
 
 /// A rule of the policy that a request breaks. Each makes the request invalid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -87,3 +97,106 @@ impl RequestRefusal {
 siros_codec::display_code!(RequestRefusal);
 
 impl std::error::Error for RequestRefusal {}
+
+/// What the policy reads of a request: the wallet's verified request, or the credential
+/// picker's unverified one.
+pub trait PolicyRequest {
+    /// The Client Identifier the request names.
+    type Client<'a>: Borrow<ClientId>
+    where
+        Self: 'a;
+
+    /// The Client Identifier of a signed request; `None` for an unsigned DC API request, whose
+    /// `client_id` the wallet ignores (OpenID4VP 1.0, A.2), and for a `client_id` the wallet does
+    /// not support.
+    fn client(&self) -> Option<Self::Client<'_>>;
+
+    /// The protocol of a DC API request; `None` over redirects.
+    fn dc_api_protocol(&self) -> Option<Protocol>;
+
+    /// Checks the host's trust verdict on the Client Identifier.
+    ///
+    /// # Errors
+    ///
+    /// [`PolicyRule::Untrusted`] for a negative verdict.
+    fn trusted(&self) -> Result<(), PolicyRule>;
+
+    /// The Response Mode the request names.
+    fn response_mode(&self) -> Option<ResponseMode>;
+
+    /// The `format` of each `verifier_info` attestation.
+    fn attestation_formats(&self) -> Vec<AttestationFormat>;
+}
+
+/// The Client Identifier of `request` when it meets the policy: signed under a prefix other
+/// than `redirect_uri`, over the Digital Credentials API as `openid4vp-v1-signed`, trusted, and
+/// answered in an encrypted Response Mode of its channel (`direct_post.cwt` or
+/// `direct_post.jwt` over redirects, `dc_api.jwt` over the Digital Credentials API). A request
+/// that carries a registration certificate in `verifier_info` is refused: the catalogue takes
+/// the semantic identifier from it, and no intake authenticates it.
+///
+/// # Errors
+///
+/// [`RequestRefusal`]: the first rule `request` breaks.
+pub fn signed_and_encrypted<R: PolicyRequest>(
+    request: &R,
+) -> Result<R::Client<'_>, RequestRefusal> {
+    let policy = RequestRefusal::Policy;
+    let client = request
+        .client()
+        .filter(|client| client.borrow().prefix() != ClientIdPrefix::RedirectUri)
+        .ok_or(policy(PolicyRule::Unsigned))?;
+    if request.dc_api_protocol() == Some(Protocol::Multisigned) {
+        return Err(policy(PolicyRule::Multisigned));
+    }
+    request.trusted().map_err(policy)?;
+    let encrypted = matches!(
+        (request.dc_api_protocol(), request.response_mode()),
+        (
+            None,
+            Some(ResponseMode::DirectPostCwt | ResponseMode::DirectPostJwt)
+        ) | (Some(_), Some(ResponseMode::DcApiJwt))
+    );
+    if !encrypted {
+        return Err(policy(PolicyRule::ResponseMode));
+    }
+    let registered = request
+        .attestation_formats()
+        .iter()
+        .any(|format| format.as_str() == REGISTRATION_CERTIFICATE);
+    if registered {
+        return Err(RequestRefusal::VerifierId(
+            VerifierIdRule::RegistrationCertificate,
+        ));
+    }
+    Ok(client)
+}
+
+/// The request as the credential picker reads it. The picker holds no trust verdict: the wallet
+/// judges the Client Identifier at intake, and refuses the selection of an untrusted one.
+impl PolicyRequest for UnverifiedRequest {
+    type Client<'a> = ClientId;
+
+    fn client(&self) -> Option<ClientId> {
+        if !self.protocol().is_signed() {
+            return None;
+        }
+        ClientId::parse(self.client_id()?).ok()
+    }
+
+    fn dc_api_protocol(&self) -> Option<Protocol> {
+        Some(self.protocol())
+    }
+
+    fn trusted(&self) -> Result<(), PolicyRule> {
+        Ok(())
+    }
+
+    fn response_mode(&self) -> Option<ResponseMode> {
+        UnverifiedRequest::response_mode(self)
+    }
+
+    fn attestation_formats(&self) -> Vec<AttestationFormat> {
+        self.verifier_info_formats()
+    }
+}

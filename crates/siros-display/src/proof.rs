@@ -4,21 +4,20 @@ use serde_json::Value;
 use siros_zkp_req::{QueryOption, ReqItem, ZkpReqQuery};
 
 use crate::error::DisplayError;
+use crate::field::{Field, FieldText, FIELD_MAX};
 use crate::text::DisplayText;
-
-/// The most characters of a row's label or value.
-const ROW_MAX_CHARS: usize = 80;
 
 /// The end of every row value. The rows come from a request whose signature nobody has
 /// checked, so they state what is asked and nothing more.
 const UNVERIFIED: &str = "(unverified request)";
 
-/// One `(label, value)` row per `_req` item of `option`, in the Verifier's order.
+/// One picker field per `_req` item of `option`, in the Verifier's order.
 ///
 /// `age_check` shows its `range` and `pseudonym` its `config`, as given. Any other function
 /// shows its `fn_id` as the label. The detail is clipped to fit with the `(unverified request)`
-/// marker in 80 characters, the label to 80, each ending in an ellipsis where clipped. The rows
-/// judge nothing: whether the request is acceptable is the wallet's decision.
+/// marker in [`FIELD_MAX`] characters, the label to [`FIELD_MAX`], each ending in an ellipsis
+/// where clipped. The rows judge nothing: whether the request is acceptable is the wallet's
+/// decision.
 ///
 /// # Errors
 ///
@@ -26,22 +25,17 @@ const UNVERIFIED: &str = "(unverified request)";
 // `inline` makes the matcher compile this function with its own copies of the std functions it
 // calls. Compiled here, it brings a second copy of each into matcher.wasm.
 #[inline]
-pub fn rows(
-    query: &ZkpReqQuery,
-    option: &QueryOption,
-) -> Result<Vec<(String, String)>, DisplayError> {
+pub fn rows(query: &ZkpReqQuery, option: &QueryOption) -> Result<Vec<Field>, DisplayError> {
     items(query, option)
         .map(|item| {
             let (label, detail) = parts(item?);
             // Clipping shortens the detail and keeps the marker.
             let value = match detail {
-                None => UNVERIFIED.to_string(),
-                Some(detail) => format!(
-                    "{} {UNVERIFIED}",
-                    clip(&detail, ROW_MAX_CHARS - UNVERIFIED.len() - 1)
-                ),
+                None => FieldText::fit(UNVERIFIED),
+                Some(detail) => FieldText::fit_within(&detail, FIELD_MAX - UNVERIFIED.len() - 1)
+                    .marked(UNVERIFIED),
             };
-            Ok((clip(label, ROW_MAX_CHARS), value))
+            Ok(Field::new(FieldText::fit(label), Some(value)))
         })
         .collect()
 }
@@ -68,17 +62,6 @@ fn parts(item: &ReqItem) -> (&str, Option<String>) {
         "pseudonym" => ("Pseudonym", param("config").map(|c| format!("config {c}"))),
         other => (other, None),
     }
-}
-
-/// At most `max` characters, ending in an ellipsis when cut.
-#[inline]
-fn clip(text: &str, max: usize) -> String {
-    if text.chars().count() <= max {
-        return text.to_string();
-    }
-    let mut out: String = text.chars().take(max.saturating_sub(1)).collect();
-    out.push('\u{2026}');
-    out
 }
 
 /// A proof statement row of a request intake verified.

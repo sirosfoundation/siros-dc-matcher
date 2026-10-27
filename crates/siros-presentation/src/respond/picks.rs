@@ -8,27 +8,8 @@ use super::selection::{Selection, Subset};
 use crate::error::{Inconsistency, PresentationError};
 use crate::ids::{AdditionIndex, OfferIndex, QueryIndex};
 use crate::offers::{Addition, Member};
+use crate::pick::Pick;
 use crate::plan::Planned;
-
-/// A credential picker entry the user picked, by the ids its metadata carries (K3).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Pick {
-    offer: OfferIndex,
-    query: QueryId,
-    credential: CredentialId,
-}
-
-impl Pick {
-    /// The entry of the credential `credential` answering the Credential Query `query` in the
-    /// offer `offer`.
-    pub fn new(offer: OfferIndex, query: QueryId, credential: CredentialId) -> Self {
-        Self {
-            offer,
-            query,
-            credential,
-        }
-    }
-}
 
 /// Why the picked entries make no selection (K3).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
