@@ -59,12 +59,6 @@ impl VerifiedSignature {
 pub enum SignatureError {
     /// No signature answers this effect.
     Missing(SignId),
-    /// Two signatures answer this effect.
-    Repeated(SignId),
-    /// A signature names this identifier, which no effect has.
-    Unknown(SignId),
-    /// The signature of this effect has this many bytes; `r ‖ s` has 64.
-    Length(SignId, usize),
     /// The signature of this effect does not verify under its holder key.
     Invalid(SignId),
 }
@@ -74,9 +68,6 @@ impl SignatureError {
     pub fn code(self) -> &'static str {
         match self {
             Self::Missing(_) => "signature_missing",
-            Self::Repeated(_) => "signature_repeated",
-            Self::Unknown(_) => "signature_unknown",
-            Self::Length(..) => "signature_length",
             Self::Invalid(_) => "signature_invalid",
         }
     }
@@ -121,11 +112,23 @@ impl Sign {
     }
 
     /// The signature `signature`, `r ‖ s`, when it verifies under the holder key (A5).
+    ///
+    /// # Panics
+    ///
+    /// When `signature` is not 64 bytes.
+    #[expect(
+        clippy::panic,
+        reason = "the host returns ES256 signatures as `r ‖ s` (H3); another length is a bug of \
+                  the host, and no presentation can carry it"
+    )]
     fn verified(&self, signature: Vec<u8>) -> Result<VerifiedSignature, SignatureError> {
         let length = signature.len();
-        let signature: [u8; 64] = signature
-            .try_into()
-            .map_err(|_| SignatureError::Length(self.id, length))?;
+        let Ok(signature) = <[u8; 64]>::try_from(signature) else {
+            panic!(
+                "the host's signature of effect {} has {length} bytes; r || s has 64",
+                self.id.value()
+            );
+        };
         if es256_verifies(&self.holder, &self.input.0, &signature) {
             Ok(VerifiedSignature(signature))
         } else {
@@ -151,20 +154,31 @@ pub(crate) fn key_id(credential: &Credential) -> Result<KeyId, PresentationError
 ///
 /// # Errors
 ///
-/// [`SignatureError`]: a signature of no effect, two for one effect, one that is not 64 bytes
-/// or does not verify, or an effect without one.
+/// [`SignatureError`]: a signature that does not verify, or an effect without one.
+///
+/// # Panics
+///
+/// When a signature names no effect, two answer one effect, or one is not 64 bytes.
+#[expect(
+    clippy::panic,
+    reason = "the host answers each `Sign` effect once, by its identifier (A5); an answer to no \
+              effect or a second answer is a bug of the host, and either signature could be \
+              the one presented"
+)]
 pub(crate) fn verified(
     signs: &[Sign],
     signatures: Vec<(SignId, Vec<u8>)>,
 ) -> Result<Vec<VerifiedSignature>, SignatureError> {
     let mut by_id: Vec<Option<VerifiedSignature>> = vec![None; signs.len()];
     for (id, signature) in signatures {
-        let (slot, sign) = by_id
-            .get_mut(id.value())
-            .zip(signs.get(id.value()))
-            .ok_or(SignatureError::Unknown(id))?;
+        let Some((slot, sign)) = by_id.get_mut(id.value()).zip(signs.get(id.value())) else {
+            panic!(
+                "the host signed effect {}, which no Sign effect has",
+                id.value()
+            );
+        };
         if slot.is_some() {
-            return Err(SignatureError::Repeated(id));
+            panic!("the host answered Sign effect {} twice", id.value());
         }
         *slot = Some(sign.verified(signature)?);
     }
