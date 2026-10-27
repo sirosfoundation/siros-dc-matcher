@@ -16,7 +16,7 @@ commit `e65861c`). **Breaking**: requests and presentations follow the draft, th
 `zkp_req_plan`, and the vectors move to the crates that own their rules. Consumers that keep a
 copy of the vectors (siros-sdk-kotlin, siros-sdk-swift) must re-copy them from the new
 directories; the vector set digest below identifies them. `matcher.wasm` is 301,872 bytes
-against the 307,200-byte budget (303,914 before).
+against the 307,200-byte budget (303,418 at v0.11.0).
 
 ### Changed
 
@@ -211,7 +211,7 @@ are versioned 0.11.0 to match the release; `siros-dcql` has no change.
 Consumers that keep a copy of the vectors (siros-sdk-kotlin, siros-sdk-swift)
 must re-copy `zkp_req`, `zkp_req_response`, `zkp_req_unsat` and `proof_time`
 from the v0.11.0 tag; the vector set digest below identifies them.
-`matcher.wasm` is 303,480 bytes against the 307,200-byte budget.
+`matcher.wasm` is 303,418 bytes against the 307,200-byte budget.
 
 ### Changed
 
