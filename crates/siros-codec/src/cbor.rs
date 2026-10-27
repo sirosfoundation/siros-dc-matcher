@@ -188,6 +188,13 @@ struct Reader<'a> {
 }
 
 impl<'a> Reader<'a> {
+    /// The next byte.
+    fn byte(&mut self) -> Result<u8, CborError> {
+        let byte = *self.bytes.get(self.at).ok_or(CborError::Truncated)?;
+        self.at += 1;
+        Ok(byte)
+    }
+
     fn take(&mut self, n: usize) -> Result<&'a [u8], CborError> {
         let end = self.at.checked_add(n).ok_or(CborError::Truncated)?;
         let out = self.bytes.get(self.at..end).ok_or(CborError::Truncated)?;
@@ -197,7 +204,7 @@ impl<'a> Reader<'a> {
 
     /// The next head.
     fn head(&mut self) -> Result<Head, CborError> {
-        let first = *self.take(1)?.first().ok_or(CborError::Truncated)?;
+        let first = self.byte()?;
         let (major, info) = (Major::of(first), first & 0x1f);
         let width = match info {
             0..=23 => {

@@ -113,16 +113,20 @@ pub fn bind<'e, 'a>(
         .collect::<Result<Vec<_>, _>>()?;
     // Stable: the entries of one credential stay in the order of the request.
     placed.sort_by_key(|(placed, _)| placed.position);
-    placed
-        .chunk_by(|(a, _), (b, _)| a.position == b.position)
-        .map(|group| {
-            let entries: Vec<&'e Entry> = group.iter().map(|(_, entry)| *entry).collect();
+    // Each credential with its entries: a group starts with the credential it holds.
+    let mut groups: Vec<(Placed<'a>, Vec<&'e Entry>)> = Vec::new();
+    for (placed, entry) in placed {
+        match groups.last_mut() {
+            Some((last, entries)) if last.position == placed.position => entries.push(entry),
+            _ => groups.push((placed, vec![entry])),
+        }
+    }
+    groups
+        .into_iter()
+        .map(|(placed, entries)| {
             let accepted: Vec<&Accepted> = entries.iter().map(|e| e.binding().hashes).collect();
             Ok(MemberBinding {
-                presented: group
-                    .first()
-                    .map(|(placed, _)| placed.presented)
-                    .ok_or(TransactionDataError::CredentialUnavailable)?,
+                presented: placed.presented,
                 choice: Choice::of(&accepted)?,
                 entries,
             })
