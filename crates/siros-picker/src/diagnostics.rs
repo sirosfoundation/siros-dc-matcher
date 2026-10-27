@@ -15,8 +15,8 @@
 //!
 //! * An entry with no icon is silently dropped. The host logs
 //!   `WasmRuntime: Null icon for icon` in its own process and shows nothing.
-//!   Every diagnostic therefore carries [`FALLBACK_ICON_PNG`], and at the
-//!   same 64x64 as real entries — a 4x4 one was dropped just the same.
+//!   Every diagnostic therefore carries the wallet's default icon, which the
+//!   wallet's writer holds to 64 pixels or more: a 4x4 one was dropped too.
 //! * Declaring the same set id twice in one invocation makes the host
 //!   discard the *whole* output, silently. Each diagnostic has its own set
 //!   id, `siros-debug-<position>`, apart from the offers' `siros-<position>`.
@@ -25,7 +25,7 @@ use android_credman::{
     AnyEntry, C8String, C8StringExt, EntrySet, SetEntry, SetSink, Slot, VerificationDisplay,
 };
 use siros_presentation::OfferIndex;
-use siros_registration::{Diagnostics as Shown, Registration};
+use siros_registration::{Diagnostics as Shown, Icon, Registration};
 
 /// Why the picker shows less than a request asks for.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,18 +64,24 @@ impl Unshown {
     }
 }
 
-/// Whether the wallet registered with its diagnostics shown.
-pub(crate) struct Diagnostics(Shown);
+/// Whether the wallet registered with its diagnostics shown, and the icon they show.
+pub(crate) struct Diagnostics<'r> {
+    shown: Shown,
+    icon: &'r Icon,
+}
 
-impl Diagnostics {
+impl<'r> Diagnostics<'r> {
     /// The diagnostics `registration` asks for.
-    pub(crate) fn of(registration: &Registration) -> Self {
-        Self(registration.diagnostics())
+    pub(crate) fn of(registration: &'r Registration) -> Self {
+        Self {
+            shown: registration.diagnostics(),
+            icon: registration.default_icon(),
+        }
     }
 
     /// Emits one entry per reason of `unshown`, each in its own set, when shown.
     pub(crate) fn emit(&self, sets: &mut impl SetSink, unshown: &[Unshown]) {
-        if self.0 == Shown::Hidden {
+        if self.shown == Shown::Hidden {
             return;
         }
         for (at, reason) in unshown.iter().enumerate() {
@@ -88,7 +94,7 @@ impl Diagnostics {
             let entry = SetEntry::new(
                 &cred_id,
                 AnyEntry::Verification(VerificationDisplay {
-                    icon: FALLBACK_ICON_PNG,
+                    icon: self.icon.as_bytes(),
                     title: &title,
                     subtitle: Some(&subtitle),
                     disclaimer: None,
@@ -99,19 +105,3 @@ impl Diagnostics {
         }
     }
 }
-
-/// A 64x64 solid-colour PNG for an entry without an icon of its own — the same dimensions the
-/// wallet ships for real ones. See the module documentation for why it exists and why it is
-/// this size.
-#[rustfmt::skip]
-pub(crate) const FALLBACK_ICON_PNG: &[u8] = &[
-    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
-    0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x40, 0x08, 0x02, 0x00, 0x00, 0x00, 0x25, 0x0B, 0xE6,
-    0x89, 0x00, 0x00, 0x00, 0x50, 0x49, 0x44, 0x41, 0x54, 0x78, 0xDA, 0xED, 0xCF, 0x41, 0x09, 0x00,
-    0x00, 0x08, 0x04, 0xB0, 0xCB, 0x61, 0x10, 0xDB, 0xD8, 0xBF, 0x86, 0x11, 0x7C, 0x0B, 0x83, 0x15,
-    0x58, 0xAA, 0xE7, 0xB5, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08,
-    0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08,
-    0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08,
-    0x08, 0x08, 0x08, 0x5C, 0x16, 0x49, 0xAB, 0xD0, 0x97, 0x3A, 0x79, 0x4A, 0x21, 0x00, 0x00, 0x00,
-    0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
-];

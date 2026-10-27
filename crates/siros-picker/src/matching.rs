@@ -56,7 +56,7 @@ pub(crate) fn pick(
         Err(NoOffer::CredentialUnavailable) => return vec![Unshown::CredentialUnavailable],
         Err(NoOffer::Unmatched(failure)) => return vec![Unshown::Unmatched(failure.code())],
     };
-    let shown = OfferEntries::sources(registration, &answered, &transactions, level);
+    let shown = OfferEntries::sources(&answered, &transactions, level);
     offers
         .offers()
         .iter()

@@ -5,7 +5,7 @@ use siros_codec::date::DateTime;
 use siros_codec::member::{ArrayIndex, MemberFault};
 use siros_credential::{ClaimTree, Format};
 use siros_dcql::{DocType, Vct};
-use siros_display::{ClaimLabels, DescribedLabel, DisplayText, Locale};
+use siros_display::{CardText, ClaimLabels, DescribedLabel, DisplayText, Locale};
 use siros_presentation::{KeyHolding, Presentability};
 use siros_transaction_data::{Projected, ServedTypes, TypeId};
 use siros_trust::{IssuerFacts, KeyIdentifier};
@@ -20,13 +20,14 @@ use crate::registration::{
 use crate::wire::{self, Map};
 
 /// The members of a registration.
-const MEMBERS: [Member; 8] = [
+const MEMBERS: [Member; 9] = [
     Member::Version,
     Member::RegisteredAt,
     Member::Language,
     Member::Diagnostics,
     Member::Systems,
     Member::Icons,
+    Member::DefaultIcon,
     Member::Definitions,
     Member::Credentials,
 ];
@@ -99,6 +100,12 @@ impl Registration {
                     .map_err(|_| RegistrationError::IconEmpty(IconIndex::new(at)))
             })
             .collect::<Result<Vec<_>, _>>()?;
+        let at = fields.read(Member::DefaultIcon, wire::unsigned)?;
+        let default_icon = usize::try_from(at)
+            .ok()
+            .and_then(|index| icons.get(index))
+            .ok_or(RegistrationError::DefaultIconUnknown(at))?
+            .clone();
         let definitions = fields
             .read(Member::Definitions, Item::as_array)?
             .iter()
@@ -106,7 +113,7 @@ impl Registration {
             .map(|(at, definition)| definition_at(DefinitionIndex::new(at), definition, &language))
             .collect::<Result<Vec<_>, _>>()?;
         let table = Tables {
-            icons: icons.len(),
+            icons: &icons,
             definitions: &definitions,
         };
         let credentials = fields
@@ -128,7 +135,7 @@ impl Registration {
             language,
             diagnostics,
             systems,
-            icons,
+            default_icon,
             credentials,
         })
     }
@@ -169,7 +176,7 @@ fn repeated_entry(credentials: &[RegisteredCredential]) -> Option<usize> {
 
 /// The tables a credential refers to.
 struct Tables<'t> {
-    icons: usize,
+    icons: &'t [Icon],
     definitions: &'t [Projected],
 }
 
@@ -220,34 +227,25 @@ impl Tables<'_> {
         if let Some(unknown) = fields.unknown(&[Member::Title, Member::Issuer, Member::Icon]) {
             return Err(CredentialFault::MemberUnknown(unknown));
         }
-        let text = |item: &Item<'_>, member: Member| {
-            let text = item
+        let text = |member: Member| {
+            let text = fields
+                .require(member)?
                 .as_text()
                 .ok_or(CredentialFault::Member(member, MemberFault::WrongType))?;
-            DisplayText::label(text).map_err(CredentialFault::Text)
+            CardText::new(text).map_err(CredentialFault::Text)
         };
-        let title = fields.require(Member::Title)?;
-        let icon = fields
-            .optional(Member::Icon)
-            .map(|icon| {
-                let at = wire::unsigned(icon).ok_or(CredentialFault::Member(
-                    Member::Icon,
-                    MemberFault::WrongType,
-                ))?;
-                usize::try_from(at)
-                    .ok()
-                    .filter(|&index| index < self.icons)
-                    .map(IconIndex::new)
-                    .ok_or(CredentialFault::IconUnknown(at))
-            })
-            .transpose()?;
+        let at = wire::unsigned(fields.require(Member::Icon)?).ok_or(CredentialFault::Member(
+            Member::Icon,
+            MemberFault::WrongType,
+        ))?;
+        let icon = usize::try_from(at)
+            .ok()
+            .and_then(|index| self.icons.get(index))
+            .ok_or(CredentialFault::IconUnknown(at))?;
         Ok(RegisteredCard {
-            title: text(title, Member::Title)?,
-            issuer: fields
-                .optional(Member::Issuer)
-                .map(|issuer| text(issuer, Member::Issuer))
-                .transpose()?,
-            icon,
+            title: text(Member::Title)?,
+            issuer: text(Member::Issuer)?,
+            icon: icon.clone(),
         })
     }
 

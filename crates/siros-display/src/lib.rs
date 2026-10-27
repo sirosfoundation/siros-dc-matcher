@@ -39,7 +39,7 @@ pub use error::{ColourFault, DisplayError, EntryFault, LogoFault};
 pub use field::{Extent, Field, FieldText, FIELD_MAX};
 pub use labels::{ClaimLabels, ClaimRow, DescribedLabel, DisplayValue};
 pub use locale::{lookup, Locale, LocaleError, Localized};
-pub use text::{DisplayText, TextError, LABEL_MAX, VALUE_MAX};
+pub use text::{CardText, DisplayText, TextError, LABEL_MAX, VALUE_MAX};
 
 #[cfg(feature = "credential")]
 mod cache;
@@ -65,7 +65,7 @@ mod type_metadata;
 #[cfg(feature = "credential")]
 pub use cache::DisplayCache;
 #[cfg(feature = "credential")]
-pub use card::Card;
+pub use card::{Card, CardFallback};
 #[cfg(feature = "credential")]
 pub use colour::Colour;
 #[cfg(feature = "credential")]

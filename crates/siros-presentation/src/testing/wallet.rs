@@ -14,7 +14,7 @@ use siros_codec::cbor::Value as Cbor;
 use siros_codec::date::DateTime;
 use siros_credential::Credential;
 use siros_dcql::QueryId;
-use siros_display::{DisplayCache, Locale};
+use siros_display::{CardFallback, CardText, DisplayCache, Locale};
 use siros_oid4vp::VerifiedRequest;
 use siros_transaction_data::{Amr, Configuration, Factor, HeldMetadata, Inherence, Possession};
 use siros_trust::TrustStore;
@@ -259,11 +259,21 @@ impl Held {
     }
 }
 
+/// The host's card fallbacks of the fixtures, in English.
+pub fn card_fallback() -> CardFallback {
+    CardFallback {
+        title: CardText::new("Credential").unwrap(),
+        issuer: CardText::new("Unknown issuer").unwrap(),
+    }
+}
+
 /// The wallet: its state, its credentials, and what its host gives the plan.
 pub struct Wallet {
     pub credentials: Vec<Credential>,
     pub display: DisplayCache,
     pub language: Locale,
+    /// The host's card title and issuer line for a credential whose metadata names none.
+    pub card_fallback: CardFallback,
     pub configuration: Configuration,
     pub systems: Vec<NymAuthSystem>,
     pub verifier_id: VerifierIdForm,
@@ -345,6 +355,7 @@ impl Wallet {
             credentials,
             display: issuer_display(),
             language: Locale::parse("en").unwrap(),
+            card_fallback: card_fallback(),
             configuration: Configuration::default(),
             systems: NymAuthSystem::ALL.to_vec(),
             verifier_id: VerifierIdForm::X509SanDns,
@@ -379,6 +390,7 @@ impl Wallet {
             records: self.state.presentations(),
             display: &self.display,
             language: &self.language,
+            card_fallback: &self.card_fallback,
             configuration: &self.configuration,
             held: &self.metadata,
             systems: &self.systems,
@@ -503,7 +515,7 @@ pub fn view_texts(view: &crate::ConsentView<'_>) -> Vec<String> {
         for credential in member.credentials() {
             let card = credential.card();
             out.push(card.title().as_str().to_owned());
-            out.extend(card.issuer().map(|i| i.as_str().to_owned()));
+            out.push(card.issuer().as_str().to_owned());
             match credential.shown() {
                 Shown::Claims(rows) => rows.iter().for_each(|r| row(r, out)),
                 Shown::Proof(rows) => {

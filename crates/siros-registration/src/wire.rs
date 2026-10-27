@@ -23,6 +23,7 @@ impl Member {
             Self::Diagnostics => "diagnostics",
             Self::Systems => "systems",
             Self::Icons => "icons",
+            Self::DefaultIcon => "default_icon",
             Self::Definitions => "definitions",
             Self::Credentials => "credentials",
             Self::Entry => "entry",

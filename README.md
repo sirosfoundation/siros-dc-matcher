@@ -193,7 +193,11 @@ The wallet registers the projection of its credentials together with
 language or transaction metadata change. Per credential it holds the typed
 claims, the card and claim labels in the wallet's language, the issuer facts
 the trust store gave at registration, and the transaction data definitions
-the credential is served by. The picker offers what the wallet's plan offers,
+the credential is served by. A card's title and issuer line come from the
+display metadata, else from the fallbacks the host passes in the wallet's
+language. Its icon is a PNG or JPEG of 64 to 256 pixels that the host
+rasterised and resized, else the wallet's default icon: Credential Manager
+drops an entry without an icon, and shows no SVG. The picker offers what the wallet's plan offers,
 except where the plan reads what the projection leaves out: the `zkp_req`
 credential tests and seed, the issuer certificates' validity at request time,
 and ad-hoc transaction metadata. The wallet decides those after the pick.

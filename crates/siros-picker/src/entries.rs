@@ -11,10 +11,10 @@ use siros_presentation::{
     Answer, Answered, Answers, Choice, DisplayFacts, HostDisplay, Offer, OfferIndex, Pick,
     Presentability, Rows, TransactionData, Transactions, WalletDisplay,
 };
-use siros_registration::{RegisteredCredential, Registration};
+use siros_registration::RegisteredCredential;
 use siros_transaction_data::{Deferral, Selection};
 
-use crate::diagnostics::{Unshown, FALLBACK_ICON_PNG};
+use crate::diagnostics::Unshown;
 use crate::fields::{PaymentShown, TransactionShown};
 use crate::matching::NoChoice;
 
@@ -26,7 +26,6 @@ const SET_PREFIX: &str = "siros";
 
 /// The matching the entries are made from.
 pub(crate) struct OfferEntries<'a, 'r> {
-    registration: &'a Registration,
     answered: &'a Answered<'r, &'a RegisteredCredential, NoChoice>,
     transactions: &'a Transactions<Deferral>,
     level: u32,
@@ -44,7 +43,7 @@ struct Presented<'a> {
 struct HostEntry<'a> {
     cred_id: C8String,
     title: C8String,
-    subtitle: Option<C8String>,
+    subtitle: C8String,
     disclaimer: Option<C8String>,
     data: C8String,
     icon: &'a [u8],
@@ -69,13 +68,11 @@ impl<'a, 'r> OfferEntries<'a, 'r> {
     /// The entries of the offers of `answered`, whose transaction data `transactions`
     /// selected, for a host at `level`.
     pub(crate) fn sources(
-        registration: &'a Registration,
         answered: &'a Answered<'r, &'a RegisteredCredential, NoChoice>,
         transactions: &'a Transactions<Deferral>,
         level: u32,
     ) -> Self {
         Self {
-            registration,
             answered,
             transactions,
             level,
@@ -99,7 +96,7 @@ impl<'a, 'r> OfferEntries<'a, 'r> {
         let disclaimer = purpose::line(offer.purposes());
         let strings: Vec<HostEntry<'_>> = shown
             .iter()
-            .map(|shown| HostEntry::of(self.registration, shown, disclaimer.as_deref()))
+            .map(|shown| HostEntry::of(shown, disclaimer.as_deref()))
             .collect();
         let fields: Vec<Vec<Field<'_>>> = strings.iter().map(HostEntry::fields).collect();
         let entries: Vec<SetEntry<'_, AnyEntry<'_>>> = strings
@@ -222,7 +219,7 @@ fn fields(
 
 impl<'a> HostEntry<'a> {
     /// The host strings of `shown`, under the verifier's purpose `disclaimer`.
-    fn of(registration: &'a Registration, shown: &Presented<'_>, disclaimer: Option<&str>) -> Self {
+    fn of(shown: &Presented<'a>, disclaimer: Option<&str>) -> Self {
         let card = shown.credential.card();
         let mut fields: Vec<HostField> = shown.fields.iter().map(HostField::of).collect();
         let payment = match &shown.transaction {
@@ -236,15 +233,10 @@ impl<'a> HostEntry<'a> {
         Self {
             cred_id: C8String::from_str_lossy(&shown.pick.credential().to_string()),
             title: C8String::from_str_lossy(card.title().as_str()),
-            subtitle: card
-                .issuer()
-                .map(|issuer| C8String::from_str_lossy(issuer.as_str())),
+            subtitle: C8String::from_str_lossy(card.issuer().as_str()),
             disclaimer: disclaimer.map(C8String::from_str_lossy),
             data: C8String::from_str_lossy(&shown.pick.to_json().to_string()),
-            // The host drops an entry without an image.
-            icon: registration
-                .icon(card)
-                .map_or(FALLBACK_ICON_PNG, |icon| icon.as_bytes()),
+            icon: card.icon().as_bytes(),
             fields,
             payment,
         }
@@ -267,7 +259,7 @@ impl<'a> HostEntry<'a> {
                 display: PaymentDisplay {
                     merchant_name: &payment.merchant,
                     payment_method_name: &self.title,
-                    payment_method_subtitle: self.subtitle.as_deref(),
+                    payment_method_subtitle: Some(&self.subtitle),
                     payment_method_icon: self.icon,
                     transaction_amount: &payment.amount,
                     bank_icon: None,
@@ -278,7 +270,7 @@ impl<'a> HostEntry<'a> {
             None => AnyEntry::Verification(VerificationDisplay {
                 icon: self.icon,
                 title: &self.title,
-                subtitle: self.subtitle.as_deref(),
+                subtitle: Some(&self.subtitle),
                 disclaimer: self.disclaimer.as_deref(),
                 warning: None,
             }),

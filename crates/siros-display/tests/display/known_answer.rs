@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use siros_codec::base64url;
 use siros_credential::Credential;
 use siros_dcql::{ClaimPath, PathComponent};
-use siros_display::{DisplayCache, DisplayValue, IssuerMetadata, Locale};
+use siros_display::{CardFallback, CardText, DisplayCache, DisplayValue, IssuerMetadata, Locale};
 use siros_wallet_state::WalletState;
 
 const CONFIGURATIONS: &str = r##"{
@@ -174,14 +174,11 @@ fn the_card_and_the_labels_of_the_example() {
     ];
     for (language, given_name, family_name, address) in table {
         let language = Locale::parse(language).unwrap();
-        let card = cache.card(&credential, &language).unwrap();
-        assert_eq!(
-            card.issuer().map(|i| i.as_str()),
-            Some(ISSUER),
-            "{language}"
-        );
+        let card = cache.card(&credential, &language, &fallback());
+        // The Credential Issuer's display names no issuer: the issuer line is the host's.
+        assert_eq!(card.issuer().as_str(), "Unknown issuer", "{language}");
         // The display has one entry, en-US: another language has no entry, and the title is
-        // the credential type.
+        // the host's.
         if language.as_str() == "en-US" {
             assert_eq!(card.title().as_str(), "IdentityCredential");
             let logo = card.logo().unwrap();
@@ -197,7 +194,7 @@ fn the_card_and_the_labels_of_the_example() {
             assert_eq!(card.background().map(rgba), Some((0x12, 0x10, 0x7c, 0xff)));
             assert_eq!(card.text().map(rgba), Some((0xff, 0xff, 0xff, 0xff)));
         } else {
-            assert_eq!(card.title().as_str(), CONFIGURATION, "{language}");
+            assert_eq!(card.title().as_str(), "Credential", "{language}");
             assert!(card.logo().is_none(), "{language}");
         }
 
@@ -230,7 +227,7 @@ fn the_configuration_serves_a_language_the_type_metadata_lacks() {
     let metadata = IssuerMetadata::merge(&issuer_metadata, CONFIGURATION, None).unwrap();
     let type_metadata = siros_display::TypeMetadata::parse(&json!({
         "vct": CONFIGURATION,
-        "display": [{"locale": "fr", "name": "Identité"}],
+        "display": [{"locale": "fr", "name": "Identité"}, {"locale": "it", "name": " "}],
         "claims": [{"path": ["given_name"], "display": [{"locale": "fr", "label": "Prénom"}]}]
     }))
     .unwrap();
@@ -239,13 +236,23 @@ fn the_configuration_serves_a_language_the_type_metadata_lacks() {
     for (language, title, label) in [
         ("fr", "Identité", "Prénom"),
         ("en-US", "IdentityCredential", "Given Name"),
+        // A name of spaces alone gives the host's title.
+        ("it", "Credential", "given_name"),
     ] {
         let language = Locale::parse(language).unwrap();
-        let card = cache.card(&credential, &language).unwrap();
+        let card = cache.card(&credential, &language, &fallback());
         assert_eq!(card.title().as_str(), title, "{language}");
         let rows = cache
             .claim_rows(&credential, &[pointer(&["given_name"])], &language)
             .unwrap();
         assert_eq!(rows[0].label().as_str(), label, "{language}");
+    }
+}
+
+/// The host's card title and issuer line.
+fn fallback() -> CardFallback {
+    CardFallback {
+        title: CardText::new("Credential").unwrap(),
+        issuer: CardText::new("Unknown issuer").unwrap(),
     }
 }

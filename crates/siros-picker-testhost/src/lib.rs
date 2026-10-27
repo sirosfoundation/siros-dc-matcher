@@ -47,8 +47,9 @@ pub struct CapturedEntry {
     pub credential_id: String,
     /// Primary line shown to the user.
     pub title: String,
-    /// Secondary line, typically the issuer.
-    pub subtitle: String,
+    /// Secondary line, typically the issuer: `None` for a null pointer, with the
+    /// absent-versus-empty distinction of [`CapturedEntry::disclaimer`].
+    pub subtitle: Option<String>,
     /// Opaque payload handed back to the wallet on selection.
     pub metadata: String,
     /// Icon bytes the matcher passed, if any.

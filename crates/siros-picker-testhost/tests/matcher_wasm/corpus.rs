@@ -14,7 +14,7 @@ use siros_presentation::testing::verifier::{
 use siros_presentation::testing::wallet::{
     base64, mdoc, mdoc_by, nym_auth, sd_jwt_x5c, Held, Wallet, MDL, MDL_NS, VCT,
 };
-use siros_registration::{CredentialIcon, Icon};
+use siros_registration::CredentialIcon;
 use siros_trust::{Certificate, TrustStore};
 use siros_wallet_state::CredentialId;
 use siros_zkp_req_nym_auth::system::NymAuthSystem;
@@ -109,7 +109,7 @@ fn mdl_cases() -> Vec<Case> {
     let mut icon = case("raw icon", unsigned(age("mso_mdoc", mdl_meta())), plain());
     icon.icons = vec![CredentialIcon {
         credential: CredentialId::new(1),
-        icon: Icon::new(vec![0x89, b'P', b'N', b'G', 0x00, 0x1A, 0x0A]).unwrap(),
+        icon: crate::sides::icon(120, 80),
     }];
     let two_member = json!({"dcql_query": {
         "credentials": [

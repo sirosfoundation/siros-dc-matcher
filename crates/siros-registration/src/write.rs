@@ -3,7 +3,7 @@
 use siros_codec::cbor::Value as Cbor;
 use siros_codec::date::DateTime;
 use siros_credential::{least_used, ClaimTree, Credential, TreeError, UsableCredential};
-use siros_display::{DescribedLabel, DisplayCache, DisplayError, Locale};
+use siros_display::{CardFallback, DescribedLabel, DisplayCache, Locale};
 use siros_presentation::{KeyHolding, MatchCredential};
 use siros_transaction_data::{
     Configuration, HeldMetadata, Projected, ServedTypes, SourceInputs, Unserved,
@@ -14,6 +14,7 @@ use siros_zkp_req_nym_auth::catalogue::{ATTESTATION_TYPES, UNDISCLOSABLE};
 use siros_zkp_req_nym_auth::system::NymAuthSystem;
 
 use crate::error::Member;
+use crate::icon::RasterIcon;
 use crate::registration::{Diagnostics, Icon, Version};
 use crate::wire::write::{self as wire, map};
 
@@ -30,6 +31,9 @@ pub struct RegistrationInput<'a> {
     pub display: &'a DisplayCache,
     /// The wallet's language, which every card, label and definition is projected to (D2).
     pub language: &'a Locale,
+    /// The title and issuer line the host shows, in the wallet's language, for a credential
+    /// whose display metadata names none.
+    pub card_fallback: &'a CardFallback,
     /// The transaction metadata the host holds.
     pub held: &'a HeldMetadata,
     /// The transaction data types the host configures.
@@ -41,28 +45,30 @@ pub struct RegistrationInput<'a> {
     pub systems: &'a [NymAuthSystem],
     /// The credentials the wallet declares presentable without its UI (A9).
     pub background: &'a [CredentialId],
-    /// The image the host rendered for each credential's card.
+    /// The icon the host prepared for each credential whose display metadata gives one: its
+    /// background image, else its issuer's logo, rasterised and resized by the host.
     pub icons: &'a [CredentialIcon],
+    /// The wallet's icon, for every credential without one of its own: Credential Manager drops
+    /// an entry without an icon.
+    pub default_icon: &'a RasterIcon,
     /// Whether the picker names why a request has no offer.
     pub diagnostics: Diagnostics,
     /// The time the registration's facts hold at.
     pub now: DateTime,
 }
 
-/// The image the host rendered for a credential's card.
+/// The icon the host prepared for a credential's card.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CredentialIcon {
     /// The credential.
     pub credential: CredentialId,
-    /// The image.
-    pub icon: Icon,
+    /// The icon.
+    pub icon: RasterIcon,
 }
 
 /// Why the wallet's state gives no registration.
 #[derive(Debug, Clone, PartialEq)]
 pub enum WriteError {
-    /// The card of this credential is no safe text.
-    Card(CredentialId, DisplayError),
     /// The claims of this credential make no claim tree.
     Claims(CredentialId, TreeError),
     /// The sources of this credential give a reason a registration does not record.
@@ -74,7 +80,6 @@ impl WriteError {
     #[must_use]
     pub fn code(&self) -> &'static str {
         match self {
-            Self::Card(_, error) => error.code(),
             Self::Claims(_, error) => error.code(),
             Self::Unserved(_, reason) => reason.code(),
         }
@@ -142,6 +147,7 @@ pub fn write(input: &RegistrationInput<'_>) -> Result<Vec<u8>, WriteError> {
         now: input.now,
     };
     let mut tables = Tables::default();
+    let default_icon = tables.icon(input.default_icon.icon());
     let credentials = least_used(&usable, input.records)
         .into_iter()
         .map(|usable| credential(input, &sources, &mut tables, usable))
@@ -177,6 +183,7 @@ pub fn write(input: &RegistrationInput<'_>) -> Result<Vec<u8>, WriteError> {
                     .collect(),
             ),
         ),
+        (Member::DefaultIcon, Cbor::Unsigned(default_icon)),
         (
             Member::Definitions,
             Cbor::Array(
@@ -216,7 +223,7 @@ fn credential(
             Cbor::Bool(usable.key_holding() == KeyHolding::Held),
         ),
         (Member::Claims, claims.to_cbor()),
-        (Member::Card, card(input, tables, credential)?),
+        (Member::Card, card(input, tables, credential)),
         (
             Member::Labels,
             map([
@@ -237,29 +244,22 @@ fn credential(
 }
 
 /// The card of `credential` in the wallet's language: its title, its issuer line, and the
-/// position of the icon the host rendered for it.
-fn card(
-    input: &RegistrationInput<'_>,
-    tables: &mut Tables,
-    credential: &Credential,
-) -> Result<Cbor, WriteError> {
+/// position of its icon: the one the host prepared for it, else the wallet's.
+fn card(input: &RegistrationInput<'_>, tables: &mut Tables, credential: &Credential) -> Cbor {
     let id = credential.entry().credential_id();
     let card = input
         .display
-        .card(credential, input.language)
-        .map_err(|error| WriteError::Card(id, error))?;
+        .card(credential, input.language, input.card_fallback);
     let icon = input
         .icons
         .iter()
         .find(|icon| icon.credential == id)
-        .map(|icon| (Member::Icon, Cbor::Unsigned(tables.icon(&icon.icon))));
-    Ok(map([(Member::Title, Cbor::text(card.title().as_str()))]
-        .into_iter()
-        .chain(
-            card.issuer()
-                .map(|issuer| (Member::Issuer, Cbor::text(issuer.as_str()))),
-        )
-        .chain(icon)))
+        .map_or(input.default_icon, |icon| &icon.icon);
+    map([
+        (Member::Title, Cbor::text(card.title().as_str())),
+        (Member::Issuer, Cbor::text(card.issuer().as_str())),
+        (Member::Icon, Cbor::Unsigned(tables.icon(icon.icon()))),
+    ])
 }
 
 /// The descriptions `descriptions`, each `[path, label]`, or `[path]` without a label in the

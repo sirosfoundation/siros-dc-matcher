@@ -25,6 +25,9 @@ pub enum Member {
     Systems,
     /// `icons`.
     Icons,
+    /// `default_icon`: the position of the wallet's icon, which a picker entry without a
+    /// credential shows.
+    DefaultIcon,
     /// `definitions`: the projected transaction data definitions.
     Definitions,
     /// `credentials`.
@@ -90,6 +93,8 @@ pub enum RegistrationError {
     System(String),
     /// The icon at this position has no byte.
     IconEmpty(IconIndex),
+    /// `default_icon` names an icon at this position, which the registration lacks.
+    DefaultIconUnknown(u64),
     /// The definition at this position is no projection.
     Definition(DefinitionIndex, ProjectionError),
     /// The definition at this position is projected to another language than the
@@ -148,6 +153,7 @@ impl RegistrationError {
             Self::Language(error) => error.code(),
             Self::System(_) => "registration_system_unknown",
             Self::IconEmpty(_) => "registration_icon_empty",
+            Self::DefaultIconUnknown(_) => "registration_icon_unknown",
             Self::Definition(_, error) => error.code(),
             Self::DefinitionLanguage(_) => "registration_definition_language",
             Self::Credential(_, fault) => fault.code(),

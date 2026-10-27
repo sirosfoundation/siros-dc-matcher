@@ -100,21 +100,20 @@ fn malformed_input_does_not_trap() {
 }
 
 /// The host drops an entry without an image: an entry carries the icon the wallet registered
-/// for its credential as raw bytes, NUL included, and a PNG of its own without one.
+/// for its credential as raw bytes, NUL included, and the wallet's default icon without one.
 #[test]
 fn every_entry_carries_an_image() {
     use siros_presentation::testing::wallet::{mdoc, Held, Wallet, MDL, MDL_NS};
-    use siros_registration::{CredentialIcon, Icon};
+    use siros_registration::CredentialIcon;
 
     let item = [("age_over_18", siros_codec::cbor::Value::Bool(true))];
     let wallet = Wallet::new(vec![
         Held::new(1, "mso_mdoc", mdoc(MDL, MDL_NS, &item)),
         Held::new(2, "mso_mdoc", mdoc(MDL, MDL_NS, &item)),
     ]);
-    let png = vec![0x89, b'P', b'N', b'G', 0x00, 0x1A, 0x0A];
     let icons = [CredentialIcon {
         credential: siros_wallet_state::CredentialId::new(1),
-        icon: Icon::new(png.clone()).unwrap(),
+        icon: sides::icon(120, 80),
     }];
     let request = json!({"requests": [{"protocol": "openid4vp-v1-unsigned", "data": {
         "dcql_query": {"credentials": [{"id": "q1", "format": "mso_mdoc",
@@ -130,7 +129,6 @@ fn every_entry_carries_an_image() {
             .unwrap();
         entry.icon.clone()
     };
-    assert_eq!(icon("1"), png);
-    let fallback = icon("2");
-    assert_eq!(&fallback[..4], b"\x89PNG", "a real image");
+    assert_eq!(icon("1"), sides::png(120, 80));
+    assert_eq!(icon("2"), sides::png(64, 64), "the wallet's default icon");
 }

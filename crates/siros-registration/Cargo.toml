@@ -41,3 +41,7 @@ siros-presentation = { workspace = true, features = ["test-fixtures"] }
 [[example]]
 name = "sample_registration"
 required-features = ["wallet"]
+
+[[test]]
+name = "icon"
+required-features = ["wallet"]

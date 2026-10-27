@@ -14,6 +14,36 @@ pub const LABEL_MAX: usize = 500;
 /// The most characters of a value. The TS12 mandate text holds at most 1000.
 pub const VALUE_MAX: usize = 2_000;
 
+/// A card's title or issuer line: a label with a character other than a space, so that an
+/// entry never shows an empty line.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CardText(DisplayText);
+
+impl CardText {
+    /// The line `text`.
+    ///
+    /// # Errors
+    ///
+    /// [`TextError::Empty`] for text of spaces alone; the rule of [`DisplayText::label`] it
+    /// breaks.
+    pub fn new(text: &str) -> Result<Self, TextError> {
+        if text.trim().is_empty() {
+            return Err(TextError::Empty);
+        }
+        DisplayText::label(text).map(Self)
+    }
+
+    /// The line `text`, when it has a character other than a space.
+    pub fn of(text: &DisplayText) -> Option<Self> {
+        (!text.as_str().trim().is_empty()).then(|| Self(text.clone()))
+    }
+
+    /// The text.
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
 /// Text that is safe to show.
 ///
 /// It holds no character of the Unicode general categories Cc (control), Cf (format: the bidi
@@ -88,6 +118,8 @@ pub enum TextError {
     Unsafe,
     /// The text has more characters than its kind allows.
     TooLong,
+    /// The text of a card's title or issuer line has no character but spaces.
+    Empty,
 }
 
 impl TextError {
@@ -96,6 +128,7 @@ impl TextError {
         match self {
             Self::Unsafe => "text_unsafe",
             Self::TooLong => "text_too_long",
+            Self::Empty => "text_empty",
         }
     }
 }

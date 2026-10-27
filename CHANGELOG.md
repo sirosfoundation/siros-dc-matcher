@@ -37,11 +37,15 @@ the 307,200-byte budget (303,418 at v0.11.0), sha256
   offer is the set `siros-{offer}`, an entry's `cred_id` is the `credentialId`, and the
   standard object's `data` is the pick `{"offer", "query", "credential"}` that
   `Planned::picked` maps to the wallet's selection. An entry's fields are its claim rows, then
-  the displayed claims of the transaction it takes. A credential that takes an entry of a
+  the displayed claims of the transaction it takes. An entry's title, subtitle and icon are the
+  registered card's title, issuer line and icon. A credential that takes an entry of a
   payment rulebook (the EC TS12 v1.0.1 payment type, PaSO Payment) is a payment entry: payee,
-  amount, and at host level 3 the `additional_info`. At host level 7 each entry carries its
-  offer's delegation: `Full` for an offer that needs no wallet display (A9), else none. The
-  picker reads no calling app origin. `mso_mdoc_zk` matches nothing.
+  amount, and at host level 3 the `additional_info`; its payment method icon is the card's
+  icon, and its bank and provider icons are NULL. An absent disclaimer or warning is NULL, and
+  each set id is declared once per invocation. A diagnostic entry shows the wallet's default
+  icon. At host level 7 each entry carries its offer's delegation: `Full` for an offer that
+  needs no wallet display (A9), else none. The picker reads no calling app origin.
+  `mso_mdoc_zk` matches nothing.
 - **BREAKING (request):** a query's options are its `_req_sets`, arrays of `_req` indexes;
   without `_req_sets`, `_req` is the one option (`zkp_req`, Section 2.1). `return` is optional
   except on `pseudonym`. `vp_formats_supported.zkp_req` requires both `proof_backend_values`
@@ -194,7 +198,10 @@ the 307,200-byte budget (303,418 at v0.11.0), sha256
   `lookup`, takes the entry of every display array for the wallet's one language, a `Locale` the
   host gives: RFC 4647 Lookup, then the entry without `locale` (PaSO View, Section 4). A card's
   title and a claim's label come from the Type Metadata, else, for a language it has no entry for,
-  from the configuration's `credential_metadata` (OpenID4VCI 1.0, Section 12.2.4). `DisplayCache`
+  from the configuration's `credential_metadata` (OpenID4VCI 1.0, Section 12.2.4). A card's title
+  and issuer line are `CardText`, labels with a character other than a space: the display
+  entry's name and the Credential Issuer's display name, else the host's `CardFallback` in the
+  wallet's language (the owner's wallet's `displayTitleFallback` and `displaySubtitleFallback`). `DisplayCache`
   keys Type Metadata by siros-dcql's `Vct` and issuer metadata by siros-wallet-state's
   `IssuerIdentifier` and `ConfigurationId`, and gives a credential's issuer metadata
   (`DisplayCache::issuer_metadata`). A `DisplayError` carries its cause: a colour that is no
@@ -412,7 +419,7 @@ the 307,200-byte budget (303,418 at v0.11.0), sha256
     match (Core, Section 7.4): a candidate of a targeted query that takes no entry is excluded,
     an entry no presented credential takes stays unused, and an entry of a type no source
     defines refuses the request unless every credential it targets takes an entry (OpenID4VP
-    1.0, Section 5.1). `PlanInput` takes the wallet's language, the host's transaction data
+    1.0, Section 5.1). `PlanInput` takes the wallet's language, the host's `CardFallback`, the host's transaction data
     `Configuration`, and the transaction metadata the host holds (`HeldMetadata`).
   - The plan also gives the entry each presented credential binds, the credential named by
     `credentialId` and instance (T4); the plan's digest over the request, its trust verdict,
@@ -482,14 +489,18 @@ the 307,200-byte budget (303,418 at v0.11.0), sha256
   version 2 in CBOR. Per credential it holds the entry reference, format and type, holder-key
   presence, the typed claim tree without nym_auth's undisclosable attributes, the card and the
   claim labels in the wallet's language, whether the wallet presents it without its UI, the
-  TR5 facts, the icon, and for each transaction data type the projected definition that serves
-  it or why none does; each definition and icon is stored once. It also holds the system ids
-  the wallet proves, the time of registration and the diagnostics flag. `Registration::read`
+  TR5 facts, the card's title, issuer line and icon, and for each transaction data type the
+  projected definition that serves it or why none does; each definition and icon is stored
+  once. It also holds the system ids the wallet proves, the time of registration, the
+  diagnostics flag and the wallet's default icon. `Registration::read`
   refuses a format `Version` other than `Version::CURRENT` (2) and every unexpected member, with a `RegistrationError` or the
   credential's `CredentialFault`. The writer (`write`, feature `wallet`) takes the parsed
   credentials, the presentation records, the display cache and language, the held transaction
   metadata and the configuration, the trust store, the systems, the credentials presented
-  without the wallet's UI, the icons and the time. `Unverified` is the picker's transaction
+  without the wallet's UI, the card fallbacks, the icons, the default icon and the time. An
+  icon is a `RasterIcon`: a PNG or JPEG of 64 to 256 pixels in each direction, read from its
+  header (`IconFault` otherwise). The host rasterises an SVG and resizes an image before it
+  passes it; a credential without an icon of its own gets the default icon. `Unverified` is the picker's transaction
   data source. It builds with Rust 1.82.
 - `scripts/gen_unicode_tables.py` writes the refused-character ranges of siros-display and the
   grapheme break runs of siros-transaction-data from their oracles' tables.

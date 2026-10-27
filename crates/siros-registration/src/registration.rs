@@ -5,13 +5,11 @@ use serde_json::Value;
 use siros_codec::date::DateTime;
 use siros_credential::{ClaimTree, EntryRef, Format, Instance, TypedValue};
 use siros_dcql::{ClaimPath, DocType, PathError, Vct};
-use siros_display::{ClaimLabels, DisplayText, Locale};
+use siros_display::{CardText, ClaimLabels, Locale};
 use siros_presentation::{KeyHolding, MatchCredential, Presentability};
 use siros_transaction_data::{Definitions, Entry, Incompatibility, Projected, ServedTypes};
 use siros_trust::{Admission, FactRefusal, IssuerFacts, QueryAuthorities, Unadmitted};
 use siros_zkp_req_nym_auth::system::NymAuthSystem;
-
-use crate::ids::IconIndex;
 
 /// The format version of a registration: the one this crate reads and writes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -49,7 +47,7 @@ pub struct Registration {
     pub(crate) language: Locale,
     pub(crate) diagnostics: Diagnostics,
     pub(crate) systems: Vec<NymAuthSystem>,
-    pub(crate) icons: Vec<Icon>,
+    pub(crate) default_icon: Icon,
     pub(crate) credentials: Vec<RegisteredCredential>,
 }
 
@@ -63,7 +61,8 @@ pub enum Diagnostics {
     Hidden,
 }
 
-/// The image of a picker entry, as the host rendered it: at least one byte.
+/// The image of a picker entry, as the wallet registered it: at least one byte. The wallet's
+/// writer admits a raster icon of 64 to 256 pixels alone; the picker passes the bytes on.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Icon(Vec<u8>);
 
@@ -97,9 +96,9 @@ pub struct RegisteredCredential {
 /// and its icon.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RegisteredCard {
-    pub(crate) title: DisplayText,
-    pub(crate) issuer: Option<DisplayText>,
-    pub(crate) icon: Option<IconIndex>,
+    pub(crate) title: CardText,
+    pub(crate) issuer: CardText,
+    pub(crate) icon: Icon,
 }
 
 impl Registration {
@@ -130,14 +129,14 @@ impl Registration {
         &self.systems
     }
 
+    /// The wallet's icon, which a picker entry without a credential shows.
+    pub fn default_icon(&self) -> &Icon {
+        &self.default_icon
+    }
+
     /// The credentials, in the wallet's order.
     pub fn credentials(&self) -> &[RegisteredCredential] {
         &self.credentials
-    }
-
-    /// The icon of `card`.
-    pub fn icon(&self, card: &RegisteredCard) -> Option<&Icon> {
-        self.icons.get(card.icon?.value())
     }
 }
 
@@ -157,6 +156,12 @@ impl Icon {
     /// The bytes.
     pub fn as_bytes(&self) -> &[u8] {
         &self.0
+    }
+
+    /// The icon of a raster image the writer read, which has bytes.
+    #[cfg(feature = "wallet")]
+    pub(crate) fn of_raster(bytes: Vec<u8>) -> Self {
+        Self(bytes)
     }
 }
 
@@ -217,13 +222,18 @@ impl RegisteredCredential {
 
 impl RegisteredCard {
     /// The title.
-    pub fn title(&self) -> &DisplayText {
+    pub fn title(&self) -> &CardText {
         &self.title
     }
 
     /// The issuer line.
-    pub fn issuer(&self) -> Option<&DisplayText> {
-        self.issuer.as_ref()
+    pub fn issuer(&self) -> &CardText {
+        &self.issuer
+    }
+
+    /// The icon.
+    pub fn icon(&self) -> &Icon {
+        &self.icon
     }
 }
 

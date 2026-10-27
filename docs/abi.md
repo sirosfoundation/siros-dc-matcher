@@ -32,8 +32,8 @@ workspace produces the same import and export shape as the C++ reference.
 
 ## Host behaviours the emitter must respect
 
-Neither is documented by the platform. Both were established on a real
-device, from the host process's own logcat output.
+None is documented by the platform. Each was established on a real
+device, from the host process's own logcat output or the share sheet.
 
 - **An entry with no icon is dropped.** `AddEntryToSet` with a null icon
   pointer makes the host log `WasmRuntime: Null icon for icon` in its own
@@ -41,13 +41,18 @@ device, from the host process's own logcat output.
   info wasn't found". An icon reference that resolves to nothing therefore
   costs the credential its *entry*, not just its picture — every entry must
   carry real image bytes, and 64×64 PNG is known to work (a 4×4 one was
-  dropped just the same).
+  dropped just the same). An SVG is not shown: the wallet registers a PNG or
+  JPEG of 64 to 256 pixels (siros-registration's `RasterIcon`), which it
+  rasterises and resizes first; the owner's wallet registers 120 pixels on
+  the long side.
 - **Declaring a set id twice discards the whole output.** Two `AddEntrySet`
   calls with the same id in one invocation make the host silently reject
   everything the matcher emitted — no log line at all. Every set id must be
   unique within an invocation.
+- **An empty disclaimer or warning draws an empty note or badge.** The
+  picker passes NULL for an absent disclaimer, warning or subtitle.
 
-Watch for both with `adb logcat | grep WasmRuntime` while the picker is open —
+Watch for the first two with `adb logcat | grep WasmRuntime` while the picker is open —
 that tag is silent on success, so its absence proves nothing, but its
 `Null icon` form is definitive.
 

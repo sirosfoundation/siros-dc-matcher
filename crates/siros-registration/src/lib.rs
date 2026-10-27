@@ -7,6 +7,7 @@
 //! | TR5: the issuer facts at registration time, and the picker's admission from them alone | [`RegisteredCredential::issuer`], the [`siros_presentation::MatchCredential`] of `&RegisteredCredential` |
 //! | K2: the picker's transaction data selection over the projected definitions, over the Digital Credentials API, deferring ad-hoc metadata to the wallet | [`Unverified`] |
 //! | R-G6: no delivered or derived secret, no undisclosable attribute | [`write()`] reads no auxiliary data and removes the undisclosable attributes |
+//! | Cards: a title and an issuer line from the display metadata, else the host's fallbacks, never a credential type; an icon of every credential, the host's else the wallet's, a PNG or JPEG of 64 to 256 pixels that the host rasterised and resized | [`RegisteredCard`], [`RasterIcon`] (feature `wallet`), [`RegistrationInput`] |
 //!
 //! The format is CBOR, read strictly: a reader refuses every version but [`Version::CURRENT`], every
 //! member it does not define, and every reference outside its tables. The wallet registers the
@@ -28,6 +29,8 @@
 )]
 
 mod error;
+#[cfg(feature = "wallet")]
+mod icon;
 mod ids;
 mod read;
 mod registration;
@@ -37,6 +40,8 @@ mod wire;
 mod write;
 
 pub use error::{CredentialFault, Member, RegistrationError};
+#[cfg(feature = "wallet")]
+pub use icon::{Dimensions, IconFault, RasterIcon, MAX_ICON_PIXELS, MIN_ICON_PIXELS};
 pub use ids::{CredentialIndex, DefinitionIndex, IconIndex};
 pub use registration::{
     Diagnostics, Icon, IconEmpty, RegisteredCard, RegisteredCredential, RegisteredType,

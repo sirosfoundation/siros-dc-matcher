@@ -1,10 +1,13 @@
 //! The picker against the wallet (K2): for the same request, credentials, metadata, trust store
 //! and time, `matcher.wasm` over the registration the wallet writes offers what the wallet's plan
-//! offers, with the same credentials, titles, rows, transactions, purposes and delegation, and
-//! the picks of each offer's entries select that offer in the plan (K3). Where the wallet's plan
-//! reads what the registration leaves out, the picker offers more, and the wallet decides.
+//! offers, with the same credentials, titles, issuer lines, rows, transactions, purposes and
+//! delegation, and the picks of each offer's entries select that offer in the plan (K3). Where
+//! the wallet's plan reads what the registration leaves out, the picker offers more, and the
+//! wallet decides. Every run keeps the host's rules: one declaration per set id, and a null
+//! pointer for an absent subtitle, disclaimer or warning.
 
 use serde_json::Value;
+use siros_picker_testhost::Captured;
 use siros_presentation::testing::wallet::{ready, Wallet};
 use siros_presentation::{Exclusion, Failure, PresentationError};
 use siros_registration::CredentialIcon;
@@ -73,6 +76,7 @@ fn compare(case: &Case) -> Result<(), String> {
         Some(Err(_)) | None => (Vec::new(), Vec::new()),
     };
     let captured = picker_run(&case.request, registration(&case.wallet, &case.icons));
+    host_rules(&captured)?;
     let picker = picker_offers(&captured, &proofs);
     let exception = case.exception.or_else(|| match &planned {
         Some(Err(refusal)) if unproven(refusal) => Some(Exception::CredentialTests),
@@ -114,6 +118,25 @@ fn unproven(refusal: &PresentationError) -> bool {
             .iter()
             .all(|reason| matches!(reason, Exclusion::Unproven(_))),
         _ => false,
+    }
+}
+
+/// Whether `captured` keeps the rules a device showed: a set id declared twice discards the
+/// whole output, and an empty disclaimer or warning draws an empty badge.
+fn host_rules(captured: &Captured) -> Result<(), String> {
+    let mut ids: Vec<&str> = captured.sets.iter().map(|(id, _)| id.as_str()).collect();
+    ids.sort_unstable();
+    if let Some(pair) = ids.windows(2).find(|pair| pair[0] == pair[1]) {
+        return Err(format!("the set id {} is declared twice", pair[0]));
+    }
+    let empty = |text: &Option<String>| text.as_deref() == Some("");
+    match captured
+        .entries
+        .iter()
+        .find(|entry| empty(&entry.subtitle) || empty(&entry.disclaimer) || empty(&entry.warning))
+    {
+        Some(entry) => Err(format!("an empty string for an absent line: {entry:?}")),
+        None => Ok(()),
     }
 }
 

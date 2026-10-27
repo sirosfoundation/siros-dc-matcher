@@ -12,7 +12,7 @@ use siros_presentation::testing::wallet::Wallet;
 use siros_presentation::{
     ConsentView, CredentialView, Fulfilment, OfferView, Pick, Planned, Shown, WalletDisplay,
 };
-use siros_registration::{write, CredentialIcon, Diagnostics, RegistrationInput};
+use siros_registration::{write, CredentialIcon, Diagnostics, RasterIcon, RegistrationInput};
 use siros_transaction_data::{LocationStep, RowValue, Segment};
 
 use siros_picker_testhost::{run, Captured, CapturedEntry, Invocation};
@@ -44,6 +44,8 @@ pub struct Presented {
     pub credential: u64,
     /// The card's title.
     pub title: String,
+    /// The card's issuer line; `None` for an entry without a subtitle.
+    pub issuer: Option<String>,
     /// The fields: each claim row, or `None` per proof statement, and each displayed claim of
     /// the transaction a verification entry shows.
     pub fields: Vec<Option<(String, Option<String>)>>,
@@ -129,6 +131,7 @@ fn wallet_presented(credential: &CredentialView, entries: &[Value]) -> Presented
     Presented {
         credential: credential.entry().credential_id().value(),
         title: credential.card().title().as_str().to_owned(),
+        issuer: Some(credential.card().issuer().as_str().to_owned()),
         fields,
         payment,
     }
@@ -197,16 +200,33 @@ pub fn registration(wallet: &Wallet, icons: &[CredentialIcon]) -> Vec<u8> {
         records: wallet.records(),
         display: &wallet.display,
         language: &wallet.language,
+        card_fallback: &wallet.card_fallback,
         held: &wallet.metadata,
         configuration: &wallet.configuration,
         trust: &wallet.trust,
         systems: &wallet.systems,
         background: &wallet.background,
         icons,
+        default_icon: &icon(64, 64),
         diagnostics: Diagnostics::Hidden,
         now: DateTime::from_unix(NOW).unwrap(),
     })
     .unwrap()
+}
+
+/// A PNG of `width` by `height` pixels, as far as its header reads: the signature and the IHDR
+/// chunk of an 8-bit truecolour image.
+pub fn png(width: u32, height: u32) -> Vec<u8> {
+    let mut bytes = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+    bytes.extend(width.to_be_bytes());
+    bytes.extend(height.to_be_bytes());
+    bytes.extend([8, 2, 0, 0, 0]);
+    bytes
+}
+
+/// The icon of [`png`] `width` by `height`.
+pub fn icon(width: u32, height: u32) -> RasterIcon {
+    RasterIcon::parse(png(width, height)).unwrap()
 }
 
 /// What the picker emits for `request` over `registration` at [`LEVEL`].
@@ -244,6 +264,7 @@ pub fn picker_offers(captured: &Captured, proofs: &[String]) -> Vec<Offered> {
         let presented = Presented {
             credential: pick.credential().value(),
             title: entry.title.clone(),
+            issuer: entry.subtitle.clone(),
             fields: entry
                 .fields
                 .iter()
