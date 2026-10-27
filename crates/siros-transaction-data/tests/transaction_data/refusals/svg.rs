@@ -280,6 +280,79 @@ fn each_vector_outside_the_subset_is_refused() {
             unpinned(x),
         ),
         (
+            "a string in a parenthesis inside image-set()",
+            svg(&format!(
+                r#"<rect style="mask-image:image-set(('{x}') 1x)"/>"#
+            )),
+            unpinned(x),
+        ),
+        (
+            "a var() fallback string in image-set()",
+            svg(&format!(
+                r#"<rect style="mask-image:image-set(var(--n,'{x}') 1x)"/>"#
+            )),
+            SvgFault::Css(CssFault::UrlVariable),
+        ),
+        (
+            "a var() fallback string in -webkit-image-set()",
+            svg(&format!(
+                r#"<rect style="mask-image:-webkit-image-set(var(--n,'{x}') 1x)"/>"#
+            )),
+            SvgFault::Css(CssFault::UrlVariable),
+        ),
+        (
+            "a var() fallback string in image()",
+            svg(&format!(
+                r#"<style>rect{{mask-image:image(var(--n,"{x}"))}}</style>"#
+            )),
+            SvgFault::Css(CssFault::UrlVariable),
+        ),
+        (
+            "a var() fallback string in src()",
+            svg(&format!(
+                r#"<rect style="mask-image:src(var(--n,'{x}'))"/>"#
+            )),
+            SvgFault::Css(CssFault::UrlVariable),
+        ),
+        (
+            "a var() fallback string in cross-fade()",
+            svg(&format!(
+                r#"<rect style="mask-image:cross-fade(var(--n,'{x}') 50%, url(#a))"/>"#
+            )),
+            SvgFault::Css(CssFault::UrlVariable),
+        ),
+        (
+            "a var() inside a gradient inside image-set()",
+            svg(r#"<rect style="mask-image:image-set(linear-gradient(var(--c),red) 1x)"/>"#),
+            SvgFault::Css(CssFault::UrlVariable),
+        ),
+        (
+            "nested var() fallbacks in image-set()",
+            svg(&format!(
+                r#"<rect style="mask-image:image-set(var(--a,var(--b,'{x}')) 1x)"/>"#
+            )),
+            SvgFault::Css(CssFault::UrlVariable),
+        ),
+        (
+            "a custom property holding a string, used in image-set()",
+            svg(&format!(
+                r#"<style>:root{{--logo:"{x}"}}svg{{background-image:image-set(var(--logo) 1x)}}</style>"#
+            )),
+            SvgFault::Css(CssFault::CustomProperty("--logo".to_owned())),
+        ),
+        (
+            "a custom property holding a string in a block of its value",
+            svg(&format!(r#"<rect style="--u:(}};'{x}')"/>"#)),
+            SvgFault::Css(CssFault::CustomProperty("--u".to_owned())),
+        ),
+        (
+            "a custom property holding a url token",
+            svg(&format!(
+                r#"<style>svg{{--u:url({x})}}rect{{mask-image:var(--u)}}</style>"#
+            )),
+            SvgFault::Css(CssFault::CustomProperty("--u".to_owned())),
+        ),
+        (
             "a function the subset does not know",
             svg(r#"<rect style="fill:element(#a) attr(href url)"/>"#),
             SvgFault::Css(CssFault::Function("element".to_owned())),

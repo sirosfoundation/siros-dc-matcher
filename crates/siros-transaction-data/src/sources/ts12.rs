@@ -56,6 +56,9 @@ pub enum Ts12Fault {
     /// integrity metadata this wallet reads (SD-JWT VC, Section 7): its claims path processing
     /// gives this error, or its value does not read.
     Pin(Result<IntegrityFault, PathError>),
+    /// The credential's `vct#integrity` pins Type Metadata at a `vct` that is no `https` URL,
+    /// which no host holds.
+    VctNotHttps,
     /// The host neither holds the document of this URL nor records it as absent: the Type
     /// Metadata of an `https` `vct`, or a document an entry references.
     NotHeld(HttpsUrl),
@@ -97,6 +100,7 @@ impl Ts12Fault {
     pub fn code(&self) -> &'static str {
         match self {
             Self::Pin(_) => "type_metadata_pin_malformed",
+            Self::VctNotHttps => "type_metadata_vct_not_https",
             Self::NotHeld(_) => "type_metadata_not_held",
             Self::Absent(_) => "type_metadata_absent",
             Self::NotUtf8(_) | Self::NotJson(_) | Self::Member(..) | Self::OneOf(_) => {
@@ -119,8 +123,9 @@ siros_codec::display_code!(Ts12Fault);
 
 impl std::error::Error for Ts12Fault {}
 
-/// The type metadata of an SCA Attestation: its `transaction_data_types` entries, every type
-/// the credential supports (Section 3.2, steps 1 and 2).
+/// The transaction metadata of a credential's type metadata: its `transaction_data_types`
+/// entries, every type the credential supports (Section 3.2, steps 1 and 2). Type metadata of
+/// another category than the SCA one supports no type.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct TypeMetadata(Vec<(String, Json)>);
 
@@ -131,19 +136,18 @@ enum Document {
 }
 
 impl TypeMetadata {
-    /// The SCA type metadata of `credential`, an SD-JWT VC: the document at its `vct` (SD-JWT
-    /// VC, Section 6.3.1), as the host holds it, when its `category` is the SCA one and it has
-    /// `transaction_data_types`. A `vct` that is no `https` URL locates no document, and the
-    /// host's record that the document is absent stands for none, unless `vct#integrity` pins
-    /// one.
+    /// The transaction metadata of `credential`, an SD-JWT VC: that of the document at its
+    /// `vct` (SD-JWT VC, Section 6.3.1), as the host holds it, when the document declares
+    /// `transaction_data_types`. The SCA `category` requires them. A `vct` that is no `https`
+    /// URL locates no document, and the host's record that the document is absent stands for
+    /// none, unless `vct#integrity` pins one.
     pub(crate) fn load(
         credential: &Credential,
         held: &HeldMetadata,
     ) -> Result<Option<Self>, Ts12Fault> {
-        let Some(url) = vct_url(credential) else {
+        let Some((url, pin)) = located(credential)? else {
             return Ok(None);
         };
-        let pin = pin(credential, "vct#integrity")?;
         let body = match (held.document(&url), &pin) {
             (Holding::Body(body), _) => body,
             (Holding::Absent, None) => return Ok(None),
@@ -163,10 +167,15 @@ impl TypeMetadata {
         let types = fields
             .optional("transaction_data_types", json::object)
             .map_err(|fault| Ts12Fault::Member(Ts12Member::TransactionDataTypes, fault))?;
-        Ok(match (category.as_deref(), types) {
-            (Some(SCA_CATEGORY), Some(types)) => Some(Self(types.rest())),
-            _ => None,
-        })
+        match (category.as_deref() == Some(SCA_CATEGORY), types) {
+            (true, Some(types)) => Ok(Some(Self(types.rest()))),
+            (true, None) => Err(Ts12Fault::Member(
+                Ts12Member::TransactionDataTypes,
+                MemberFault::Absent,
+            )),
+            (false, Some(_)) => Ok(Some(Self(Vec::new()))),
+            (false, None) => Ok(None),
+        }
     }
 
     /// The URLs of the documents of `credential`'s type metadata: the document at its `vct`,
@@ -179,7 +188,7 @@ impl TypeMetadata {
         credential: &Credential,
         held: &HeldMetadata,
     ) -> Result<Vec<HttpsUrl>, Ts12Fault> {
-        let Some(url) = vct_url(credential) else {
+        let Some((url, _)) = located(credential)? else {
             return Ok(Vec::new());
         };
         let mut urls = vec![url.clone()];
@@ -215,12 +224,23 @@ impl TypeMetadata {
     }
 }
 
-/// The URL of the Type Metadata of `credential`: its `vct`, when the credential is an SD-JWT
-/// VC and the `vct` an `https` URL.
-fn vct_url(credential: &Credential) -> Option<HttpsUrl> {
+/// The URL of the Type Metadata of `credential` and its `vct#integrity` pin: its `vct`, when
+/// the credential is an SD-JWT VC and the `vct` an `https` URL.
+///
+/// # Errors
+///
+/// [`Ts12Fault::Pin`] for a pin that does not read, and [`Ts12Fault::VctNotHttps`] for a pin
+/// of a `vct` that is no `https` URL.
+fn located(credential: &Credential) -> Result<Option<(HttpsUrl, Option<Integrity>)>, Ts12Fault> {
     match credential.format() {
-        Format::SdJwtVc => HttpsUrl::parse(credential.credential_type().as_str()),
-        Format::Mdoc => None,
+        Format::SdJwtVc => {}
+        Format::Mdoc => return Ok(None),
+    }
+    let pin = pin(credential, "vct#integrity")?;
+    match (HttpsUrl::parse(credential.credential_type().as_str()), pin) {
+        (Some(url), pin) => Ok(Some((url, pin))),
+        (None, None) => Ok(None),
+        (None, Some(_)) => Err(Ts12Fault::VctNotHttps),
     }
 }
 

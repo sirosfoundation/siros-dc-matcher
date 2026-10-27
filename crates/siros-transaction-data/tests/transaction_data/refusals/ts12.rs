@@ -2,7 +2,7 @@
 //! 7), the TS12 rendering rules of Section 3.3.1, and TS12 logos: a row per rule.
 
 use serde_json::{json, Value};
-use siros_codec::member::ArrayIndex;
+use siros_codec::member::{ArrayIndex, MemberFault};
 use siros_oid4vp::HttpsUrl;
 use siros_transaction_data::{
     ClaimFault, ClaimIndex, DefinitionError, DefinitionMember, EntryFault, ImageFault,
@@ -191,12 +191,21 @@ fn each_type_metadata_rule_is_refused_alone() {
             fault(Ts12Fault::NotHeld(HttpsUrl::parse(VCT).unwrap())),
         ),
         (
-            "no SCA category (Section 3.2): no source",
+            "no SCA category (Section 3.2, step 1): no type",
             none.clone(),
             served(
                 &json!({"vct": VCT, "transaction_data_types": {PAYMENT: payment_type(json!({}))}}),
             ),
-            Some(Incompatibility::TypeUnsupported),
+            Some(Incompatibility::TypeUndeclared),
+        ),
+        (
+            "the SCA category without transaction_data_types (Section 3.2)",
+            none.clone(),
+            served(&json!({"vct": VCT, "category": "urn:eu:europa:ec:eudi:sua:sca"})),
+            fault(Ts12Fault::Member(
+                Ts12Member::TransactionDataTypes,
+                MemberFault::Absent,
+            )),
         ),
         (
             "a path outside payload (Section 2.3)",
@@ -444,11 +453,28 @@ fn the_configuration_serves_only_credentials_without_metadata() {
         Err(Incompatibility::TypeUndeclared),
         "held with SCA types"
     );
+    host.held = served(&json!({"vct": VCT, "category": "urn:example:other",
+                               "transaction_data_types": {limit: {}}}));
+    assert_eq!(
+        source(&host),
+        Err(Incompatibility::TypeUndeclared),
+        "held with types of another category"
+    );
     // Without its issuer metadata, whether the credential is a PaSO Credential is unknown.
     host.absent = vec![VCT.to_owned()];
     host.held = Vec::new();
     host.display = siros_display::DisplayCache::new(Vec::new(), Vec::new()).unwrap();
     assert_eq!(source(&host), Err(Incompatibility::IssuerMetadataNotHeld));
+
+    // A vct that is no https URL locates no document, and a pin of one locates none either.
+    let urn = "urn:example:card";
+    let host = Host::new(json!([configured(limit, urn, &definition)]));
+    let urn_entries = crate::common::entries(&[entry.to_string()], &query(&["pay"], urn));
+    let pinned = credential_with(urn, &[], &json!({"vct#integrity": sri(b"{}")}));
+    assert_eq!(
+        cause(host.select(&[&urn_entries[0]], &pinned).unwrap()),
+        Some(Incompatibility::TypeMetadata(Ts12Fault::VctNotHttps))
+    );
 }
 
 /// The documents the host should hold for a credential without a chain: its Type Metadata and
