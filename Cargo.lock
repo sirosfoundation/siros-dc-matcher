@@ -2605,6 +2605,8 @@ dependencies = [
  "sha2",
  "siros-codec",
  "siros-dcql",
+ "siros-mdoc",
+ "siros-oid4vp",
 ]
 
 [[package]]

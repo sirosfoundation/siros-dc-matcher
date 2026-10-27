@@ -8,7 +8,7 @@ use siros_credential::{Credential, Parsed, UsableCredential};
 use siros_dcql::mdoc_components;
 use siros_mdoc::{ElementId, Mdoc, SessionTranscript};
 use siros_oid4vp::{Presentation, VerifiedRequest};
-use siros_sdjwt::SdJwt;
+use siros_sdjwt::{Audience, BeforeEpoch, NumericDate, SdJwt};
 use siros_transaction_data::{Amr, Jti, KbJwtInputs, MemberBinding};
 use siros_wallet_state::{CredentialId, KeyId};
 use siros_zkp_req_nym_auth::presenter::Prepared as NymPrepared;
@@ -36,33 +36,19 @@ pub(crate) struct PendingMember<'p> {
     pub(crate) credentials: Vec<(CredentialId, Form<'p>)>,
 }
 
-/// The audience of a response (A6): `origin:` and the calling origin over the Digital
-/// Credentials API, the Client Identifier with its prefix over redirects, signed requests
-/// included (A.4).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Audience(String);
-
-impl Audience {
-    /// The audience of `request`.
-    ///
-    /// # Errors
-    ///
-    /// [`PresentationError::AudienceMissing`] for a request without an origin or a Client
-    /// Identifier.
-    pub(crate) fn of(request: &VerifiedRequest) -> Result<Self, PresentationError> {
-        match (request.origin(), request.verifier().client_id()) {
-            (Some(origin), _) => Ok(Self(format!("origin:{origin}"))),
-            (None, Some(client_id)) => Ok(Self(client_id.as_str().to_owned())),
-            (None, None) => Err(PresentationError::AudienceMissing),
-        }
-    }
-
-    pub(crate) fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    pub(crate) fn into_string(self) -> String {
-        self.0
+/// The audience of a response to `request` (A6): `origin:` and the calling origin over the
+/// Digital Credentials API, the Client Identifier with its prefix over redirects, signed
+/// requests included (A.4).
+///
+/// # Errors
+///
+/// [`PresentationError::AudienceMissing`] for a request without an origin or a Client
+/// Identifier.
+pub(crate) fn audience(request: &VerifiedRequest) -> Result<Audience, PresentationError> {
+    match (request.origin(), request.verifier().client_id()) {
+        (Some(origin), _) => Ok(Audience::new(&format!("origin:{origin}"))),
+        (None, Some(client_id)) => Ok(Audience::new(client_id.as_str())),
+        (None, None) => Err(PresentationError::AudienceMissing),
     }
 }
 
@@ -211,12 +197,11 @@ impl<'p, 'a> Chosen<'p, 'a> {
             )));
         }
         let input = self.planned.input;
-        let iat = u64::try_from(input.now.unix()).map_err(|_| PresentationError::Time)?;
-        let audience = Audience::of(input.request)?;
+        let iat = NumericDate::of(input.now).map_err(|BeforeEpoch| PresentationError::Time)?;
         let binding = presentation.key_binding(
             iat,
-            audience.as_str(),
-            input.request.nonce().as_str(),
+            &audience(input.request)?,
+            input.request.nonce(),
             extra,
         )?;
         Ok(Form::unsigned(binding, id))

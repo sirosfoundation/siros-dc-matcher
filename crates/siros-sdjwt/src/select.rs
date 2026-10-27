@@ -37,7 +37,7 @@ impl SdJwt {
                 chosen.add_within(target.shape());
             }
         }
-        let mut text = self.issuer_jwt().to_owned();
+        let mut text = self.issuer_jwt().as_str().to_owned();
         text.push('~');
         for disclosure in chosen.order {
             text.push_str(disclosure);

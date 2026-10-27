@@ -12,8 +12,8 @@
 //! signature and the validity claims (Section 7.1, steps 2.a to 2.c and 6) are the caller's to
 //! check.
 //!
-//! The host signs [`KeyBinding::signing_input`] with ES256 and returns the raw `r ‖ s`
-//! signature, which [`KeyBinding::assemble`] turns into the SD-JWT+KB.
+//! The host signs [`KeyBinding::signing_input`] with ES256 and returns the signature, which
+//! [`KeyBinding::assemble`] turns into the SD-JWT+KB.
 //!
 //! Types that hold claim values or salts implement no `Debug`, which keeps them out of logs
 //! (R-G6).
@@ -42,8 +42,12 @@ mod sd_jwt;
 mod select;
 mod tree;
 
-pub use error::{KeyBindingError, ParseError, X5cError};
-pub use key_binding::{KeyBinding, Presentation};
+pub use alg::Digest;
+pub use error::{
+    DisclosureFault, EncodedJsonFault, IssuerJwtFault, JsonFault, JsonTextFault, KeyBindingError,
+    ParseError, Placement, ReservedFault, SdAlgFault, X5cError, X5cIndex,
+};
+pub use key_binding::{Audience, BeforeEpoch, KeyBinding, NumericDate, Presentation};
 pub use node::{Children, Node, NodeValue};
 pub use process::MAX_DEPTH;
 pub use sd_jwt::{SdJwt, X5c};

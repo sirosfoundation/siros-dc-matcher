@@ -5,6 +5,7 @@
 //! disclosure, a decoy among them, is an [`Element::Withheld`] at its position.
 
 use serde_json::Number;
+use siros_codec::base64url::Base64Url;
 
 /// A JSON object of the processed payload.
 ///
@@ -96,20 +97,35 @@ pub enum Element {
 }
 
 /// A disclosure of the stored credential, named by its position in the compact form.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct DisclosureId(usize);
+
+impl DisclosureId {
+    /// The disclosure at `position` among the disclosures, from 0.
+    #[must_use]
+    pub fn new(position: usize) -> Self {
+        Self(position)
+    }
+
+    /// The position among the disclosures, from 0.
+    #[must_use]
+    pub fn value(self) -> usize {
+        self.0
+    }
+}
 
 /// A disclosure as stored: its position and its base64url text.
 pub(crate) struct Disclosure {
     id: DisclosureId,
-    encoded: String,
+    encoded: Base64Url,
 }
 
 impl Disclosure {
-    pub(crate) fn new(position: usize, encoded: String) -> Self {
-        Self {
-            id: DisclosureId(position),
-            encoded,
-        }
+    pub(crate) fn new(id: DisclosureId, encoded: Base64Url) -> Self {
+        Self { id, encoded }
+    }
+
+    pub(crate) fn id(&self) -> DisclosureId {
+        self.id
     }
 }

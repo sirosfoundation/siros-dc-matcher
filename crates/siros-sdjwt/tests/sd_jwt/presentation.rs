@@ -2,8 +2,10 @@
 
 use serde_json::{json, Value};
 use siros_codec::base64url;
+use siros_codec::date::DateTime;
 use siros_dcql::PathComponent;
-use siros_sdjwt::{ClaimValue, Element, SdJwt};
+use siros_oid4vp::Nonce;
+use siros_sdjwt::{Audience, ClaimValue, Element, KeyBindingError, NumericDate, SdJwt};
 
 use crate::common::{compact, decoy, disclosure, issued};
 
@@ -125,32 +127,31 @@ type Claims = Vec<(String, Value)>;
 fn key_binding_claims() {
     let a3 = SdJwt::parse(&issued("a3")).unwrap();
     let hashes = json!(["fOBUSQvo46yQO-wRwXBcGqvnbKIueISEL961_Sjd4do"]);
-    let rows: [(Claims, Result<(), &str>); 3] = [
+    let rows: [(Claims, Result<(), KeyBindingError>); 3] = [
         (vec![("transaction_data_hashes".into(), hashes)], Ok(())),
         (
             vec![("nonce".into(), json!("n-0S6_WzA2Mj"))],
-            Err("kb_jwt_claim_collision"),
+            Err(KeyBindingError::RequiredClaim("nonce".to_owned())),
         ),
         (
             vec![("jti".into(), json!("a")), ("jti".into(), json!("b"))],
-            Err("kb_jwt_claim_collision"),
+            Err(KeyBindingError::RepeatedClaim("jti".to_owned())),
         ),
     ];
+    let iat = NumericDate::of(DateTime::from_unix(1709838604).unwrap()).unwrap();
+    let aud = Audience::new("x509_san_dns:client.example.org");
+    let nonce = Nonce::parse("n-0S6_WzA2Mj").unwrap();
     for (extra, expected) in rows {
         let presentation = a3.select::<Vec<PathComponent>>(&[]).unwrap();
-        let binding = presentation.key_binding(
-            1709838604,
-            "x509_san_dns:client.example.org",
-            "n-0S6_WzA2Mj",
-            &extra,
-        );
+        let binding = presentation.key_binding(iat, &aud, &nonce, &extra);
         let binding = match (binding, expected) {
             (Ok(binding), Ok(())) => binding,
-            (Err(e), Err(code)) => {
-                assert_eq!(e.code(), code);
+            (Err(e), Err(cause)) => {
+                assert_eq!(e.code(), "kb_jwt_claim_collision");
+                assert_eq!(e, cause);
                 continue;
             }
-            (Ok(_), Err(code)) => panic!("accepted, expected {code}"),
+            (Ok(_), Err(cause)) => panic!("accepted, expected {cause}"),
             (Err(e), Ok(())) => panic!("refused: {e}"),
         };
         let input = std::str::from_utf8(binding.signing_input()).unwrap();

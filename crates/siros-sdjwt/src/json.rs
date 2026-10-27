@@ -7,7 +7,10 @@ use std::fmt;
 
 use rustc_hash::FxHashSet;
 use serde::de::{Deserialize, Deserializer, Error, MapAccess, SeqAccess, Visitor};
+use serde_json::error::Category;
 use serde_json::Number;
+
+use crate::error::{JsonFault, JsonTextFault};
 
 /// One JSON value.
 pub(crate) enum Json {
@@ -20,9 +23,39 @@ pub(crate) enum Json {
 }
 
 impl Json {
-    /// The value `bytes` encode, alone and in UTF-8.
-    pub(crate) fn parse(bytes: &[u8]) -> Option<Self> {
-        serde_json::from_slice(bytes).ok()
+    /// The value `bytes` encode, alone and in UTF-8, each object's member names unique.
+    pub(crate) fn parse(bytes: &[u8]) -> Result<Self, JsonFault> {
+        let json: Self = serde_json::from_slice(bytes).map_err(|error| JsonFault::Text {
+            kind: match error.classify() {
+                Category::Syntax | Category::Io => JsonTextFault::Syntax,
+                Category::Data => JsonTextFault::Value,
+                Category::Eof => JsonTextFault::Eof,
+            },
+            line: error.line(),
+            column: error.column(),
+        })?;
+        match json.repeated_member() {
+            Some(name) => Err(JsonFault::RepeatedMember(name.to_owned())),
+            None => Ok(json),
+        }
+    }
+
+    /// The first member name an object of this value repeats, in document order.
+    fn repeated_member(&self) -> Option<&str> {
+        match self {
+            Self::Array(items) => items.iter().find_map(Self::repeated_member),
+            Self::Object(members) => {
+                let mut names = FxHashSet::default();
+                members.iter().find_map(|(name, value)| {
+                    if names.insert(name.as_str()) {
+                        value.repeated_member()
+                    } else {
+                        Some(name.as_str())
+                    }
+                })
+            }
+            Self::Null | Self::Bool(_) | Self::Number(_) | Self::String(_) => None,
+        }
     }
 }
 
@@ -80,12 +113,8 @@ impl<'de> Visitor<'de> for JsonVisitor {
     }
 
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Json, A::Error> {
-        let mut names = FxHashSet::default();
         let mut members = Vec::new();
         while let Some(name) = map.next_key::<String>()? {
-            if !names.insert(name.clone()) {
-                return Err(A::Error::custom("a repeated member name"));
-            }
             members.push((name, map.next_value()?));
         }
         Ok(Json::Object(members))

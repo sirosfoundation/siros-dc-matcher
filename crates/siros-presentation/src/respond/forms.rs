@@ -73,9 +73,7 @@ impl Unsigned for KeyBinding {
         signature: &VerifiedSignature,
         _prover: &dyn NymAuthProver,
     ) -> Result<Presentation, PresentationError> {
-        Ok(Presentation::text(
-            self.assemble(signature.signature().as_bytes()),
-        ))
+        Ok(Presentation::text(self.assemble(signature.signature())))
     }
 }
 

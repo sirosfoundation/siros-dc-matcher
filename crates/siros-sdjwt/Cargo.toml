@@ -16,3 +16,5 @@ serde_json = { workspace = true }
 sha2 = "0.10.9"
 siros-codec = { workspace = true }
 siros-dcql = { workspace = true }
+siros-mdoc = { workspace = true }
+siros-oid4vp = { workspace = true, features = ["crypto"] }
