@@ -112,7 +112,7 @@ pub fn client_metadata() -> Value {
 }
 
 /// Intake of `state` to its end, the host trusting every subject.
-fn intake(state: IntakeState) -> VerifiedRequest {
+pub fn intake(state: IntakeState) -> VerifiedRequest {
     intake_with(state, true).unwrap()
 }
 
@@ -306,14 +306,25 @@ pub fn redirect_signed_state(params: &Value, signer: Signer) -> IntakeState {
     )
 }
 
-/// The intake of a DC API request of one entry from [`ORIGIN`].
-fn dc_api_state(protocol: &str, data: Value) -> IntakeState {
-    let request = json!({"requests": [{"protocol": protocol, "data": data}]});
+/// The DC API request of one entry, `protocol` and its `data`, as the browser sends it.
+pub fn dc_api_request(protocol: &str, data: Value) -> Vec<u8> {
+    json!({"requests": [{"protocol": protocol, "data": data}]})
+        .to_string()
+        .into_bytes()
+}
+
+/// The intake of the DC API request `request` from [`ORIGIN`].
+pub fn dc_api_intake(request: &[u8]) -> IntakeState {
     IntakeState::dc_api(
-        request.to_string().as_bytes(),
+        request,
         Origin::new(ORIGIN),
         DateTime::from_unix(NOW).unwrap(),
     )
+}
+
+/// The intake of a DC API request of one entry from [`ORIGIN`].
+fn dc_api_state(protocol: &str, data: Value) -> IntakeState {
+    dc_api_intake(&dc_api_request(protocol, data))
 }
 
 /// An unsigned DC API request of `params`.
@@ -329,11 +340,17 @@ pub fn dc_api_signed(params: &Value) -> VerifiedRequest {
 /// The intake of a DC API request of `params` that `signer` signs, which expects [`ORIGIN`]:
 /// `openid4vp-v1-signed`, or `openid4vp-v1-multisigned` with one signature when `multiple`.
 pub fn dc_api_signed_state(params: &Value, signer: Signer, multiple: bool) -> IntakeState {
+    dc_api_intake(&dc_api_signed_request(params, signer, multiple))
+}
+
+/// The DC API request of `params` that `signer` signs, which expects [`ORIGIN`]:
+/// `openid4vp-v1-signed`, or `openid4vp-v1-multisigned` with one signature when `multiple`.
+pub fn dc_api_signed_request(params: &Value, signer: Signer, multiple: bool) -> Vec<u8> {
     let mut object = params.clone();
     object["expected_origins"] = json!([ORIGIN]);
     if !multiple {
         object["client_id"] = signer.client_id().into();
-        return dc_api_state(
+        return dc_api_request(
             "openid4vp-v1-signed",
             json!({"request": signer.compact(&object)}),
         );
@@ -344,7 +361,7 @@ pub fn dc_api_signed_state(params: &Value, signer: Signer, multiple: bool) -> In
     let protected = b64(header.to_string().as_bytes());
     let payload = b64(object.to_string().as_bytes());
     let signature = signer.sign(&format!("{protected}.{payload}"));
-    dc_api_state(
+    dc_api_request(
         "openid4vp-v1-multisigned",
         json!({"payload": payload, "signatures": [{"protected": protected, "signature": signature}]}),
     )

@@ -1,5 +1,9 @@
 //! The wallet: its credentials, its host, and the phases driven to the response.
 
+use crate::{
+    plan, AdditionIndex, Fetches, Fulfilment, OfferIndex, PlanInput, PlanStep, Planned,
+    PresentationError, Response, Selection, SignId, Subset,
+};
 use ciborium::Value as Ciborium;
 use p256::ecdsa::signature::Signer;
 use p256::ecdsa::{Signature, SigningKey};
@@ -12,10 +16,6 @@ use siros_credential::Credential;
 use siros_dcql::QueryId;
 use siros_display::{DisplayCache, Locale};
 use siros_oid4vp::{FetchResponse, HttpStatus, VerifiedRequest};
-use siros_presentation::{
-    plan, AdditionIndex, Fetches, Fulfilment, OfferIndex, PlanInput, PlanStep, Planned,
-    PresentationError, Response, Selection, SignId, Subset,
-};
 use siros_transaction_data::{Amr, Configuration, Factor, HeldMetadata, Inherence, Possession};
 use siros_trust::TrustStore;
 use siros_wallet_state::{CredentialId, WalletState};
@@ -23,8 +23,8 @@ use siros_zkp_req_nym_auth::system::NymAuthSystem;
 use siros_zkp_req_nym_auth::testing::{self, Issuer, Spec, TestProver, SEED};
 use siros_zkp_req_nym_auth::verifier_id::VerifierIdForm;
 
-use crate::host::{holding_absent, issuer_display, label_text};
-use crate::verifier::{b64, Rng, NOW};
+use super::host::{holding_absent, issuer_display, label_text};
+use super::verifier::{b64, Rng, NOW};
 
 /// The holder's key, nym_auth's test device key, which every credential is bound to.
 pub fn holder() -> SigningKey {
@@ -359,6 +359,11 @@ impl Wallet {
         }
     }
 
+    /// The wallet's presentation records.
+    pub fn records(&self) -> &[siros_wallet_state::PresentationRecord] {
+        self.state.presentations()
+    }
+
     /// Every credential is presentable without the wallet's UI.
     pub fn all_in_background(mut self) -> Self {
         self.background = self
@@ -429,7 +434,7 @@ pub fn ready<'a>(input: &PlanInput<'a>) -> Result<Planned<'a>, PresentationError
 }
 
 /// The host's signatures for every `Sign` effect of `prepared`, with the holder's key.
-pub fn sign_all(signs: &[siros_presentation::Sign]) -> Vec<(SignId, Vec<u8>)> {
+pub fn sign_all(signs: &[crate::Sign]) -> Vec<(SignId, Vec<u8>)> {
     signs
         .iter()
         .map(|sign| {
@@ -505,9 +510,9 @@ pub fn ciborium(bytes: &[u8]) -> Ciborium {
 }
 
 /// Every text a consent view shows, the digest included.
-pub fn view_texts(view: &siros_presentation::ConsentView<'_>) -> Vec<String> {
+pub fn view_texts(view: &crate::ConsentView<'_>) -> Vec<String> {
+    use crate::{MemberView, Shown};
     use siros_display::{ClaimRow, DisplayValue};
-    use siros_presentation::{MemberView, Shown};
     use siros_transaction_data::RowValue;
 
     fn value(shown: &DisplayValue, out: &mut Vec<String>) {

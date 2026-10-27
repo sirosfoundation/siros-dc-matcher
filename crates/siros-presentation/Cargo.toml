@@ -32,6 +32,17 @@ wallet = [
     "siros-trust/chain",
     "siros-zkp-req-nym-auth/request",
 ]
+# The wallet, its host and the verifier of the tests: credentials issued, requests signed and
+# taken through intake, responses decrypted with code of their own.
+test-fixtures = [
+    "wallet",
+    "dep:aes-gcm",
+    "dep:ciborium",
+    "dep:p256",
+    "dep:x509-cert",
+    "sha2/oid",
+    "siros-zkp-req-nym-auth/test-fixtures",
+]
 
 [dependencies]
 itertools = { workspace = true }
@@ -52,10 +63,15 @@ siros-display = { workspace = true, optional = true }
 siros-mdoc = { workspace = true, optional = true }
 siros-sdjwt = { workspace = true, optional = true }
 zeroize = { version = "1.8.1", optional = true }
+aes-gcm = { version = "0.10.3", default-features = false, features = ["aes", "alloc"], optional = true }
+ciborium = { workspace = true, optional = true }
+p256 = { version = "0.13.2", default-features = false, features = ["ecdsa", "ecdh", "alloc", "pem"], optional = true }
+x509-cert = { version = "0.2.5", default-features = false, features = ["std", "builder"], optional = true }
 
 # The tests act as the verifier: they sign requests, issue credentials, and decrypt and check
-# responses with code of their own.
+# responses with code of their own. This crate, on itself, switches on `test-fixtures` for them.
 [dev-dependencies]
+siros-presentation = { path = ".", features = ["test-fixtures"] }
 aes-gcm = { version = "0.10.3", default-features = false, features = ["aes", "alloc"] }
 ciborium = { workspace = true }
 p256 = { version = "0.13.2", default-features = false, features = ["ecdsa", "ecdh", "alloc", "pem"] }

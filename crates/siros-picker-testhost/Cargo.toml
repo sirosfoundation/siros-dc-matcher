@@ -1,7 +1,7 @@
 [package]
 name = "siros-picker-testhost"
 version = "0.1.0"
-description = "A Credential Manager host implementation, so the matcher is testable off-device"
+description = "A Credential Manager host implementation, so the picker is testable off-device"
 publish = false
 edition.workspace = true
 license.workspace = true
@@ -11,12 +11,22 @@ authors.workspace = true
 # harness that never ships, so its floor is allowed above the workspace's.
 rust-version = "1.88"
 
-# wasmtime is added in Phase 1 alongside the first real emission path.
 [dependencies]
 anyhow = "1.0.104"
 serde_json = { workspace = true }
 wasmtime = "30.0.2"
 wasmtime-wasi = "30.0.2"
 
+# The differential test runs the wallet's plan beside the picker: the presentation component's
+# test wallet and verifier, and the registration writer.
 [dev-dependencies]
-siros-dc-matcher-core = { path = "../siros-dc-matcher-core", features = ["test-fixtures"] }
+android-credman = { workspace = true }
+siros-codec = { workspace = true }
+siros-display = { workspace = true, features = ["credential"] }
+siros-oid4vp = { workspace = true, features = ["crypto"] }
+siros-presentation = { workspace = true, features = ["test-fixtures"] }
+siros-registration = { workspace = true, features = ["wallet"] }
+siros-transaction-data = { workspace = true, features = ["wallet"] }
+siros-trust = { workspace = true, features = ["chain"] }
+siros-wallet-state = { workspace = true }
+siros-zkp-req-nym-auth = { workspace = true, features = ["test-fixtures"] }

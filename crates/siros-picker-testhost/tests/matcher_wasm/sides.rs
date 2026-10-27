@@ -1,0 +1,311 @@
+//! What each side offers for a case: the wallet's plan over the request intake verified, and
+//! the picker's entry sets over the registration the wallet writes, in one form to compare.
+
+use android_credman::Picked;
+use serde_json::Value;
+use siros_codec::date::DateTime;
+use siros_display::Field;
+use siros_presentation::testing::host::label_text;
+use siros_presentation::testing::verifier::{dc_api_intake, intake_with, NOW, ORIGIN};
+use siros_presentation::testing::wallet::Wallet;
+use siros_presentation::{
+    ConsentView, CredentialView, Fulfilment, OfferView, Pick, Planned, Shown, WalletDisplay,
+};
+use siros_registration::{write, CredentialIcon, Diagnostics, RegistrationInput};
+use siros_transaction_data::{LocationStep, RowValue, Segment};
+
+use siros_picker_testhost::{run, Captured, CapturedEntry, Invocation};
+
+use crate::matcher_wasm;
+
+/// The host level the picker runs at: the level that shows every option, delegation included.
+pub const LEVEL: u32 = 7;
+
+/// The payment rulebooks' types: EC TS12 v1.0.1's and PaSO's.
+const PAYMENTS: [&str; 2] = ["urn:eudi:sca:payment:1", "urn:paso:sca:global:payment:1"];
+
+/// An offer as either side shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Offered {
+    /// Each member: its Credential Query, and each credential it presents.
+    pub members: Vec<(String, Vec<Presented>)>,
+    /// Whether the wallet presents the offer without its UI: the picker's `Full` delegation,
+    /// the wallet's `WalletDisplay::NotNeeded`.
+    pub background: bool,
+    /// The purpose line.
+    pub purpose: Option<String>,
+}
+
+/// A credential of an offer as either side shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Presented {
+    /// `credentialId`.
+    pub credential: u64,
+    /// The card's title.
+    pub title: String,
+    /// The fields: each claim row, or `None` per proof statement, and each displayed claim of
+    /// the transaction a verification entry shows.
+    pub fields: Vec<Option<(String, Option<String>)>>,
+    /// The payee, the amount and the further lines of a payment entry.
+    pub payment: Option<(String, String, Vec<String>)>,
+}
+
+/// The request intake verifies of the DC API request `request`, the host trusting every
+/// verifier; `None` when intake refuses it.
+pub fn intake(request: &[u8]) -> Option<siros_oid4vp::VerifiedRequest> {
+    intake_with(dc_api_intake(request), true).ok()
+}
+
+/// The offers of the wallet's plan, as its consent view shows them; `entries` are the
+/// request's `transaction_data` entries, decoded.
+pub fn wallet_offers(view: &ConsentView<'_>, entries: &[Value]) -> Vec<Offered> {
+    view.offers()
+        .iter()
+        .map(|offer| wallet_offer(offer, entries))
+        .collect()
+}
+
+fn wallet_offer(offer: &OfferView, entries: &[Value]) -> Offered {
+    Offered {
+        members: offer
+            .members()
+            .iter()
+            .map(|member| {
+                let credentials = member
+                    .credentials()
+                    .iter()
+                    .map(|credential| wallet_presented(credential, entries))
+                    .collect();
+                (member.query_id().as_str().to_owned(), credentials)
+            })
+            .collect(),
+        background: offer.wallet_display() == WalletDisplay::NotNeeded,
+        purpose: offer.purpose().map(host_text),
+    }
+}
+
+/// `text` as a host string carries it: each NUL a space.
+fn host_text(text: &str) -> String {
+    text.replace('\0', " ")
+}
+
+/// A credential of the wallet's view: its claim rows as the picker formats a row, and the
+/// transaction bound to it as a payment entry or as rows.
+fn wallet_presented(credential: &CredentialView, entries: &[Value]) -> Presented {
+    let mut fields: Vec<Option<(String, Option<String>)>> = match credential.shown() {
+        Shown::Claims(rows) => rows
+            .iter()
+            .map(|row| Some(texts(&Field::of_claim(row))))
+            .collect(),
+        Shown::Proof(rows) => rows.iter().map(|_| None).collect(),
+    };
+    let mut payment = None;
+    if let Some(bound) = credential.transaction() {
+        let entry = &entries[bound.entry().value()];
+        let view = bound.view();
+        let rows = view.rows().iter().map(|row| {
+            let paid = paid_location(row.location().steps());
+            (paid, label_text(row.label()), value_text(row.value()))
+        });
+        match expected_payment(entry) {
+            Some((payee, amount)) => {
+                let lines =
+                    view.transaction_title()
+                        .map(label_text)
+                        .into_iter()
+                        .chain(rows.filter(|(paid, ..)| !paid).map(
+                            |(_, label, value)| match value {
+                                Some(value) => format!("{label}: {value}"),
+                                None => label,
+                            },
+                        ))
+                        .collect();
+                payment = Some((payee, amount, lines));
+            }
+            None => fields.extend(rows.map(|(_, label, value)| Some((label, value)))),
+        }
+    }
+    Presented {
+        credential: credential.entry().credential_id().value(),
+        title: credential.card().title().as_str().to_owned(),
+        fields,
+        payment,
+    }
+}
+
+/// The payee and the amount a payment entry shows for `entry`, when its type is a payment
+/// rulebook's: `payee.name`, and the amount with its currency.
+fn expected_payment(entry: &Value) -> Option<(String, String)> {
+    if !PAYMENTS.contains(&entry["type"].as_str()?) {
+        return None;
+    }
+    let payload = &entry["payload"];
+    let payee = payload["payee"]["name"].as_str()?.to_owned();
+    let amount = match (&payload["amount"], payload["currency"].as_str()) {
+        (Value::Number(amount), Some(currency)) => format!("{amount} {currency}"),
+        (Value::String(amount), _) => amount.clone(),
+        _ => return None,
+    };
+    Some((payee, amount))
+}
+
+/// Whether `steps` locate the payee's name, the amount or the currency.
+fn paid_location(steps: &[LocationStep]) -> bool {
+    let keys: Vec<&str> = steps
+        .iter()
+        .filter_map(|step| match step {
+            LocationStep::Key(key) => Some(key.as_str()),
+            LocationStep::Index(_) => None,
+        })
+        .collect();
+    keys.len() == steps.len()
+        && [&["payee", "name"][..], &["amount"], &["currency"]].contains(&keys.as_slice())
+}
+
+/// A row's value as the payload writes it; `None` for a label alone, empty for an image.
+fn value_text(value: &RowValue) -> Option<String> {
+    match value {
+        RowValue::LabelOnly => None,
+        RowValue::Value(scalar) => Some(scalar.text()),
+        RowValue::Template(interpolated) => Some(
+            interpolated
+                .segments()
+                .iter()
+                .map(|segment| match segment {
+                    Segment::Text(text) => text.clone(),
+                    Segment::Value(value) => value.text(),
+                })
+                .collect(),
+        ),
+        RowValue::Image(_) => Some(String::new()),
+    }
+}
+
+/// A picker field's texts.
+fn texts(field: &Field) -> (String, Option<String>) {
+    (
+        field.name().as_str().to_owned(),
+        field.value().map(|value| value.as_str().to_owned()),
+    )
+}
+
+/// The registration the wallet writes for the picker, at the time of the plan.
+pub fn registration(wallet: &Wallet, icons: &[CredentialIcon]) -> Vec<u8> {
+    write(&RegistrationInput {
+        credentials: &wallet.credentials,
+        records: wallet.records(),
+        display: &wallet.display,
+        language: &wallet.language,
+        held: &wallet.metadata,
+        configuration: &wallet.configuration,
+        trust: &wallet.trust,
+        systems: &wallet.systems,
+        background: &wallet.background,
+        icons,
+        diagnostics: Diagnostics::Hidden,
+        now: DateTime::from_unix(NOW).unwrap(),
+    })
+    .unwrap()
+}
+
+/// What the picker emits for `request` over `registration` at [`LEVEL`].
+pub fn picker_run(request: &[u8], registration: Vec<u8>) -> Captured {
+    run(
+        matcher_wasm(),
+        Invocation {
+            request: request.to_vec(),
+            credentials: registration,
+            calling_package: "com.android.chrome".into(),
+            origin: ORIGIN.into(),
+            wasm_version: LEVEL,
+        },
+    )
+    .unwrap()
+}
+
+/// The pick an entry carries (K3).
+pub fn pick(entry: &CapturedEntry) -> Pick {
+    let picked = Picked::parse(&entry.metadata).unwrap();
+    Pick::parse(picked.data().unwrap()).unwrap()
+}
+
+/// The offers of the picker's entry sets, in the order of their offers: each set's entries
+/// grouped by the Credential Query their pick names. `proofs` gives the queries the wallet
+/// answers with a proof, whose fields show proof statements.
+pub fn picker_offers(captured: &Captured, proofs: &[String]) -> Vec<Offered> {
+    let mut offers: Vec<(usize, Offered)> = Vec::new();
+    for entry in &captured.entries {
+        let pick = pick(entry);
+        let at = pick.offer().value();
+        assert_eq!(entry.set_id, format!("siros-{at}"), "an offer's set");
+        let query = pick.query().as_str().to_owned();
+        let proof = proofs.contains(&query);
+        let presented = Presented {
+            credential: pick.credential().value(),
+            title: entry.title.clone(),
+            fields: entry
+                .fields
+                .iter()
+                .map(|(name, value)| (!proof).then(|| (name.clone(), Some(value.clone()))))
+                .collect(),
+            payment: entry.payment.as_ref().map(|payment| {
+                let lines = payment
+                    .additional_info
+                    .iter()
+                    .flat_map(|info| info.lines())
+                    .map(str::to_owned)
+                    .collect();
+                (payment.merchant.clone(), payment.amount.clone(), lines)
+            }),
+        };
+        let background = entry.delegation == Some(1);
+        if !offers.iter().any(|(offer, _)| *offer == at) {
+            offers.push((
+                at,
+                Offered {
+                    members: Vec::new(),
+                    background,
+                    purpose: entry.disclaimer.clone(),
+                },
+            ));
+        }
+        let (_, offer) = offers.iter_mut().find(|(offer, _)| *offer == at).unwrap();
+        assert_eq!(offer.background, background, "one delegation per set");
+        match offer.members.iter_mut().find(|(q, _)| *q == query) {
+            Some((_, credentials)) => credentials.push(presented),
+            None => offer.members.push((query, vec![presented])),
+        }
+    }
+    offers.sort_by_key(|(at, _)| *at);
+    offers.into_iter().map(|(_, offer)| offer).collect()
+}
+
+/// Whether the picks of the entries of the picker's offer at `offer` select that offer of
+/// `planned`, which the wallet then chooses (K3).
+pub fn chosen_through_picks(planned: &Planned<'_>, captured: &Captured, offer: usize) -> bool {
+    let picks: Vec<Pick> = captured
+        .entries
+        .iter()
+        .filter(|entry| entry.set_id == format!("siros-{offer}"))
+        .map(pick)
+        .collect();
+    let Ok(selection) = planned.picked(&picks) else {
+        return false;
+    };
+    planned.choose(&selection, Fulfilment::WalletUi).is_ok()
+}
+
+/// The Credential Queries of `view` that an offer answers with a proof.
+pub fn proof_queries(view: &ConsentView<'_>) -> Vec<String> {
+    view.offers()
+        .iter()
+        .flat_map(OfferView::members)
+        .filter(|member| {
+            member
+                .credentials()
+                .iter()
+                .any(|credential| matches!(credential.shown(), Shown::Proof(_)))
+        })
+        .map(|member| member.query_id().as_str().to_owned())
+        .collect()
+}

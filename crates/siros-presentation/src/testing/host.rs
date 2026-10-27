@@ -6,7 +6,7 @@ use siros_display::{DisplayCache, IssuerMetadata};
 use siros_oid4vp::HttpsUrl;
 use siros_transaction_data::{HeldDocument, HeldMetadata, Segment, ShownLabel};
 
-use crate::wallet::VCT;
+use super::wallet::VCT;
 
 /// The display metadata of the wallet's credentials: the issuer metadata of the configuration
 /// `example` of `https://issuer.example`, without a `credential_metadata_uri`.

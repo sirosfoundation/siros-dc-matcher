@@ -2576,9 +2576,18 @@ dependencies = [
 name = "siros-picker-testhost"
 version = "0.1.0"
 dependencies = [
+ "android-credman",
  "anyhow",
  "serde_json",
- "siros-dc-matcher-core",
+ "siros-codec",
+ "siros-display",
+ "siros-oid4vp",
+ "siros-presentation",
+ "siros-registration",
+ "siros-transaction-data",
+ "siros-trust",
+ "siros-wallet-state",
+ "siros-zkp-req-nym-auth",
  "wasmtime",
  "wasmtime-wasi",
 ]
@@ -2601,6 +2610,7 @@ dependencies = [
  "siros-display",
  "siros-mdoc",
  "siros-oid4vp",
+ "siros-presentation",
  "siros-sdjwt",
  "siros-transaction-data",
  "siros-trust",

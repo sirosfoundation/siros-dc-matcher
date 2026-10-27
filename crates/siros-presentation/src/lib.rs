@@ -67,6 +67,8 @@ mod error;
 mod plan;
 #[cfg(feature = "wallet")]
 mod respond;
+#[cfg(feature = "test-fixtures")]
+pub mod testing;
 
 #[cfg(feature = "wallet")]
 pub use error::{Inconsistency, PresentationError};

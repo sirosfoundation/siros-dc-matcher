@@ -3,100 +3,20 @@
 //! entry for a credential that supports no type of the first, and a refusal per plan rule with
 //! the error the verifier receives.
 
-use p256::ecdsa::signature::Signer;
-use p256::ecdsa::Signature;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use siros_codec::base64url;
-use siros_display::{DisplayCache, IssuerMetadata};
-use siros_oid4vp::{ErrorCode, HttpsUrl};
+use siros_oid4vp::ErrorCode;
+use siros_presentation::testing::paso::{approval, entry, paso_wallet, APPROVAL};
 use siros_presentation::{Fetches, PresentationError};
 use siros_transaction_data::{
-    Configuration, EntryPosition, Exclusion, HeldDocument, HeldJwt, HeldMetadata, Incompatibility,
-    Location, LocationStep, PayloadFault, RowValue, SourceKind, TransactionDataError,
-    UnsignedWarning,
+    Configuration, EntryPosition, Exclusion, Incompatibility, Location, LocationStep, PayloadFault,
+    RowValue, SourceKind, TransactionDataError, UnsignedWarning,
 };
-use siros_trust::TrustStore;
-use siros_wallet_state::{ConfigurationId, IssuerIdentifier};
-use siros_zkp_req_nym_auth::testing::Issuer;
 
 use crate::host::{holding_absent, label_text};
-use crate::verifier::{
-    b64, client_metadata, dc_api_signed, dc_api_unsigned, decrypt_jwe, NONCE, NOW,
-};
-use crate::wallet::{base64, ready, respond, sd_jwt, sd_jwt_x5c, Held, Wallet, VCT};
-
-const APPROVAL: &str = "urn:paso:sca:com.example:approval:1";
-const METADATA_URI: &str = "https://issuer.example/metadata/pid";
-
-/// The definition of [`APPROVAL`]: one mandatory claim and the affirmative action label.
-fn approval() -> Value {
-    json!({
-        "claims": [{"path": ["what"], "mandatory": true,
-                    "display": [{"locale": "en", "name": "What"}]}],
-        "ui_labels": {"affirmative_action_label": [{"locale": "en", "value": "Approve"}]}
-    })
-}
-
-/// A `transaction_data` entry of `type_id` naming the query `query`, with `payload`, as the
-/// verifier sends it.
-fn entry(type_id: &str, query: &str, payload: Value) -> String {
-    let entry = json!({"type": type_id, "credential_ids": [query], "payload": payload});
-    b64(entry.to_string().as_bytes())
-}
-
-/// The signed credential metadata JWT of [`VCT`] (PaSO Proof Metadata, Section 4) defining
-/// [`APPROVAL`], which `signer` signs.
-fn credential_metadata(signer: &Issuer) -> String {
-    let header =
-        json!({"alg": "ES256", "typ": "credential-metadata+jwt", "x5c": [base64(&signer.der)]});
-    let claims = json!({
-        "iss": "https://issuer.example", "sub": VCT, "format": "dc+sd-jwt",
-        "iat": NOW - 86_400, "exp": NOW + 86_400, "credential_metadata_uri": METADATA_URI,
-        "credential_metadata": {"transaction_data_types": {APPROVAL: approval()}}
-    });
-    let input = format!(
-        "{}.{}",
-        b64(header.to_string().as_bytes()),
-        b64(claims.to_string().as_bytes())
-    );
-    let signature: Signature = signer.key.sign(input.as_bytes());
-    format!("{input}.{}", b64(&signature.to_bytes()))
-}
-
-/// A wallet holding one PID of a Document Signer under a trusted root, whose issuer metadata
-/// names [`METADATA_URI`], and whose host holds the credential metadata the Document Signer
-/// signs.
-fn paso_wallet() -> Wallet {
-    let root = Issuer::root(0x71, "Bank root");
-    let signer = root.sign_child(0x72, "Bank Document Signer");
-    let claims = [("given_name", json!("Erika"))];
-    let mut wallet = Wallet::new(vec![Held::new(
-        1,
-        "dc+sd-jwt",
-        sd_jwt_x5c(VCT, &claims, &[&signer.der]),
-    )]);
-    let anchors = json!([{"type": "etsi_tl", "value": "https://tl.example/eu",
-                          "certificates": [base64(&root.der)]}]);
-    wallet.trust = TrustStore::parse(&anchors.to_string()).unwrap();
-    let issuer = json!({
-        "credential_issuer": "https://issuer.example",
-        "credential_configurations_supported": {"example": {
-            "format": "dc+sd-jwt", "vct": VCT, "credential_metadata_uri": METADATA_URI
-        }}
-    });
-    let metadata = IssuerMetadata::merge(&issuer, "example", None).unwrap();
-    wallet.display = DisplayCache::new(vec![metadata], Vec::new()).unwrap();
-    let jwt = HeldJwt::new(
-        IssuerIdentifier::parse("https://issuer.example").unwrap(),
-        ConfigurationId::parse("example").unwrap(),
-        credential_metadata(&signer),
-        HttpsUrl::parse(METADATA_URI).unwrap(),
-    );
-    let absent = HeldDocument::absent(HttpsUrl::parse(VCT).unwrap());
-    wallet.metadata = HeldMetadata::new(vec![jwt], vec![absent]).unwrap();
-    wallet
-}
+use crate::verifier::{b64, client_metadata, dc_api_signed, dc_api_unsigned, decrypt_jwe, NONCE};
+use crate::wallet::{ready, respond, sd_jwt, Held, Wallet, VCT};
 
 /// The parameters of a DC API request for the `given_name` of each query of `queries`, all
 /// required, carrying `transaction_data`.
@@ -125,7 +45,7 @@ fn kb_jwt_claims(input: &siros_presentation::PlanInput<'_>) -> Value {
 
 #[test]
 fn signed_credential_metadata_binds_the_entry_into_the_kb_jwt() {
-    let wallet = paso_wallet();
+    let wallet = paso_wallet(json!({APPROVAL: approval()}));
     let approval = entry(APPROVAL, "pid", json!({"what": "Pay 10.00 EUR"}));
     let request = dc_api_signed(&params(&[("pid", VCT)], std::slice::from_ref(&approval)));
     // The signed credential metadata is the host's input: the plan fetches nothing (Proof
@@ -242,7 +162,7 @@ fn annex_a5_offers_bind_each_credential_its_entry() {
 /// for the credential refuses nothing while the credential takes a later entry.
 #[test]
 fn a_credential_takes_the_next_entry_of_a_type_it_supports() {
-    let wallet = paso_wallet();
+    let wallet = paso_wallet(json!({APPROVAL: approval()}));
     let entries = [
         entry(
             "urn:paso:sca:com.example:approval:2",
@@ -260,7 +180,7 @@ fn a_credential_takes_the_next_entry_of_a_type_it_supports() {
 
 #[test]
 fn each_plan_rule_refuses_the_request() {
-    let wallet = paso_wallet();
+    let wallet = paso_wallet(json!({APPROVAL: approval()}));
     let credential = wallet.credentials[0].entry();
     let excluded = |cause| {
         vec![Exclusion {
