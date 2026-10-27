@@ -7,8 +7,9 @@
 //! its root's `width` and `height` in absolute units.
 
 mod allow;
+mod markup;
 
-use roxmltree::{Document as Xml, Node, NodeType};
+use roxmltree::{Document as Xml, Node, NodeType, ParsingOptions};
 use siros_oid4vp::{BodyLimit, HttpsUrl};
 
 use super::css::{self, CssFault};
@@ -19,6 +20,8 @@ use super::{
 use crate::fetched;
 use crate::fetched::{FetchFault, Fetched, Step};
 use crate::integrity::{Integrity, IntegrityFault};
+
+pub use markup::MAX_DEPTH;
 
 /// The limit of the fetch of a resource an SVG document references.
 const RESOURCE_LIMIT: BodyLimit = BodyLimit::bytes(MAX_IMAGE_BYTES);
@@ -32,7 +35,9 @@ pub const MAX_RESOURCES: usize = 8;
 pub enum SvgFault {
     /// The bytes are no UTF-8 text.
     NotUtf8,
-    /// The text is no XML document without a DTD.
+    /// The document nests elements deeper than [`MAX_DEPTH`] levels.
+    Nesting,
+    /// The text is no XML document whose DOCTYPE has no internal subset.
     Xml(roxmltree::Error),
     /// The root element is no `svg` element of the SVG namespace.
     NotSvg,
@@ -73,6 +78,7 @@ impl SvgFault {
     pub fn code(&self) -> &'static str {
         match self {
             Self::NotUtf8 => "svg_not_utf8",
+            Self::Nesting => "svg_nesting",
             Self::Xml(_) => "svg_xml",
             Self::NotSvg => "svg_root",
             Self::ProcessingInstruction(_) => "svg_processing_instruction",
@@ -107,7 +113,11 @@ pub(super) struct Document {
 /// The SVG document `bytes`; the fetch of a resource while the host has not given it.
 pub(super) fn read(bytes: &[u8], fetched: &Fetched) -> Result<Step<Document>, SvgFault> {
     let text = std::str::from_utf8(bytes).map_err(|_| SvgFault::NotUtf8)?;
-    let document = Xml::parse(text).map_err(SvgFault::Xml)?;
+    let options = ParsingOptions {
+        allow_dtd: markup::scan(text)?.readable(),
+        ..ParsingOptions::default()
+    };
+    let document = Xml::parse_with_options(text, options).map_err(SvgFault::Xml)?;
     let root = document.root_element();
     if root.tag_name().namespace() != Some(allow::SVG) || root.tag_name().name() != "svg" {
         return Err(SvgFault::NotSvg);

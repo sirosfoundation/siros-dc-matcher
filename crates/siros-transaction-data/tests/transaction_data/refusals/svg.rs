@@ -5,7 +5,7 @@
 use serde_json::json;
 use siros_transaction_data::{
     CssFault, ImageFault, Incompatibility, IntegrityFault, Location, LocationStep, SvgFault,
-    MAX_RESOURCES,
+    MAX_DEPTH, MAX_RESOURCES,
 };
 
 use crate::common::{
@@ -368,22 +368,47 @@ fn each_vector_outside_the_subset_is_refused() {
     }
     for (case, document) in [
         (
-            "an internal DTD with an entity",
+            "an internal subset with an entity",
             r#"<!DOCTYPE svg [<!ENTITY e "url(https://evil.example/x.png)">]><svg xmlns="http://www.w3.org/2000/svg"><rect style="fill:&e;"/></svg>"#,
         ),
         (
-            "an external DTD",
-            r#"<!DOCTYPE svg SYSTEM "https://evil.example/x.dtd"><svg xmlns="http://www.w3.org/2000/svg"/>"#,
+            "an internal subset after a literal holding >",
+            r#"<!DOCTYPE svg SYSTEM "a>b" [<!ENTITY e "url(https://evil.example/x.png)">]><svg xmlns="http://www.w3.org/2000/svg"><rect style="fill:&e;"/></svg>"#,
         ),
     ] {
-        assert!(
-            matches!(
-                outcome(document, Vec::new()),
-                Err(Incompatibility::Image(_, ImageFault::Svg(SvgFault::Xml(_))))
-            ),
+        assert_eq!(
+            outcome(document, Vec::new()),
+            refused(SvgFault::Xml(roxmltree::Error::DtdDetected)),
             "{case}"
         );
     }
+}
+
+/// Nesting past `MAX_DEPTH` is refused before the parser recurses into it: the refusal runs on
+/// a 1 MiB stack, which parsing 20000 levels overflows. A document at the bound is shown.
+#[test]
+fn nesting_is_bounded_before_the_parse() {
+    // Within the root element: `levels` + 1 levels.
+    let nested = |levels: usize| {
+        svg(&format!(
+            "{}{}",
+            "<g>".repeat(levels),
+            "</g>".repeat(levels)
+        ))
+    };
+    let deep = nested(20_000);
+    let outcome_deep = std::thread::Builder::new()
+        .stack_size(1 << 20)
+        .spawn(move || outcome(&deep, Vec::new()))
+        .unwrap()
+        .join()
+        .unwrap();
+    assert_eq!(outcome_deep, refused(SvgFault::Nesting));
+    assert_eq!(outcome(&nested(MAX_DEPTH - 1), Vec::new()), shown());
+    assert_eq!(
+        outcome(&nested(MAX_DEPTH), Vec::new()),
+        refused(SvgFault::Nesting)
+    );
 }
 
 /// A logo as a drawing program exports it: an XML declaration, a style sheet of classes, a

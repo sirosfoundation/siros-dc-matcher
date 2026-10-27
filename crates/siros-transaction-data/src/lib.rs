@@ -76,7 +76,7 @@ pub use fetched::{FetchFault, Fetched, Step};
 pub use hash::{AlgClaim, HashAlg, HashesAlgFault};
 pub use image::{
     CssFault, Dimensions, ImageFault, ImageFormat, ImageRef, RasterFault, Resource, SvgFault,
-    VerifiedImage, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, MAX_RESOURCES,
+    VerifiedImage, MAX_DEPTH, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, MAX_RESOURCES,
 };
 pub use integrity::{Integrity, IntegrityFault};
 pub use output::{Binding, Jti, KbJwtInputs};

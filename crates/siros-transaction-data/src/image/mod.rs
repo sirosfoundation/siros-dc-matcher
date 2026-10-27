@@ -18,7 +18,7 @@ use crate::integrity::{Integrity, IntegrityFault};
 
 pub use css::CssFault;
 pub use raster::RasterFault;
-pub use svg::{SvgFault, MAX_RESOURCES};
+pub use svg::{SvgFault, MAX_DEPTH, MAX_RESOURCES};
 
 /// The most bytes of an image: of a Data URL's payload, or of the fetched content.
 pub const MAX_IMAGE_BYTES: usize = 512 * 1024;
