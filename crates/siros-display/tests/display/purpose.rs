@@ -9,7 +9,11 @@ fn the_line_joins_the_string_purposes_and_is_absent_without_one() {
     let table: [(&str, Vec<Value>, Option<&str>); 4] = [
         ("blank", vec![json!("   ")], None),
         ("an object", vec![json!({"id": 7})], None),
-        ("a text", vec![json!("Age verification")], Some("Age verification")),
+        (
+            "a text",
+            vec![json!("Age verification")],
+            Some("Age verification"),
+        ),
         (
             "two texts, trimmed",
             vec![json!(" Age verification "), json!("Account opening")],

@@ -82,10 +82,9 @@ impl PresentationError {
             Self::Asked(_) => ErrorCode::InvalidRequest,
             Self::NoOffer(failure) => oid4vp_code(failure.error_code()),
             Self::TransactionData(e) => e.error_code(),
-            Self::Display(_)
-            | Self::FetchRepeated(_)
-            | Self::Inconsistent(_)
-            | Self::Choice(_) => ErrorCode::AccessDenied,
+            Self::Display(_) | Self::FetchRepeated(_) | Self::Inconsistent(_) | Self::Choice(_) => {
+                ErrorCode::AccessDenied
+            }
         }
     }
 }

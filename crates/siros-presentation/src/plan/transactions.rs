@@ -257,9 +257,7 @@ pub(crate) fn offered<'w, 'a>(
         .iter()
         .map(|member| {
             let query = member.query();
-            let answers = answered
-                .answers(query)
-                .ok_or(Inconsistency::Query(query))?;
+            let answers = answered.answers(query).ok_or(Inconsistency::Query(query))?;
             let candidates = member
                 .candidates()
                 .iter()
