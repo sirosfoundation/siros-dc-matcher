@@ -1,10 +1,10 @@
 //! A strict CBOR reader and a deterministic CBOR writer (RFC 8949).
 //!
 //! The reader takes untrusted input. It accepts one data item with definite lengths and nothing
-//! after it, or a CBOR sequence of such items (RFC 8742). It keeps the encoded bytes of every item, because a digest or a signature covers
-//! an item as it was written. It refuses floating-point numbers, indefinite lengths, simple values
-//! other than `false`, `true`, `null` and `undefined`, a map key that repeats, and nesting deeper
-//! than [`MAX_DEPTH`].
+//! after it, or a CBOR sequence of such items (RFC 8742). It keeps the encoded bytes of every
+//! item, because a digest or a signature covers an item as it was written. It refuses
+//! floating-point numbers, indefinite lengths, simple values other than `false`, `true`, `null`
+//! and `undefined`, a map key that repeats, and nesting deeper than [`MAX_DEPTH`].
 //!
 //! The writer emits the core deterministic encoding of RFC 8949, Section 4.2.1: shortest heads,
 //! definite lengths, and map keys sorted by their encoded bytes.
