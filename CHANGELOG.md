@@ -344,8 +344,6 @@ binaryen version_116.
     template splits and sorted helpers, `siros-presentation`'s seed opening,
     `siros-dc-matcher-core`'s `ZkpReqSelection::to_json` and the test host's calling-app
     fields and entry lookup have no panic path.
-- **BREAKING (Rust API):** `Prepared::finish` takes the host's signatures as
-  `Es256Signature`, which `Es256Signature::parse` reads from the 64 bytes of `r ‖ s`.
 - The picker panics, with its reason, on an `Inconsistency` or a `ChoiceError` the
   presentation component returns for an offer: no entry is right for it.
 - **BREAKING (Rust API):** `android-credman` panics on a host that breaks its ABI; its
@@ -694,11 +692,12 @@ binaryen version_116.
     the credential an entry binds to is refused, and phase 2 binds the entries to the
     credentials the view named. `Planned::picked` makes the selection from the credential picker
     entries the user picked, each naming its offer, query and `credentialId` (K3). Phase 2 gives
-    a `Sign` effect per signing input, verifies each signature under the instance's holder key
-    (A5), and gives one `vp_token` (A8), its submission for the request's Response Mode and the
-    presentation record. It proves `zkp_req` in-process through a `NymAuthProver`. A decline,
-    and a background fulfilment of an offer that needs the wallet's display, give
-    `access_denied`.
+    a `Sign` effect per signing input. `Prepared::finish` takes the host's signatures as
+    `Es256Signature` (`Es256Signature::parse` reads one from the 64 bytes of `r ‖ s`),
+    verifies each under the instance's holder key (A5), and gives one `vp_token` (A8), its
+    submission for the request's Response Mode and the presentation record. It proves `zkp_req`
+    in-process through a `NymAuthProver`. A decline, and a background fulfilment of an offer
+    that needs the wallet's display, give `access_denied`.
   - Positions and identifiers are their own types (`QueryIndex`, `CandidateIndex`, `SetIndex`,
     `OfferIndex`, `AdditionIndex`, `EntryPosition`, `PlanDigest`, `SignId`, and DCQL's `QueryId`),
     and so are A9's facts. The host gives the plan every input beforehand. Without the
