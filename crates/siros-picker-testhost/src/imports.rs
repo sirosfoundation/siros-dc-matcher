@@ -56,6 +56,7 @@ pub(crate) fn add_credman(linker: &mut Linker<State>) -> Result<()> {
             let end = start.saturating_add(len).min(blob.len());
             let slice = blob.get(start..end).unwrap_or_default().to_vec();
             write_bytes(&mut c, ptr, &slice)?;
+            c.data_mut().out.credential_bytes += slice.len();
             Ok(slice.len() as i32)
         },
     )?;

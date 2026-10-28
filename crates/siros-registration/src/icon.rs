@@ -91,7 +91,7 @@ impl RasterIcon {
         if dimensions.width > MAX_ICON_PIXELS || dimensions.height > MAX_ICON_PIXELS {
             return Err(IconFault::TooLarge(dimensions));
         }
-        Ok(Self(Icon::of_raster(bytes)))
+        Ok(Self(Icon::of_held(bytes)))
     }
 
     /// The icon, as the registration holds it.

@@ -55,13 +55,13 @@ pub use display_rule::{
 pub use ids::{AdditionIndex, CandidateIndex, OfferIndex, OptionIndex, QueryIndex, SetIndex};
 pub use inconsistency::Inconsistency;
 pub use matching::{
-    Answer, Answered, Answers, Asked, Candidate, ChoiceError, Claims, Excluded, Exclusion, Failure,
-    Matching, ProofChoice, QueryRefusal, ZkpQuery, ZkpRefusal,
+    Answer, Answered, Answers, Asked, AskedType, Candidate, ChoiceError, Claims, Excluded,
+    Exclusion, Failure, Matching, ProofChoice, QueryRefusal, QueryTypes, ZkpQuery, ZkpRefusal,
 };
 pub use offers::{Addition, Member, Offer, Offers, MAX_ADDITIONS, MAX_EXAMINED, MAX_OFFERS};
 pub use pick::{Pick, PickFault};
 pub use request::MatchRequest;
-pub use transactions::{BoundEntry, NoOffer, TransactionSource, Transactions};
+pub use transactions::{BoundEntry, NoOffer, RequestEntries, TransactionSource, Transactions};
 
 #[cfg(feature = "wallet")]
 mod error;

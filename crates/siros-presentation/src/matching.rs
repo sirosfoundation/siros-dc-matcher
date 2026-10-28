@@ -1,6 +1,7 @@
 //! Matching (A1, A2): the candidates of each Credential Query of a request, one instance per
 //! batch (C5).
 
+mod asked;
 mod failure;
 mod zkp;
 
@@ -25,6 +26,7 @@ use crate::credential::{KeyHolding, MatchCredential};
 use crate::ids::{CandidateIndex, QueryIndex};
 use crate::request::MatchRequest;
 
+pub use asked::{AskedType, QueryTypes};
 pub use failure::{Failure, QueryRefusal};
 pub use zkp::{ChoiceError, ProofChoice, ZkpQuery, ZkpRefusal};
 
@@ -61,6 +63,18 @@ impl<'r> Asked<'r> {
             credential_sets: query.credential_sets(),
             client_metadata: request.client_metadata(),
         }
+    }
+
+    /// Each Credential Query's `id`, with the credential types its matching reads: a matching
+    /// over the credentials of those types alone gives what a matching over all of them gives.
+    pub fn types(&self) -> Vec<QueryTypes> {
+        self.queries
+            .iter()
+            .map(|asked| QueryTypes {
+                query: asked.id.clone(),
+                types: AskedType::of(asked.query),
+            })
+            .collect()
     }
 }
 
@@ -289,9 +303,10 @@ fn answering<C: MatchCredential + Clone>(
     authorities: &QueryAuthorities,
     trust: &C::Trust,
 ) -> Matched<C, Claims> {
+    let types = AskedType::of(query);
     let mut matched = Matched::new();
     for &credential in instances {
-        match claims(query, credential) {
+        match claims(query, &types, credential) {
             Ok(Some(claims)) => matched.admit(credential.clone(), claims, authorities, trust),
             Ok(None) => {}
             Err(error) => matched.excluded.push(Excluded {
@@ -303,8 +318,9 @@ fn answering<C: MatchCredential + Clone>(
     matched
 }
 
-/// The claims `query` selects in `credential`, when the credential matches the query's format
-/// and `meta` (A1) and holds every claim the query asks for; `None` when it does not answer.
+/// The claims `query` selects in `credential`, when the credential is of a type of `types`, the
+/// types the query asks for (A1), and holds every claim the query asks for; `None` when it does
+/// not answer.
 ///
 /// # Errors
 ///
@@ -312,18 +328,17 @@ fn answering<C: MatchCredential + Clone>(
 /// empty selection.
 fn claims<C: MatchCredential>(
     query: &CredentialQuery,
+    types: &[AskedType],
     credential: &C,
 ) -> Result<Option<Claims>, PathError> {
     let holder_binding = query.holder_binding();
-    let Some(format) = asked_format(query, credential) else {
+    let Some(asked) = types.iter().find(|asked| asked.holds(credential)) else {
         return Ok(None);
     };
+    let format = asked.format();
     let needs_key = format == Format::Mdoc || holder_binding == HolderBinding::Required;
     let undisclosable = ATTESTATION_TYPES.contains(&credential.credential_type());
-    if credential.format() != format
-        || undisclosable
-        || (needs_key && credential.key_holding() == KeyHolding::NotHeld)
-    {
+    if undisclosable || (needs_key && credential.key_holding() == KeyHolding::NotHeld) {
         return Ok(None);
     }
     let held = Held {
@@ -338,24 +353,6 @@ fn claims<C: MatchCredential>(
             .collect(),
         holder_binding,
     }))
-}
-
-/// The format `query` asks for, when its `meta` names `credential`'s type (A1).
-fn asked_format<C: MatchCredential>(query: &CredentialQuery, credential: &C) -> Option<Format> {
-    let credential_type = Some(credential.credential_type());
-    match query.format().as_str() {
-        "mso_mdoc" => {
-            let doctype = query.meta().get("doctype_value").and_then(Value::as_str);
-            (doctype == credential_type).then_some(Format::Mdoc)
-        }
-        "dc+sd-jwt" => {
-            let vcts = query.meta().get("vct_values").and_then(Value::as_array);
-            let listed =
-                vcts.is_some_and(|vcts| vcts.iter().any(|v| v.as_str() == credential_type));
-            listed.then_some(Format::SdJwtVc)
-        }
-        _ => None,
-    }
 }
 
 /// A credential as DCQL's claim selection reads it, with its decimal `credentialId` and its

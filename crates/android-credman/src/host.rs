@@ -72,28 +72,6 @@ impl Host {
         Ok(copied)
     }
 
-    /// The credential blob the wallet registered, read in as many calls as
-    /// the host needs. A matcher reads it once.
-    ///
-    /// # Errors
-    ///
-    /// [`CredentialsError`] when the host copies nothing before the length it
-    /// reported, or reports more bytes than it was asked for.
-    pub fn credentials(&self) -> Result<Vec<u8>, CredentialsError> {
-        let size = self.credentials_size();
-        let mut blob = vec![0; size];
-        let mut delivered = 0;
-        while let Some(rest) = blob.get_mut(delivered..).filter(|rest| !rest.is_empty()) {
-            let copied = self.read_credentials_at(rest, delivered)?;
-            if copied == 0 {
-                return Err(CredentialsError::Incomplete { delivered, size });
-            }
-            // At most `rest.len()`, so `delivered` stays within `size`.
-            delivered += copied;
-        }
-        Ok(blob)
-    }
-
     /// The app that called the Digital Credentials API, converted once.
     ///
     /// # Errors

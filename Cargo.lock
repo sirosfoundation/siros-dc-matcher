@@ -2625,6 +2625,7 @@ dependencies = [
 name = "siros-registration"
 version = "0.11.0"
 dependencies = [
+ "rustc-hash",
  "serde_json",
  "siros-codec",
  "siros-credential",

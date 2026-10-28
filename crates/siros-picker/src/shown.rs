@@ -1,28 +1,69 @@
 //! What an offer shows (A3, T4): each credential of its members with its claim or proof
 //! statement fields and the transaction entry bound to it, after its additions' rows show.
 
+use std::io::{Read, Seek};
+
 use siros_dcql::QueryId;
 use siros_display::Field;
 use siros_presentation::{Answer, Answered, Answers, Candidate, Offer, OfferIndex, Transactions};
-use siros_registration::RegisteredCredential;
+use siros_registration::{Icon, Registration, RegistrationError};
 use siros_transaction_data::Deferral;
 
+use crate::candidates::Requested;
 use crate::diagnostics::Unshown;
 use crate::fields::TransactionShown;
 use crate::matching::NoChoice;
 
 /// The matching an offer shows from.
 pub(crate) struct Matched<'a, 'r> {
-    pub(crate) answered: &'a Answered<'r, &'a RegisteredCredential, NoChoice>,
+    pub(crate) answered: &'a Answered<'r, &'a Requested, NoChoice>,
     pub(crate) transactions: &'a Transactions<Deferral>,
 }
 
 /// One credential of an offer as its entry shows it.
 pub(crate) struct Presented<'a> {
-    pub(crate) credential: &'a RegisteredCredential,
+    pub(crate) credential: &'a Requested,
     pub(crate) query: QueryId,
     pub(crate) fields: Vec<Field>,
     pub(crate) transaction: TransactionShown,
+}
+
+/// A credential of an offer as its entry shows it, with the icon read from the registration.
+pub(crate) struct Emitted<'a> {
+    pub(crate) presented: Presented<'a>,
+    pub(crate) icon: Icon,
+}
+
+/// An offer the picker shows, and each credential of its members, `C`: a [`Presented`], then an
+/// [`Emitted`].
+pub(crate) struct ShownOffer<'o, C> {
+    pub(crate) offer: &'o Offer,
+    pub(crate) credentials: Vec<C>,
+}
+
+impl<'o, 'a> ShownOffer<'o, Presented<'a>> {
+    /// The offer with the icon of each credential's card, read from `registration`.
+    ///
+    /// # Errors
+    ///
+    /// [`RegistrationError`] when the source fails.
+    pub(crate) fn with_icons<R: Read + Seek>(
+        self,
+        registration: &mut Registration<R>,
+    ) -> Result<ShownOffer<'o, Emitted<'a>>, RegistrationError> {
+        let credentials = self
+            .credentials
+            .into_iter()
+            .map(|presented| {
+                let icon = registration.icon(*presented.credential.card().icon())?;
+                Ok(Emitted { presented, icon })
+            })
+            .collect::<Result<_, RegistrationError>>()?;
+        Ok(ShownOffer {
+            offer: self.offer,
+            credentials,
+        })
+    }
 }
 
 impl<'a> Matched<'a, '_> {
@@ -57,7 +98,7 @@ impl<'a> Matched<'a, '_> {
         for member in offer.members() {
             let (answers, candidates) = self.candidates(member);
             for candidate in candidates {
-                let credential: &'a RegisteredCredential = candidate.credential();
+                let credential: &'a Requested = candidate.credential();
                 let transaction = match bindings.iter().find(|b| b.binds(answers, candidate)) {
                     Some(binding) => TransactionShown::of(binding.taken())
                         .map_err(|error| Unshown::Display(index, error.code()))?,
@@ -98,8 +139,8 @@ impl<'a> Matched<'a, '_> {
         &self,
         member: &siros_presentation::Member,
     ) -> (
-        &'a Answers<'a, &'a RegisteredCredential, NoChoice>,
-        Vec<&'a Candidate<&'a RegisteredCredential>>,
+        &'a Answers<'a, &'a Requested, NoChoice>,
+        Vec<&'a Candidate<&'a Requested>>,
     ) {
         // The presentation component's guarantee: an offer's members name queries and
         // candidates of the matching it was built from.
@@ -138,8 +179,8 @@ impl<'a> Matched<'a, '_> {
 )]
 fn fields(
     index: OfferIndex,
-    answers: &Answers<'_, &RegisteredCredential, NoChoice>,
-    credential: &RegisteredCredential,
+    answers: &Answers<'_, &Requested, NoChoice>,
+    credential: &Requested,
     answer: &Answer,
 ) -> Result<Vec<Field>, Unshown> {
     match answer {

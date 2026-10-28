@@ -21,11 +21,13 @@
 //!   discard the *whole* output, silently. Each diagnostic has its own set
 //!   id, `siros-debug-<position>`, apart from the offers' `siros-<position>`.
 
+use std::io::{Read, Seek};
+
 use android_credman::{
     AnyEntry, C8String, C8StringExt, EntrySet, SetEntry, SetSink, Slot, VerificationDisplay,
 };
 use siros_presentation::OfferIndex;
-use siros_registration::{Diagnostics as Shown, Icon, Registration};
+use siros_registration::{Diagnostics as Shown, Facts, IconRef, Registration};
 
 /// Why the picker shows less than a request asks for.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,6 +45,8 @@ pub(crate) enum Unshown {
     /// The rows of the matching's offer at this position do not show, which leaves it out:
     /// the error's code.
     Display(OfferIndex, &'static str),
+    /// A part of the registration the request needs breaks a rule: the error's code.
+    Registration(&'static str),
 }
 
 impl Unshown {
@@ -55,30 +59,41 @@ impl Unshown {
             Self::CredentialUnavailable => "transaction data: credential_unavailable".to_owned(),
             Self::Unmatched(code) => format!("no offer: {code}"),
             Self::Display(offer, code) => format!("offer {offer}: {code}"),
+            Self::Registration(code) => format!("registration: {code}"),
         }
     }
 }
 
 /// Whether the wallet registered with its diagnostics shown, and the icon they show.
-pub(crate) struct Diagnostics<'r> {
+pub(crate) struct Diagnostics {
     shown: Shown,
-    icon: &'r Icon,
+    icon: IconRef,
 }
 
-impl<'r> Diagnostics<'r> {
-    /// The diagnostics `registration` asks for.
-    pub(crate) fn of(registration: &'r Registration) -> Self {
+impl Diagnostics {
+    /// The diagnostics a registration of `facts` asks for.
+    pub(crate) fn of(facts: &Facts) -> Self {
         Self {
-            shown: registration.diagnostics(),
-            icon: registration.default_icon(),
+            shown: facts.diagnostics(),
+            icon: *facts.default_icon(),
         }
     }
 
-    /// Emits one entry per reason of `unshown`, each in its own set, when shown.
-    pub(crate) fn emit(&self, sets: &mut impl SetSink, unshown: &[Unshown]) {
-        if self.shown == Shown::Hidden {
+    /// Emits one entry per reason of `unshown`, each in its own set, when shown, with the
+    /// wallet's icon read from `registration`. The host drops an entry without an icon: an icon
+    /// that does not read leaves nothing to emit.
+    pub(crate) fn emit<R: Read + Seek>(
+        &self,
+        registration: &mut Registration<R>,
+        sets: &mut impl SetSink,
+        unshown: &[Unshown],
+    ) {
+        if self.shown == Shown::Hidden || unshown.is_empty() {
             return;
         }
+        let Ok(icon) = registration.icon(self.icon) else {
+            return;
+        };
         for (at, reason) in unshown.iter().enumerate() {
             let id = C8String::from_str_lossy(&format!("siros-debug-{at}"));
             let cred_id = C8String::from_str_lossy("siros-debug-entry");
@@ -89,7 +104,7 @@ impl<'r> Diagnostics<'r> {
             let entry = SetEntry::new(
                 &cred_id,
                 AnyEntry::Verification(VerificationDisplay {
-                    icon: self.icon.as_bytes(),
+                    icon: icon.as_bytes(),
                     title: &title,
                     subtitle: Some(&subtitle),
                     disclaimer: None,

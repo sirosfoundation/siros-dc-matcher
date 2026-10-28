@@ -97,6 +97,8 @@ pub struct Captured {
     pub sets: Vec<(String, i32)>,
     /// Entries emitted, in order.
     pub entries: Vec<CapturedEntry>,
+    /// The bytes of the registration `ReadCredentialsBuffer` copied, over every call.
+    pub credential_bytes: usize,
 }
 
 impl Captured {

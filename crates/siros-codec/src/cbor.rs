@@ -1,7 +1,7 @@
 //! A strict CBOR reader and a deterministic CBOR writer (RFC 8949).
 //!
 //! The reader takes untrusted input. It accepts one data item with definite lengths and nothing
-//! after it. It keeps the encoded bytes of every item, because a digest or a signature covers
+//! after it, or a CBOR sequence of such items (RFC 8742). It keeps the encoded bytes of every item, because a digest or a signature covers
 //! an item as it was written. It refuses floating-point numbers, indefinite lengths, simple values
 //! other than `false`, `true`, `null` and `undefined`, a map key that repeats, and nesting deeper
 //! than [`MAX_DEPTH`].
@@ -203,6 +203,22 @@ pub fn decode(bytes: &[u8]) -> Result<Item<'_>, CborError> {
         return Err(CborError::TrailingBytes);
     }
     Ok(item)
+}
+
+/// Decodes `bytes` as a CBOR sequence (RFC 8742): items one after another up to the last byte,
+/// each complete.
+///
+/// # Errors
+///
+/// [`CborError`]: the first item that does not decode, [`CborError::Truncated`] for one the
+/// input ends inside.
+pub fn decode_sequence(bytes: &[u8]) -> Result<Vec<Item<'_>>, CborError> {
+    let mut reader = Reader { bytes, at: 0 };
+    let mut items = Vec::new();
+    while reader.at < bytes.len() {
+        items.push(reader.item(0)?);
+    }
+    Ok(items)
 }
 
 struct Reader<'a> {
