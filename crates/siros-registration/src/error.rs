@@ -85,7 +85,7 @@ pub enum RegistrationError {
     /// The registration has this version; the picker reads its own.
     Version(u64),
     /// A member of the registration is absent or of the wrong type.
-    Member(Member, MemberFault),
+    Member(Member, #[source] MemberFault),
     /// The registration has this member, which it does not define.
     MemberUnknown(String),
     /// `registered_at` is no `tdate`.
@@ -118,7 +118,7 @@ pub enum CredentialFault {
     /// The credential is no map.
     NotMap,
     /// A member is absent or of the wrong type.
-    Member(Member, MemberFault),
+    Member(Member, #[source] MemberFault),
     /// The credential has this member, which it does not define.
     MemberUnknown(String),
     /// `format` names this format, which is neither `dc+sd-jwt` nor `mso_mdoc`.

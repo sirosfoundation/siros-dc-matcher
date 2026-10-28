@@ -24,3 +24,4 @@ siros-registration = { workspace = true }
 siros-transaction-data = { workspace = true }
 siros-wallet-state = { workspace = true }
 siros-zkp-req-nym-auth = { workspace = true }
+thiserror = { workspace = true }
