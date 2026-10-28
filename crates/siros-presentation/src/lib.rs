@@ -27,6 +27,8 @@
 //! host for each signature, randomness comes from the caller's CSPRNG, and the time is an input.
 
 #![deny(missing_docs)]
+// Links to the items of `wallet` resolve with it, where rustdoc checks them.
+#![cfg_attr(not(feature = "wallet"), allow(rustdoc::broken_intra_doc_links))]
 #![deny(unsafe_code)]
 #![deny(unused_results)]
 #![deny(clippy::cognitive_complexity)]

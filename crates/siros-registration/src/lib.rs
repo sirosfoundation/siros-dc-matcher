@@ -23,6 +23,8 @@
 //! with Rust 1.82 and links no X.509, ECDSA or trust store code.
 
 #![deny(missing_docs)]
+// Links to the items of `wallet` resolve with it, where rustdoc checks them.
+#![cfg_attr(not(feature = "wallet"), allow(rustdoc::broken_intra_doc_links))]
 #![deny(unsafe_code)]
 #![deny(unused_results)]
 #![deny(clippy::cognitive_complexity)]

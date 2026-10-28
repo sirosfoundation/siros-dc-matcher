@@ -461,7 +461,7 @@ impl<I> Definitions for RegisteredCredential<Projected, I> {
 }
 
 /// A registration read whole: its facts, and its credentials in the wallet's order, each with
-/// its definitions and icon. The writer lays it out ([`crate::encode`], feature `wallet`).
+/// its definitions and icon. The writer lays it out (`encode`, feature `wallet`).
 #[derive(Debug, PartialEq)]
 pub struct Projection {
     pub(crate) facts: Facts<Icon>,
