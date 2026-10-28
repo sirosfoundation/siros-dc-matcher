@@ -134,8 +134,16 @@ fn transposable(alternatives: Vec<Vec<&str>>) -> bool {
 
 /// `items` in order, each once.
 fn sorted_set<T: Ord>(items: impl IntoIterator<Item = T>) -> Vec<T> {
-    let mut set: Vec<T> = items.into_iter().collect();
-    set.sort();
-    set.dedup();
+    let mut set: Vec<T> = Vec::new();
+    for item in items {
+        let (mut before, after): (Vec<T>, Vec<T>) =
+            set.into_iter().partition(|other| *other < item);
+        // `after` starts with the least member not below `item`: `item` itself, when present.
+        if after.first() != Some(&item) {
+            before.push(item);
+        }
+        before.extend(after);
+        set = before;
+    }
     set
 }
