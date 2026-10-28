@@ -10,11 +10,9 @@ use crate::text::TextError;
 #[error("{}", self.code())]
 pub enum DisplayError {
     /// Text to show is unsafe or too long. The code is its own.
-    Text(TextError),
+    Text(#[source] TextError),
     /// A `locale` is no language tag. The code is its own.
-    Locale(LocaleError),
-    /// A `zkp_req` option names this `_req` index, which its query lacks.
-    OptionItemUnknown(usize),
+    Locale(#[source] LocaleError),
     /// A metadata document, or one of its members, is no JSON object.
     NotObject,
     /// `credential_issuer` is absent, no string, or empty.
@@ -34,17 +32,17 @@ pub enum DisplayError {
     /// `credential_metadata_uri` is no `https` URL (PaSO Proof Metadata, Section 2).
     CredentialMetadataUri,
     /// A `display` array or one of its entries breaks its rules.
-    Display(EntryFault),
+    Display(#[source] EntryFault),
     /// Two `display` entries of one array have the same locale.
     DisplayLocaleRepeated,
     /// A `logo` breaks its rules.
-    Logo(LogoFault),
+    Logo(#[source] LogoFault),
     /// A colour is no numerical colour value of CSS Color Module Level 3.
-    Colour(ColourFault),
+    Colour(#[source] ColourFault),
     /// A `claims` array, a claim description or one of its `display` entries breaks its rules.
-    Claims(EntryFault),
+    Claims(#[source] EntryFault),
     /// A claim `path` is no claims path pointer.
-    ClaimPath(ClaimPathError),
+    ClaimPath(#[source] ClaimPathError),
     /// Two claims descriptions address the same claim (OpenID4VCI 1.0, Appendix B.3).
     ClaimRepeated,
     /// Two claims descriptions disagree on whether a claim is an object or an array, or address
@@ -70,7 +68,7 @@ pub enum DisplayError {
     /// A chain of `extends` returns to its start (SD-JWT VC, Section 7.4).
     ExtendsCycle,
     /// A claims path pointer selects nothing in the credential. The code is its own.
-    Pointer(PathError),
+    Pointer(#[source] PathError),
     /// A claims path pointer without `null` selects several claims.
     PointerSelectsSeveral,
     /// A claim has no label in the metadata and its path has no key.
@@ -144,7 +142,6 @@ impl DisplayError {
             Self::Text(e) => e.code(),
             Self::Locale(e) => e.code(),
             Self::Pointer(e) => e.code(),
-            Self::OptionItemUnknown(_) => "option_item_unknown",
             Self::NotObject => "metadata_not_object",
             Self::IssuerIdentifier => "credential_issuer_malformed",
             Self::ConfigurationUnknown => "configuration_unknown",

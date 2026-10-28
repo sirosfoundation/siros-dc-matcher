@@ -21,14 +21,18 @@ const UNVERIFIED: &str = "(unverified request)";
 ///
 /// # Errors
 ///
-/// [`DisplayError::OptionItemUnknown`] when `option` names an item `query` lacks.
+/// [`DisplayError::Text`] when a label or a detail is unsafe to show.
+///
+/// # Panics
+///
+/// When `option` is no option of `query`: it names an item `query` lacks.
 // `inline` makes the matcher compile this function with its own copies of the std functions it
 // calls. Compiled here, it brings a second copy of each into matcher.wasm.
 #[inline]
 pub fn rows(query: &ZkpReqQuery, option: &QueryOption) -> Result<Vec<Field>, DisplayError> {
     items(query, option)
         .map(|item| {
-            let (label, detail) = statement(item?)?;
+            let (label, detail) = statement(item)?;
             // Clipping shortens the detail and keeps the marker.
             let value = match detail {
                 None => FieldText::fit(UNVERIFIED),
@@ -42,16 +46,23 @@ pub fn rows(query: &ZkpReqQuery, option: &QueryOption) -> Result<Vec<Field>, Dis
         .collect()
 }
 
-/// The `_req` items `option` names, in the Verifier's order.
+/// The `_req` items `option`, an option of `query`, names, in the Verifier's order.
+///
+/// # Panics
+///
+/// When `option` names an item `query` lacks.
 #[inline]
-fn items<'q>(
-    query: &'q ZkpReqQuery,
-    option: &'q QueryOption,
-) -> impl Iterator<Item = Result<&'q ReqItem, DisplayError>> {
+#[expect(
+    clippy::expect_used,
+    reason = "the parse of a query refuses an option naming an item the query lacks, so an \
+              option of `query` names its items; another option is a bug of the caller, and its \
+              rows would show another query's items"
+)]
+fn items<'q>(query: &'q ZkpReqQuery, option: &'q QueryOption) -> impl Iterator<Item = &'q ReqItem> {
     option.items().iter().map(move |&index| {
         query
             .item(index)
-            .ok_or(DisplayError::OptionItemUnknown(index.value()))
+            .expect("an option of a query names items of that query")
     })
 }
 
@@ -108,15 +119,18 @@ impl ProofRow {
 ///
 /// # Errors
 ///
-/// - [`DisplayError::OptionItemUnknown`] when `option` names an item `query` lacks.
-/// - [`DisplayError::Text`] when a label or a detail is unsafe to show or too long.
+/// [`DisplayError::Text`] when a label or a detail is unsafe to show or too long.
+///
+/// # Panics
+///
+/// When `option` is no option of `query`: it names an item `query` lacks.
 pub fn verified_rows(
     query: &ZkpReqQuery,
     option: &QueryOption,
 ) -> Result<Vec<ProofRow>, DisplayError> {
     items(query, option)
         .map(|item| {
-            let (label, value) = statement(item?)?;
+            let (label, value) = statement(item)?;
             Ok(ProofRow { label, value })
         })
         .collect()
