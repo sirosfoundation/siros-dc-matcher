@@ -9,13 +9,14 @@
 
 use serde_json::Value;
 use siros_codec::date::Date;
-use siros_mdoc::{device_signing_digest, DeviceNameSpaces};
+use siros_dcql::DocType;
+use siros_mdoc::{device_signing_input, DeviceNameSpaces, SessionTranscript};
 use siros_oid4vp::ClientId;
 use siros_oid4vp::{Handover, JwkThumbprint};
 use siros_zkp_req_nym_auth::age::{AgeRange, Bound, Bounds};
-use siros_zkp_req_nym_auth::catalogue::{Config, Prf, Pseudonym};
+use siros_zkp_req_nym_auth::catalogue::Config;
 use siros_zkp_req_nym_auth::verifier_id::{
-    pseudonym_sha256, verifier_input, Intermediary, VerifierId,
+    pseudonym_sha256, verifier_input, Intermediary, ProverInput, VerifierId,
 };
 
 /// A range, D, E, C, and where the case comes from.
@@ -40,7 +41,13 @@ fn hex(text: &str) -> Vec<u8> {
 
 /// e2: the digest of the data the device key signs, with no `DeviceSigned` element.
 fn challenge_digest(session_transcript: &[u8], doc_type: &str) -> [u8; 32] {
-    device_signing_digest(session_transcript, doc_type, &DeviceNameSpaces::empty())
+    *device_signing_input(
+        &SessionTranscript::new(session_transcript.to_vec()),
+        &DocType::new(doc_type),
+        &DeviceNameSpaces::empty(),
+    )
+    .digest()
+    .as_bytes()
 }
 
 fn vectors(name: &str) -> Value {
@@ -171,23 +178,20 @@ fn age_check_bounds_out_of_every_window() {
 fn pseudonym_vectors() {
     let v = vectors("pseudonym.json");
     let seed: [u8; 16] = hex(v["secret_seed"].as_str().unwrap()).try_into().unwrap();
-    let pseudonym = Pseudonym {
-        config: Config::KnownOffenderMatchingSsc,
-        prf: Prf::Sha256,
-    };
+    let config = Config::KnownOffenderMatchingSsc;
     for verifier in v["verifiers"].as_array().unwrap() {
         let client_id = verifier["client_id"].as_str().unwrap();
         let client = ClientId::parse(client_id).unwrap();
         let id = VerifierId::x509_san_dns(&client, Intermediary::Absent).unwrap();
-        let vi = verifier_input(&pseudonym, &id);
+        let vi = verifier_input(&config, &id);
         assert_eq!(
-            vi.to_vec(),
+            vi.as_bytes().to_vec(),
             hex(verifier["verifier_input"].as_str().unwrap()),
             "{client_id}"
         );
-        let nym = pseudonym_sha256(&pseudonym.config, &seed, &[0; 32], &vi);
+        let nym = pseudonym_sha256(&config, &seed, &ProverInput::ZEROS, &vi);
         assert_eq!(
-            nym.to_vec(),
+            nym.as_bytes().to_vec(),
             hex(verifier["pseudonym"].as_str().unwrap()),
             "{client_id}"
         );

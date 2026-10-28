@@ -36,11 +36,13 @@
 pub mod client_id;
 pub mod error_code;
 pub mod handover;
+mod jws_rules;
+mod parameters;
 pub mod protocol;
+mod request;
 pub mod semantic;
 pub mod unverified;
 
-#[cfg(feature = "crypto")]
 pub mod fetch;
 #[cfg(feature = "crypto")]
 mod form;
@@ -58,26 +60,27 @@ mod x509;
 pub use client_id::{ClientId, ClientIdError, ClientIdPrefix};
 pub use error_code::ErrorCode;
 pub use handover::{ec_jwk_thumbprint, Handover, HandoverInvalid, JwkThumbprint};
+pub use jws_rules::JwsRule;
+pub use parameters::{Nonce, ParameterFault, State, VerifierInfoRule};
 pub use protocol::Protocol;
 pub use semantic::{Person, SemanticIdError, SemanticIdentifier};
-pub use unverified::{
-    diagnose, CompactFault, NoQuery, PayloadFault, UnverifiedQuery, UnverifiedRequest,
-};
+pub use unverified::{diagnose, CompactFault, NoQuery, PayloadFault, UnverifiedRequest};
 
-#[cfg(feature = "crypto")]
-pub use fetch::{BodyLimit, Fetch, FetchResponse, HttpStatus, HttpsUrl, MediaType, Method};
+pub use fetch::{
+    BodyLimit, Fetch, FetchResponse, HttpStatus, HttpsUrl, MediaType, Method, Redirects,
+};
 #[cfg(feature = "crypto")]
 pub use intake::{
-    AttestationFault, ChainFault, Effect, EffectResult, FormFault, IntakeError, IntakeState,
-    JwsError, JwsFault, KeyMaterial, Step, Trust, TrustAnswer, TrustSubject, Verdict,
-    VerifierInfoRule,
+    AttestationClaim, AttestationFault, ChainFault, ClaimsFault, Coordinate, Effect, EffectResult,
+    FormFault, IntakeError, IntakeState, JsonParameter, JwkFault, JwsError, JwsFault, KeyMaterial,
+    LeafKeyFault, Step, Trust, TrustAnswer, TrustSubject, Verdict,
+};
+pub use request::{
+    AttestationFormat, RequestSignature, ResponseMode, TransactionDataInvalid, TransactionDataItem,
 };
 #[cfg(feature = "crypto")]
-pub use values::{AttestationIssuer, Kid, Nonce, Origin, State, TransactionDataItem, TrustChain};
+pub use values::{AttestationIssuer, Kid, Origin, TrustChain};
 #[cfg(feature = "crypto")]
 pub use verified::{
-    AccessCertificate, AttestationFormat, CertificateDer, ContentEncryption, Encryption,
-    ResponseMode, VerifiedRequest, VerifierView,
+    AccessCertificate, CertificateDer, ContentEncryption, Encryption, VerifiedRequest, VerifierView,
 };
-#[cfg(feature = "crypto")]
-pub use x509::X509Chain;

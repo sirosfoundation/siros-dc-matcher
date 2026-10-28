@@ -1,16 +1,39 @@
-//! Integrity metadata (W3C Subresource Integrity, Section 3), as SD-JWT VC pins a metadata
-//! document with a `#integrity` claim (SD-JWT VC, Section 7).
+//! Integrity metadata (W3C Subresource Integrity, Section 3): the `#integrity` claims of
+//! SD-JWT VC (Section 7), the `#integrity` siblings of payload images, and the fragments of the
+//! URLs an SVG document references.
 
 use siros_codec::base64;
 
-use crate::error::TransactionDataError;
 use crate::hash::HashAlg;
 
 /// The digests of the strongest algorithm an integrity metadata string names (SRI, Section
 /// 3.3.4): at least one.
-pub(crate) struct Integrity {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Integrity {
     alg: HashAlg,
     digests: Vec<Vec<u8>>,
+}
+
+/// Why integrity metadata refuses a document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
+pub enum IntegrityFault {
+    /// The metadata has no expression of SHA-256, SHA-384 or SHA-512, or one whose value is
+    /// not the base64 of a digest of its algorithm.
+    Malformed,
+    /// The document's digest is none the metadata lists (SRI, Section 3.3.5).
+    Mismatch,
+}
+
+impl IntegrityFault {
+    /// A stable identifier.
+    #[must_use]
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Malformed => "integrity_malformed",
+            Self::Mismatch => "integrity_mismatch",
+        }
+    }
 }
 
 impl Integrity {
@@ -19,9 +42,8 @@ impl Integrity {
     ///
     /// # Errors
     ///
-    /// [`TransactionDataError::IntegrityMalformed`]: no expression of SHA-256, SHA-384 or
-    /// SHA-512, or one of them whose value is not the base64 of a digest of its algorithm.
-    pub(crate) fn parse(text: &str) -> Result<Self, TransactionDataError> {
+    /// [`IntegrityFault::Malformed`].
+    pub fn parse(text: &str) -> Result<Self, IntegrityFault> {
         let expressions = text
             .split_ascii_whitespace()
             .filter_map(expression)
@@ -30,14 +52,14 @@ impl Integrity {
                     .ok()
                     .filter(|digest| digest.len() == alg.len())
                     .map(|digest| (alg, digest))
-                    .ok_or(TransactionDataError::IntegrityMalformed)
+                    .ok_or(IntegrityFault::Malformed)
             })
             .collect::<Result<Vec<_>, _>>()?;
         let alg = expressions
             .iter()
             .map(|(alg, _)| *alg)
             .max()
-            .ok_or(TransactionDataError::IntegrityMalformed)?;
+            .ok_or(IntegrityFault::Malformed)?;
         Ok(Self {
             alg,
             digests: expressions
@@ -52,12 +74,12 @@ impl Integrity {
     ///
     /// # Errors
     ///
-    /// [`TransactionDataError::IntegrityMismatch`].
-    pub(crate) fn check(&self, document: &[u8]) -> Result<(), TransactionDataError> {
+    /// [`IntegrityFault::Mismatch`].
+    pub fn check(&self, document: &[u8]) -> Result<(), IntegrityFault> {
         if self.digests.contains(&self.alg.digest(document)) {
             Ok(())
         } else {
-            Err(TransactionDataError::IntegrityMismatch)
+            Err(IntegrityFault::Mismatch)
         }
     }
 }

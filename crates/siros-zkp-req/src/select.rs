@@ -1,14 +1,15 @@
 //! Choosing a system and a proof backend (`zkp_req`, Section 1.3).
 
 use crate::formats::ZkpFormats;
+use crate::ids::{ProofBackend, SystemId};
 use crate::query::CredentialType;
 
 /// A system as Section 1.3 judges it.
 pub trait System {
     /// The system identifier.
-    fn id(&self) -> &str;
+    fn id(&self) -> SystemId;
     /// Whether the system runs on the proof backend `backend`.
-    fn runs_on(&self, backend: &str) -> bool;
+    fn runs_on(&self, backend: &ProofBackend) -> bool;
     /// Whether the system proves over the source format and a type that `credential_type`
     /// allows.
     fn proves_over(&self, credential_type: &CredentialType) -> bool;
@@ -46,15 +47,15 @@ pub fn usable_backend<'f, S, U>(
     credential_type: &CredentialType,
     system: &S,
     supports: impl FnOnce(&S) -> Result<(), U>,
-) -> Result<&'f str, PairRefusal<U>>
+) -> Result<&'f ProofBackend, PairRefusal<U>>
 where
     S: System + ?Sized,
 {
-    if !formats.lists_system(system.id()) {
+    if !formats.lists_system(&system.id()) {
         return Err(PairRefusal::SystemNotListed);
     }
     let backend = formats
-        .proof_backends
+        .proof_backends()
         .iter()
         .find(|b| system.runs_on(b))
         .ok_or(PairRefusal::NoListedBackend)?;

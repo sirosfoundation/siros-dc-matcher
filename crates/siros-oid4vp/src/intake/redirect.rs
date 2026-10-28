@@ -4,11 +4,12 @@
 use rustc_hash::FxHashMap;
 use serde_json::{Map, Value};
 use siros_codec::date::DateTime;
+use siros_codec::json::JsonTextError;
 
 use super::request::{self, Arrival};
 use super::signature::{self, by_request, UriRule};
 use super::trust::{self, KeyMaterial, TrustSubject};
-use super::{Answers, FormFault, Halt, IntakeError, JwsFault};
+use super::{Answers, FormFault, Halt, IntakeError, JsonParameter, JwsFault};
 use crate::client_id::{ClientId, ClientIdPrefix};
 use crate::fetch::{BodyLimit, Fetch, HttpStatus, HttpsUrl, MediaType, Method};
 use crate::form;
@@ -90,7 +91,7 @@ pub(super) fn intake(
                 return Err(IntakeError::FetchTooLarge.into());
             }
             let jws = std::str::from_utf8(response.body())
-                .map_err(|_| IntakeError::JwsMalformed(JwsFault::NotUtf8))?;
+                .map_err(|error| IntakeError::JwsMalformed(JwsFault::NotUtf8(error)))?;
             let echoed = match method {
                 RequestUriMethod::Get => None,
                 RequestUriMethod::Post => Some(wallet.nonce),
@@ -184,11 +185,12 @@ fn unsigned(
 /// The request parameter `name` of the form value `value`. Section 5.1: parameters holding
 /// objects travel as JSON-serialized strings.
 fn parameter(name: &str, value: &str) -> Result<Value, IntakeError> {
-    let invalid = match name {
-        "dcql_query" => IntakeError::DcqlQueryInvalid,
-        "client_metadata" => IntakeError::ClientMetadataInvalid,
-        "transaction_data" => IntakeError::TransactionDataInvalid,
+    let parameter = match name {
+        "dcql_query" => JsonParameter::DcqlQuery,
+        "client_metadata" => JsonParameter::ClientMetadata,
+        "transaction_data" => JsonParameter::TransactionData,
         _ => return Ok(Value::String(value.to_owned())),
     };
-    serde_json::from_str(value).map_err(|_| invalid)
+    serde_json::from_str(value)
+        .map_err(|error| IntakeError::ParameterNotJson(parameter, JsonTextError::of(&error)))
 }

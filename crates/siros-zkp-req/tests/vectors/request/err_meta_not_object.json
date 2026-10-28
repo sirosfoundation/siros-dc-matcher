@@ -1,5 +1,5 @@
 {
-  "description": "meta is a string.",
+  "description": "meta is a string: DCQL refuses it (OpenID4VP 1.0, Section 6.1).",
   "query": {
     "id": "nym_attestation",
     "format": "zkp_req",
@@ -27,7 +27,7 @@
     }
   },
   "expect": {
-    "error": "meta_invalid"
+    "error": "dcql_malformed"
   },
-  "v0_4": "Same rule; the code follows the draft's wording."
+  "v0_4": "Same rule; DCQL refuses it with its code."
 }

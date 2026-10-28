@@ -11,11 +11,10 @@ members = [
     "crates/siros-oid4vp",
     "crates/siros-presentation",
     "crates/siros-dc-matcher-core",
-    "crates/siros-dc-matcher-wasm",
     "crates/siros-dc-matcher-ffi",
-    "crates/siros-dc-matcher-testhost",
     "crates/siros-sdjwt",
     "crates/siros-transaction-data",
+    "crates/siros-trust",
     "crates/siros-wallet-state",
     "crates/siros-zkp-req",
     "crates/siros-zkp-req-nym-auth",
@@ -26,12 +25,9 @@ edition = "2021"
 license = "BSD-2-Clause"
 repository = "https://github.com/sirosfoundation/siros-dc-matcher"
 authors = ["SIROS Foundation"]
-# Held by every crate of this workspace but -ffi and -testhost, and checked on 1.82
-# in CI. matcher.wasm links siros-codec, siros-dcql, siros-oid4vp without `crypto`,
-# siros-display without `credential`, the two zkp_req crates, -core and the two
-# android-credman crates; the wallet core crates hold it for the picker too. The
-# -ffi and -testhost crates override this upward: uniffi's bindgen chain and
-# wasmtime both need more.
+# Held by every crate of this workspace but -ffi, and checked on 1.82 in CI: the wallet core
+# crates hold it for the credential picker. -ffi overrides this upward: uniffi's bindgen chain
+# needs more.
 rust-version = "1.82"
 
 [workspace.dependencies]
@@ -41,8 +37,10 @@ siros-dcql = { version = "0.12.0", path = "crates/siros-dcql" }
 siros-display = { path = "crates/siros-display", default-features = false }
 siros-mdoc = { path = "crates/siros-mdoc" }
 siros-oid4vp = { path = "crates/siros-oid4vp" }
+siros-presentation = { path = "crates/siros-presentation", default-features = false }
 siros-sdjwt = { path = "crates/siros-sdjwt" }
-siros-transaction-data = { path = "crates/siros-transaction-data" }
+siros-transaction-data = { path = "crates/siros-transaction-data", default-features = false }
+siros-trust = { path = "crates/siros-trust", default-features = false }
 siros-wallet-state = { path = "crates/siros-wallet-state" }
 siros-dc-matcher-core = { path = "crates/siros-dc-matcher-core" }
 siros-zkp-req = { path = "crates/siros-zkp-req" }

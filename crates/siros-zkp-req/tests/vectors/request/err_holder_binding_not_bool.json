@@ -40,6 +40,6 @@
     }
   },
   "expect": {
-    "error": "holder_binding_invalid"
+    "error": "dcql_malformed"
   }
 }

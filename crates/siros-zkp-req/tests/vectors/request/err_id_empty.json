@@ -39,6 +39,6 @@
     }
   },
   "expect": {
-    "error": "query_id_invalid"
+    "error": "query_id_empty"
   }
 }

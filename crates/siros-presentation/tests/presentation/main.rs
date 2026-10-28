@@ -8,7 +8,13 @@
     dead_code
 )]
 
+use siros_presentation::testing::{host, verifier, wallet};
+
+mod display;
 mod nym_request;
 mod offers;
-mod verifier;
-mod wallet;
+mod sd_jwt;
+mod seed;
+mod transactions;
+mod trust;
+mod usable;

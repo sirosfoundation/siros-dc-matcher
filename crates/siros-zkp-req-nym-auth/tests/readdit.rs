@@ -17,14 +17,15 @@ mod support;
 use ciborium::value::Value as Ciborium;
 use serde_json::{json, Value};
 use siros_codec::date::DateTime;
-use siros_mdoc::P256Key;
+use siros_mdoc::{Mdoc, P256Key};
 use siros_oid4vp::ec_jwk_thumbprint;
-use siros_zkp_req::Match;
-use siros_zkp_req_nym_auth::attestation::UsableAttestation;
+use siros_zkp_req::ZkProof;
+use siros_zkp_req_nym_auth::attestation::TestedAttestation;
 use siros_zkp_req_nym_auth::catalogue::MDOC_DOCTYPE;
-use siros_zkp_req_nym_auth::presenter::{match_query, prepare, MatchInput, Prepared, ProveInput};
+use siros_zkp_req_nym_auth::presenter::Prepared;
 use siros_zkp_req_nym_auth::prover::ProofOutput;
 use siros_zkp_req_nym_auth::system::NymAuthSystem;
+use siros_zkp_req_nym_auth::verifier_id::PseudonymValue;
 use support::*;
 
 fn facts() -> Value {
@@ -66,77 +67,55 @@ fn assert_agrees(reference: &str, theirs: &Value, ours: &Value, elsewhere: &[&st
 /// The credential as this crate reads it, under readdit's names.
 fn our_credential(facts: &Value) -> Value {
     let data = facts["inputs"]["credential"].as_str().unwrap();
-    let attestation = match UsableAttestation::new(data, None, proof_time(facts)) {
+    let attestation = match TestedAttestation::of(&Mdoc::parse(data).unwrap(), proof_time(facts)) {
         Ok(attestation) => attestation,
-        Err(unusable) => panic!("the credential is not usable: {unusable:?}"),
+        Err(unusable) => panic!("the credential fails its tests: {unusable:?}"),
     };
     let credential = attestation.credential();
     let mdoc = credential.mdoc();
     json!({
-        "sig_structure": hex(mdoc.sig_structure()),
-        "issuer_signature": hex(mdoc.issuer_signature()),
+        "sig_structure": hex(mdoc.sig_structure().as_bytes()),
+        "issuer_signature": hex(mdoc.issuer_signature().as_bytes()),
         "birth_date_item": hex(mdoc.birth_date().bytes()),
         "ssc_item": hex(mdoc.ssc().bytes()),
-        "document_signer": hex(mdoc.document_signer()),
+        "document_signer": hex(credential.signer().certificate().der()),
         "doc_type": MDOC_DOCTYPE,
         "device_key": key(mdoc.device_key()),
         "valid_from": mdoc.valid_from().to_string(),
         "valid_until": mdoc.valid_until().to_string(),
         "birth_date": mdoc.birth_date().value().to_string(),
-        "ssc": hex(mdoc.ssc().value()),
+        "ssc": hex(mdoc.ssc().value().as_bytes()),
         "digests_listed": true,
-        "issuer_key": key(credential.certificate().key()),
+        "issuer_key": key(credential.signer().key()),
     })
 }
 
 /// The presenter's phases up to the prover, on readdit's inputs: the query `nym` with
-/// `age_check` `18+`, and the Document Signer as the only anchor.
-fn prepared(facts: &Value, system: NymAuthSystem) -> Prepared {
+/// `age_check` `18+`, in readdit's session.
+fn prepared_for(facts: &Value, system: NymAuthSystem) -> Prepared {
     let inputs = &facts["inputs"];
     assert_eq!(inputs["client_id"], CLIENT_ID);
     assert_eq!(inputs["nonce"], NONCE);
     assert_eq!(inputs["response_uri"], RESPONSE_URI);
     assert_eq!(unhex(&inputs["secret_seed"]), SEED);
+    assert_eq!(proof_time(facts).unix(), NOW);
     assert_eq!(
         unhex(&inputs["jwk_thumbprint"]),
         ec_jwk_thumbprint(&encryption_jwk()).unwrap().as_bytes()
     );
-    let credential = stored("c1", inputs["credential"].as_str().unwrap().to_owned());
-    let anchors = [unhex(&facts["longfellow"]["mdoc"]["document_signer"])];
-    let now = proof_time(facts).unix();
     let query = query(Some("18+"), true);
-    let metadata = client_metadata();
-    let matched = match_query(&MatchInput {
-        query: &query,
-        client_metadata: &metadata,
-        credentials: std::slice::from_ref(&credential),
-        anchors: Some(&anchors),
-        systems: &[system],
-        now,
-    })
-    .unwrap();
-    let Match::Candidates(candidates) = matched else {
-        panic!("no candidate: {matched:?}");
-    };
-    prepare(&ProveInput {
-        candidate: &candidates[0],
-        query: &query,
-        client_metadata: &metadata,
-        session: &session(&query, NONCE),
-        credential: &credential,
-        secret_seed: &SEED,
-        anchors: Some(&anchors),
-        now,
-    })
-    .unwrap()
+    let request = verified_request(&query, NONCE);
+    let data = inputs["credential"].as_str().unwrap();
+    prepared(system, &query, data, &SEED, &request).unwrap()
 }
 
 /// A prover's output with the pseudonym readdit computed. The presenter assembles a
 /// presentation only with the catalogue's pseudonym, so assembling it shows the two agree.
 fn readdit_output(facts: &Value, reference: &str, zk_proof: Vec<u8>) -> ProofOutput {
+    let pseudonym = unhex(&facts[reference]["pseudonym"]);
     ProofOutput {
-        zk_proof,
-        pseudonym: unhex(&facts[reference]["pseudonym"]).try_into().unwrap(),
+        zk_proof: ZkProof::new(zk_proof),
+        pseudonym: PseudonymValue::try_from(pseudonym.as_slice()).unwrap(),
     }
 }
 
@@ -151,20 +130,20 @@ fn the_wallet_reaches_readdits_values() {
         (NymAuthSystem::VegaV1, "vega"),
     ] {
         assert_agrees(reference, &facts[reference]["mdoc"], &credential, &[]);
-        let prepared = prepared(&facts, system);
+        let prepared = prepared_for(&facts, system);
         let statement = prepared.statement();
         assert_eq!(statement.system, system);
         assert_eq!(statement.proof_time, proof_time(&facts));
         assert_eq!(
-            hex(&statement.issuer_certificate),
+            hex(statement.issuer.certificate().der()),
             credential["document_signer"]
         );
         let ours = json!({
-            "session_transcript": hex(&statement.session_transcript),
-            "device_message": hex(prepared.data_to_sign()),
-            "challenge_digest": hex(&statement.challenge_digest),
-            "verifier_input": hex(&statement.verifier_input),
-            "issuer_key": key(&statement.issuer_key),
+            "session_transcript": hex(statement.session_transcript.as_bytes()),
+            "device_message": hex(prepared.data_to_sign().as_bytes()),
+            "challenge_digest": hex(statement.challenge_digest.as_bytes()),
+            "verifier_input": hex(statement.verifier_input.as_bytes()),
+            "issuer_key": key(statement.issuer.key()),
         });
         let elsewhere = ["mdoc", "pseudonym", "presentation_v0_4"];
         assert_agrees(reference, &facts[reference], &ours, &elsewhere);
@@ -213,7 +192,7 @@ fn sorted(map: &Ciborium) -> Vec<(String, Ciborium)> {
 fn the_draft_presentation_carries_readdits_v0_4_values() {
     let facts = facts();
     let output = readdit_output(&facts, "longfellow", unhex(&facts["inputs"]["proof"]));
-    let ours = prepared(&facts, NymAuthSystem::LongfellowV1)
+    let ours = prepared_for(&facts, NymAuthSystem::LongfellowV1)
         .assemble(&output)
         .unwrap()
         .encode();

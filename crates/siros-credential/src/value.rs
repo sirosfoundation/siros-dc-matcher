@@ -6,7 +6,8 @@ use siros_codec::date::{Date, DateTime};
 use siros_mdoc::Mdoc;
 use siros_sdjwt::{Claim, ClaimValue, Element};
 
-use crate::error::CredentialError;
+use crate::error::{CborTag, CredentialError};
+use crate::tree::{Members as TreeMembers, TreeElement, TreeValue};
 
 /// A claim value with its type.
 #[derive(Clone, Copy)]
@@ -41,6 +42,7 @@ pub struct Array<'a>(ArrayOf<'a>);
 enum ArrayOf<'a> {
     Json(&'a [Element]),
     Cbor(&'a [Cbor]),
+    Tree(&'a [TreeElement]),
 }
 
 /// An object value.
@@ -51,6 +53,7 @@ pub struct Object<'a>(ObjectOf<'a>);
 enum ObjectOf<'a> {
     Json(&'a siros_sdjwt::Object),
     Cbor(&'a [(Cbor, Cbor)]),
+    Tree(&'a TreeMembers),
 }
 
 impl<'a> Array<'a> {
@@ -60,6 +63,7 @@ impl<'a> Array<'a> {
         Elements(match self.0 {
             ArrayOf::Json(elements) => ElementsOf::Json(elements.iter()),
             ArrayOf::Cbor(items) => ElementsOf::Cbor(items.iter()),
+            ArrayOf::Tree(elements) => ElementsOf::Tree(elements.iter()),
         })
     }
 }
@@ -70,6 +74,7 @@ impl<'a> Object<'a> {
         Members(match self.0 {
             ObjectOf::Json(object) => MembersOf::Json(Box::new(object.members())),
             ObjectOf::Cbor(entries) => MembersOf::Cbor(entries.iter()),
+            ObjectOf::Tree(members) => MembersOf::Tree(Box::new(members.iter())),
         })
     }
 }
@@ -80,6 +85,7 @@ pub struct Elements<'a>(ElementsOf<'a>);
 enum ElementsOf<'a> {
     Json(std::slice::Iter<'a, Element>),
     Cbor(std::slice::Iter<'a, Cbor>),
+    Tree(std::slice::Iter<'a, TreeElement>),
 }
 
 impl<'a> Iterator for Elements<'a> {
@@ -94,6 +100,12 @@ impl<'a> Iterator for Elements<'a> {
                 })
                 .map(|claim| json(claim.value())),
             ElementsOf::Cbor(items) => items.next().map(cbor),
+            ElementsOf::Tree(elements) => elements
+                .find_map(|element| match element {
+                    TreeElement::Present(value) => Some(value),
+                    TreeElement::Withheld => None,
+                })
+                .map(TreeValue::typed),
         }
     }
 }
@@ -104,6 +116,7 @@ pub struct Members<'a>(MembersOf<'a>);
 enum MembersOf<'a> {
     Json(Box<dyn Iterator<Item = (&'a str, &'a Claim)> + 'a>),
     Cbor(std::slice::Iter<'a, (Cbor, Cbor)>),
+    Tree(Box<dyn Iterator<Item = (&'a str, &'a TreeValue)> + 'a>),
 }
 
 impl<'a> Iterator for Members<'a> {
@@ -119,8 +132,19 @@ impl<'a> Iterator for Members<'a> {
                 Cbor::Text(name) => Some((name.as_str(), cbor(value))),
                 _ => None,
             }),
+            MembersOf::Tree(members) => members.next().map(|(name, value)| (name, value.typed())),
         }
     }
+}
+
+/// The array of a claim tree's `elements`.
+pub(crate) fn tree_array(elements: &[TreeElement]) -> TypedValue<'_> {
+    TypedValue::Array(Array(ArrayOf::Tree(elements)))
+}
+
+/// The object of a claim tree's `members`.
+pub(crate) fn tree_object(members: &TreeMembers) -> TypedValue<'_> {
+    TypedValue::Object(Object(ObjectOf::Tree(members)))
 }
 
 /// The processed SD-JWT payload as an object.
@@ -202,7 +226,9 @@ fn classify(value: &Cbor) -> (TypedValue<'_>, Option<CredentialError>) {
                 other => (cbor(other), Some(CredentialError::Tdate)),
             }
         }
-        Cbor::Tag(_, inner) => return (cbor(inner), Some(CredentialError::Tag)),
+        Cbor::Tag(tag, inner) => {
+            return (cbor(inner), Some(CredentialError::Tag(CborTag::new(*tag))))
+        }
         Cbor::Bool(b) => TypedValue::Bool(*b),
         Cbor::Null => TypedValue::Null,
         Cbor::Encoded(_) => return (TypedValue::Null, Some(CredentialError::Undefined)),

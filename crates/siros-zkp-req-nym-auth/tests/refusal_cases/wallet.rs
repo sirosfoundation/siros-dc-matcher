@@ -5,7 +5,6 @@ use crate::*;
 
 pub fn cases() -> Vec<Case> {
     let param = |q: &mut Value, i: usize, k: &str, v: Value| q["_req"][i]["params"][k] = v;
-    let other_root = Issuer::root(0x22, "Another Root");
     vec![
         // zkp_req, Section 1.3, and the systems' Section 2: vp_formats_not_supported.
         (
@@ -57,19 +56,20 @@ pub fn cases() -> Vec<Case> {
                     ..Spec::default()
                 },
                 Some("18+"),
+                SEED,
             ),
-            Got::Rejected(vec![ZkpError::Item {
+            Got::Unanswerable(Unanswerable::Failed(vec![ZkpError::Item {
                 option: None,
-                item: 1,
+                item: ItemIndex::new(1),
                 code: ItemCode::AgeOutOfRange,
-            }]),
+            }])),
         ),
         (
             "seed_mismatch",
-            prove([0x5a; 16], Spec::default().device, None),
-            Got::Prove(ProveError::Rejected(vec![ZkpError::Item {
+            match_credential(Spec::default(), None, [0x5a; 16]),
+            Got::Unanswerable(Unanswerable::Failed(vec![ZkpError::Item {
                 option: None,
-                item: 0,
+                item: ItemIndex::new(0),
                 code: ItemCode::SeedMismatch,
             }])),
         ),
@@ -81,6 +81,7 @@ pub fn cases() -> Vec<Case> {
                     ..Spec::default()
                 },
                 None,
+                SEED,
             ),
             credential_error(CredentialCode::Validity),
         ),
@@ -92,58 +93,20 @@ pub fn cases() -> Vec<Case> {
                     ..Spec::default()
                 },
                 None,
+                SEED,
             ),
             credential_error(CredentialCode::IssuerSignature),
-        ),
-        (
-            "issuer_signature: digest",
-            match_credential(
-                Spec {
-                    wrong_ssc_digest: true,
-                    ..Spec::default()
-                },
-                None,
-            ),
-            credential_error(CredentialCode::IssuerSignature),
-        ),
-        (
-            "issuer_untrusted",
-            {
-                let mut q = query(None, false);
-                q["trusted_authorities"] = json!([{"type": "aki", "values": ["AAAA"]}]);
-                got(matched(
-                    &q,
-                    &client_metadata(),
-                    issue(&ds(), &Spec::default()),
-                    Some(std::slice::from_ref(&other_root.der)),
-                ))
-            },
-            credential_error(CredentialCode::IssuerUntrusted),
         ),
         (
             "device_binding",
-            prove(SEED, 0x44, None),
+            prove(0x44, None),
             Got::Prove(ProveError::Rejected(vec![ZkpError::Credential(
                 CredentialCode::DeviceBinding,
             )])),
         ),
         (
-            "credential_form: unreadable",
-            got(matched(
-                &query(None, false),
-                &client_metadata(),
-                "not base64url!".into(),
-                None,
-            )),
-            credential_error(CredentialCode::CredentialForm),
-        ),
-        (
             "credential_form: prover",
-            prove(
-                SEED,
-                Spec::default().device,
-                Some(ProverFailure::CredentialForm),
-            ),
+            prove(Spec::default().device, Some(ProverFailure::CredentialForm)),
             Got::Prove(ProveError::Rejected(vec![ZkpError::Credential(
                 CredentialCode::CredentialForm,
             )])),

@@ -5,58 +5,11 @@
 //! missing a requested claim must not be offered at all, and an absent
 //! `credential_sets` means every query must be satisfied rather than none.
 
-use serde_json::{json, Value};
-use siros_dcql::{execute, DcqlQuery, Dropped, ExactFormat, PathComponent, PathError};
+mod support;
 
-/// A JSON credential, resolved with the §7.1 rules the crate provides.
-struct JsonCredential {
-    id: String,
-    format: String,
-    body: Value,
-    /// Cryptographic holder binding, so §6.1's requirement can be tested from
-    /// both sides.
-    bound: bool,
-}
-
-impl JsonCredential {
-    fn new(id: &str, format: &str, body: Value) -> Self {
-        Self {
-            id: id.into(),
-            format: format.into(),
-            body,
-            bound: true,
-        }
-    }
-
-    /// The same credential, with no cryptographic holder binding.
-    fn unbound(mut self) -> Self {
-        self.bound = false;
-        self
-    }
-}
-
-impl siros_dcql::Credential for JsonCredential {
-    fn id(&self) -> &str {
-        &self.id
-    }
-    fn format(&self) -> &str {
-        &self.format
-    }
-    fn claim(&self, path: &[PathComponent]) -> Result<Vec<Value>, PathError> {
-        siros_dcql::resolve_json(&self.body, path).map(|v| v.into_iter().cloned().collect())
-    }
-    fn has_cryptographic_holder_binding(&self) -> bool {
-        self.bound
-    }
-}
-
-fn pid(body: Value) -> JsonCredential {
-    JsonCredential::new("pid-1", "dc+sd-jwt", body)
-}
-
-fn query(json: &str) -> DcqlQuery {
-    DcqlQuery::from_json(json).expect("valid DCQL")
-}
+use serde_json::json;
+use siros_dcql::{execute, ComponentIndex, ExactFormat, PathError};
+use support::{pid, query, satisfiable, JsonCredential};
 
 /// §6.4.1 — "If the Wallet cannot deliver all claims requested by the
 /// Verifier according to these rules, it MUST NOT return the respective
@@ -74,8 +27,8 @@ fn credential_missing_a_requested_claim_is_not_offered() {
     let creds = [pid(json!({"given_name": "Erika"}))];
 
     let r = execute(&q, &creds, &ExactFormat);
-    assert!(r.query("c").unwrap().candidates.is_empty());
-    assert!(!r.satisfiable);
+    assert!(r.query("c").unwrap().candidates().is_empty());
+    assert!(!satisfiable(&r));
 }
 
 #[test]
@@ -89,11 +42,11 @@ fn credential_with_every_requested_claim_is_offered() {
     )];
 
     let r = execute(&q, &creds, &ExactFormat);
-    let c = &r.query("c").unwrap().candidates;
+    let c = &r.query("c").unwrap().candidates();
     assert_eq!(c.len(), 1);
-    assert_eq!(c[0].credential_id, "pid-1");
-    assert_eq!(c[0].claims.len(), 2, "both claims should be disclosed");
-    assert!(r.satisfiable);
+    assert_eq!(c[0].credential_id(), "pid-1");
+    assert_eq!(c[0].claims().len(), 2, "both claims should be disclosed");
+    assert!(satisfiable(&r));
 }
 
 /// §6.4.1 — "If `claims` is absent, the Verifier is requesting no claims that
@@ -105,9 +58,9 @@ fn absent_claims_matches_and_selects_nothing() {
     let creds = [pid(json!({"given_name": "Erika"}))];
 
     let r = execute(&q, &creds, &ExactFormat);
-    let c = &r.query("c").unwrap().candidates;
+    let c = &r.query("c").unwrap().candidates();
     assert_eq!(c.len(), 1);
-    assert!(c[0].claims.is_empty());
+    assert!(c[0].claims().is_empty());
 }
 
 /// §6.4.1 — "the Wallet SHOULD return the first option that it can satisfy",
@@ -127,15 +80,15 @@ fn claim_sets_take_the_first_satisfiable_option() {
         json!({"age_over_18": true, "birth_date": "1979-04-12"}),
     )];
     let r = execute(&q, &both, &ExactFormat);
-    let claims = &r.query("c").unwrap().candidates[0].claims;
+    let claims = &r.query("c").unwrap().candidates()[0].claims();
     assert_eq!(claims.len(), 1);
-    assert_eq!(claims[0].claim_id.as_deref(), Some("over18"));
+    assert_eq!(claims[0].claim_id().map(|id| id.as_str()), Some("over18"));
 
     // Holds only the fallback: the second option is used.
     let dob_only = [pid(json!({"birth_date": "1979-04-12"}))];
     let r = execute(&q, &dob_only, &ExactFormat);
-    let claims = &r.query("c").unwrap().candidates[0].claims;
-    assert_eq!(claims[0].claim_id.as_deref(), Some("dob"));
+    let claims = &r.query("c").unwrap().candidates()[0].claims();
+    assert_eq!(claims[0].claim_id().map(|id| id.as_str()), Some("dob"));
 }
 
 /// §6.4.1 — "If the Wallet cannot satisfy any of the options, it MUST NOT
@@ -151,7 +104,7 @@ fn no_satisfiable_claim_set_means_no_match() {
     let creds = [pid(json!({"given_name": "Erika"}))];
 
     let r = execute(&q, &creds, &ExactFormat);
-    assert!(r.query("c").unwrap().candidates.is_empty());
+    assert!(r.query("c").unwrap().candidates().is_empty());
 }
 
 /// §6.3 — value matching is exact in "type and value". A boolean `true` is
@@ -168,7 +121,7 @@ fn value_matching_is_exact_in_type_and_value() {
         !execute(&q, &[pid(json!({"age_over_18": true}))], &ExactFormat)
             .query("c")
             .unwrap()
-            .candidates
+            .candidates()
             .is_empty()
     );
 
@@ -178,7 +131,7 @@ fn value_matching_is_exact_in_type_and_value() {
             execute(&q, &creds, &ExactFormat)
                 .query("c")
                 .unwrap()
-                .candidates
+                .candidates()
                 .is_empty(),
             "value {wrong} should not match `true`"
         );
@@ -202,7 +155,7 @@ fn absent_credential_sets_requires_every_query_to_be_satisfied() {
     assert!(r.query("a").unwrap().is_satisfied());
     assert!(!r.query("b").unwrap().is_satisfied());
     assert!(
-        !r.satisfiable,
+        !satisfiable(&r),
         "one unsatisfied query must fail the request"
     );
 }
@@ -217,7 +170,7 @@ fn credential_sets_require_one_satisfiable_option() {
             "credential_sets":[{"options":[["a"],["b"]]}]}"#,
     );
     let only_a = [pid(json!({"given_name": "Erika"}))];
-    assert!(execute(&q, &only_a, &ExactFormat).satisfiable);
+    assert!(satisfiable(&execute(&q, &only_a, &ExactFormat)));
 
     // Both members of the single option are needed.
     let q_both = query(
@@ -225,7 +178,7 @@ fn credential_sets_require_one_satisfiable_option() {
                            {"id":"b","format":"mso_mdoc","meta":{}}],
             "credential_sets":[{"options":[["a","b"]]}]}"#,
     );
-    assert!(!execute(&q_both, &only_a, &ExactFormat).satisfiable);
+    assert!(!satisfiable(&execute(&q_both, &only_a, &ExactFormat)));
 }
 
 #[test]
@@ -240,28 +193,10 @@ fn an_optional_credential_set_does_not_block_the_request() {
 
     let r = execute(&q, &only_a, &ExactFormat);
     assert!(
-        r.satisfiable,
+        satisfiable(&r),
         "an optional set must not make the request fail"
     );
     assert!(!r.query("b").unwrap().is_satisfied());
-}
-
-/// §6.4.1 — "`claim_sets` MUST NOT be present if `claims` is absent." The
-/// verifier asked for a combination of claims it never listed, so what it
-/// wants cannot be determined and nothing is offered.
-#[test]
-fn claim_sets_without_claims_matches_nothing() {
-    let q = query(
-        r#"{"credentials":[{"id":"c","format":"dc+sd-jwt","meta":{},
-             "claim_sets":[["nonexistent"]]}]}"#,
-    );
-    let creds = [pid(json!({"given_name": "Erika"}))];
-
-    assert!(execute(&q, &creds, &ExactFormat)
-        .query("c")
-        .unwrap()
-        .candidates
-        .is_empty());
 }
 
 /// §6.1 — "Multiple Credential Queries in a request MAY request a
@@ -279,9 +214,15 @@ fn one_credential_can_answer_several_queries() {
     )];
 
     let r = execute(&q, &creds, &ExactFormat);
-    assert_eq!(r.query("a").unwrap().candidates[0].credential_id, "pid-1");
-    assert_eq!(r.query("b").unwrap().candidates[0].credential_id, "pid-1");
-    assert!(r.satisfiable);
+    assert_eq!(
+        r.query("a").unwrap().candidates()[0].credential_id(),
+        "pid-1"
+    );
+    assert_eq!(
+        r.query("b").unwrap().candidates()[0].credential_id(),
+        "pid-1"
+    );
+    assert!(satisfiable(&r));
 }
 
 /// Every credential that qualifies is a candidate — choosing between them is
@@ -299,20 +240,22 @@ fn all_qualifying_credentials_are_returned_as_candidates() {
         JsonCredential::new("mdl-1", "mso_mdoc", json!({"given_name": "Erika"})),
     ];
 
-    let ids: Vec<_> = execute(&q, &creds, &ExactFormat)
+    let result = execute(&q, &creds, &ExactFormat);
+    let ids: Vec<_> = result
         .query("c")
         .unwrap()
-        .candidates
+        .candidates()
         .iter()
-        .map(|c| c.credential_id.clone())
+        .map(|c| c.credential_id().to_owned())
         .collect();
     assert_eq!(ids, ["pid-1", "pid-2"], "the mdoc has the wrong format");
 }
 
-/// A path whose *type* is wrong for the credential aborts resolution (§7.1.1),
-/// which must disqualify the credential rather than propagate as a panic.
+/// A path whose *type* is wrong for the credential aborts processing with an error (§7.1.1):
+/// the credential answers nothing, and the query's refusals carry the error. With
+/// `claim_sets`, the next option still answers.
 #[test]
-fn a_type_mismatched_path_disqualifies_without_panicking() {
+fn a_type_mismatched_path_refuses_the_credential_with_its_error() {
     let q = query(
         r#"{"credentials":[{"id":"c","format":"dc+sd-jwt","meta":{},
              "claims":[{"path":["given_name","first"]}]}]}"#,
@@ -320,8 +263,34 @@ fn a_type_mismatched_path_disqualifies_without_panicking() {
     let creds = [pid(json!({"given_name": "Erika"}))];
 
     let r = execute(&q, &creds, &ExactFormat);
-    assert!(r.query("c").unwrap().candidates.is_empty());
-    assert!(!r.satisfiable);
+    let c = r.query("c").unwrap();
+    assert!(c.candidates().is_empty());
+    let refusals: Vec<_> = c
+        .refusals()
+        .iter()
+        .map(|refusal| (refusal.credential_id().as_str(), refusal.error().clone()))
+        .collect();
+    assert_eq!(
+        refusals,
+        [(
+            "pid-1",
+            PathError::TypeMismatch {
+                at: ComponentIndex::new(1)
+            }
+        )]
+    );
+    assert!(!satisfiable(&r));
+
+    let q = query(
+        r#"{"credentials":[{"id":"c","format":"dc+sd-jwt","meta":{},
+             "claims":[{"id":"bad","path":["given_name","first"]},
+                       {"id":"good","path":["given_name"]}],
+             "claim_sets":[["bad"],["good"]]}]}"#,
+    );
+    let r = execute(&q, &creds, &ExactFormat);
+    let c = r.query("c").unwrap();
+    assert_eq!(c.candidates()[0].claims()[0].claim_id().unwrap(), "good");
+    assert!(c.refusals().is_empty());
 }
 
 /// An empty wallet satisfies nothing, and must not be reported otherwise.
@@ -331,19 +300,8 @@ fn an_empty_wallet_satisfies_nothing() {
     let creds: [JsonCredential; 0] = [];
 
     let r = execute(&q, &creds, &ExactFormat);
-    assert!(!r.satisfiable);
-    assert!(r.query("c").unwrap().candidates.is_empty());
-}
-
-/// §6 — `credentials` is REQUIRED and non-empty, but parsing does not enforce
-/// it and every set check is vacuously true over an empty set. Without a
-/// guard, an empty query reports as satisfiable and the picker offers an entry
-/// backed by nothing.
-#[test]
-fn an_empty_query_is_not_satisfiable() {
-    let q = query(r#"{"credentials":[]}"#);
-    let creds = [pid(json!({"given_name": "Erika"}))];
-    assert!(!execute(&q, &creds, &ExactFormat).satisfiable);
+    assert!(!satisfiable(&r));
+    assert!(r.query("c").unwrap().candidates().is_empty());
 }
 
 /// A request whose sets are all optional passes "all required sets satisfied"
@@ -359,296 +317,7 @@ fn all_optional_sets_with_nothing_matching_is_not_satisfiable() {
 
     let r = execute(&q, &no_mdoc, &ExactFormat);
     assert!(!r.query("a").unwrap().is_satisfied());
-    assert!(!r.satisfiable);
-}
-
-// ---------------------------------------------------------------------------
-// Combination enumeration
-// ---------------------------------------------------------------------------
-
-/// With no `credential_sets`, every query must be answered, so a combination
-/// spans all of them (§6.4).
-#[test]
-fn a_combination_spans_every_query_when_no_sets_are_given() {
-    let q = query(
-        r#"{"credentials":[{"id":"a","format":"dc+sd-jwt","meta":{},
-                            "claims":[{"path":["given_name"]}]},
-                           {"id":"b","format":"dc+sd-jwt","meta":{},
-                            "claims":[{"path":["family_name"]}]}]}"#,
-    );
-    let creds = [pid(
-        json!({"given_name": "Erika", "family_name": "Mustermann"}),
-    )];
-
-    let combos = execute(&q, &creds, &ExactFormat).combinations(16);
-    assert_eq!(combos.dropped, Dropped::Exact(0));
-    assert_eq!(combos.combinations.len(), 1);
-
-    let members = &combos.combinations[0].members;
-    assert_eq!(members.len(), 2, "both queries in one combination");
-    assert_eq!(members[0].0, "a");
-    assert_eq!(members[1].0, "b");
-}
-
-/// Alternatives are separate combinations — the user picks one.
-#[test]
-fn each_alternative_credential_is_its_own_combination() {
-    let q = query(
-        r#"{"credentials":[{"id":"a","format":"dc+sd-jwt","meta":{},
-             "claims":[{"path":["given_name"]}]}]}"#,
-    );
-    let creds = [
-        JsonCredential::new("pid-1", "dc+sd-jwt", json!({"given_name": "Erika"})),
-        JsonCredential::new("pid-2", "dc+sd-jwt", json!({"given_name": "Max"})),
-    ];
-
-    let combos = execute(&q, &creds, &ExactFormat).combinations(16);
-    let ids: Vec<_> = combos
-        .combinations
-        .iter()
-        .map(|c| c.members[0].1.credential_id.clone())
-        .collect();
-    assert_eq!(ids, ["pid-1", "pid-2"]);
-}
-
-/// Each option of a required set is a distinct way to satisfy it, and a
-/// multi-member option produces one combination covering both queries.
-#[test]
-fn each_satisfiable_option_becomes_a_combination() {
-    let q = query(
-        r#"{"credentials":[{"id":"full","format":"dc+sd-jwt","meta":{},
-                            "claims":[{"path":["given_name"]}]},
-                           {"id":"part1","format":"dc+sd-jwt","meta":{},
-                            "claims":[{"path":["family_name"]}]},
-                           {"id":"part2","format":"dc+sd-jwt","meta":{},
-                            "claims":[{"path":["birth_date"]}]}],
-            "credential_sets":[{"options":[["full"],["part1","part2"]]}]}"#,
-    );
-    let creds = [pid(json!({
-        "given_name": "Erika", "family_name": "Mustermann", "birth_date": "1979-04-12"
-    }))];
-
-    let combos = execute(&q, &creds, &ExactFormat).combinations(16);
-    assert_eq!(combos.combinations.len(), 2, "one per satisfiable option");
-
-    let sizes: Vec<_> = combos
-        .combinations
-        .iter()
-        .map(|c| c.members.len())
-        .collect();
-    assert_eq!(sizes, [1, 2], "the second option needs both credentials");
-}
-
-/// An option the wallet cannot satisfy is not offered, but a sibling option
-/// that it can satisfy still is.
-#[test]
-fn unsatisfiable_options_are_left_out() {
-    let q = query(
-        r#"{"credentials":[{"id":"have","format":"dc+sd-jwt","meta":{},
-                            "claims":[{"path":["given_name"]}]},
-                           {"id":"lack","format":"mso_mdoc","meta":{}}],
-            "credential_sets":[{"options":[["lack"],["have"]]}]}"#,
-    );
-    let creds = [pid(json!({"given_name": "Erika"}))];
-
-    let combos = execute(&q, &creds, &ExactFormat).combinations(16);
-    assert_eq!(combos.combinations.len(), 1);
-    assert_eq!(combos.combinations[0].members[0].0, "have");
-}
-
-/// Optional sets are not enumerated: the wallet MAY include them, so offering
-/// one is a UI decision rather than a matching one, and folding them in would
-/// multiply the count for choices the verifier said it can do without.
-#[test]
-fn optional_sets_do_not_multiply_the_combinations() {
-    let q = query(
-        r#"{"credentials":[{"id":"need","format":"dc+sd-jwt","meta":{},
-                            "claims":[{"path":["given_name"]}]},
-                           {"id":"nice","format":"dc+sd-jwt","meta":{},
-                            "claims":[{"path":["family_name"]}]}],
-            "credential_sets":[{"options":[["need"]]},
-                               {"options":[["nice"]],"required":false}]}"#,
-    );
-    let creds = [pid(
-        json!({"given_name": "Erika", "family_name": "Mustermann"}),
-    )];
-
-    let combos = execute(&q, &creds, &ExactFormat).combinations(16);
-    assert_eq!(combos.combinations.len(), 1);
-    assert_eq!(combos.combinations[0].members[0].0, "need");
-}
-
-/// The count is a product, so it has to be bounded — and whatever is dropped
-/// is counted. A picker showing the first few of many is telling the user
-/// those are the only options they have.
-#[test]
-fn the_combination_count_is_bounded_and_the_remainder_is_counted() {
-    let q = query(
-        r#"{"credentials":[{"id":"a","format":"dc+sd-jwt","meta":{},
-             "claims":[{"path":["given_name"]}]}]}"#,
-    );
-    let creds: Vec<_> = (0..10)
-        .map(|i| {
-            JsonCredential::new(
-                &format!("pid-{i}"),
-                "dc+sd-jwt",
-                json!({"given_name": "Erika"}),
-            )
-        })
-        .collect();
-
-    let combos = execute(&q, &creds, &ExactFormat).combinations(4);
-    assert_eq!(combos.combinations.len(), 4);
-    assert_eq!(
-        combos.dropped,
-        Dropped::Exact(6),
-        "the remainder must be reported, not hidden"
-    );
-}
-
-/// An unsatisfiable request yields no combinations — §6.4 says the wallet
-/// must not return any credential, so there is nothing to offer.
-#[test]
-fn an_unsatisfiable_request_yields_no_combinations() {
-    let q = query(
-        r#"{"credentials":[{"id":"a","format":"dc+sd-jwt","meta":{},
-                            "claims":[{"path":["given_name"]}]},
-                           {"id":"b","format":"mso_mdoc","meta":{}}]}"#,
-    );
-    let creds = [pid(json!({"given_name": "Erika"}))];
-
-    let result = execute(&q, &creds, &ExactFormat);
-    assert!(!result.satisfiable);
-    assert!(result.combinations(16).combinations.is_empty());
-}
-
-/// Every set optional means nothing is required, so there is no combination to
-/// enumerate. Returning one empty combination would hand the picker an option
-/// containing no credentials at all.
-#[test]
-fn all_optional_sets_produce_no_combination_rather_than_an_empty_one() {
-    let q = query(
-        r#"{"credentials":[{"id":"nice","format":"dc+sd-jwt","meta":{},
-             "claims":[{"path":["given_name"]}]}],
-            "credential_sets":[{"options":[["nice"]],"required":false}]}"#,
-    );
-    let creds = [pid(json!({"given_name": "Erika"}))];
-
-    let result = execute(&q, &creds, &ExactFormat);
-    assert!(result.satisfiable, "an optional set imposes nothing");
-
-    let combos = result.combinations(16);
-    assert!(
-        combos.combinations.is_empty(),
-        "expected no combinations, got {:?}",
-        combos.combinations
-    );
-}
-
-/// The product is computed, not built: asking for two of a thousand
-/// possibilities must not materialise a thousand.
-#[test]
-fn only_the_requested_number_of_combinations_is_built() {
-    let q = query(
-        r#"{"credentials":[{"id":"a","format":"dc+sd-jwt","meta":{},
-                            "claims":[{"path":["given_name"]}]},
-                           {"id":"b","format":"dc+sd-jwt","meta":{},
-                            "claims":[{"path":["given_name"]}]}],
-            "credential_sets":[{"options":[["a","b"]]}]}"#,
-    );
-    let creds: Vec<_> = (0..40)
-        .map(|i| {
-            JsonCredential::new(
-                &format!("pid-{i}"),
-                "dc+sd-jwt",
-                json!({"given_name": "Erika"}),
-            )
-        })
-        .collect();
-
-    // 40 candidates for each of two queries: 1600 possibilities.
-    let combos = execute(&q, &creds, &ExactFormat).combinations(2);
-    assert_eq!(combos.combinations.len(), 2);
-    assert_eq!(
-        combos.dropped,
-        Dropped::Exact(1598),
-        "the rest are counted, not built"
-    );
-
-    // The two built are distinct, so the bound does not collapse them.
-    assert_ne!(combos.combinations[0], combos.combinations[1]);
-    for combination in &combos.combinations {
-        assert_eq!(combination.members.len(), 2);
-    }
-}
-
-/// §6.2 `purpose` reaches the combination it explains, not just the query.
-///
-/// A request with two required sets offers combinations that satisfy both, so
-/// both reasons belong to each one. Shown beside the wrong option, a purpose
-/// misinforms the person consenting.
-#[test]
-fn a_combination_carries_the_purposes_of_the_sets_it_satisfies() {
-    let q = query(
-        r#"{"credentials":[{"id":"name","format":"dc+sd-jwt","meta":{},
-                            "claims":[{"path":["given_name"]}]},
-                           {"id":"age","format":"dc+sd-jwt","meta":{},
-                            "claims":[{"path":["birth_date"]}]}],
-            "credential_sets":[
-              {"options":[["name"]],"purpose":"Addressing you correctly"},
-              {"options":[["age"]],"purpose":{"id":7,"name":"Age check"}}]}"#,
-    );
-    let creds = [pid(
-        json!({"given_name": "Erika", "birth_date": "1979-04-12"}),
-    )];
-
-    let combos = execute(&q, &creds, &ExactFormat).combinations(16);
-    assert_eq!(combos.combinations.len(), 1);
-    let purposes = &combos.combinations[0].purposes;
-    assert_eq!(
-        purposes.len(),
-        2,
-        "one per required set the combination satisfies"
-    );
-    assert_eq!(
-        purposes[0],
-        Value::String("Addressing you correctly".into())
-    );
-    assert_eq!(
-        purposes[1].get("name"),
-        Some(&Value::String("Age check".into())),
-        "a non-string purpose is carried whole, not stringified here"
-    );
-}
-
-/// A set with no `purpose` contributes nothing rather than a placeholder, so a
-/// caller can tell "no reason given" from "a reason that renders as empty".
-#[test]
-fn a_set_without_a_purpose_contributes_none() {
-    let q = query(
-        r#"{"credentials":[{"id":"name","format":"dc+sd-jwt","meta":{},
-                            "claims":[{"path":["given_name"]}]}],
-            "credential_sets":[{"options":[["name"]]}]}"#,
-    );
-    let creds = [pid(json!({"given_name": "Erika"}))];
-
-    let combos = execute(&q, &creds, &ExactFormat).combinations(16);
-    assert!(combos.combinations[0].purposes.is_empty());
-}
-
-/// Without `credential_sets` there is no set to carry a reason, so there is no
-/// reason — the implicit group §6.4 defines is the engine's, not the
-/// verifier's.
-#[test]
-fn no_credential_sets_means_no_purposes() {
-    let q = query(
-        r#"{"credentials":[{"id":"name","format":"dc+sd-jwt","meta":{},
-             "claims":[{"path":["given_name"]}]}]}"#,
-    );
-    let creds = [pid(json!({"given_name": "Erika"}))];
-
-    let combos = execute(&q, &creds, &ExactFormat).combinations(16);
-    assert!(combos.combinations[0].purposes.is_empty());
+    assert!(!satisfiable(&r));
 }
 
 /// §6.1 — `require_cryptographic_holder_binding` defaults to `true`, so a
@@ -664,10 +333,10 @@ fn an_unbound_credential_is_not_offered_when_binding_is_required() {
 
     let result = execute(&q, &creds, &ExactFormat);
     assert!(
-        !result.satisfiable,
+        !satisfiable(&result),
         "the default is `true`; silence is not permission"
     );
-    assert!(result.query("c").expect("query").candidates.is_empty());
+    assert!(result.query("c").expect("query").candidates().is_empty());
 }
 
 /// The same credential is offered once the verifier says binding is not
@@ -682,8 +351,8 @@ fn an_unbound_credential_is_offered_when_binding_is_not_required() {
     let creds = [pid(json!({"given_name": "Erika"})).unbound()];
 
     let result = execute(&q, &creds, &ExactFormat);
-    assert!(result.satisfiable);
-    assert_eq!(result.query("c").expect("query").candidates.len(), 1);
+    assert!(satisfiable(&result));
+    assert_eq!(result.query("c").expect("query").candidates().len(), 1);
 }
 
 /// Binding is checked before format and claims: an unbound credential is
@@ -701,227 +370,7 @@ fn binding_disqualifies_rather_than_deprioritises() {
     ];
 
     let result = execute(&q, &creds, &ExactFormat);
-    let candidates = &result.query("c").expect("query").candidates;
+    let candidates = &result.query("c").expect("query").candidates();
     assert_eq!(candidates.len(), 1, "only the bound one");
-    assert_eq!(candidates[0].credential_id, "pid-1");
-}
-
-/// §6.1 `multiple` — "multiple Credentials can be returned for this Credential
-/// Query". A query that sets it is answered by every matching credential at
-/// once, which is the reading under which the flag does anything at all.
-#[test]
-fn a_multiple_query_is_answered_by_every_matching_credential() {
-    let q = query(
-        r#"{"credentials":[{"id":"c","format":"dc+sd-jwt","meta":{},"multiple":true,
-             "claims":[{"path":["given_name"]}]}]}"#,
-    );
-    let creds = [
-        JsonCredential::new("a", "dc+sd-jwt", json!({"given_name": "Erika"})),
-        JsonCredential::new("b", "dc+sd-jwt", json!({"given_name": "Max"})),
-        JsonCredential::new("c", "dc+sd-jwt", json!({"given_name": "Ada"})),
-    ];
-
-    let combos = execute(&q, &creds, &ExactFormat).combinations(16);
-    assert_eq!(
-        combos.combinations.len(),
-        1,
-        "one option holding all three, not three alternatives"
-    );
-    let ids: Vec<_> = combos.combinations[0]
-        .members
-        .iter()
-        .map(|(query_id, candidate)| (query_id.as_str(), candidate.credential_id.as_str()))
-        .collect();
-    assert_eq!(ids, [("c", "a"), ("c", "b"), ("c", "c")]);
-}
-
-/// Without `multiple` the same wallet yields one alternative per credential —
-/// the default is `false`, and §6.4 then permits at most one per query.
-#[test]
-fn without_multiple_each_credential_is_its_own_alternative() {
-    let q = query(
-        r#"{"credentials":[{"id":"c","format":"dc+sd-jwt","meta":{},
-             "claims":[{"path":["given_name"]}]}]}"#,
-    );
-    let creds = [
-        JsonCredential::new("a", "dc+sd-jwt", json!({"given_name": "Erika"})),
-        JsonCredential::new("b", "dc+sd-jwt", json!({"given_name": "Max"})),
-        JsonCredential::new("c", "dc+sd-jwt", json!({"given_name": "Ada"})),
-    ];
-
-    let combos = execute(&q, &creds, &ExactFormat).combinations(16);
-    assert_eq!(combos.combinations.len(), 3);
-    for combination in &combos.combinations {
-        assert_eq!(combination.members.len(), 1, "at most one per query (§6.4)");
-    }
-}
-
-/// `multiple` collapses the product rather than multiplying it: two queries
-/// with three candidates each is nine combinations normally, and one when both
-/// take everything.
-#[test]
-fn multiple_collapses_the_combination_count() {
-    let q = query(
-        r#"{"credentials":[{"id":"names","format":"dc+sd-jwt","meta":{},"multiple":true,
-                            "claims":[{"path":["given_name"]}]},
-                           {"id":"dates","format":"dc+sd-jwt","meta":{},"multiple":true,
-                            "claims":[{"path":["birth_date"]}]}]}"#,
-    );
-    let creds = [
-        JsonCredential::new(
-            "a",
-            "dc+sd-jwt",
-            json!({"given_name": "Erika", "birth_date": "1979-04-12"}),
-        ),
-        JsonCredential::new(
-            "b",
-            "dc+sd-jwt",
-            json!({"given_name": "Max", "birth_date": "1985-01-02"}),
-        ),
-        JsonCredential::new(
-            "c",
-            "dc+sd-jwt",
-            json!({"given_name": "Ada", "birth_date": "1990-11-30"}),
-        ),
-    ];
-
-    let combos = execute(&q, &creds, &ExactFormat).combinations(64);
-    assert_eq!(combos.combinations.len(), 1);
-    assert_eq!(combos.combinations[0].members.len(), 6, "3 per query");
-    assert_eq!(combos.dropped, Dropped::Exact(0));
-}
-
-/// A `multiple` query with nothing matching is still unsatisfied. Width one
-/// applies to a query answered by everything, and there is no "everything"
-/// when the wallet holds none of it.
-#[test]
-fn a_multiple_query_with_no_candidates_is_not_satisfied() {
-    let q = query(r#"{"credentials":[{"id":"c","format":"mso_mdoc","meta":{},"multiple":true}]}"#);
-    let creds = [pid(json!({"given_name": "Erika"}))];
-
-    let result = execute(&q, &creds, &ExactFormat);
-    assert!(!result.satisfiable);
-    assert!(result.combinations(16).combinations.is_empty());
-}
-
-/// The finding this type exists for: a product that overflows `usize` reports
-/// a bound, not a number.
-///
-/// Before, `dropped` was `total - take` where `total` had saturated, so a
-/// wallet asking about 500 credential queries was told 18446744073709551551
-/// combinations had been dropped — a figure precise enough to be believed and
-/// wrong enough to discredit everything beside it.
-#[test]
-fn an_overflowing_product_reports_a_bound_rather_than_a_number() {
-    // Two candidates per query across enough queries that 2^n leaves `usize`
-    // far behind. Nothing is mis-offered — the cap is what keeps enumeration
-    // bounded — but the count of what was skipped is unknowable.
-    let queries: Vec<String> = (0..200)
-        .map(|i| {
-            format!(
-                r#"{{"id":"q{i}","format":"dc+sd-jwt","meta":{{}},
-                     "claims":[{{"path":["given_name"]}}]}}"#
-            )
-        })
-        .collect();
-    let q = query(&format!(r#"{{"credentials":[{}]}}"#, queries.join(",")));
-    let creds = [
-        JsonCredential::new("a", "dc+sd-jwt", json!({"given_name": "Erika"})),
-        JsonCredential::new("b", "dc+sd-jwt", json!({"given_name": "Max"})),
-    ];
-
-    let combos = execute(&q, &creds, &ExactFormat).combinations(32);
-    assert_eq!(combos.combinations.len(), 32, "the limit is still honoured");
-    assert!(
-        !combos.dropped.is_exact(),
-        "2^200 combinations cannot be counted in a usize, and claiming \
-         otherwise is the bug: got {:?}",
-        combos.dropped
-    );
-    assert!(combos.dropped.any());
-    assert!(
-        matches!(combos.dropped, Dropped::AtLeast(n) if n == usize::MAX - 32),
-        "the bound is what is left of the clamp: got {:?}",
-        combos.dropped
-    );
-}
-
-/// A count that fits stays exact, so the distinction is not merely always-on.
-#[test]
-fn a_product_that_fits_stays_exact() {
-    let q = query(
-        r#"{"credentials":[{"id":"a","format":"dc+sd-jwt","meta":{},
-                            "claims":[{"path":["given_name"]}]},
-                           {"id":"b","format":"dc+sd-jwt","meta":{},
-                            "claims":[{"path":["given_name"]}]}]}"#,
-    );
-    let creds = [
-        JsonCredential::new("x", "dc+sd-jwt", json!({"given_name": "Erika"})),
-        JsonCredential::new("y", "dc+sd-jwt", json!({"given_name": "Max"})),
-        JsonCredential::new("z", "dc+sd-jwt", json!({"given_name": "Ada"})),
-    ];
-
-    // 3 x 3 = 9 combinations, of which 4 are built.
-    let combos = execute(&q, &creds, &ExactFormat).combinations(4);
-    assert_eq!(combos.combinations.len(), 4);
-    assert_eq!(combos.dropped, Dropped::Exact(5));
-    assert!(combos.dropped.is_exact());
-}
-
-/// Nothing dropped is exactly zero, not an unknown — a picker showing every
-/// option there is should say so with confidence.
-#[test]
-fn nothing_dropped_is_an_exact_zero() {
-    let q = query(
-        r#"{"credentials":[{"id":"c","format":"dc+sd-jwt","meta":{},
-             "claims":[{"path":["given_name"]}]}]}"#,
-    );
-    let creds = [pid(json!({"given_name": "Erika"}))];
-
-    let combos = execute(&q, &creds, &ExactFormat).combinations(16);
-    assert_eq!(combos.dropped, Dropped::Exact(0));
-    assert!(!combos.dropped.any());
-}
-
-/// Summing dropped counts must not manufacture exactness either.
-///
-/// Two required credential sets each drop a bounded number, and the total is
-/// still a bound. Reported as exact, that would be the same overstatement one
-/// layer up from the product — so it is checked across the group loop, not
-/// only inside it.
-#[test]
-fn a_bound_stays_a_bound_across_several_credential_sets() {
-    // Two required sets, each over enough queries that its own product
-    // overflows, so both contribute an `AtLeast` that then has to be summed.
-    let mut queries = Vec::new();
-    for group in 0..2 {
-        for i in 0..100 {
-            queries.push(format!(
-                r#"{{"id":"g{group}q{i}","format":"dc+sd-jwt","meta":{{}},
-                     "claims":[{{"path":["given_name"]}}]}}"#
-            ));
-        }
-    }
-    let options: Vec<String> = (0..2)
-        .map(|group| {
-            let ids: Vec<String> = (0..100).map(|i| format!(r#""g{group}q{i}""#)).collect();
-            format!(r#"{{"options":[[{}]]}}"#, ids.join(","))
-        })
-        .collect();
-    let q = query(&format!(
-        r#"{{"credentials":[{}],"credential_sets":[{}]}}"#,
-        queries.join(","),
-        options.join(",")
-    ));
-    let creds = [
-        JsonCredential::new("a", "dc+sd-jwt", json!({"given_name": "Erika"})),
-        JsonCredential::new("b", "dc+sd-jwt", json!({"given_name": "Max"})),
-    ];
-
-    let combos = execute(&q, &creds, &ExactFormat).combinations(32);
-    assert!(
-        !combos.dropped.is_exact(),
-        "a sum of bounds is a bound: got {:?}",
-        combos.dropped
-    );
+    assert_eq!(candidates[0].credential_id(), "pid-1");
 }

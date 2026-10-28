@@ -6,8 +6,9 @@
 //! | Walk its claims | [`SdJwt::claims`], [`Object`], [`Claim`], [`ClaimValue`], [`Element`] | S2: issued array positions |
 //! | Resolve a claims path pointer | [`SdJwt::root`] gives the [`Node`] that [`siros_dcql::resolve`] walks | Q4 |
 //!
-//! The issuer JWT's signature and the validity claims (Section 7.1, steps 2.a to 2.c and 6) are
-//! the caller's to check.
+//! The issuer JWT is kept verbatim, with its `x5c` header parameter ([`SdJwt::x5c`]). Its
+//! signature and the validity claims (Section 7.1, steps 2.a to 2.c and 6) are the caller's to
+//! check.
 //!
 //! Types that hold claim values or salts implement no `Debug`, which keeps them out of logs
 //! (R-G6).
@@ -37,13 +38,16 @@
 
 mod alg;
 mod error;
-mod json;
 mod node;
 mod process;
 mod sd_jwt;
 mod tree;
 
-pub use error::ParseError;
+pub use alg::Digest;
+pub use error::{
+    DisclosureFault, EncodedJsonFault, IssuerJwtFault, ParseError, Placement, ReservedFault,
+    SdAlgFault, X5cError, X5cIndex,
+};
 pub use node::{Children, Node, NodeValue};
 pub use process::MAX_DEPTH;
 pub use sd_jwt::SdJwt;

@@ -1,17 +1,22 @@
 //! OpenID4VCI display metadata of one credential configuration, and the merger (D1).
 
 use serde_json::{Map, Value};
+use siros_codec::url::HttpsUrl;
+use siros_wallet_state::{ConfigurationId, EmptyIdentifier, IssuerIdentifier};
 
 use crate::claims::{self, ClaimDescription, Label};
 use crate::entry::DisplayEntry;
 use crate::error::{DisplayError, EntryFault};
-use crate::ids::{ConfigurationId, IssuerIdentifier};
 use crate::json::{self, Entries};
 use crate::locale::Localized;
 
 /// The Credential Response member that carries delivered secrets (privatedata 3.1, Section
 /// 5A.1).
 const AUXILIARY_DATA: &str = "auxiliary_data";
+
+/// The configuration member that locates its signed credential metadata (PaSO Proof Metadata,
+/// Section 2).
+const METADATA_URI: &str = "credential_metadata_uri";
 
 /// The display metadata of one credential configuration of a Credential Issuer, as the display
 /// cache holds it.
@@ -23,13 +28,15 @@ const AUXILIARY_DATA: &str = "auxiliary_data";
 ///   "credential_issuer": "https://issuer.example",
 ///   "credential_configuration_id": "pid",
 ///   "display": [{"name": "Example Issuer", "locale": "en"}],
-///   "credential_metadata": {"display": [{"name": "PID", "locale": "en"}], "claims": []}
+///   "credential_metadata": {"display": [{"name": "PID", "locale": "en"}], "claims": []},
+///   "credential_metadata_uri": "https://issuer.example/credential-metadata/pid"
 /// }
 /// ```
 ///
 /// `display` is the Credential Issuer's own (OpenID4VCI 1.0, Section 12.2.4). `credential_metadata`
 /// is the configuration's, merged with the Credential Response's ([`IssuerMetadata::merge`]); it
-/// holds no `auxiliary_data`. Both are optional and keep all their members.
+/// holds no `auxiliary_data`. `credential_metadata_uri` is the configuration's (PaSO Proof
+/// Metadata, Section 2). All three are optional; the first two keep all their members.
 #[derive(Debug, Clone)]
 pub struct IssuerMetadata {
     record: Value,
@@ -38,6 +45,7 @@ pub struct IssuerMetadata {
     issuer_display: Vec<Label>,
     display: Vec<DisplayEntry>,
     claims: Vec<ClaimDescription>,
+    metadata_uri: Option<HttpsUrl>,
 }
 
 impl IssuerMetadata {
@@ -95,6 +103,9 @@ impl IssuerMetadata {
                 .get("display")
                 .map(|display| ("display", display.clone())),
             Some(("credential_metadata", merged.into())),
+            configuration
+                .get(METADATA_URI)
+                .map(|uri| (METADATA_URI, uri.clone())),
         ]
         .into_iter()
         .flatten()
@@ -106,7 +117,7 @@ impl IssuerMetadata {
     /// The display metadata of `record`, the form [`IssuerMetadata::to_json`] gives.
     ///
     /// `display` is a non-empty array of objects, each with an optional string `name` and an
-    /// optional `locale`, one per locale. `credential_metadata` is an object without
+    /// optional `locale`, one per locale. `credential_metadata_uri` is an `https` URL. `credential_metadata` is an object without
     /// `auxiliary_data`. Its `display` is a non-empty array of objects with a string `name`, an
     /// optional `locale` (one per locale), `logo`, `background_color` and `text_color`; its
     /// `claims` are claims descriptions (Appendix B.2 and B.3).
@@ -121,6 +132,7 @@ impl IssuerMetadata {
             "credential_configuration_id",
             "display",
             "credential_metadata",
+            METADATA_URI,
         ];
         if object.keys().any(|name| !known.contains(&name.as_str())) {
             return Err(DisplayError::RecordMemberUnknown);
@@ -152,11 +164,16 @@ impl IssuerMetadata {
         };
         Ok(Self {
             record: record.clone(),
-            issuer: IssuerIdentifier::new(issuer),
-            configuration_id: ConfigurationId::new(configuration_id),
+            issuer: IssuerIdentifier::parse(issuer)
+                .map_err(|EmptyIdentifier| DisplayError::IssuerIdentifier)?,
+            configuration_id: ConfigurationId::parse(configuration_id)
+                .map_err(|EmptyIdentifier| DisplayError::ConfigurationId)?,
             issuer_display: claims::named_labels(object, DisplayError::Display)?,
             display: credential_display(metadata)?,
             claims,
+            metadata_uri: json::string(object, METADATA_URI, DisplayError::CredentialMetadataUri)?
+                .map(|uri| HttpsUrl::parse(uri).ok_or(DisplayError::CredentialMetadataUri))
+                .transpose()?,
         })
     }
 
@@ -173,6 +190,12 @@ impl IssuerMetadata {
     /// The credential configuration identifier.
     pub fn configuration_id(&self) -> &ConfigurationId {
         &self.configuration_id
+    }
+
+    /// `credential_metadata_uri`: where the configuration's signed credential metadata JWT is
+    /// served (PaSO Proof Metadata, Section 2).
+    pub fn credential_metadata_uri(&self) -> Option<&HttpsUrl> {
+        self.metadata_uri.as_ref()
     }
 
     /// The names of the issuer `display` entries that have one.

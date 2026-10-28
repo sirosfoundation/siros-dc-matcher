@@ -1,5 +1,9 @@
 //! The Verifier's refusals.
 
+use siros_trust::{CertificateError, ChainIndex, PathRefusal};
+use siros_zkp_req_nym_auth::attestation::DocumentSignerError;
+use x509_cert::der::Decode;
+
 use super::Case;
 use crate::*;
 
@@ -46,7 +50,7 @@ pub fn cases() -> Vec<Case> {
         ),
         (
             "system_not_on_backend",
-            verify_edit(|p| p.proof_backend = "vega-v1".into()),
+            verify_edit(|p| p.proof_backend = ProofBackend::new("vega-v1")),
             Got::Verify(Rejection::Structure(StructureRejection::SystemNotOnBackend)),
         ),
         (
@@ -67,7 +71,7 @@ pub fn cases() -> Vec<Case> {
         ),
         (
             "req_set_unknown",
-            verify_edit(|p| p.req_set = Some(5)),
+            verify_edit(|p| p.req_set = Some(ReqSetIndex::new(5))),
             Got::Verify(Rejection::Structure(StructureRejection::ReqSetUnknown)),
         ),
         (
@@ -79,7 +83,7 @@ pub fn cases() -> Vec<Case> {
             "result_not_true",
             verify_edit(|p| set_result(p, "adult", Some(Cbor::Bool(false)))),
             Got::Verify(Rejection::Structure(StructureRejection::ResultNotTrue {
-                item: 1,
+                item: ItemIndex::new(1),
             })),
         ),
         // The systems' Section 9, Verifier side.
@@ -96,9 +100,12 @@ pub fn cases() -> Vec<Case> {
                 },
                 &honest(NymAuthSystem::LongfellowV1, &sets_query()),
             ),
-            Got::Verify(Rejection::Request(Some(InvalidRequest::Catalogue(
-                CatalogueRule::VerInvalid { item: 0 },
-            )))),
+            Got::Verify(Rejection::Request(OwnQueryFault::Invalid(
+                InvalidRequest::Catalogue(CatalogueRule::VerInvalid {
+                    item: ItemIndex::new(0),
+                    fault: ParamFault::Value,
+                }),
+            ))),
         ),
         (
             "request: unsupported",
@@ -117,13 +124,17 @@ pub fn cases() -> Vec<Case> {
         ),
         (
             "proof_encoding: proof",
-            verify_edit(|p| p.proof = vec![0xff]),
-            Got::Verify(Rejection::ProofEncoding),
+            verify_edit(|p| p.proof = ProofContent::new(vec![0xff])),
+            Got::Verify(Rejection::ProofEncoding(ProofEncodingFault::Envelope(
+                EncodingError::Cbor(CborError::Unsupported(CborUnsupported::IndefiniteLength)),
+            ))),
         ),
         (
             "proof_encoding: inputs",
-            verify_edit(|p| edit_envelope(p, |e| e.inputs.push(("extra".into(), Cbor::Null)))),
-            Got::Verify(Rejection::ProofEncoding),
+            verify_edit(|p| {
+                edit_envelope(p, |e| e.inputs.push((InputName::new("extra"), Cbor::Null)))
+            }),
+            Got::Verify(Rejection::ProofEncoding(ProofEncodingFault::Inputs)),
         ),
         (
             "proof_encoding: tdate",
@@ -132,24 +143,18 @@ pub fn cases() -> Vec<Case> {
                     set_input(e, "proof_time", Cbor::text("2026-10-09T12:00:00Z"))
                 })
             }),
-            Got::Verify(Rejection::ProofEncoding),
+            Got::Verify(Rejection::ProofEncoding(ProofEncodingFault::ProofTime)),
         ),
         (
             "proof_encoding: zk_proof length",
             verify_edit_as(NymAuthSystem::VegaV1, Verifying::default(), |p| {
-                edit_envelope(p, |e| {
-                    e.zk_proof.pop();
-                })
+                edit_envelope(p, |e| e.zk_proof = shortened(&e.zk_proof))
             }),
-            Got::Verify(Rejection::ProofEncoding),
+            Got::Verify(Rejection::ProofEncoding(ProofEncodingFault::ZkProofLength)),
         ),
         (
             "proof_encoding: verifier",
-            verify_edit(|p| {
-                edit_envelope(p, |e| {
-                    e.zk_proof.pop();
-                })
-            }),
+            verify_edit(|p| edit_envelope(p, |e| e.zk_proof = shortened(&e.zk_proof))),
             Got::Verify(Rejection::Proof(ProofFailure::Encoding)),
         ),
         (
@@ -163,7 +168,7 @@ pub fn cases() -> Vec<Case> {
                     )
                 })
             }),
-            Got::Verify(Rejection::IssuerKeySet(IssuerKeySetError::Count)),
+            Got::Verify(Rejection::IssuerKeySet(IssuerKeySetError::Count(2))),
         ),
         (
             "issuer_key_set: certificate",
@@ -177,7 +182,9 @@ pub fn cases() -> Vec<Case> {
                 })
             }),
             Got::Verify(Rejection::IssuerKeySet(IssuerKeySetError::Certificate(
-                siros_mdoc::CertificateError::Der,
+                DocumentSignerError::Certificate(CertificateError::Der(
+                    x509_cert::Certificate::from_der(&[0x30, 0x00]).unwrap_err(),
+                )),
             ))),
         ),
         (
@@ -185,12 +192,14 @@ pub fn cases() -> Vec<Case> {
             verify_edit_as(
                 NymAuthSystem::LongfellowV1,
                 Verifying {
-                    anchors: vec![other_root.der.clone()],
+                    trust_anchors: vec![Certificate::parse(&other_root.der).unwrap()],
                     ..Verifying::default()
                 },
                 |_| {},
             ),
-            Got::Verify(Rejection::IssuerKeySet(IssuerKeySetError::Untrusted)),
+            Got::Verify(Rejection::IssuerKeySet(IssuerKeySetError::Untrusted(
+                PathRefusal::IssuerName(ChainIndex::new(0)),
+            ))),
         ),
         (
             "proof_time: malformed",
@@ -210,7 +219,7 @@ pub fn cases() -> Vec<Case> {
             verify_edit_as(
                 NymAuthSystem::LongfellowV1,
                 Verifying {
-                    now: NOW + 601,
+                    now: DateTime::from_unix(NOW + 601).unwrap(),
                     ..Verifying::default()
                 },
                 |_| {},
@@ -220,7 +229,7 @@ pub fn cases() -> Vec<Case> {
         (
             "results",
             verify_edit(|p| set_result(p, "nym", Some(Cbor::Bytes(vec![0; 31])))),
-            Got::Verify(Rejection::Results),
+            Got::Verify(Rejection::Results(ResultsFault::Length(LengthError(31)))),
         ),
     ]
 }

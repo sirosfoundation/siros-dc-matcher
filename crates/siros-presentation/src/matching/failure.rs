@@ -1,36 +1,19 @@
 //! Why a request cannot be matched, why a Credential Query has no candidate, and why a request
 //! has no offer.
 
-use siros_credential::PointerError;
+use siros_dcql::QueryId;
+use siros_trust::AuthorityError;
 use siros_zkp_req::ErrorCode;
 
-use super::{Answered, ZkpRefusal};
-use siros_dcql::QueryId;
-
-/// Why a request cannot be matched: the query as sent lacks a Credential Query of the parsed
-/// one. The request is invalid (`invalid_request`).
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("{}", self.code())]
-pub enum AskedError {
-    /// The query as sent lacks the Credential Query of this `id`.
-    Unsent(QueryId),
-}
-
-impl AskedError {
-    /// A stable identifier.
-    pub fn code(&self) -> &'static str {
-        match self {
-            Self::Unsent(_) => "query_unsent",
-        }
-    }
-}
+use super::{Answered, Exclusion, ZkpRefusal};
+use crate::credential::MatchCredential;
 
 /// Why a Credential Query has no candidate whatever the wallet holds.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{}", self.code())]
 pub enum QueryRefusal {
-    /// A claims path the query selects is no claims path pointer (OpenID4VP 1.0, Section 7).
-    ClaimPath(#[source] PointerError),
+    /// `trusted_authorities` holds an `aki` value that encodes no keyIdentifier (TR3).
+    Authorities(#[source] AuthorityError),
     /// The `zkp_req` query is refused.
     Zkp(#[source] ZkpRefusal),
 }
@@ -39,24 +22,25 @@ impl QueryRefusal {
     /// A stable identifier.
     pub fn code(&self) -> &'static str {
         match self {
-            Self::ClaimPath(error) => error.code(),
+            Self::Authorities(error) => error.code(),
             Self::Zkp(refusal) => refusal.code(),
         }
     }
 
-    /// The `zkp_req.md`, Section 5 code: `invalid_request` for a claims path.
+    /// The `zkp_req.md`, Section 5 code: `invalid_request` for `trusted_authorities`.
     pub fn error_code(&self) -> ErrorCode {
         match self {
-            Self::ClaimPath(_) => ErrorCode::InvalidRequest,
+            Self::Authorities(_) => ErrorCode::InvalidRequest,
             Self::Zkp(refusal) => refusal.error_code(),
         }
     }
 }
 
-/// Why a request has no offer. `R` is why a `zkp_req` candidate answers no option.
+/// Why a request has no offer. `U` is why a query's authorities refuse an issuer, `R` why a
+/// `zkp_req` candidate answers no option.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{}", self.code())]
-pub enum Failure<R> {
+pub enum Failure<U, R> {
     /// A Credential Query is refused.
     Refused {
         /// The query.
@@ -65,23 +49,23 @@ pub enum Failure<R> {
         #[source]
         refusal: QueryRefusal,
     },
-    /// Credentials matched a `zkp_req` query, and none answers an option.
-    Unproven {
+    /// Credentials of a query's format and type exist, and the query excludes each.
+    Excluded {
         /// The query.
         query: QueryId,
-        /// Why each credential answers none.
-        reasons: Vec<R>,
+        /// Why it excludes each credential.
+        reasons: Vec<Exclusion<U, R>>,
     },
     /// No combination of the candidates satisfies the request.
     Unsatisfied,
 }
 
-impl<R> Failure<R> {
-    /// A stable identifier: the refusal's code, `unproven` or `unsatisfied`.
+impl<U, R> Failure<U, R> {
+    /// A stable identifier: the refusal's code, `excluded` or `unsatisfied`.
     pub fn code(&self) -> &'static str {
         match self {
             Self::Refused { refusal, .. } => refusal.code(),
-            Self::Unproven { .. } => "unproven",
+            Self::Excluded { .. } => "excluded",
             Self::Unsatisfied => "unsatisfied",
         }
     }
@@ -90,16 +74,31 @@ impl<R> Failure<R> {
     pub fn error_code(&self) -> ErrorCode {
         match self {
             Self::Refused { refusal, .. } => refusal.error_code(),
-            Self::Unproven { .. } | Self::Unsatisfied => ErrorCode::AccessDenied,
+            Self::Excluded { .. } | Self::Unsatisfied => ErrorCode::AccessDenied,
         }
     }
 }
 
-impl<C, R: Clone> Answered<'_, C, R> {
+impl<C: MatchCredential, R: Clone> Answered<'_, C, R> {
+    /// The refusal of the first Credential Query that makes the request invalid
+    /// (`invalid_request`, `zkp_req.md`, Section 5). One invalid Credential Query refuses the
+    /// whole request, whatever the other queries answer.
+    pub fn invalid_request(&self) -> Option<Failure<C::Unadmitted, R>> {
+        self.queries.iter().find_map(|answers| {
+            let refusal = answers
+                .refusal()
+                .filter(|refusal| refusal.error_code() == ErrorCode::InvalidRequest)?;
+            Some(Failure::Refused {
+                query: answers.id().clone(),
+                refusal: refusal.clone(),
+            })
+        })
+    }
+
     /// Why the request has no offer (`zkp_req.md`, Section 5): the first refused query whose
     /// code comes first of `invalid_request` and `vp_formats_not_supported`; else the first
-    /// `zkp_req` query whose matched credentials all fail; else no combination.
-    pub fn failure(&self) -> Failure<R> {
+    /// query with no candidate that excludes credentials; else no combination.
+    pub fn failure(&self) -> Failure<C::Unadmitted, R> {
         let refused = self
             .queries
             .iter()
@@ -111,12 +110,12 @@ impl<C, R: Clone> Answered<'_, C, R> {
                 refusal: refusal.clone(),
             };
         }
-        let unproven = self
+        let excluding = self
             .queries
             .iter()
             .find(|answers| answers.candidates().is_empty() && !answers.excluded().is_empty());
-        match unproven {
-            Some(answers) => Failure::Unproven {
+        match excluding {
+            Some(answers) => Failure::Excluded {
                 query: answers.id().clone(),
                 reasons: answers
                     .excluded()

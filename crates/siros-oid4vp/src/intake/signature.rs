@@ -1,7 +1,6 @@
 //! A signed Request Object authenticated under the rule of its Client Identifier Prefix
 //! (OpenID4VP 1.0, Section 5.9.3).
 
-use serde_json::Value;
 use sha2::{Digest, Sha256};
 use siros_codec::base64url;
 use siros_codec::date::DateTime;
@@ -10,12 +9,11 @@ use super::trust::{self, KeyMaterial, MetadataAnswer, TrustSubject, Verdict};
 use super::{attestation, Answers, Halt, IntakeError, JwsFault};
 use crate::client_id::{ClientId, ClientIdPrefix};
 use crate::jose::Signed;
+use crate::jws_rules;
+use crate::parameters::{strings, Metadata};
 use crate::values::{Kid, TrustChain};
 use crate::verified::AccessCertificate;
 use crate::x509::Chain;
-
-/// The `typ` of a Request Object (RFC 9101, Section 10.8).
-const REQUEST_OBJECT_TYP: &str = "oauth-authz-req+jwt";
 
 /// Who sent a request, as intake established it.
 pub(super) struct Verifier {
@@ -25,14 +23,6 @@ pub(super) struct Verifier {
     pub(super) certificate: Option<AccessCertificate>,
     pub(super) metadata: Metadata,
     pub(super) response_uri: UriRule,
-}
-
-/// Where the Verifier metadata comes from.
-pub(super) enum Metadata {
-    /// `client_metadata` of the request.
-    Request,
-    /// The Trust Chain of an `openid_federation` client; `client_metadata` is ignored.
-    TrustChain(Option<Value>),
 }
 
 /// What the `response_uri` of a redirect request must be, beyond an `https` URL.
@@ -57,7 +47,7 @@ pub(super) fn authenticate(
     now: DateTime,
     answers: &mut Answers<'_>,
 ) -> Result<Verifier, Halt> {
-    if signed.text("typ") != Some(REQUEST_OBJECT_TYP) {
+    if !jws_rules::is_request_object(signed.header()) {
         return Err(IntakeError::TypMismatch.into());
     }
     match client_id.prefix() {
@@ -153,7 +143,7 @@ fn certified(
     let trusted = trust::verdict(
         answers,
         TrustSubject::Client(client_id.clone()),
-        KeyMaterial::X509Chain(chain.into_x509()),
+        KeyMaterial::X509Chain(chain.into_certificates()),
     )?;
     Ok((trusted, certificate))
 }
@@ -167,13 +157,4 @@ pub(super) fn by_request(client_id: ClientId, trusted: Verdict, response_uri: Ur
         metadata: Metadata::Request,
         response_uri,
     }
-}
-
-/// A JSON array of strings.
-pub(super) fn strings(value: &Value) -> Option<Vec<String>> {
-    value
-        .as_array()?
-        .iter()
-        .map(|s| s.as_str().map(str::to_owned))
-        .collect()
 }

@@ -8,8 +8,7 @@
 //! disclosed, and `degrees` holds a decoy at its end.
 
 use serde_json::{json, Value};
-use siros_credential::ClaimPointer;
-use siros_dcql::{Credential as _, PathComponent};
+use siros_dcql::{ClaimPath, Credential as _};
 
 use crate::common::{credential, disclosure, json, sd_jwt};
 
@@ -96,15 +95,15 @@ fn section_7_3_examples() {
         (r#"["nationalities", 1]"#, json!(["Betelgeusian"])),
     ];
     for (pointer, selected) in rows {
-        let components: Vec<PathComponent> = serde_json::from_str(pointer).unwrap();
+        let path: ClaimPath = serde_json::from_str(pointer).unwrap();
         let typed: Vec<Value> = credential
-            .claims(&ClaimPointer::parse(components.clone()).unwrap())
+            .claims(&path)
             .unwrap()
             .into_iter()
             .map(json)
             .collect();
         assert_eq!(Value::Array(typed), selected, "{pointer}");
-        let compared = credential.claim(&components).unwrap();
+        let compared = credential.claim(&path).unwrap();
         assert_eq!(Value::Array(compared), selected, "{pointer}");
     }
 }

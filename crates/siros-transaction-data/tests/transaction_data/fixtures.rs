@@ -4,7 +4,7 @@
 
 use serde_json::{json, Value};
 
-use siros_transaction_data::MAX_DEPTH;
+use siros_codec::json::MAX_DEPTH;
 
 use crate::common::{payment, with, ACCESS, LOGIN, MANDATE, PAYMENT};
 

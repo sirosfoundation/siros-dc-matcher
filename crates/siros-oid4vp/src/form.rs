@@ -61,7 +61,7 @@ fn decode(text: &str) -> Result<String, FormFault> {
             other => bytes.push(other),
         }
     }
-    String::from_utf8(bytes).map_err(|_| FormFault::NotUtf8)
+    String::from_utf8(bytes).map_err(|error| FormFault::NotUtf8(error.utf8_error()))
 }
 
 fn hex(digit: u8) -> Option<u8> {

@@ -7,15 +7,15 @@
 
 use serde_json::{json, Value};
 use siros_codec::date::DateTime;
-use siros_oid4vp::{IntakeError, IntakeState, Origin, SemanticIdError};
+use siros_oid4vp::{IntakeError, IntakeState, Origin, SemanticIdError, Verdict};
 use siros_zkp_req_nym_auth::policy::{PolicyRule, RequestRefusal};
 use siros_zkp_req_nym_auth::request::NymAuthRequest;
 use siros_zkp_req_nym_auth::testing::query;
 use siros_zkp_req_nym_auth::verifier_id::{VerifierIdForm, VerifierIdRule};
 
 use crate::verifier::{
-    client_metadata, dc_api_signed_state, intake_with, redirect_signed_state, SignedPrefix, Signer,
-    NATURAL_POLICY, NONCE, ORIGIN, SIGNER,
+    client_metadata, dc_api_signed_state, intake_with, redirect_signed_state, SignedForm,
+    SignedPrefix, Signer, NATURAL_POLICY, NONCE, ORIGIN, SIGNER,
 };
 
 /// A request for a nym_auth proof in `mode`, with the members of `extra`.
@@ -75,49 +75,53 @@ fn nym_auth_requests_meet_the_policy() {
         (
             "the Client Identifier",
             redirect_signed_state(&cwt(), SIGNER),
-            true,
+            Verdict::Trusted,
             x509,
             Outcome::Accepted("x509_san_dns:verifier.example"),
         ),
         (
             "a legal person's organizationIdentifier",
             redirect_signed_state(&cwt(), SIGNER),
-            true,
+            Verdict::Trusted,
             semantic,
             Outcome::Accepted("semantic_id:VATBE-0876866142"),
         ),
         (
             "a natural person's serialNumber",
             redirect_signed_state(&cwt(), natural),
-            true,
+            Verdict::Trusted,
             semantic,
             Outcome::Accepted("semantic_id:PNOSE-200007292386"),
         ),
         (
             "unsigned",
             unsigned(&params("dc_api.jwt", json!({}))),
-            true,
+            Verdict::Trusted,
             x509,
             policy(PolicyRule::Unsigned),
         ),
         (
             "multisigned",
-            dc_api_signed_state(&params("dc_api.jwt", json!({})), SIGNER, true),
-            true,
+            dc_api_signed_state(
+                &params("dc_api.jwt", json!({})),
+                SIGNER,
+                SignedForm::Multisigned,
+            ),
+            Verdict::Trusted,
             x509,
             policy(PolicyRule::Multisigned),
         ),
         (
             "untrusted",
             redirect_signed_state(&cwt(), SIGNER),
-            false,
+            Verdict::Untrusted,
             x509,
             policy(PolicyRule::Untrusted),
         ),
         (
             "an unencrypted response",
             redirect_signed_state(&params("direct_post", json!({})), SIGNER),
-            true,
+            Verdict::Trusted,
             x509,
             policy(PolicyRule::ResponseMode),
         ),
@@ -127,7 +131,7 @@ fn nym_auth_requests_meet_the_policy() {
                 &params("direct_post.jwt", json!({"client_metadata": {}})),
                 SIGNER,
             ),
-            true,
+            Verdict::Trusted,
             x509,
             Outcome::NotVerified(IntakeError::EncryptionKeyMissing),
         ),
@@ -140,27 +144,27 @@ fn nym_auth_requests_meet_the_policy() {
                 ),
                 SIGNER,
             ),
-            true,
+            Verdict::Trusted,
             semantic,
             identity(VerifierIdRule::RegistrationCertificate),
         ),
         (
             "no semantic identifier",
             redirect_signed_state(&cwt(), anonymous),
-            true,
+            Verdict::Trusted,
             semantic,
             identity(VerifierIdRule::SemanticId(SemanticIdError::Absent)),
         ),
         (
             "another Client Identifier Prefix",
             redirect_signed_state(&cwt(), hashed),
-            true,
+            Verdict::Trusted,
             x509,
             identity(VerifierIdRule::ClientIdPrefix),
         ),
     ];
-    for (case, state, trusted, form, outcome) in cases {
-        let verified = intake_with(state, trusted);
+    for (case, state, verdict, form, outcome) in cases {
+        let verified = intake_with(state, verdict);
         match outcome {
             Outcome::NotVerified(error) => assert_eq!(verified.err(), Some(error), "{case}"),
             Outcome::Accepted(id) => {

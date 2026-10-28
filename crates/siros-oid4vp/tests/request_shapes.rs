@@ -4,8 +4,10 @@
 //! verifier belongs in the device pass.
 
 use siros_codec::base64url::encode as b64;
+use siros_codec::json::JsonTextError;
 use siros_codec::Base64Error;
-use siros_oid4vp::{diagnose, CompactFault, NoQuery, PayloadFault, UnverifiedRequest};
+use siros_dcql::{CredentialMember, FormFault, Member, Position, QueryError};
+use siros_oid4vp::{diagnose, ClientId, CompactFault, NoQuery, PayloadFault, UnverifiedRequest};
 
 /// The protocols SIROS wallets register: the three of OpenID4VP 1.0, A.1.
 fn siros_default(label: &str) -> bool {
@@ -26,16 +28,14 @@ fn first_supported_request(
     registered: &dyn Fn(&str) -> bool,
 ) -> Option<(String, siros_dcql::DcqlQuery)> {
     let found = first(request, registered)?;
-    Some((
-        found.protocol().label().to_owned(),
-        found.query().typed()?.clone(),
-    ))
+    Some((found.protocol().label().to_owned(), found.query().clone()))
 }
 
 /// The authorization request object all three protocols ultimately carry.
 fn request_object() -> String {
     serde_json::json!({
         "client_id": "x509_san_dns:verifier.example",
+        "response_type": "vp_token",
         "response_mode": "dc_api.jwt",
         "nonce": "n-0S6_WzA2Mj",
         "expected_origins": ["https://verifier.example"],
@@ -52,6 +52,33 @@ fn request_object() -> String {
     .to_string()
 }
 
+/// The request object of a multisigned request: its Client Identifiers are its signatures'
+/// (A.3.2.2).
+fn multisigned_object() -> String {
+    let mut object: serde_json::Value = serde_json::from_str(&request_object()).expect("json");
+    object.as_object_mut().expect("object").remove("client_id");
+    object.to_string()
+}
+
+/// The protected header of a Request Object's JWS that keeps the rules the picker reads.
+const HEADER: &[u8] = br#"{"alg":"ES256","typ":"oauth-authz-req+jwt"}"#;
+
+/// 64 bytes in place of an ES256 signature, which the picker never verifies.
+fn bogus_signature() -> String {
+    b64(&[7; 64]).to_string()
+}
+
+/// A signature of a multisigned request whose protected header names a Client Identifier.
+fn signature() -> serde_json::Value {
+    let header = br#"{"alg":"ES256","typ":"oauth-authz-req+jwt","client_id":"x509_san_dns:verifier.example"}"#;
+    serde_json::json!({"protected": b64(header).to_string(), "signature": bogus_signature()})
+}
+
+/// A compact JWS of [`HEADER`] whose payload segment is `payload`, as written.
+fn jws(payload: impl std::fmt::Display) -> String {
+    format!("{}.{payload}.{}", b64(HEADER), bogus_signature())
+}
+
 fn envelope(protocol: &str, data: serde_json::Value) -> Vec<u8> {
     serde_json::json!({"requests": [{"protocol": protocol, "data": data}]})
         .to_string()
@@ -59,12 +86,7 @@ fn envelope(protocol: &str, data: serde_json::Value) -> Vec<u8> {
 }
 
 fn compact_jws(payload: &str) -> String {
-    format!(
-        "{}.{}.{}",
-        b64(br#"{"alg":"ES256"}"#),
-        b64(payload.as_bytes()),
-        b64(b"sig")
-    )
+    jws(b64(payload.as_bytes()))
 }
 
 // --- the three shapes ------------------------------------------------------
@@ -76,7 +98,7 @@ fn an_unsigned_request_still_works() {
     let found = first_supported_request(&envelope("openid4vp-v1-unsigned", data), &siros_default);
     let (protocol, query) = found.expect("unsigned request should be answered");
     assert_eq!(protocol, "openid4vp-v1-unsigned");
-    assert_eq!(query.credentials.len(), 1);
+    assert_eq!(query.credentials().len(), 1);
 }
 
 /// `openid4vp-v1-signed`: `data.request` is a compact JWS whose middle segment
@@ -87,8 +109,8 @@ fn a_signed_request_is_read_from_the_jws_payload() {
     let found = first_supported_request(&envelope("openid4vp-v1-signed", data), &siros_default);
     let (protocol, query) = found.expect("signed request should be answered");
     assert_eq!(protocol, "openid4vp-v1-signed");
-    assert_eq!(query.credentials.len(), 1);
-    assert_eq!(query.credentials[0].id, "pid");
+    assert_eq!(query.credentials().len(), 1);
+    assert_eq!(*query.credentials()[0].id(), "pid");
 }
 
 /// `openid4vp-v1-multisigned`: `data.request` is a JWS JSON Serialization
@@ -97,14 +119,14 @@ fn a_signed_request_is_read_from_the_jws_payload() {
 fn a_multisigned_request_is_read_from_the_payload_member() {
     let data = serde_json::json!({
         "request": {
-            "payload": b64(request_object().as_bytes()).to_string(),
-            "signatures": [{"protected": b64(br#"{"alg":"ES256"}"#).to_string(), "signature": b64(b"sig").to_string()}]
+            "payload": b64(multisigned_object().as_bytes()).to_string(),
+            "signatures": [signature()]
         }
     });
     let found =
         first_supported_request(&envelope("openid4vp-v1-multisigned", data), &siros_default);
     let (_, query) = found.expect("multisigned request should be answered");
-    assert_eq!(query.credentials[0].id, "pid");
+    assert_eq!(*query.credentials()[0].id(), "pid");
 }
 
 /// The reference matcher also accepts the serialization at the top level of
@@ -113,8 +135,8 @@ fn a_multisigned_request_is_read_from_the_payload_member() {
 #[test]
 fn a_multisigned_payload_at_the_top_level_of_data_is_accepted_too() {
     let data = serde_json::json!({
-        "payload": b64(request_object().as_bytes()).to_string(),
-        "signatures": [{"signature": b64(b"sig").to_string()}]
+        "payload": b64(multisigned_object().as_bytes()).to_string(),
+        "signatures": [signature()]
     });
     let found =
         first_supported_request(&envelope("openid4vp-v1-multisigned", data), &siros_default);
@@ -129,7 +151,7 @@ fn a_multisigned_payload_at_the_top_level_of_data_is_accepted_too() {
 fn a_bogus_signature_does_not_stop_the_query_being_read() {
     let payload = b64(request_object().as_bytes());
     let data = serde_json::json!({
-        "request": format!("{}.{}.{}", b64(br#"{"alg":"ES256"}"#), payload, b64(b"not-a-signature")),
+        "request": jws(payload),
     });
     assert!(
         first_supported_request(&envelope("openid4vp-v1-signed", data), &siros_default).is_some()
@@ -148,9 +170,9 @@ fn malformed_signed_requests_decline_without_panicking() {
         serde_json::json!({"request": "not-a-jws"}),
         serde_json::json!({"request": "onlyheader."}),
         serde_json::json!({"request": ".."}),
-        serde_json::json!({"request": "aGVhZGVy.!!!not-base64url!!!.c2ln"}),
-        serde_json::json!({"request": format!("aGVhZGVy.{}.c2ln", b64(b"not json at all"))}),
-        serde_json::json!({"request": format!("aGVhZGVy.{}.c2ln", b64(br#"{"nonce":"x"}"#))}),
+        serde_json::json!({"request": jws("!!!not-base64url!!!")}),
+        serde_json::json!({"request": jws(b64(b"not json at all"))}),
+        serde_json::json!({"request": jws(b64(br#"{"nonce":"x"}"#))}),
         serde_json::json!({"request": {"payload": "!!!"}}),
         serde_json::json!({"request": {"signatures": []}}),
         serde_json::json!({"request": 42}),
@@ -208,17 +230,19 @@ fn each_failure_is_named_separately() {
         ),
         (
             "openid4vp-v1-signed",
-            serde_json::json!({"request": "aGVhZGVy.@@@@.c2ln"}),
+            serde_json::json!({"request": jws("@@@@")}),
             NoQuery::PayloadNotBase64url(PayloadFault::Encoding(Base64Error::Alphabet(0))),
         ),
         (
             "openid4vp-v1-signed",
-            serde_json::json!({"request": format!("aGVhZGVy.{}.c2ln", b64(b"plain text"))}),
-            NoQuery::PayloadNotJson,
+            serde_json::json!({"request": jws(b64(b"plain text"))}),
+            NoQuery::PayloadNotJson(JsonTextError::of(
+                &serde_json::from_slice::<serde_json::Value>(b"plain text").unwrap_err(),
+            )),
         ),
         (
             "openid4vp-v1-signed",
-            serde_json::json!({"request": format!("aGVhZGVy.{}.c2ln", b64(br#"{"nonce":"x"}"#))}),
+            serde_json::json!({"request": jws(b64(br#"{"nonce":"x"}"#))}),
             NoQuery::PayloadHasNoDcqlQuery,
         ),
         // A signed request whose `request` is not even a string.
@@ -283,31 +307,19 @@ fn a_jwe_is_not_mistaken_for_a_jws() {
     );
 }
 
-/// An unsecured token (RFC 7519 §6) is `header.payload.`: its payload is read,
-/// and intake decides whether the request is acceptable.
-#[test]
-fn an_unsecured_token_has_an_empty_signature_not_a_missing_one() {
-    let token = format!(
-        "{}.{}.",
-        b64(br#"{"alg":"none"}"#),
-        b64(request_object().as_bytes())
-    );
-    assert!(UnverifiedRequest::read(
-        "openid4vp-v1-signed",
-        &serde_json::json!({"request": token})
-    )
-    .is_ok());
-}
-
 /// A `dcql_query` that is present but not DCQL is its own failure, not a
 /// missing one.
 #[test]
 fn a_malformed_dcql_query_reports_the_parse_error() {
-    let data = serde_json::json!({"dcql_query": {"credentials": "not an array"}});
-    match UnverifiedRequest::read("openid4vp-v1-unsigned", &data) {
-        Err(NoQuery::Malformed(e)) => assert!(!e.is_empty()),
-        other => panic!("expected a parse error, got {other:?}"),
-    }
+    let data = serde_json::json!({"response_type": "vp_token", "response_mode": "dc_api",
+        "nonce": "n-1", "dcql_query": {"credentials": "not an array"}});
+    assert_eq!(
+        UnverifiedRequest::read("openid4vp-v1-unsigned", &data),
+        Err(NoQuery::Malformed(QueryError::Form {
+            member: Member::Credentials,
+            fault: FormFault::WrongType,
+        }))
+    );
 }
 
 /// ISO 18013-7 carries a CBOR DeviceRequest, not DCQL. Declining is what lets
@@ -352,7 +364,8 @@ fn a_signed_label_does_not_accept_an_inline_query() {
 fn the_two_signed_protocols_do_not_accept_each_other_s_shape() {
     let compact = serde_json::json!({"request": compact_jws(&request_object())});
     let json = serde_json::json!({
-        "request": {"payload": b64(request_object().as_bytes()).to_string(), "signatures": []}
+        "request": {"payload": b64(multisigned_object().as_bytes()).to_string(),
+            "signatures": [signature()]}
     });
 
     assert!(UnverifiedRequest::read("openid4vp-v1-signed", &compact).is_ok());
@@ -419,7 +432,7 @@ fn a_protocol_outside_the_profile_is_skipped() {
 #[test]
 fn the_diagnostic_names_the_signed_failure_rather_than_the_missing_key() {
     let profile = siros_default;
-    let data = serde_json::json!({"request": "aGVhZGVy.@@@@.c2ln"});
+    let data = serde_json::json!({"request": jws("@@@@")});
     let text = diagnose(&envelope("openid4vp-v1-signed", data), &profile);
     assert!(text.contains("base64url"), "got: {text}");
     assert!(!text.contains("has no `dcql_query`"), "got: {text}");
@@ -471,17 +484,14 @@ fn an_unsigned_request_yields_its_full_context() {
     .expect("context");
     assert_eq!(ctx.protocol().label(), "openid4vp-v1-unsigned");
     assert!(!ctx.protocol().is_signed());
-    assert_eq!(ctx.client_id(), Some("x509_san_dns:verifier.example"));
-    assert_eq!(
-        ctx.expected_origins(),
-        Some(vec!["https://verifier.example"])
-    );
+    // A.2: the Wallet ignores the `client_id` and `expected_origins` of an unsigned request.
+    assert_eq!(ctx.client_id(), None);
+    assert_eq!(ctx.expected_origins(), None);
     assert_eq!(
         ctx.client_metadata(),
         Some(&serde_json::json!({"jwks": {"keys": []}}))
     );
-    assert_eq!(ctx.query().raw()["credentials"][0]["id"], "pid");
-    assert_eq!(ctx.query().typed().expect("typed").credentials[0].id, "pid");
+    assert_eq!(ctx.query().credentials()[0].id(), "pid");
 }
 
 #[test]
@@ -493,73 +503,43 @@ fn a_signed_request_yields_its_full_context() {
     .expect("context");
     assert_eq!(ctx.protocol().label(), "openid4vp-v1-signed");
     assert!(ctx.protocol().is_signed());
-    assert_eq!(ctx.client_id(), Some("x509_san_dns:verifier.example"));
+    assert_eq!(
+        ctx.client_id().map(ClientId::as_str),
+        Some("x509_san_dns:verifier.example")
+    );
     assert_eq!(
         ctx.expected_origins(),
-        Some(vec!["https://verifier.example"])
+        Some(["https://verifier.example".to_owned()].as_slice())
     );
     assert!(ctx.client_metadata().is_some());
-    assert!(ctx.query().typed().is_some());
+    assert_eq!(ctx.query().credentials()[0].id(), "pid");
 }
 
+/// The rulebook v0.4 example puts an object under `claims`: DCQL refuses the request, a `zkp_req`
+/// query's among them.
 #[test]
-fn origins_client_id_and_metadata_are_none_when_absent() {
-    let data = serde_json::json!({"dcql_query": {"credentials": [{
-        "id": "pid", "format": "mso_mdoc",
-        "meta": {"doctype_value": "org.iso.18013.5.1.mDL"},
-        "claims": [{"path": ["org.iso.18013.5.1", "age_over_18"]}]
-    }]}});
-    let ctx = first(&envelope("openid4vp-v1-unsigned", data), &siros_default).expect("context");
-    assert_eq!(ctx.client_id(), None);
-    assert_eq!(ctx.expected_origins(), None);
-    assert_eq!(ctx.client_metadata(), None);
-}
-
-/// The rulebook example puts an object under `claims`, which the typed DCQL
-/// parser rejects. It must still reach the planner.
-fn zkp_req_object_claims_data() -> serde_json::Value {
-    serde_json::json!({
-        "client_id": "x509_san_dns:rp.example.com",
-        "dcql_query": {"credentials": [{
-            "id": "nym", "format": "zkp_req",
+fn object_claims_are_malformed_in_every_format() {
+    for format in ["zkp_req", "mso_mdoc"] {
+        let data = serde_json::json!({"response_type": "vp_token", "response_mode": "dc_api",
+            "nonce": "n-1", "dcql_query": {"credentials": [{
+            "id": "nym", "format": format,
             "meta": {"doctype_value": "eu.europa.ec.eudi.nym_auth.1"},
-            "claims": {"_req": [{"fn_id": "age_check", "id": "a", "params": {"ge": "2008-10-10"}}]}
-        }]}
-    })
-}
-
-#[test]
-fn a_zkp_req_request_with_object_claims_yields_a_context() {
-    let ctx = first(
-        &envelope("openid4vp-v1-unsigned", zkp_req_object_claims_data()),
-        &siros_default,
-    )
-    .expect("a context, not Malformed");
-    assert!(ctx.query().typed().is_none());
-    assert!(ctx.query().raw()["credentials"][0]["claims"]["_req"].is_array());
-}
-
-/// ... but only for zkp_req. Other formats keep failing as before, and so
-/// does a malformed credential sitting next to a zkp_req one.
-#[test]
-fn object_claims_on_any_other_format_is_still_malformed() {
-    let data = serde_json::json!({"dcql_query": {"credentials": [{
-        "id": "pid", "format": "mso_mdoc",
-        "meta": {"doctype_value": "d"}, "claims": {"_req": []}
-    }]}});
-    let profile = siros_default;
-    assert!(first(&envelope("openid4vp-v1-unsigned", data.clone()), &profile).is_none());
-    assert!(matches!(
-        UnverifiedRequest::read("openid4vp-v1-unsigned", &data),
-        Err(NoQuery::Malformed(_))
-    ));
-
-    let mut mixed = zkp_req_object_claims_data();
-    mixed["dcql_query"]["credentials"]
-        .as_array_mut()
-        .expect("array")
-        .push(data["dcql_query"]["credentials"][0].clone());
-    assert!(first(&envelope("openid4vp-v1-unsigned", mixed), &profile).is_none());
+            "claims": {"_req": [{"fn_id": "age_check", "params": {"ge": "2008-10-10"}}]}
+        }]}});
+        assert!(first(
+            &envelope("openid4vp-v1-unsigned", data.clone()),
+            &siros_default
+        )
+        .is_none());
+        assert_eq!(
+            UnverifiedRequest::read("openid4vp-v1-unsigned", &data),
+            Err(NoQuery::Malformed(QueryError::Form {
+                member: Member::CredentialMember(Position::new(0), CredentialMember::Claims),
+                fault: FormFault::WrongType,
+            })),
+            "{format}"
+        );
+    }
 }
 
 #[test]

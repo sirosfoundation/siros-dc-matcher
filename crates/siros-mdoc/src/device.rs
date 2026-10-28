@@ -1,8 +1,10 @@
 //! `DeviceSigned` elements and the data the device key signs (ISO/IEC 18013-5, 8.3.2.1.2.2 and
 //! 9.1.3).
 
-use sha2::{Digest, Sha256};
 use siros_codec::cbor::Value;
+use siros_dcql::DocType;
+
+use crate::signature::{SessionTranscript, SigStructure};
 
 /// The protected header of an ES256 `COSE_Sign1`: `{1: -7}`.
 pub(crate) const PROTECTED_ES256: [u8; 3] = [0xa1, 0x01, 0x26];
@@ -16,6 +18,7 @@ pub struct DeviceNameSpaces {
 
 impl DeviceNameSpaces {
     /// No element.
+    #[must_use]
     pub fn empty() -> Self {
         Self::of(Value::Map(Vec::new()))
     }
@@ -41,39 +44,26 @@ impl DeviceNameSpaces {
 ///                                               DocType, DeviceNameSpacesBytes])
 /// Sig_structure = ["Signature1", h'A10126', h'', DeviceAuthenticationBytes]
 /// ```
-///
-/// `session_transcript` is the encoded `SessionTranscript`.
+#[must_use]
 pub fn device_signing_input(
-    session_transcript: &[u8],
-    doc_type: &str,
+    session_transcript: &SessionTranscript,
+    doc_type: &DocType,
     name_spaces: &DeviceNameSpaces,
-) -> Vec<u8> {
+) -> SigStructure {
     let authentication = Value::Array(vec![
         Value::text("DeviceAuthentication"),
-        Value::Encoded(session_transcript.to_vec()),
-        Value::text(doc_type),
+        Value::Encoded(session_transcript.as_bytes().to_vec()),
+        Value::text(doc_type.as_str()),
         Value::Encoded(name_spaces.as_cbor().to_vec()),
     ]);
     let bytes = Value::Tag(24, Box::new(Value::Bytes(authentication.encode())));
-    Value::Array(vec![
-        Value::text("Signature1"),
-        Value::Bytes(PROTECTED_ES256.to_vec()),
-        Value::Bytes(Vec::new()),
-        Value::Bytes(bytes.encode()),
-    ])
-    .encode()
-}
-
-/// The SHA-256 of [`device_signing_input`]: the message hash of the ES256 signature.
-pub fn device_signing_digest(
-    session_transcript: &[u8],
-    doc_type: &str,
-    name_spaces: &DeviceNameSpaces,
-) -> [u8; 32] {
-    Sha256::digest(device_signing_input(
-        session_transcript,
-        doc_type,
-        name_spaces,
-    ))
-    .into()
+    SigStructure::new(
+        Value::Array(vec![
+            Value::text("Signature1"),
+            Value::Bytes(PROTECTED_ES256.to_vec()),
+            Value::Bytes(Vec::new()),
+            Value::Bytes(bytes.encode()),
+        ])
+        .encode(),
+    )
 }
