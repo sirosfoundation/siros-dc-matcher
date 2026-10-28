@@ -6,12 +6,22 @@
 
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
-#![deny(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::panic
+// Nothing panics outside the tests. scripts/check_panic_sites.py refuses an
+// allow of these lints there and finds the panics they cannot see.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::panic,
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::unreachable,
+        clippy::todo,
+        clippy::unimplemented,
+        clippy::indexing_slicing,
+        clippy::disallowed_methods
+    )
 )]
+#![cfg_attr(test, allow(clippy::disallowed_methods))]
 
 use siros_codec::date::Date;
 use siros_zkp_req_nym_auth::prover::{
@@ -37,17 +47,17 @@ fn params() -> NymAuthCircuitParams {
 }
 
 /// Why `circuits.zst` was not loaded.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum ArtifactError {
     /// The bytes are not the pinned file.
     #[error("not the pinned {} ({} bytes)", .0.name, .0.len)]
     Pin(ArtifactPin),
     /// The pinned file does not decompress within its content's length.
     #[error("the circuits do not decompress")]
-    Decompress,
+    Decompress(#[source] std::io::Error),
     /// zk-cred-longfellow refused the circuits.
-    #[error("circuits refused: {0}")]
-    Circuits(String),
+    #[error("zk-cred-longfellow refused the circuits")]
+    Circuits(#[source] NymAuthError),
 }
 
 /// The decompressed circuits of a `circuits.zst` that matches its pin.
@@ -56,8 +66,7 @@ fn circuits(circuits_zst: &[u8]) -> Result<Vec<u8>, ArtifactError> {
     if !artifact.compressed.matches(circuits_zst) {
         return Err(ArtifactError::Pin(artifact.compressed));
     }
-    zstd::bulk::decompress(circuits_zst, artifact.content.len)
-        .map_err(|_| ArtifactError::Decompress)
+    zstd::bulk::decompress(circuits_zst, artifact.content.len).map_err(ArtifactError::Decompress)
 }
 
 /// The prover of the system.
@@ -73,7 +82,7 @@ impl LongfellowProver {
         let circuits = circuits(circuits_zst)?;
         Prover::new(&circuits, &params())
             .map(Self)
-            .map_err(|e| ArtifactError::Circuits(e.to_string()))
+            .map_err(ArtifactError::Circuits)
     }
 }
 
@@ -90,7 +99,7 @@ impl LongfellowVerifier {
         let circuits = circuits(circuits_zst)?;
         Verifier::new(&circuits, &params())
             .map(Self)
-            .map_err(|e| ArtifactError::Circuits(e.to_string()))
+            .map_err(ArtifactError::Circuits)
     }
 }
 

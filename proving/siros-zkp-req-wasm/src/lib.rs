@@ -553,7 +553,7 @@ impl ZkpProvers {
         let prover = LongfellowProver::load(circuits_zst).map_err(|e| {
             host(match e {
                 longfellow::ArtifactError::Pin(_) => "artifact_pin",
-                longfellow::ArtifactError::Decompress => "artifact_decompress",
+                longfellow::ArtifactError::Decompress(_) => "artifact_decompress",
                 longfellow::ArtifactError::Circuits(_) => "artifact_refused",
             })
         })?;
@@ -572,7 +572,7 @@ impl ZkpProvers {
         let keys = VegaNymAuth::load(shapes_zst).map_err(|e| {
             host(match e {
                 vega::ArtifactError::Pin(_) => "artifact_pin",
-                vega::ArtifactError::Decompress => "artifact_decompress",
+                vega::ArtifactError::Decompress(_) => "artifact_decompress",
                 vega::ArtifactError::Shapes(_) => "artifact_refused",
             })
         })?;
