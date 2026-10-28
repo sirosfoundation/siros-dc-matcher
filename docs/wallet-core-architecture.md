@@ -41,7 +41,7 @@ Key words: MUST, MUST NOT, SHOULD and MAY as in RFC 2119.
 ## 3. Cross-cutting requirements
 
 - **R-G1 Logic lives in the core.** Every rule about requests, credentials, matching, disclosure, proof choice, transaction data, display content and response construction MUST have its only implementation in the core. Platforms MUST NOT keep their own copy of such a rule.
-- **R-G2 Sans-IO.** The core MUST NOT perform network, storage, clock, randomness or key operations by itself. It requests each one from the host as an effect (§5.1). Every call MUST receive all of its inputs and MUST keep nothing between calls.
+- **R-G2 Pure and offline.** The core MUST hold no notion of networking: it lists the URLs it needs resolved and returns the bodies to send, as protocol data (H1). It MUST NOT perform storage, clock, randomness or key operations by itself; it takes each from the host as an input or an effect result (§5). Every call MUST receive all of its inputs and MUST keep nothing between calls.
 - **R-G3 Construction guards validity.** Data MUST enter through a parser whose output type can only hold valid states. The core MUST NOT expose a separate validation function beside a parser, nor a boolean predicate that callers must remember to call.
   - Where a rule depends on runtime context (the time, a trust verdict, a selection against a plan, a seed against a commitment), the check MUST be the constructor of a witness type. The next operation MUST require that witness.
   - Fields of these types MUST be private.
@@ -96,10 +96,10 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
 - the clock, randomness and the user interface.
 
 **Requirements:**
-- **H1.** It MUST execute every `Fetch` effect within its constraints: HTTPS only, public addresses only, no redirects, the stated size cap and timeout.
+- **H1.** It MUST resolve the URLs the core lists and transmit the bodies it returns, under F5.
 - **H2.** It MUST answer `Trust` effects with the AuthZEN verdict for the stated subject and key material.
 - **H3.** It MUST sign exactly the bytes a `Sign` effect states, with the key it names, and report that key's authentication factors (`amr`) before signing.
-- **H4.** It MUST supply the decrypted wallet state, the display and transaction metadata it holds (signed credential metadata JWTs, type metadata and referenced documents, issuer key sets, each with the URL it was fetched from, and the URLs it observed absent), the wallet's language, the current time, the circuit artifacts it ships, and the trust store it provisions (TR1, TR4).
+- **H4.** It MUST supply the decrypted wallet state, the display and transaction metadata it holds (signed credential metadata JWTs, type metadata and referenced documents, issuer key sets, each with the URL that served it, and the URLs that serve no document), the wallet's language, the current time, the circuit artifacts it ships, and the trust store it provisions (TR1, TR4).
 - **H5.** It MUST append the presentation record the core returns as a `new_presentation` event (privatedata §6).
 - **H6.** It MUST render the views the core returns and return the user's selection.
 - **H7.** It MUST NOT interpret protocol data, choose credentials, choose claims, choose a proof system, or build a presentation.
@@ -173,7 +173,11 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
 - `vp_token`, response encryption, submissions and error responses.
 
 **Requirements:**
-- **P1.** `VerifiedRequest` MUST be constructible only by intake. Its existence guarantees:
+- **P1.** `VerifiedRequest` MUST be constructible only by intake. Intake has two effects:
+  - the request object of a request by reference, named by its `https` `request_uri` (RFC 9101 §5.2) and its `request_uri_method`. The host answers with the text it obtained, at most 256 KiB;
+  - the trust evaluation of the verifier. The host answers with its verdict.
+
+  The existence of a `VerifiedRequest` guarantees:
   - the request object signature verifies under the rule of its client identifier prefix (`x509_san_dns`, `x509_hash`, `decentralized_identifier`, `verifier_attestation`, `openid_federation`; `redirect_uri` for unsigned requests only);
   - the outer and inner `client_id` are equal;
   - a trust verdict was obtained for the client identifier, or for the origin of an unsigned DC API request;
@@ -184,7 +188,7 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
   - an encrypted mode has a chosen key and `enc`;
   - for `openid4vp-v1-multisigned`, the client identifier is that of the first signature that qualifies.
 - **P2.** `UnverifiedRequest` MUST be the only request type the picker can construct, and the only one it accepts. It guarantees a supported protocol and a data shape that matches the protocol label.
-- **P3.** `request_uri_method=post` MUST send the wallet's `wallet_metadata` and a `wallet_nonce`, and require the request object to echo the nonce.
+- **P3.** For `request_uri_method=post`, intake MUST state the wallet's `wallet_metadata` and the `wallet_nonce` it chose, as values and as the form parameters of §5.10, and MUST require the request object to echo the nonce.
 - **P4.** A submission MUST take the form of its response mode:
 
   | Mode | Form |
@@ -196,7 +200,10 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
   | `direct_post.cwt` (`zkp_req.md` §6.2) | an `application/cwt` body: a `COSE_Encrypt` of the CBOR Authorization Response |
 
   JWE encryption is ECDH-ES with the request's first supported `enc` (A128GCM, A256GCM); A128GCM when none is stated. `direct_post.cwt` uses COSE ECDH-ES + HKDF-256 (-25) with AES-GCM from the same list (A128GCM, A192GCM, A256GCM), and its handover thumbprint is that of the key it encrypted to.
+
+  A submission is data: its response mode, its target (the `response_uri`, or the DC API return), and its parameters (`vp_token` or `error`, `state`, or the encrypted `response`) as typed values, with the form parameters or the `COSE_Encrypt` body built.
 - **P5.** A refusal MAY produce an error submission only when the response target is verified.
+- **P6.** The core MUST read the body the Response URI answers a direct post with (§8.2): a JSON object of at most 64 KiB, whose `redirect_uri`, when present, is an absolute URI.
 
 ### 4.7 `zkp_req`
 
@@ -272,7 +279,7 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
 - **T1. Entry.** An entry MUST be parsed from base64url JSON with no duplicate keys: a string `type`, a non-empty `credential_ids` naming DCQL query ids, a `payload`, and an optional ad-hoc `metadata` JWT. `transaction_data_hashes_alg` is a JSON array (§5.1) or a single string, read as a one-element list.
 - **T2. Definitions.** A definition is a PaSO `transaction_data_types` entry (Proof Metadata §3): claims with a payload path, `mandatory`, `value_type` and `display`, and `ui_labels`. Its parse checks every locale, with the limits of its source: PaSO §3.3 for PaSO and configured definitions, TS12 §3.3.3 for TS12 ones. The sources, for one type and credential:
   - ad-hoc metadata in the entry, verified per Proof Metadata §5.3; a failure makes that entry incompatible, with no fallback;
-  - the credential's own metadata: a PaSO signed credential metadata JWT, verified at every load (§7, and §8 against the URL it was fetched from), or TS12 v1.0.1 SD-JWT VC type metadata with its `#integrity` pins. Invalid or unheld metadata excludes the credential for every entry;
+  - the credential's own metadata: a PaSO signed credential metadata JWT, verified at every load (§7, and §8 against the URL that served it), or TS12 v1.0.1 SD-JWT VC type metadata with its `#integrity` pins. Invalid or unheld metadata excludes the credential for every entry;
   - the host configuration: a definition and the credential types (`vct`, doctype) it applies to. It serves only credentials without transaction metadata of their own; an https `vct` whose metadata the host neither holds nor observed absent is an error.
 - **T3. Projection.** A definition is projected to the wallet's language (D2): each array keeps the entry its locale selects, and a type with an unmatched array is unsupported by the credential. The projection removes the other locales and keeps everything else, with its source kind and rulebook, and serializes canonically.
 - **T4. Selection** (PaSO Core §7.4):
@@ -280,11 +287,11 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
   - each candidate credential takes the first entry, in array order, that targets it, whose type it supports, whose payload conforms (Core §7.4.2, View §3), and whose resources verify; a credential without one is excluded;
   - an entry that no chosen credential takes stays unused; a type that no source defines for any candidate is `TypeUnknown`;
   - the binding names the credential by `credentialId` and instance; the view shows it, the plan digest covers it with its source and rulebook, and phase 2 binds by it.
-- **T5. Rendering** follows View §2: claims order, the `null` rule, single-pass templates carried as typed segments, at most 200 items counted before any image is fetched, `security_hint` as given. The UI re-checks each formatted label's limit. An entry that cannot render in full is incompatible.
+- **T5. Rendering** follows View §2: claims order, the `null` rule, single-pass templates carried as typed segments, at most 200 items counted before any image is resolved, `security_hint` as given. The UI re-checks each formatted label's limit. An entry that cannot render in full is incompatible.
 - **T6. Images.** The core resolves and verifies no image: it checks an image value's form and carries it in the consent view, for the UI to resolve, verify and render statically. The form is a Data URL whose encoded size is at most 512 KiB, or an `https` URL with a `#integrity` sibling of SRI syntax (a TS12 logo may lack it). Over the DC API an image is a Data URL in a format Credential Manager decodes (PNG, JPEG); otherwise a PaSO entry is incompatible and a TS12 logo is left out.
 - **T7. Output.** Transaction data binds into SD-JWT VC only. A query that sets `require_cryptographic_holder_binding: false` refuses the request (B.3.3). A KB-JWT carries the B.3.3.1 hashes of the entries bound to its credential, over each entry string as received, with one algorithm; `transaction_data_hashes_alg` is returned when the request carried it. The TS12 v1.0.1 rulebook adds `jti`, `response_mode` and `amr`.
 - **T8. Signed requests.** An entry a PaSO-sourced definition serves requires a signed request (Core §3). An unsigned request with TS12 entries carries TS12's warning in the view.
-- **T9. Metadata is input.** The plan fetches no metadata (Proof Metadata §6, §8). The host holds and renews it outside presentations; the core gives it the verification of a fetched JWT and the list of documents it still wants.
+- **T9. Metadata is input.** The host holds and renews the metadata outside presentations (Proof Metadata §6, §8). The core gives it the verification of a JWT with the URL that served it, and the list of documents it still wants.
 
 ### 4.13 Presentation
 
@@ -335,13 +342,19 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
 
 **Responsibility:**
 - linking the provers in-process (Longfellow and Vega backends);
-- exposing the core to Kotlin and Swift (UniFFI), the browser (wasm-bindgen) and Go (a `wasm32-wasip1` module run under wazero, because go-wallet-backend builds with `CGO_ENABLED=0`).
+- exposing the core to Kotlin and Swift (UniFFI), the browser (wasm-bindgen) and Go (a `wasm32-wasip1` module run under wazero, because go-wallet-backend builds with `CGO_ENABLED=0`);
+- the HTTP adapter `siros-http`, a facade-level crate built in the facades wave: it resolves the URLs the core lists and transmits the bodies it returns.
 
 **Requirements:**
 - **F1.** Every facade MUST expose the same operations with the same wire form of every record, so a record serialises identically on every binding.
 - **F2.** Records crossing a facade MUST be parsed into core types at the boundary.
 - **F3.** The cloud engine module MUST expose intake and submission only. It holds no credentials and no keys.
 - **F4.** `secret_seed` MUST stay inside the process from the wallet state to the proof.
+- **F5. HTTP.** `siros-http` MUST apply these rules, and so MUST every host that does its own HTTP:
+  - every request: `https` only, public addresses only, a 10-second timeout, and no cookies, credentials or headers that identify the wallet (OpenID4VP §15.6, §15.8);
+  - the request object: a `GET` of `request_uri`, or for `request_uri_method=post` a `POST` of the form parameters intake states, with `Accept: application/oauth-authz-req+jwt` (§5.10); no redirects (RFC 9101 §10.4.1); status 200 and the media type `application/oauth-authz-req+jwt` (§5.10.1, §5.10.2); at most 256 KiB read, as UTF-8 text;
+  - a submission: a `POST` of its body to the `response_uri`, as `application/x-www-form-urlencoded` form parameters or an `application/cwt` `COSE_Encrypt`; the reply: status 200 and `application/json` (§8.2), at most 64 KiB read;
+  - held metadata, outside presentations: a signed credential metadata JWT with `Accept: application/jwt` and the wallet's language in `Accept-Language`, following redirects, the final URL being the URL that served it (Proof Metadata §8); a URL answering 404 is recorded as serving no document.
 
 ### 4.15 Picker
 
@@ -357,13 +370,14 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
 
 ### 4.16 Cloud engine (go-wallet-backend)
 
-**Responsibility:** the network legs of the redirect flow for the web wallet: fetching the request, trust evaluation, and delivering the submission.
+**Responsibility:** the network legs of the redirect flow for the web wallet: resolving the request object, trust evaluation, and delivering the submission.
 
 **Requirements:**
 - **E1.** It MUST run intake through the core module.
 - **E2.** It MUST send the client the `VerifiedRequest`.
 - **E3.** It MUST deliver the client's submission unchanged.
 - **E4.** It MUST NOT match credentials, vet consent, or assemble a `vp_token`.
+- **E5.** Its HTTP MUST follow F5.
 
 ### 4.17 User interface (each platform)
 
@@ -392,16 +406,17 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
     - A store certificate byte-identical to the chain's first certificate admits it when it is valid at that time.
 
   An entry of any other type admits nothing. A malformed `aki` value makes the query invalid. Admission MUST be the constructor of an `AdmittedIssuer` witness that names the query and the chain's first certificate.
-- **TR4. Provision.** The host supplies the store (H4). The core fetches no list, federation statement or certificate. The store is global, the same for every request and channel, because the DC API gives the picker nothing per request.
+- **TR4. Provision.** The host supplies the store (H4), with every list, federation statement and certificate in it. The store is global, the same for every request and channel, because the DC API gives the picker nothing per request.
 - **TR5. Picker facts.** At registration the wallet resolves each credential against the store. The projection records the credential's AKI keyIdentifiers and the `type` and `value` of every store entry that admits it. The picker admits an issuer from these facts alone, with the same rule. The picker has no clock: its facts hold at registration time (K2). The wallet registers again when the store, the wallet state, the wallet's language or a credential's metadata changes.
 
 ## 5. Boundary contracts
 
 | Boundary | Crosses inward | Crosses outward | Guaranteed by the core | Guaranteed by the other side |
 |---|---|---|---|---|
-| Host ↔ core | wallet state; display metadata; locales; key factors; circuits; trust store; time; effect results | effects (`Fetch`, `Trust`, `Sign`); views; submissions; presentation records; refusals | R-G2 to R-G7; every effect is the only I/O it needs | H1 to H5 |
+| Host ↔ core | wallet state; display metadata; locales; key factors; circuits; trust store; time; effect results (request object texts, trust verdicts, signatures); reply bodies | effects (`RequestObject`, `Trust`, `Sign`); the URLs of the documents it wants; views; submissions as data; presentation records; refusals | R-G2 to R-G7; P1; P3; P4; P6 | H1 to H5 |
+| HTTP adapter ↔ verifiers and publishers | request objects; replies; held metadata | request object requests; submissions; metadata requests | P3; P4 | F5 |
 | UI ↔ core | selection | consent view: verifier, purposes, offers with cards, rows and proof statements, optional additions, transactions | the view equals the plan; R-G6 | H6, §4.17 |
-| Engine ↔ web client | verified request | submission | P1; F3 | E1 to E4 |
+| Engine ↔ web client | verified request | submission | P1; F3 | E1 to E5 |
 | Wallet ↔ picker | the picker's chosen entry | registration projection | K1 to K3 | Credential Manager runs the matcher on the registered projection |
 | Core ↔ provers | proof output | proof job with statement, credential and `OpenedSeed` | N3 to N5; F4 | the backend proves exactly the statement it is given |
 | Core ↔ container | `S` | `new_presentation` record | W1 to W4 | H5 |
@@ -488,5 +503,6 @@ The core meets this document when all of the following hold:
 | TR3 applies RFC 5280's keyCertSign, pathLenConstraint and critical-extension rules, and admits a store-listed issuer certificate | Owner's decision, 2026-10-27; the wallet offers only what a verifier's path validation admits |
 | Transaction data follows PaSO draft-2: one definition form, sources by precedence, one wallet language, first match per credential, TS12-compatible output | Owner's decision, 2026-10-27; the configuration serves only credentials without metadata of their own |
 | The picker's issuer facts hold at registration time | Owner's decision, 2026-10-27; `matcher.wasm` has no clock. The wallet refuses an offer whose issuer is no longer admitted |
+| The core is pure and offline: it lists the URLs it needs and returns the bodies to send; HTTP lives in the facade-level `siros-http` | Owner's decision, 2026-10-27; library users such as the picker provide URL resources from data they hold |
 
 **Open:** none.
