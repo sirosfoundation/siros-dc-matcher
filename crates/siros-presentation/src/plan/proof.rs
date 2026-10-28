@@ -6,7 +6,7 @@ use siros_codec::date::DateTime;
 use siros_credential::{Parsed, UsableCredential};
 use siros_trust::AdmittedIssuer;
 use siros_zkp_req_nym_auth::attestation::{
-    OtherIssuer, SecretSeed, TestedAttestation, Unreadable, Unusable, UsableAttestation,
+    SecretSeed, TestedAttestation, Unreadable, Unusable, UsableAttestation,
 };
 use siros_zkp_req_nym_auth::outcome::CredentialCode;
 use siros_zkp_req_nym_auth::presenter::{Answer as NymAnswer, Unanswerable};
@@ -24,9 +24,7 @@ pub enum Unproven {
     /// The mdoc is of another `docType`.
     OtherDocType,
     /// The credential cannot be read in the nym_auth form: `credential_form`.
-    Unreadable(Unreadable),
-    /// The admission of the credential's issuer is for another certificate or query.
-    Issuer(#[from] OtherIssuer),
+    Unreadable(#[source] Unreadable),
     /// The credential fails these tests at the proof time.
     Fails(Vec<CredentialCode>),
     /// The issuer delivered no usable `secret_seed`.
@@ -40,10 +38,10 @@ pub enum Unproven {
 pub enum OptionRefusal {
     /// The option's pair is not usable again.
     #[error("the option's pair is not usable again")]
-    Choice(ChoiceError),
+    Choice(#[source] ChoiceError),
     /// An item of the option fails for the credential.
     #[error("an item of the option fails for the credential")]
-    Unanswerable(Unanswerable),
+    Unanswerable(#[source] Unanswerable),
 }
 
 impl Unproven {
@@ -54,7 +52,6 @@ impl Unproven {
             Self::NotAnMdoc => "not_an_mdoc",
             Self::OtherDocType => "other_doc_type",
             Self::Unreadable(_) => CredentialCode::CredentialForm.code(),
-            Self::Issuer(e) => e.code(),
             Self::Fails(_) => "credential",
             Self::Seed(e) => e.code(),
             Self::Options(_) => "no_option_answered",
@@ -131,7 +128,7 @@ fn tested(
         return Err(Unproven::NotAnMdoc);
     };
     let tested = TestedAttestation::of(mdoc, now)?;
-    let attestation = UsableAttestation::new(tested, issuer.clone(), zkp.query())?;
+    let attestation = UsableAttestation::new(tested, issuer.clone(), zkp.query());
     let seed = seed::delivered(credential.credential())?;
     Ok((attestation, seed))
 }

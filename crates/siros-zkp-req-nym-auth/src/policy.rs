@@ -32,7 +32,7 @@ pub enum PolicyRule {
     /// `client_id` is missing or no string.
     ClientIdMissing,
     /// `client_id` is no Client Identifier this wallet supports (OpenID4VP 1.0, Section 5.9).
-    ClientId(ClientIdError),
+    ClientId(#[source] ClientIdError),
     /// `nonce` is missing or no string.
     NonceMissing,
     /// `nonce` is empty or holds a character outside the ASCII URL-safe ones (OpenID4VP 1.0,
@@ -76,9 +76,9 @@ impl PolicyRule {
 #[error("{}", self.code())]
 pub enum RequestRefusal {
     /// A rule of the signed-request and encrypted-response policy.
-    Policy(PolicyRule),
+    Policy(#[source] PolicyRule),
     /// A rule of the `verifier_id` of the trust framework's form.
-    VerifierId(VerifierIdRule),
+    VerifierId(#[source] VerifierIdRule),
 }
 
 impl RequestRefusal {

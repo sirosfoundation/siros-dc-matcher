@@ -22,7 +22,7 @@ pub enum ElementFault<F> {
     Absent,
     /// Its value has another form.
     #[error("its value has another form")]
-    Form(F),
+    Form(#[source] F),
 }
 
 /// Why a value is no `full-date = #6.1004(tstr)` (RFC 8943).
@@ -57,7 +57,7 @@ pub enum FormError {
     /// The issuer signs with this algorithm, where the form takes ES256 (`{1: -7}`).
     Algorithm(CoseAlgorithm),
     /// The issuer's signature is no ES256 signature.
-    Signature(SignatureLength),
+    Signature(#[source] SignatureLength),
     /// `digestAlgorithm` is this algorithm, where the form takes `SHA-256`.
     DigestAlgorithm(DigestAlgorithm),
     /// The nym_auth namespace is missing.
@@ -65,11 +65,11 @@ pub enum FormError {
     /// The namespace holds this element, other than `birth_date`, `ssc` and `psc`.
     Element(ElementIdentifier),
     /// `psc` is not a 32-byte string.
-    Psc(CommitmentFault),
+    Psc(#[source] CommitmentFault),
     /// `birth_date` is missing or not a tag-1004 `full-date`.
-    BirthDate(ElementFault<FullDateFault>),
+    BirthDate(#[source] ElementFault<FullDateFault>),
     /// `ssc` is missing or not a 32-byte string.
-    Ssc(ElementFault<CommitmentFault>),
+    Ssc(#[source] ElementFault<CommitmentFault>),
 }
 
 impl FormError {

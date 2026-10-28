@@ -71,10 +71,10 @@ pub struct Verified {
 pub enum OwnQueryFault {
     /// DCQL refuses it (OpenID4VP 1.0, Section 6).
     #[error("DCQL refuses it (OpenID4VP 1.0, Section 6)")]
-    Dcql(QueryError),
+    Dcql(#[source] QueryError),
     /// It breaks a rule of `zkp_req` or of the catalogue.
     #[error("it breaks a rule of `zkp_req` or of the catalogue")]
-    Invalid(InvalidRequest),
+    Invalid(#[source] InvalidRequest),
     /// It asks for another credential type than the nym_auth attestation.
     #[error("it asks for another credential type than the nym_auth attestation")]
     OtherType,
@@ -86,7 +86,7 @@ pub enum OwnQueryFault {
 pub enum ProofEncodingFault {
     /// `proof` is no `Proof`.
     #[error("`proof` is no `Proof`")]
-    Envelope(EncodingError),
+    Envelope(#[source] EncodingError),
     /// `zk_proof` has a length the system's proof backend does not read.
     #[error("`zk_proof` has a length the system's proof backend does not read")]
     ZkProofLength,
@@ -115,7 +115,7 @@ pub enum ResultsFault {
     NotBytes,
     /// The byte string is no 32-byte pseudonym.
     #[error("the byte string is no 32-byte pseudonym")]
-    Length(LengthError),
+    Length(#[source] LengthError),
 }
 
 /// Why `issuer_key_set` is refused.
@@ -126,10 +126,10 @@ pub enum IssuerKeySetError {
     Count(usize),
     /// The certificate is not one of the systems' form.
     #[error("the certificate is not one of the systems' form")]
-    Certificate(DocumentSignerError),
+    Certificate(#[source] DocumentSignerError),
     /// The certificate has no path to the Verifier's `trust_anchors` at its clock (TR3).
     #[error("the certificate has no path to the Verifier's `trust_anchors` at its clock (TR3)")]
-    Untrusted(PathRefusal),
+    Untrusted(#[source] PathRefusal),
 }
 
 /// Why `proof_time` is refused.
@@ -148,23 +148,23 @@ pub enum ProofTimeError {
 #[error("{}: {:?}", self.code(), self)]
 pub enum Rejection {
     /// The Verifier's own query is unusable.
-    Request(OwnQueryFault),
+    Request(#[source] OwnQueryFault),
     /// The Verifier's own option lies outside the system's Section 2: `request`.
-    Unsupported(Unsupported),
+    Unsupported(#[source] Unsupported),
     /// The presentation is not a `ZkpPresentation`.
-    Presentation(EncodingError),
+    Presentation(#[source] EncodingError),
     /// Steps 1 to 5 of `zkp_req`, Section 4.1.
-    Structure(StructureRejection),
+    Structure(#[source] StructureRejection),
     /// `proof` breaks the proof backend's format, or `inputs` breaks Section 3.
-    ProofEncoding(ProofEncodingFault),
+    ProofEncoding(#[source] ProofEncodingFault),
     /// `issuer_key_set`.
-    IssuerKeySet(IssuerKeySetError),
+    IssuerKeySet(#[source] IssuerKeySetError),
     /// `proof_time`.
-    ProofTime(ProofTimeError),
+    ProofTime(#[source] ProofTimeError),
     /// The pseudonym of `results`.
-    Results(ResultsFault),
+    Results(#[source] ResultsFault),
     /// The system's verifier refused the proof.
-    Proof(ProofFailure),
+    Proof(#[source] ProofFailure),
 }
 
 impl Rejection {

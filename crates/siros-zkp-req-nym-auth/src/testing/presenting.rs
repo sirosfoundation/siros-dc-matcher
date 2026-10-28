@@ -32,7 +32,7 @@ use x509_cert::time::{Time, Validity};
 use zeroize::Zeroizing;
 
 use super::{client_metadata, device_signature, key, request_object, CLIENT_ID, NOW};
-use crate::attestation::{OtherIssuer, SecretSeed, TestedAttestation, Unusable, UsableAttestation};
+use crate::attestation::{SecretSeed, TestedAttestation, Unusable, UsableAttestation};
 use crate::catalogue::NymAuthQuery;
 use crate::policy::RequestRefusal;
 use crate::presenter::{Answer, Prepared, ProveError, Unanswerable};
@@ -52,8 +52,6 @@ pub enum Presenting {
     Unusable(Unusable),
     /// The query's `trusted_authorities` do not admit the Document Signer.
     Unadmitted(Unadmitted<ChainRefusal>),
-    /// The admission does not make the attestation usable.
-    OtherIssuer(OtherIssuer),
     /// The attestation answers no option.
     Unanswerable(Unanswerable),
     /// The request breaks the nym_auth policy.
@@ -195,7 +193,7 @@ pub fn usable(
     let mdoc = Mdoc::parse(data).map_err(Presenting::Mdoc)?;
     let tested = TestedAttestation::of(&mdoc, now).map_err(Presenting::Unusable)?;
     let issuer = admitted(query, &mdoc, now).map_err(Presenting::Unadmitted)?;
-    UsableAttestation::new(tested, issuer, nym).map_err(Presenting::OtherIssuer)
+    Ok(UsableAttestation::new(tested, issuer, nym))
 }
 
 /// The presentation `request` asks for `query`, prepared from the credential `data` with the

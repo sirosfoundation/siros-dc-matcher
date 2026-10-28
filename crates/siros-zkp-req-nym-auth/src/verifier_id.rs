@@ -19,7 +19,7 @@ pub enum VerifierIdRule {
     SemanticIdMissing,
     /// The form is `semantic` and the authenticated certificate's subject gives no semantics
     /// identifier.
-    SemanticId(SemanticIdError),
+    SemanticId(#[source] SemanticIdError),
     /// The form is `x509_san_dns` and the Client Identifier has another prefix.
     ClientIdPrefix,
     /// The form is `x509_san_dns` and the registration certificate names an intermediary.

@@ -31,7 +31,7 @@ pub enum KeyError {
     NotP256,
     /// The key is not an uncompressed point.
     #[error("the key is not an uncompressed point")]
-    Point(PointError),
+    Point(#[source] PointError),
 }
 
 /// Why bytes are no Document Signer certificate.
@@ -39,9 +39,9 @@ pub enum KeyError {
 #[error("{}", self.code())]
 pub enum DocumentSignerError {
     /// The certificate does not parse.
-    Certificate(CertificateError),
+    Certificate(#[source] CertificateError),
     /// Its key.
-    Key(KeyError),
+    Key(#[source] KeyError),
 }
 
 impl DocumentSignerError {
@@ -108,9 +108,9 @@ impl Credential {
 #[error("{}", self.code())]
 pub enum Unreadable {
     /// The mdoc.
-    Form(FormError),
+    Form(#[source] FormError),
     /// The Document Signer.
-    Signer(DocumentSignerError),
+    Signer(#[source] DocumentSignerError),
 }
 
 impl Unreadable {
@@ -150,7 +150,7 @@ pub enum Unusable {
     /// An mdoc of another `docType`: it does not match the query.
     OtherDocType,
     /// The credential cannot be read in the nym_auth form: `credential_form`.
-    Unreadable(Unreadable),
+    Unreadable(#[source] Unreadable),
     /// The credential reads and fails the tests of [`Failures::codes`].
     Fails(Box<Failures>),
 }
@@ -245,28 +245,6 @@ impl TestedAttestation {
     }
 }
 
-/// Why an admitted issuer does not make a tested attestation usable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
-#[error("{}", self.code())]
-pub enum OtherIssuer {
-    /// The admission names another certificate than the attestation's Document Signer.
-    Certificate,
-    /// The admission is for the authorities of another query: another `id`, or other
-    /// `trusted_authorities`.
-    Query,
-}
-
-impl OtherIssuer {
-    /// A stable identifier.
-    #[must_use]
-    pub fn code(self) -> &'static str {
-        match self {
-            Self::Certificate => "admission_other_certificate",
-            Self::Query => "admission_other_query",
-        }
-    }
-}
-
 /// A tested attestation whose Document Signer the query's `trusted_authorities` admit (N3,
 /// TR3). Proving requires it.
 #[derive(Debug, Clone)]
@@ -278,25 +256,26 @@ pub struct UsableAttestation {
 impl UsableAttestation {
     /// `tested`, usable for `query` because `issuer` admits its Document Signer.
     ///
-    /// # Errors
+    /// # Panics
     ///
-    /// [`OtherIssuer`]: `issuer` names another certificate than `tested`'s Document Signer, or
-    /// other authorities than those of `query`.
-    pub fn new(
-        tested: TestedAttestation,
-        issuer: AdmittedIssuer,
-        query: &NymAuthQuery,
-    ) -> Result<Self, OtherIssuer> {
-        if issuer.leaf() != Some(tested.credential().signer().certificate()) {
-            return Err(OtherIssuer::Certificate);
-        }
-        if !issuer
-            .authorities()
-            .are_those_of(query.query().credential_query())
-        {
-            return Err(OtherIssuer::Query);
-        }
-        Ok(Self { tested, issuer })
+    /// When `issuer` names another certificate than `tested`'s Document Signer, or other
+    /// authorities than those of `query`.
+    #[must_use]
+    pub fn new(tested: TestedAttestation, issuer: AdmittedIssuer, query: &NymAuthQuery) -> Self {
+        // The caller admits the issuer of the credential it tested, for the query it answers.
+        // Another admission is a bug of the caller, and the proof would rest on a trust
+        // decision about another certificate or another query.
+        assert!(
+            issuer.leaf() == Some(tested.credential().signer().certificate()),
+            "the admission names another certificate than the attestation's Document Signer"
+        );
+        assert!(
+            issuer
+                .authorities()
+                .are_those_of(query.query().credential_query()),
+            "the admission is for the authorities of another query"
+        );
+        Self { tested, issuer }
     }
 
     /// The credential.
