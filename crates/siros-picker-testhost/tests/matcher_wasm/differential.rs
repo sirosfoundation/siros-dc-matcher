@@ -16,7 +16,7 @@ use crate::sides::{
     chosen_through_picks, intake, picker_offers, picker_run, registration, wallet_offers, Offered,
     LEVELS,
 };
-use crate::{corpus, families, paso};
+use crate::{corpus, families, key_free, paso};
 
 /// A request over a wallet, and what the picker cannot verify of it.
 pub struct Case {
@@ -53,6 +53,7 @@ fn the_picker_offers_what_the_wallet_plans() {
         .into_iter()
         .chain(paso::cases())
         .chain(families::cases())
+        .chain(key_free::cases())
         .collect();
     let disagreements: Vec<String> = cases
         .iter()

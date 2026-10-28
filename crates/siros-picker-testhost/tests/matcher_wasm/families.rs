@@ -43,7 +43,6 @@ pub fn cases() -> Vec<Case> {
     cases.extend(verifier_ids());
     cases.extend(unshown());
     cases.extend(payments());
-    cases.extend(key_free());
     cases
 }
 
@@ -67,7 +66,7 @@ fn signed_by(params: Value, signer: Signer) -> Vec<u8> {
     dc_api_signed_request(&object, signer, SignedForm::Compact)
 }
 
-fn case(name: &str, request: Vec<u8>, wallet: Wallet) -> Case {
+pub(crate) fn case(name: &str, request: Vec<u8>, wallet: Wallet) -> Case {
     Case {
         name: name.to_owned(),
         request,
@@ -78,11 +77,11 @@ fn case(name: &str, request: Vec<u8>, wallet: Wallet) -> Case {
     }
 }
 
-fn mdl(id: u64, items: &[(&str, Cbor)]) -> Held {
+pub(crate) fn mdl(id: u64, items: &[(&str, Cbor)]) -> Held {
     Held::new(id, "mso_mdoc", mdoc(MDL, MDL_NS, items))
 }
 
-fn ask(id: &str, element: &str) -> Value {
+pub(crate) fn ask(id: &str, element: &str) -> Value {
     json!({"id": id, "format": "mso_mdoc", "meta": {"doctype_value": MDL},
         "claims": [{"path": [MDL_NS, element]}]})
 }
@@ -412,139 +411,4 @@ fn payments() -> Vec<Case> {
     );
     purpose.exception = Some(Exception::PaymentPurpose);
     vec![purpose, one_entry]
-}
-
-/// The rules of the request parameters and of the Client Identifier that need no key: one
-/// request breaks each, and the wallet's intake and the picker refuse it alike. Over the DC API
-/// the Wallet ignores `state` and, in unsigned `data`, a `request_uri` (A.2): both accept those.
-fn key_free() -> Vec<Case> {
-    let adult = || Wallet::new(vec![mdl(1, &[("age_over_18", Cbor::Bool(true))])]);
-    let query = || json!({"credentials": [ask("q1", "age_over_18")]});
-    let params = || {
-        json!({"response_type": "vp_token", "response_mode": "dc_api", "nonce": NONCE,
-            "dcql_query": query()})
-    };
-    let unsigned_with = |edit: &dyn Fn(&mut Value)| {
-        let mut data = params();
-        edit(&mut data);
-        dc_api_request("openid4vp-v1-unsigned", data)
-    };
-    let without = |member: &'static str| {
-        move |data: &mut Value| {
-            data.as_object_mut().unwrap().remove(member).unwrap();
-        }
-    };
-    // A signed Request Object: `dc_api.jwt`, its encryption key, `client_id` and
-    // `expected_origins`, edited.
-    let signed_with = |edit: &dyn Fn(&mut Value)| {
-        let mut object = params();
-        object["response_mode"] = json!("dc_api.jwt");
-        object["client_metadata"] = json!({"jwks": {"keys": [encryption_jwk()]}});
-        object["client_id"] = json!(SIGNER.client_id());
-        object["expected_origins"] = json!([siros_presentation::testing::verifier::ORIGIN]);
-        edit(&mut object);
-        dc_api_request(
-            "openid4vp-v1-signed",
-            json!({"request": SIGNER.compact(&object)}),
-        )
-    };
-    // A multisigned payload, its one signature's header naming the client.
-    let multisigned_with = |edit: &dyn Fn(&mut Value)| {
-        let mut object = params();
-        object["response_mode"] = json!("dc_api.jwt");
-        object["client_metadata"] = json!({"jwks": {"keys": [encryption_jwk()]}});
-        object["expected_origins"] = json!([siros_presentation::testing::verifier::ORIGIN]);
-        edit(&mut object);
-        let mut header = SIGNER.header();
-        header["client_id"] = json!(SIGNER.client_id());
-        let protected = b64(header.to_string().as_bytes());
-        let payload = b64(object.to_string().as_bytes());
-        let signature = SIGNER.sign(&format!("{protected}.{payload}"));
-        dc_api_request(
-            "openid4vp-v1-multisigned",
-            json!({"payload": payload,
-                "signatures": [{"protected": protected, "signature": signature}]}),
-        )
-    };
-    let rows: Vec<(&str, Vec<u8>)> = vec![
-        ("unsigned, every rule kept", unsigned_with(&|_| {})),
-        ("signed, every rule kept", signed_with(&|_| {})),
-        ("multisigned, every rule kept", multisigned_with(&|_| {})),
-        ("no nonce", unsigned_with(&without("nonce"))),
-        (
-            "a nonce with a space",
-            unsigned_with(&|d| d["nonce"] = json!("a b")),
-        ),
-        ("no response_type", unsigned_with(&without("response_type"))),
-        (
-            "response_type id_token",
-            unsigned_with(&|d| d["response_type"] = json!("id_token")),
-        ),
-        ("no response_mode", unsigned_with(&without("response_mode"))),
-        (
-            "direct_post over the DC API",
-            unsigned_with(&|d| d["response_mode"] = json!("direct_post")),
-        ),
-        (
-            "unsigned client_metadata a string",
-            unsigned_with(&|d| d["client_metadata"] = json!("x")),
-        ),
-        (
-            "signed client_metadata a string",
-            signed_with(&|o| o["client_metadata"] = json!("x")),
-        ),
-        (
-            "multisigned client_metadata a string",
-            multisigned_with(&|o| o["client_metadata"] = json!("x")),
-        ),
-        (
-            "verifier_info no array",
-            unsigned_with(&|d| d["verifier_info"] = json!({"format": "jwt", "data": "x"})),
-        ),
-        (
-            "a signed Request Object with a request_uri",
-            signed_with(&|o| o["request_uri"] = json!("https://verifier.example/request")),
-        ),
-        (
-            "signed without expected_origins",
-            signed_with(&|o| drop(o.as_object_mut().unwrap().remove("expected_origins"))),
-        ),
-        (
-            "signed without client_id",
-            signed_with(&|o| drop(o.as_object_mut().unwrap().remove("client_id"))),
-        ),
-        (
-            "a pre-registered client",
-            signed_with(&|o| o["client_id"] = json!("verifier.example")),
-        ),
-        (
-            "a signed redirect_uri client",
-            signed_with(&|o| o["client_id"] = json!("redirect_uri:https://verifier.example/cb")),
-        ),
-        (
-            "a multisigned payload with client_id",
-            multisigned_with(&|o| o["client_id"] = json!(SIGNER.client_id())),
-        ),
-        (
-            "a multisigned payload with verifier_info",
-            multisigned_with(&|o| {
-                o["verifier_info"] = json!([{"format": "jwt", "data": "x"}]);
-            }),
-        ),
-        (
-            "state with a space over the DC API",
-            unsigned_with(&|d| d["state"] = json!("a b")),
-        ),
-        (
-            "state a number over the DC API",
-            unsigned_with(&|d| d["state"] = json!(7)),
-        ),
-        (
-            "a request_uri in unsigned data",
-            unsigned_with(&|d| d["request_uri"] = json!("https://verifier.example/request")),
-        ),
-    ];
-    rows.into_iter()
-        .map(|(name, request)| case(name, request, adult()))
-        .collect()
 }

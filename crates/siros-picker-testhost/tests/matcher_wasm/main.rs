@@ -21,6 +21,7 @@ use siros_picker_testhost::{run, Invocation};
 mod corpus;
 mod differential;
 mod families;
+mod key_free;
 mod paso;
 mod sides;
 
