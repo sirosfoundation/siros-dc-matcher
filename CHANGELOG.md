@@ -88,9 +88,15 @@ against the 307,200-byte budget (303,418 at v0.11.0).
     (`plan_query_unknown`, `plan_candidate_unknown`, `plan_zkp_query_missing`,
     `plan_entry_unknown`, `plan_bound_credential_unknown`) for a plan that contradicts
     itself, and `PresentationError::FetchRepeated` (`fetch_repeated`) for a fetch the host
-    answers twice.
+    answers twice. The response step returns `Inconsistency::BindingEmpty`
+    (`plan_binding_empty`) and `NymAuthRequest` (`plan_nym_auth_request_refused`) too,
+    `PresentationError::Pointer` and `Disclosure` for a pointer or a disclosure the
+    credential refuses, `KeyFactorsMissing` for a signing key without its authentication
+    factors, and `SignatureError::Unknown`, `Repeated` and `Length` for a signature of no
+    `Sign` effect, a second one, and one of other than 64 bytes.
   - `siros-oid4vp`: `IntakeError::AnswerMismatch`, `UnexpectedTrustKey` and `UnusedAnswer`
-    for a host that breaks intake's effect protocol.
+    for a host that breaks intake's effect protocol, and `EncryptionFault::EphemeralKey`,
+    `KdfLength` and `Seal` for an encryption the core cannot complete.
   - `siros-zkp-req-nym-auth`: `HostError::AnchorsMissing`, `SeedLength`, `SignatureLength`
     and `CredentialMismatch`, `KeyNotInRequest` from `CheckedRequest::handover`, and
     `Unanswerable::ProofDate`, for a host that breaks the presenter's contract. The FFI's
