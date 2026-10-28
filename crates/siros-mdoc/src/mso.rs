@@ -178,10 +178,10 @@ impl P256Key {
 
     /// The uncompressed SEC 1 point.
     pub fn sec1(&self) -> [u8; 65] {
-        let mut point = [0u8; 65];
-        point[0] = 0x04;
-        point[1..33].copy_from_slice(&self.x);
-        point[33..].copy_from_slice(&self.y);
+        let mut point = [0x04; 65];
+        for (slot, byte) in point.iter_mut().skip(1).zip(self.x.iter().chain(&self.y)) {
+            *slot = *byte;
+        }
         point
     }
 }
