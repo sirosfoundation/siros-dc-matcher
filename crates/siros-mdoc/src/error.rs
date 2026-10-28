@@ -57,7 +57,7 @@ pub enum MdocError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum EnvelopeFault {
     /// `documents` holds this many documents, where one is read.
-    #[error("`documents` holds this many documents, where one is read")]
+    #[error("`documents` holds {0} documents, where one is read")]
     Documents(usize),
     /// The `Document` has no `issuerSigned`.
     #[error("the `Document` has no `issuerSigned`")]
@@ -144,25 +144,25 @@ pub enum ValueDigestsFault {
     #[error("a namespace is not text")]
     NameSpace,
     /// The namespace's digests are no non-empty map.
-    #[error("the namespace's digests are no non-empty map")]
+    #[error("the digests of namespace `{0}` are no non-empty map")]
     Digests(NameSpace, #[source] MemberFault),
     /// A `digestID` of the namespace is not an unsigned integer.
-    #[error("a `digestID` of the namespace is not an unsigned integer")]
+    #[error("a `digestID` of namespace `{0}` is not an unsigned integer")]
     DigestId(NameSpace),
     /// The digest under this `digestID` is not a byte string.
-    #[error("the digest under this `digestID` is not a byte string")]
+    #[error("the digest under `digestID` {1} of namespace `{0}` is not a byte string")]
     Digest(NameSpace, DigestId),
     /// The digest under this `digestID` has this many bytes, another length than the
     /// algorithm's.
     #[error(
-        "the digest under this `digestID` has this many bytes, another length than the algorithm's"
+        "the digest under `digestID` {1} of namespace `{0}` has {2} bytes, another length than the algorithm's"
     )]
     DigestLength(NameSpace, DigestId, usize),
     /// The namespace lists this `digestID` twice.
-    #[error("the namespace lists this `digestID` twice")]
+    #[error("namespace `{0}` lists `digestID` {1} twice")]
     RepeatedDigestId(NameSpace, DigestId),
     /// The map holds this namespace twice.
-    #[error("the map holds this namespace twice")]
+    #[error("the map holds namespace `{0}` twice")]
     RepeatedNameSpace(NameSpace),
 }
 
@@ -196,7 +196,7 @@ pub enum NamesFault {
     #[error("a name is not text")]
     NotText,
     /// It holds this name twice.
-    #[error("it holds this name twice")]
+    #[error("it holds the name {0:?} twice")]
     Repeated(String),
 }
 
@@ -216,13 +216,13 @@ pub enum KeyAuthorizationsFault {
     #[error("a namespace of `dataElements` is not text")]
     NameSpace,
     /// The element identifiers of this namespace.
-    #[error("the element identifiers of this namespace")]
+    #[error("the element identifiers of namespace `{0}`")]
     Elements(NameSpace, #[source] NamesFault),
     /// This namespace is in `nameSpaces` and in `dataElements`.
-    #[error("this namespace is in `nameSpaces` and in `dataElements`")]
+    #[error("namespace `{0}` is in `nameSpaces` and in `dataElements`")]
     Overlap(NameSpace),
     /// `dataElements` holds this namespace twice.
-    #[error("`dataElements` holds this namespace twice")]
+    #[error("`dataElements` holds namespace `{0}` twice")]
     RepeatedNameSpace(NameSpace),
 }
 
@@ -256,7 +256,7 @@ pub enum ValidityFault {
     #[error("the MSO has no `validityInfo`")]
     Absent,
     /// This time is absent or no 20-character `tdate`.
-    #[error("this time is absent or no 20-character `tdate`")]
+    #[error("`{}` is absent or no 20-character `tdate`", .0.name())]
     Time(ValidityTime),
     /// `validFrom` precedes `signed`, or does not precede `validUntil`.
     #[error("`validFrom` precedes `signed`, or does not precede `validUntil`")]
@@ -273,13 +273,13 @@ pub enum NameSpacesFault {
     #[error("a namespace is not text")]
     NameNotText,
     /// The map holds this namespace twice.
-    #[error("the map holds this namespace twice")]
+    #[error("the map holds namespace `{0}` twice")]
     Repeated(NameSpace),
     /// The namespace's items are no non-empty array.
-    #[error("the namespace's items are no non-empty array")]
+    #[error("the items of namespace `{0}` are no non-empty array")]
     Items(NameSpace, #[source] MemberFault),
     /// An item of the namespace is no byte string under tag 24.
-    #[error("an item of the namespace is no byte string under tag 24")]
+    #[error("an item of namespace `{0}` is no byte string under tag 24")]
     NotTagged(NameSpace),
 }
 
@@ -303,8 +303,21 @@ pub enum ItemFault {
     #[error("the tagged bytes are not one CBOR item")]
     Cbor(#[source] CborError),
     /// This member is absent or of another CBOR type.
-    #[error("this member is absent or of another CBOR type")]
+    #[error("`{}` is absent or of another CBOR type", .0.name())]
     Member(ItemMember),
+}
+
+impl ItemMember {
+    /// The member's name.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::DigestId => "digestID",
+            Self::Random => "random",
+            Self::ElementIdentifier => "elementIdentifier",
+            Self::ElementValue => "elementValue",
+        }
+    }
 }
 
 impl MdocError {

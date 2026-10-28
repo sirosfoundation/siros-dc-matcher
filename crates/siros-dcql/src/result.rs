@@ -22,7 +22,7 @@ pub struct Candidate {
 
 /// A credential whose claims path processing gives an error (§7.1.1, §7.2.1), and the error.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("claims path processing gives an error (§7.1.1, §7.2.1)")]
+#[error("claims path processing of credential {credential_id} gives an error (§7.1.1, §7.2.1)")]
 pub struct ClaimPathRefusal {
     credential_id: CredentialRef,
     #[source]

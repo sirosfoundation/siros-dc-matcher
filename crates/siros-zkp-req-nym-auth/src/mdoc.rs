@@ -46,7 +46,7 @@ pub enum CommitmentFault {
     #[error("the value is not a byte string")]
     NotBytes,
     /// The byte string has this many bytes.
-    #[error("the byte string has this many bytes")]
+    #[error("the byte string has {0} bytes")]
     Length(usize),
 }
 

@@ -81,7 +81,9 @@ pub enum ReturnHandleError {
     #[error("the text is empty")]
     Empty,
     /// The text holds this character, which is not an ASCII letter, a digit, `_` or `-`.
-    #[error("the text holds this character, which is not an ASCII letter, a digit, `_` or `-`")]
+    #[error(
+        "the text holds the character {0:?}, which is not an ASCII letter, a digit, `_` or `-`"
+    )]
     Character(char),
 }
 

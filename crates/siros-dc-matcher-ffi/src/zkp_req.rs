@@ -25,7 +25,7 @@ use siros_zkp_req_nym_auth::verify::{verify, Rejection, Tolerance, VerifyInput};
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum ZkpReqError {
     /// The request breaks a rule of `zkp_req` or of the nym_auth catalogue.
-    #[error("invalid request ({code})")]
+    #[error("{error_code}: invalid request ({code})")]
     InvalidRequest {
         /// `invalid_request`.
         error_code: String,
@@ -33,7 +33,7 @@ pub enum ZkpReqError {
         code: String,
     },
     /// An input of the host is not one the core can use.
-    #[error("host input ({code})")]
+    #[error("{error_code}: host input ({code})")]
     Host {
         /// `access_denied`.
         error_code: String,
@@ -41,7 +41,7 @@ pub enum ZkpReqError {
         code: String,
     },
     /// The verifier refused a presentation.
-    #[error("presentation refused ({code})")]
+    #[error("presentation refused ({code}): {detail}")]
     Refused {
         /// The system rulebook's code (Section 9), or the step of `zkp_req`, Section 4.1.
         code: String,

@@ -19,15 +19,15 @@ bodies it returns.
 1.0, Section 6, the FFI loses `zkp_req_plan`, and the vectors move to the crates that own their
 rules. Consumers that keep a copy of the vectors (siros-sdk-kotlin, siros-sdk-swift) must
 re-copy them from the new directories; the vector set digest below identifies them.
-`matcher.wasm` is 392,363 bytes against the 409,600-byte budget (303,418 at v0.11.0), sha256
-`eb3908228037737e0179fee50506cb082b6a1c322293b3b0383098e85fc33776` with Rust 1.99.1 and
+`matcher.wasm` is 392,579 bytes against the 409,600-byte budget (303,418 at v0.11.0), sha256
+`d68027c27a47af10ce7f07a67151e041d143ff5233ba48ffeae6d86e235f0740` with Rust 1.99.1 and
 binaryen version_116.
 
 ### Changed
 
 - The `matcher.wasm` size budget is 409,600 bytes (400 KiB), up from 307,200. The picker runs
   the wallet's matching and transaction data selection over the registration (K2): with images
-  passed through and `wasm-opt -Oz` it measures 392,363 bytes, and the measured alternatives
+  passed through and `wasm-opt -Oz` it measures 392,579 bytes, and the measured alternatives
   that drop parts of K2 were declined.
 - The matcher crate `siros-dc-matcher-wasm` is `siros-picker`, and its test host
   `siros-dc-matcher-testhost` is `siros-picker-testhost`. `make matcher` builds `matcher.wasm`
@@ -216,6 +216,7 @@ binaryen version_116.
   `siros-debug-0`.
 - Every error type derives `Display` and `Error` with `thiserror` and keeps its text; an error
   type that had none takes its code, or the first sentence of each variant's documentation.
+- The error texts now print the value they name.
 - **BREAKING (Rust API):** `siros-codec`'s `display_code!` macro is gone.
 - `source()` returns the cause a variant holds. These errors returned `None` for the variants
   named, and return the cause now:

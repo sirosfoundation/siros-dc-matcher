@@ -45,7 +45,7 @@ pub enum TypeValueFault {
     /// The `type_values` list at this position breaks the rule of a non-empty array of
     /// strings.
     #[error(
-        "the `type_values` list at this position breaks the rule of a non-empty array of strings"
+        "the `type_values` list at position {0} breaks the rule of a non-empty array of strings"
     )]
     List(ArrayIndex, #[source] MemberFault),
 }
@@ -85,13 +85,13 @@ pub enum OptionFault {
     #[error("the option is empty")]
     Empty,
     /// The entry at this position is not an unsigned integer.
-    #[error("the entry at this position is not an unsigned integer")]
+    #[error("the entry at position {0} is not an unsigned integer")]
     NotInteger(ArrayIndex),
     /// The entry at this position is no index of `_req`.
-    #[error("the entry at this position is no index of `_req`")]
+    #[error("the entry at position {0} is no index of `_req`")]
     OutOfRange(ArrayIndex),
     /// The option names this `_req` item a second time.
-    #[error("the option names this `_req` item a second time")]
+    #[error("the option names `_req` item {0} a second time")]
     Repeated(ItemIndex),
 }
 

@@ -95,11 +95,11 @@ pub enum ColourFault {
     Notation,
     /// The function is none of `rgb`, `rgba`, `hsl` and `hsla` with its number of arguments; it
     /// has this many.
-    #[error("the function is none of `rgb`, `rgba`, `hsl` and `hsla` with its number of arguments; it has this many")]
+    #[error("the function is none of `rgb`, `rgba`, `hsl` and `hsla` with its number of arguments; it has {0}")]
     Function(usize),
     /// The argument at this position is no `<integer>`, `<number>` or `<percentage>` as its
     /// place takes.
-    #[error("the argument at this position is no `<integer>`, `<number>` or `<percentage>` as its place takes")]
+    #[error("the argument at position {0} is no `<integer>`, `<number>` or `<percentage>` as its place takes")]
     Argument(usize),
 }
 

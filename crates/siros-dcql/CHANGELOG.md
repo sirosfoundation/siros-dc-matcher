@@ -100,6 +100,8 @@ this file.
   `QueryError::Form` returns its `FormFault` from `source()`, and `ClaimPathRefusal` its
   `PathError`. `QueryTextError::Query` is transparent: its text and source are its
   `QueryError`'s.
+- The error texts now print the value they name: `FormFault::Entry`, `ClaimPathRefusal`, and
+  `QueryError`'s `DuplicateClaimId`, `ClaimPath`, `UnknownClaimId` and `MdocPath`.
 
 ### Added
 
