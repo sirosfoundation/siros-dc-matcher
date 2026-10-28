@@ -98,7 +98,8 @@ this file.
   `TrustedAuthorityError`, `QueryError` and `QueryTextError`. `FormFault` and
   `ClaimPathRefusal` implement `Error`, with the first sentence of their documentation as text.
   `QueryError::Form` returns its `FormFault` from `source()`, and `ClaimPathRefusal` its
-  `PathError`.
+  `PathError`. `QueryTextError::Query` is transparent: its text and source are its
+  `QueryError`'s.
 
 ### Added
 

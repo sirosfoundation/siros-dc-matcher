@@ -16,16 +16,16 @@ commit `e65861c`), and adds the components of the SIROS wallet core. **Breaking*
 presentations follow the draft, the DCQL parse enforces OpenID4VP 1.0, Section 6, the FFI loses
 `zkp_req_plan`, and the vectors move to the crates that own their rules. Consumers that keep a
 copy of the vectors (siros-sdk-kotlin, siros-sdk-swift) must re-copy them from the new
-directories; the vector set digest below identifies them. `matcher.wasm` is 365,793 bytes
+directories; the vector set digest below identifies them. `matcher.wasm` is 366,587 bytes
 against the 409,600-byte budget (303,418 at v0.11.0), sha256
-`e2d3c8c34ea81512d8d4e0c996c643877e27dc926ed6c1f80b254de94638f2ed` with Rust 1.99.1 and
+`f4a81e90cd7394e4704f15143cdd2c0035b79ad8c727ef76ab364eb07bdb12bb` with Rust 1.99.1 and
 binaryen version_116.
 
 ### Changed
 
 - The `matcher.wasm` size budget is 409,600 bytes (400 KiB), up from 307,200. The picker runs
   the wallet's matching and transaction data selection over the registration (K2): with images
-  passed through and `wasm-opt -Oz` it measures 365,793 bytes, and the measured alternatives
+  passed through and `wasm-opt -Oz` it measures 366,587 bytes, and the measured alternatives
   that drop parts of K2 were declined.
 - The matcher crate `siros-dc-matcher-wasm` is `siros-picker`, and its test host
   `siros-dc-matcher-testhost` is `siros-picker-testhost`. `make matcher` builds `matcher.wasm`
@@ -246,8 +246,9 @@ binaryen version_116.
     `Unmatched`); `RenderFault` (`Label`, `Template`, `Value`); `SignedFault` (`Chain`,
     `Claim`, `CredentialUntrusted`, `Jws`, `KeySet`, `Untrusted`); `TemplateFault`
     (`Value`); `TransactionDataError` (`CredentialSets`, `Entry`); `Ts12Fault`
-    (`Definition`, `Integrity`, `Member`, `NotJson`, `NotUtf8`); `Ts12PayloadFault`
-    (`Member`); `WantedFault` (`KeySet`, `TypeMetadata`).
+    (`Definition`, `Integrity`, `Member`, `NotJson`, `NotUtf8`, and `PinPath` and `PinValue`,
+    which replace `Pin`); `Ts12PayloadFault` (`Member`); `WantedFault` (`KeySet`,
+    `TypeMetadata`).
   - `siros-trust`: `AkiError` (`Base64url`, `KeyIdentifier`); `AuthorityError` (`Aki`);
     `CertificateError` (`BasicConstraints`, `ExtendedKeyUsage`, `KeyUsage`, `Name`,
     `PublicKey`, `SubjectKeyIdentifier`); `ChainRefusal` (`Path`); `EntryError`
@@ -279,7 +280,7 @@ binaryen version_116.
     (`Malformed`); `JwsFault` (`Encoding`, `NotUtf8`); `LeafKeyFault` (`Curve`);
     `PayloadFault` (`Encoding`).
   - `siros-presentation`: `Exclusion` (`ClaimPath`, `Unadmitted`, `Unproven`); `Failure`
-    (`Refused`); `NoOffer` (`Unmatched`); `OptionRefusal` (`Choice`, `Unanswerable`).
+    (`Refused`); `OptionRefusal` (`Choice`, `Unanswerable`).
   - `siros-sdjwt`: `DisclosureFault` (`Encoding`); `EncodedJsonFault` (`Base64`, `Json`);
     `IssuerJwtFault` (`Header`, `Payload`, `Signature`); `X5cError` (`Base64`).
   - `siros-transaction-data`: `ClaimFault` (`Display`, `Member`, `Path`); `ConfiguredFault`
@@ -295,6 +296,9 @@ binaryen version_116.
     `IssuerKeySetError` (`Certificate`, `Untrusted`); `KeyError` (`Point`); `OwnQueryFault`
     (`Dcql`, `Invalid`); `ProofEncodingFault` (`Envelope`); `ResultsFault` (`Length`);
     `Unreadable` (`Form`, `Signer`).
+- A variant that wraps one error is transparent, its text and source those of the error:
+  `siros-codec`'s `ReadFault::Text` and `JsonFault::Read`, `siros-dcql`'s
+  `QueryTextError::Query`, and `siros-presentation`'s `NoOffer::Unmatched`.
 - **BREAKING (Rust API):** a broken guarantee panics, with its reason, where an error variant
   reported it. The variants and their codes are gone:
   - `siros-oid4vp`: a host whose results do not answer intake's effects
@@ -302,21 +306,32 @@ binaryen version_116.
     key without coordinates and a KDF output shorter than its key (`EncryptionFault::EphemeralKey`,
     `::KdfLength`). `cose_kdf` returns the `ContentKey`.
   - `siros-zkp-req-nym-auth`: an attestation tested at another date than its pair's
-    (`Unanswerable::ProofDate`, with `HostError` and `ProveError::Host`), or usable for
-    another query (`Unanswerable::OtherQuery`, `ProveError::OtherQuery`); an admission of
-    another certificate or query (`OtherIssuer`); a JWK thumbprint of no key in the request
-    (`KeyNotInRequest`). `UsableAttestation::new` returns the attestation, and
-    `CheckedRequest::handover` the `Handover`.
-  - `siros-display`: an option of another query (`DisplayError::OptionItemUnknown`).
-  - `siros-presentation`: a plan that contradicts the matching it was built from
-    (`PresentationError::Inconsistent`, `Inconsistency`); a proof choice of another query
-    (`ChoiceError::OptionUnknown`), and with it an admission of another issuer
-    (`Unproven::Issuer`); a signing key without the factors `PlanInput` carries
-    (`KeyFactorsMissing`); a claims pointer of the matching that selects nothing (`Pointer`); a
-    `Sign` effect answered twice, an answer to no effect, and a signature of other than 64
-    bytes (`SignatureError::Repeated`, `::Unknown`, `::Length`).
-    `PresentationError::Disclosure` is `ElementRepeated` (`repeated_selection`);
-    `Transactions::bind` returns the bindings and `ZkpQuery::option` the option.
+    (`Unanswerable::ProofDate`, with `HostError` and `ProveError::Host`); a JWK thumbprint of no
+    key in the request (`KeyNotInRequest`). `CheckedRequest::handover` returns the `Handover`.
+  - `siros-presentation`: a proof whose query the matching read as no nym_auth query, or of a
+    request that breaks the nym_auth policy; a signing key without the factors `PlanInput` carries
+    (`KeyFactorsMissing`); SD-JWT claims or mdoc elements of the matching the credential does
+    not disclose; a `Sign` effect answered twice and an answer to no effect
+    (`SignatureError::Repeated`, `::Unknown`). `PresentationError::Disclosure` is
+    `ElementRepeated` (`repeated_selection`).
+- Outside the picker's crates, a broken guarantee that no type rules out is an error:
+  - `siros-presentation`: a member, a candidate or an entry the plan's matching lacks
+    (`PresentationError::Inconsistent` with `Inconsistency::Query`, `::Candidate`, `::Entry`;
+    `plan_query_unknown`, `plan_candidate_unknown`, `plan_entry_unknown`), which
+    `Transactions::bind` returns too; a proof choice of another query
+    (`ChoiceError::OptionUnknown`, `choice_option_unknown`); an admission of another issuer
+    (`Unproven::Issuer`); a claims pointer of an mdoc that names no namespace and element
+    (`PresentationError::Pointer`).
+  - `siros-zkp-req-nym-auth`: an admission of another certificate or query
+    (`OtherIssuer::Certificate`, `::Query`; `admission_other_certificate`,
+    `admission_other_query`), and an attestation usable for another query than its pair's
+    (`Unanswerable::OtherQuery`, `ProveError::OtherQuery`; `other_query`).
+  - `siros-display`: an option of another query (`DisplayError::OptionItemUnknown`,
+    `option_item_unknown`).
+- **BREAKING (Rust API):** `Prepared::finish` takes the host's signatures as
+  `Es256Signature`, which `Es256Signature::parse` reads from the 64 bytes of `r ‖ s`.
+- The picker panics, with its reason, on an `Inconsistency` or a `ChoiceError` the
+  presentation component returns for an offer: no entry is right for it.
   - `android-credman`: a host that breaks its ABI (`CredentialsError`, `CallingAppError`).
     `Host::credentials` returns the blob, and `Host::calling_app` the `CallingApp`.
 - Vector set digest: `db62a22cfaccb912bf717c63d2a107e41e5437caa72e21594ceb3bb395eab431`.
