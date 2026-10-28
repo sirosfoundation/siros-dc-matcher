@@ -1,6 +1,7 @@
 //! What Credential Manager returns to the wallet for a picked set entry: the standard metadata
 //! object [`SetEntry::metadata`](crate::SetEntry::metadata) writes.
 
+use serde_json::error::Category;
 use serde_json::{Map, Value};
 
 /// Whether the host shows every text a set entry carries.
@@ -34,9 +35,11 @@ pub enum PickedMember {
 /// Why a text is no standard metadata object.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PickedError {
-    /// The text is no JSON text: where its reading stopped.
+    /// The text is no JSON text: what breaks it, and where its reading stopped.
     #[error("entry metadata is no JSON text at line {line}, column {column}")]
     NotJson {
+        /// What breaks the text: its syntax, a value, or its end.
+        kind: Category,
         /// The line, from 1.
         line: usize,
         /// The column, from 1.
@@ -78,6 +81,7 @@ impl Picked {
             Ok(_) => return Err(PickedError::NotObject),
             Err(error) => {
                 return Err(PickedError::NotJson {
+                    kind: error.classify(),
                     line: error.line(),
                     column: error.column(),
                 })

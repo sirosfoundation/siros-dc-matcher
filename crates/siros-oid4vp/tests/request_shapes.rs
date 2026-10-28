@@ -7,7 +7,9 @@ use siros_codec::base64url::encode as b64;
 use siros_codec::json::JsonTextError;
 use siros_codec::Base64Error;
 use siros_dcql::{CredentialMember, FormFault, Member, Position, QueryError};
-use siros_oid4vp::{diagnose, CompactFault, NoQuery, PayloadFault, UnverifiedRequest};
+use siros_oid4vp::{
+    diagnose, ClientId, CompactFault, NoQuery, ParameterFault, PayloadFault, UnverifiedRequest,
+};
 
 /// The protocols SIROS wallets register: the three of OpenID4VP 1.0, A.1.
 fn siros_default(label: &str) -> bool {
@@ -485,11 +487,9 @@ fn an_unsigned_request_yields_its_full_context() {
     .expect("context");
     assert_eq!(ctx.protocol().label(), "openid4vp-v1-unsigned");
     assert!(!ctx.protocol().is_signed());
-    assert_eq!(ctx.client_id(), Some("x509_san_dns:verifier.example"));
-    assert_eq!(
-        ctx.expected_origins(),
-        Some(vec!["https://verifier.example"])
-    );
+    // A.2: the Wallet ignores the `client_id` and `expected_origins` of an unsigned request.
+    assert_eq!(ctx.client_id(), None);
+    assert_eq!(ctx.expected_origins(), None);
     assert_eq!(
         ctx.client_metadata(),
         Some(&serde_json::json!({"jwks": {"keys": []}}))
@@ -506,10 +506,13 @@ fn a_signed_request_yields_its_full_context() {
     .expect("context");
     assert_eq!(ctx.protocol().label(), "openid4vp-v1-signed");
     assert!(ctx.protocol().is_signed());
-    assert_eq!(ctx.client_id(), Some("x509_san_dns:verifier.example"));
+    assert_eq!(
+        ctx.client_id().map(ClientId::as_str),
+        Some("x509_san_dns:verifier.example")
+    );
     assert_eq!(
         ctx.expected_origins(),
-        Some(vec!["https://verifier.example"])
+        Some(["https://verifier.example".to_owned()].as_slice())
     );
     assert!(ctx.client_metadata().is_some());
     assert_eq!(ctx.query().credentials()[0].id(), "pid");
@@ -590,4 +593,43 @@ fn an_unknown_protocol_still_yields_no_context() {
         &siros_default
     )
     .is_none());
+}
+
+/// The Verifier metadata of a request comes from its `client_metadata`, which is then a JSON
+/// object, except for an `openid_federation` client, whose Trust Chain carries it (Section
+/// 5.9.3): a signed request's client, or one a multisigned request's protected header names.
+#[test]
+fn client_metadata_is_the_requests_except_for_a_federation_client() {
+    let object = |client_id: Option<&str>| {
+        let mut object: serde_json::Value = serde_json::from_str(&request_object()).expect("json");
+        object["client_metadata"] = serde_json::json!("x");
+        match client_id {
+            Some(client_id) => object["client_id"] = serde_json::json!(client_id),
+            None => drop(object.as_object_mut().expect("object").remove("client_id")),
+        }
+        object.to_string()
+    };
+    let signed = |client_id: &str| {
+        let data = serde_json::json!({"request": compact_jws(&object(Some(client_id)))});
+        UnverifiedRequest::read("openid4vp-v1-signed", &data)
+    };
+    let multisigned = |client_id: &str| {
+        let header = serde_json::json!({"alg": "ES256", "client_id": client_id});
+        let data = serde_json::json!({
+            "payload": b64(object(None).as_bytes()).to_string(),
+            "signatures": [{"protected": b64(header.to_string().as_bytes()).to_string(),
+                "signature": b64(b"sig").to_string()}]
+        });
+        UnverifiedRequest::read("openid4vp-v1-multisigned", &data)
+    };
+    let refused = Err(NoQuery::Parameter(ParameterFault::ClientMetadataInvalid));
+    assert_eq!(signed("x509_san_dns:verifier.example").map(drop), refused);
+    assert_eq!(
+        multisigned("x509_san_dns:verifier.example").map(drop),
+        refused
+    );
+    let federation = "openid_federation:https://verifier.example";
+    for read in [signed(federation), multisigned(federation)] {
+        assert_eq!(read.expect("read").client_metadata(), None);
+    }
 }

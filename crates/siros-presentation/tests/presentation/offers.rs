@@ -207,6 +207,7 @@ fn picks_select_against_the_plan() {
         ))
     };
     let refused = |error| Err(PresentationError::Pick(error));
+    let unheld = |why| refused(PickError::Unmatched(vec![(OfferIndex::new(0), why)]));
     // (case, picks, outcome)
     let cases: [(&str, Vec<Pick>, Result<Selection, PresentationError>); 11] = [
         ("the offer", vec![pick(0, "pid", 1)], selection(vec![])),
@@ -235,9 +236,9 @@ fn picks_select_against_the_plan() {
             }),
         ),
         (
-            "an unknown offer",
+            "an offer the picker numbers apart from the plan",
             vec![pick(1, "pid", 1)],
-            Err(PresentationError::OfferUnknown(OfferIndex::new(1))),
+            selection(vec![]),
         ),
         (
             "a query the request lacks",
@@ -247,7 +248,7 @@ fn picks_select_against_the_plan() {
         (
             "a credential the offer does not hold",
             vec![pick(0, "pid", 2)],
-            refused(PickError::Credential {
+            unheld(PickError::Credential {
                 query: id("pid"),
                 credential: CredentialId::new(2),
             }),
@@ -255,17 +256,51 @@ fn picks_select_against_the_plan() {
         (
             "an offer member without a pick",
             vec![pick(0, "mdl", 2)],
-            refused(PickError::Missing(id("pid"))),
+            unheld(PickError::Missing(id("pid"))),
         ),
         (
             "a part of an addition",
             vec![pick(0, "pid", 1), pick(0, "photo", 3)],
-            refused(PickError::Additions),
+            unheld(PickError::Additions),
         ),
     ];
     for (case, picks, outcome) in cases {
         assert_eq!(planned.picked(&picks), outcome, "{case}");
     }
+}
+
+/// K3: picks two offers of the plan both hold make no selection.
+#[test]
+fn picks_two_offers_hold_are_refused() {
+    let pid = Held::new(
+        1,
+        "dc+sd-jwt",
+        sd_jwt(VCT, &[("given_name", json!("Erika"))]),
+    );
+    let wallet = Wallet::new(vec![pid, mdl(2)]);
+    // The offers {pid} with the addition {mdl}, and {pid, mdl}.
+    let request = asked(json!({
+        "credentials": [pid_query(), mdl_query(false)],
+        "credential_sets": [
+            {"options": [["pid"], ["pid", "mdl"]]},
+            {"options": [["mdl"]], "required": false}
+        ]
+    }));
+    let planned = ready(&wallet.input(&request)).unwrap();
+    let pick = |query: &str, credential| {
+        Pick::new(
+            OfferIndex::new(0),
+            QueryId::parse(query).unwrap(),
+            CredentialId::new(credential),
+        )
+    };
+    assert_eq!(
+        planned.picked(&[pick("pid", 1), pick("mdl", 2)]),
+        Err(PresentationError::Pick(PickError::Ambiguous(vec![
+            OfferIndex::new(0),
+            OfferIndex::new(1)
+        ])))
+    );
 }
 
 /// A3: required and optional sets, additions, `multiple` members, and the limits.

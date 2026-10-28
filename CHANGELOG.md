@@ -74,13 +74,24 @@ binaryen version_116.
   - nym_auth: `policy::admitted` applies the policy and the `x509_san_dns` rule of the
     wallet's `verifier_id` form, which the registration records. The `semantic` form stays the
     wallet's: it reads the access certificate.
-  - Request parameters: siros-oid4vp's key-free rules (a nested request, `response_type`,
-    `nonce`, `state`, the Response Mode of the channel, `expected_origins`, `client_metadata`,
-    `verifier_info`) and the Client Identifier rules apply to `UnverifiedRequest` as to
-    intake (`ParameterFault`; `IntakeError::Parameter` replaces the variants it holds).
-    Intake reports the rule of the first entry it skips.
+  - Request parameters: siros-oid4vp's key-free rules (`response_type`, `nonce`, the Response
+    Mode of the channel, `expected_origins`, `client_metadata`, `verifier_info`; a nested
+    request in a Request Object or a redirect) and the Client Identifier rules apply to
+    `UnverifiedRequest` as to intake (`ParameterFault`; `IntakeError::Parameter` replaces the
+    variants it holds). Intake reports the rule of the first entry it skips. Over the DC API
+    the Wallet ignores `state`, which the digest leaves out there, and a `request_uri` in
+    unsigned `data` (A.2). The Verifier metadata is the request's `client_metadata`, except
+    for an `openid_federation` client, a signed request's or one a multisigned request's
+    protected header names (Section 5.9.3). A multisigned payload holds no `verifier_info`
+    (`IntakeError::VerifierInfoInPayload`): intake reads it from the qualifying signature's
+    protected header (A.3.2.2). `UnverifiedRequest` holds the values it reads typed.
+  - K3: `Planned::picked` selects the one offer of the plan whose members and additions hold
+    the picks; the picker's offer number is the picker's (`PickError::Unmatched`,
+    `PickError::Ambiguous`).
 - **BREAKING (display):** a label is `LabelText`, display text with a character other than
-  white space; display metadata with a blank name or label is refused. A field's name is a
+  white space. A blank OPTIONAL display member (the issuer's `name`, a claim's `name`, a
+  logo's `alt_text`) reads as absent; a blank REQUIRED one (the credential's display `name`,
+  the Type Metadata display `name` and claim `label`) is refused. A field's name is a
   `FieldName`. A blank transaction label is `TextFault::Blank`.
 - **BREAKING (request):** a query's options are its `_req_sets`, arrays of `_req` indexes;
   without `_req_sets`, `_req` is the one option (`zkp_req`, Section 2.1). `return` is optional
@@ -152,6 +163,18 @@ binaryen version_116.
   matched such a query: for the mDL fixture under a malformed `trusted_authorities`, its
   `match_dcql` gave `Ok` with `satisfiable: true` and one combination, and a `zkp_req` query
   with an object under `claims` gave `Ok` with `satisfiable: false`.
+- **BREAKING (FFI):** `match_dc_api_request` and `UnverifiedRequest::first_registered` refuse a
+  DC API request entry that breaks a rule intake applies without a key, as intake refuses it:
+  - no `nonce`, `response_type` or `response_mode`;
+  - a signed request without `client_id` or `expected_origins`;
+  - a pre-registered client, a `client_id` without a prefix;
+  - `client_metadata` that is no JSON object;
+  - a malformed `verifier_info`.
+
+  `match_dc_api_request` fails with `MatchError::Request` naming the rule (`request parameter
+  refused: nonce_invalid`, `client_id refused: client_id_unprefixed`), and `first_registered`
+  passes the entry over. v0.11.0 matched each: for the mDL fixture, its `match_dc_api_request`
+  gave `Ok` with `satisfiable: true` for every one of these requests.
 - **BREAKING (matcher):** `matcher.wasm` emits nothing for a request whose DCQL query the parse
   refuses, the same queries as the FFI above: under `trusted_authorities` `[{"type": "aki"}]` or
   `[]`, the matcher at `1b0fe3d` emitted the one entry of set `siros-0` for the mDL fixture. A

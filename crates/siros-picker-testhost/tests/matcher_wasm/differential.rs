@@ -39,8 +39,8 @@ pub enum Exception {
     CredentialTests,
     /// An entry's ad-hoc metadata JWT.
     AdHocMetadata,
-    /// The `semantic` form of the nym_auth `verifier_id`, read from the access certificate's
-    /// DER, which the picker does not read until the owner rules on it.
+    /// The `semantic` form of the nym_auth `verifier_id`, the owner's K2 exception: its
+    /// identifier comes from the access certificate's DER, which the projection leaves out.
     SemanticVerifierId,
     /// The purpose of an offer a payment entry shows, which the wallet configuration maps to a
     /// payment entry's fields in a later wave: the picker's payment entry shows none.
@@ -105,10 +105,10 @@ fn compare(case: &Case, level: u32) -> Result<(), String> {
                 return Err(format!("wallet {wallet:#?}\npicker {picker:#?}"));
             }
             if let Some(Ok(planned)) = &planned {
-                if let Some(offer) =
-                    (0..picker.len()).find(|&at| !chosen_through_picks(planned, &captured, at))
+                if let Some(offer) = (0..picker.len())
+                    .find(|&at| chosen_through_picks(planned, &captured, at) != Some(at))
                 {
-                    return Err(format!("the picks of offer {offer} select nothing"));
+                    return Err(format!("the picks of offer {offer} select another"));
                 }
             }
             Ok(())
@@ -118,14 +118,27 @@ fn compare(case: &Case, level: u32) -> Result<(), String> {
                 .iter()
                 .filter(|offer| !picker.iter().any(|shown| shows(shown, offer)))
                 .collect();
-            if unmatched.is_empty() && picker.len() > wallet.len() {
-                Ok(())
-            } else {
-                Err(format!(
+            if !unmatched.is_empty() || picker.len() <= wallet.len() {
+                return Err(format!(
                     "{exception:?}: wallet {unmatched:#?} not shown alike among more of picker \
                      {picker:#?}"
-                ))
+                ));
             }
+            // K3: the picks of each picker offer that shows a wallet offer select that offer in
+            // the plan, whatever the picker numbers it.
+            if let Some(Ok(planned)) = &planned {
+                let unchosen = picker.iter().enumerate().find(|(at, shown)| {
+                    wallet.iter().any(|offer| shows(shown, offer))
+                        && !chosen_through_picks(planned, &captured, *at)
+                            .is_some_and(|chosen| shows(shown, &wallet[chosen]))
+                });
+                if let Some((at, _)) = unchosen {
+                    return Err(format!(
+                        "{exception:?}: the picks of picker offer {at} select no offer"
+                    ));
+                }
+            }
+            Ok(())
         }
     }
 }

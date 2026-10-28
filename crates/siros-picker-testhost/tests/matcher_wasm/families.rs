@@ -43,6 +43,7 @@ pub fn cases() -> Vec<Case> {
     cases.extend(verifier_ids());
     cases.extend(unshown());
     cases.extend(payments());
+    cases.extend(key_free());
     cases
 }
 
@@ -256,13 +257,13 @@ fn background() -> Vec<Case> {
 }
 
 /// The `verifier_id` forms: `x509_san_dns` with a client of that prefix and of another, and the
-/// `semantic` form, which the picker leaves to the wallet until the owner rules on it.
+/// `semantic` form, the owner's K2 exception, which the wallet decides after the pick.
 fn verifier_ids() -> Vec<Case> {
-    let nym_wallet = |form: VerifierIdForm| {
+    let nym_wallet = |form: VerifierIdForm, others: Vec<Held>| {
         let (data, auxiliary) = nym_auth(&Spec::default());
         let mut held = Held::new(1, "mso_mdoc", data);
         held.metadata = Some(auxiliary);
-        let mut wallet = Wallet::new(vec![held]);
+        let mut wallet = Wallet::new(std::iter::once(held).chain(others).collect());
         wallet.systems = NymAuthSystem::ALL.to_vec();
         wallet.verifier_id = form;
         wallet
@@ -276,26 +277,45 @@ fn verifier_ids() -> Vec<Case> {
         subject: "CN=Test verifier,O=Test only",
         ..SIGNER
     };
+    // The adult's attestation fails "18-" in the wallet (N3), which the picker cannot test: the
+    // picker numbers the nym offer the wallet leaves out, and the mDL's picks still select the
+    // wallet's offer (K3).
+    let numbering = nym_wallet(
+        VerifierIdForm::X509SanDns,
+        vec![mdl(2, &[("age_over_18", Cbor::Bool(true))])],
+    );
+    let mut renumbered = case(
+        "nym 18- of an adult, or an mDL",
+        signed_by(
+            json!({"dcql_query": {
+                "credentials": [nym_query(Some("18-"), true), ask("q1", "age_over_18")],
+                "credential_sets": [{"options": [["nym"], ["q1"]]}]}}),
+            SIGNER,
+        ),
+        numbering,
+    );
+    renumbered.exception = Some(Exception::CredentialTests);
     let mut semantic = case(
         "nym, semantic form, no semantics identifier",
         signed_by(request(), anonymous),
-        nym_wallet(VerifierIdForm::Semantic),
+        nym_wallet(VerifierIdForm::Semantic, Vec::new()),
     );
-    // The semantic identifier comes from the access certificate's DER, which the picker does
-    // not read until the owner rules on it.
+    // The owner's K2 exception: the semantic identifier comes from the access certificate's DER,
+    // which the projection leaves out.
     semantic.exception = Some(Exception::SemanticVerifierId);
     vec![
         case(
             "nym, x509_san_dns form, x509_san_dns client",
             signed_by(request(), SIGNER),
-            nym_wallet(VerifierIdForm::X509SanDns),
+            nym_wallet(VerifierIdForm::X509SanDns, Vec::new()),
         ),
         case(
             "nym, x509_san_dns form, x509_hash client",
             signed_by(request(), hashed),
-            nym_wallet(VerifierIdForm::X509SanDns),
+            nym_wallet(VerifierIdForm::X509SanDns, Vec::new()),
         ),
         semantic,
+        renumbered,
     ]
 }
 
@@ -392,4 +412,139 @@ fn payments() -> Vec<Case> {
     );
     purpose.exception = Some(Exception::PaymentPurpose);
     vec![purpose, one_entry]
+}
+
+/// The rules of the request parameters and of the Client Identifier that need no key: one
+/// request breaks each, and the wallet's intake and the picker refuse it alike. Over the DC API
+/// the Wallet ignores `state` and, in unsigned `data`, a `request_uri` (A.2): both accept those.
+fn key_free() -> Vec<Case> {
+    let adult = || Wallet::new(vec![mdl(1, &[("age_over_18", Cbor::Bool(true))])]);
+    let query = || json!({"credentials": [ask("q1", "age_over_18")]});
+    let params = || {
+        json!({"response_type": "vp_token", "response_mode": "dc_api", "nonce": NONCE,
+            "dcql_query": query()})
+    };
+    let unsigned_with = |edit: &dyn Fn(&mut Value)| {
+        let mut data = params();
+        edit(&mut data);
+        dc_api_request("openid4vp-v1-unsigned", data)
+    };
+    let without = |member: &'static str| {
+        move |data: &mut Value| {
+            data.as_object_mut().unwrap().remove(member).unwrap();
+        }
+    };
+    // A signed Request Object: `dc_api.jwt`, its encryption key, `client_id` and
+    // `expected_origins`, edited.
+    let signed_with = |edit: &dyn Fn(&mut Value)| {
+        let mut object = params();
+        object["response_mode"] = json!("dc_api.jwt");
+        object["client_metadata"] = json!({"jwks": {"keys": [encryption_jwk()]}});
+        object["client_id"] = json!(SIGNER.client_id());
+        object["expected_origins"] = json!([siros_presentation::testing::verifier::ORIGIN]);
+        edit(&mut object);
+        dc_api_request(
+            "openid4vp-v1-signed",
+            json!({"request": SIGNER.compact(&object)}),
+        )
+    };
+    // A multisigned payload, its one signature's header naming the client.
+    let multisigned_with = |edit: &dyn Fn(&mut Value)| {
+        let mut object = params();
+        object["response_mode"] = json!("dc_api.jwt");
+        object["client_metadata"] = json!({"jwks": {"keys": [encryption_jwk()]}});
+        object["expected_origins"] = json!([siros_presentation::testing::verifier::ORIGIN]);
+        edit(&mut object);
+        let mut header = SIGNER.header();
+        header["client_id"] = json!(SIGNER.client_id());
+        let protected = b64(header.to_string().as_bytes());
+        let payload = b64(object.to_string().as_bytes());
+        let signature = SIGNER.sign(&format!("{protected}.{payload}"));
+        dc_api_request(
+            "openid4vp-v1-multisigned",
+            json!({"payload": payload,
+                "signatures": [{"protected": protected, "signature": signature}]}),
+        )
+    };
+    let rows: Vec<(&str, Vec<u8>)> = vec![
+        ("unsigned, every rule kept", unsigned_with(&|_| {})),
+        ("signed, every rule kept", signed_with(&|_| {})),
+        ("multisigned, every rule kept", multisigned_with(&|_| {})),
+        ("no nonce", unsigned_with(&without("nonce"))),
+        (
+            "a nonce with a space",
+            unsigned_with(&|d| d["nonce"] = json!("a b")),
+        ),
+        ("no response_type", unsigned_with(&without("response_type"))),
+        (
+            "response_type id_token",
+            unsigned_with(&|d| d["response_type"] = json!("id_token")),
+        ),
+        ("no response_mode", unsigned_with(&without("response_mode"))),
+        (
+            "direct_post over the DC API",
+            unsigned_with(&|d| d["response_mode"] = json!("direct_post")),
+        ),
+        (
+            "unsigned client_metadata a string",
+            unsigned_with(&|d| d["client_metadata"] = json!("x")),
+        ),
+        (
+            "signed client_metadata a string",
+            signed_with(&|o| o["client_metadata"] = json!("x")),
+        ),
+        (
+            "multisigned client_metadata a string",
+            multisigned_with(&|o| o["client_metadata"] = json!("x")),
+        ),
+        (
+            "verifier_info no array",
+            unsigned_with(&|d| d["verifier_info"] = json!({"format": "jwt", "data": "x"})),
+        ),
+        (
+            "a signed Request Object with a request_uri",
+            signed_with(&|o| o["request_uri"] = json!("https://verifier.example/request")),
+        ),
+        (
+            "signed without expected_origins",
+            signed_with(&|o| drop(o.as_object_mut().unwrap().remove("expected_origins"))),
+        ),
+        (
+            "signed without client_id",
+            signed_with(&|o| drop(o.as_object_mut().unwrap().remove("client_id"))),
+        ),
+        (
+            "a pre-registered client",
+            signed_with(&|o| o["client_id"] = json!("verifier.example")),
+        ),
+        (
+            "a signed redirect_uri client",
+            signed_with(&|o| o["client_id"] = json!("redirect_uri:https://verifier.example/cb")),
+        ),
+        (
+            "a multisigned payload with client_id",
+            multisigned_with(&|o| o["client_id"] = json!(SIGNER.client_id())),
+        ),
+        (
+            "a multisigned payload with verifier_info",
+            multisigned_with(&|o| {
+                o["verifier_info"] = json!([{"format": "jwt", "data": "x"}]);
+            }),
+        ),
+        (
+            "state with a space over the DC API",
+            unsigned_with(&|d| d["state"] = json!("a b")),
+        ),
+        (
+            "state a number over the DC API",
+            unsigned_with(&|d| d["state"] = json!(7)),
+        ),
+        (
+            "a request_uri in unsigned data",
+            unsigned_with(&|d| d["request_uri"] = json!("https://verifier.example/request")),
+        ),
+    ];
+    rows.into_iter()
+        .map(|(name, request)| case(name, request, adult()))
+        .collect()
 }

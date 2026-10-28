@@ -17,7 +17,7 @@ use siros_codec::Base64Error;
 use siros_dcql::{DcqlQuery, QueryError};
 
 use crate::client_id::{ClientId, ClientIdError, ClientIdPrefix};
-use crate::parameters::{self, DcApiEncoding, Nonce, ParameterFault, Plain, State};
+use crate::parameters::{self, Carrier, DcApiEncoding, Metadata, Nonce, ParameterFault, Plain};
 use crate::protocol::Protocol;
 use crate::request::{
     AttestationFormat, RequestSignature, ResponseMode, TransactionDataInvalid, TransactionDataItem,
@@ -64,6 +64,9 @@ pub enum NoQuery {
     SignedRedirectUri,
     /// An `openid4vp-v1-multisigned` payload holds `client_id` (A.3.2.2).
     ClientIdInPayload,
+    /// An `openid4vp-v1-multisigned` payload holds `verifier_info`, which travels in each
+    /// signature's protected header (A.3.2.2).
+    VerifierInfoInPayload,
     /// The protocol is none of the three of OpenID4VP 1.0, A.1.
     NoParser,
 }
@@ -89,6 +92,7 @@ impl NoQuery {
             Self::ClientId(error) => error.code(),
             Self::SignedRedirectUri => "signed_redirect_uri",
             Self::ClientIdInPayload => "client_id_in_payload",
+            Self::VerifierInfoInPayload => "verifier_info_in_payload",
             Self::NoParser => "protocol_unsupported",
         }
     }
@@ -121,6 +125,7 @@ impl NoQuery {
             Self::ClientId(error) => format!("client_id refused: {}", error.code()),
             Self::SignedRedirectUri => "signed request uses the redirect_uri prefix".into(),
             Self::ClientIdInPayload => "multisigned payload holds `client_id`".into(),
+            Self::VerifierInfoInPayload => "multisigned payload holds `verifier_info`".into(),
             Self::NoParser => "no parser for this protocol in this build".into(),
         }
     }
@@ -157,12 +162,21 @@ pub enum PayloadFault {
 pub struct UnverifiedRequest {
     protocol: Protocol,
     nonce: Nonce,
-    state: Option<State>,
-    /// The request object without its `dcql_query` and `transaction_data`, which `query` and
-    /// `transaction_data` hold.
-    object: Value,
+    encoding: DcApiEncoding,
+    client: Option<ClientId>,
+    expected_origins: Option<Vec<String>>,
+    client_metadata: Option<Value>,
+    verifier_info: Vec<AttestationFormat>,
     query: DcqlQuery,
     transaction_data: Vec<TransactionDataItem>,
+}
+
+/// The Client Identifier rules of a request's payload: its Client Identifier, its
+/// `expected_origins`, and where its Verifier metadata comes from.
+struct Client {
+    client: Option<ClientId>,
+    expected_origins: Option<Vec<String>>,
+    metadata: Metadata,
 }
 
 impl UnverifiedRequest {
@@ -174,33 +188,42 @@ impl UnverifiedRequest {
     /// breaks.
     pub fn read(label: &str, data: &Value) -> Result<Self, NoQuery> {
         let protocol = Protocol::from_label(label).ok_or(NoQuery::NoParser)?;
-        let mut object = shape::request_object(protocol, data)?.into_owned();
-        let members = object
-            .as_object_mut()
-            .ok_or(NoQuery::PayloadHasNoDcqlQuery)?;
+        let object = shape::request_object(protocol, data)?;
+        let members = object.as_object().ok_or(NoQuery::PayloadHasNoDcqlQuery)?;
         let parameter = NoQuery::Parameter;
-        let Plain { nonce, state } = parameters::plain(members).map_err(parameter)?;
+        let carrier = match protocol {
+            Protocol::Unsigned => Carrier::UnsignedData,
+            Protocol::Signed | Protocol::Multisigned => Carrier::SignedObject,
+        };
+        let Plain { nonce, .. } = parameters::plain(members, carrier).map_err(parameter)?;
         let mode = members.get("response_mode").and_then(Value::as_str);
-        DcApiEncoding::of(mode).map_err(parameter)?;
-        if from_request(protocol, members)? {
-            parameters::request_metadata(members).map_err(parameter)?;
-        }
+        let encoding = DcApiEncoding::of(mode).map_err(parameter)?;
+        let Client {
+            client,
+            expected_origins,
+            metadata,
+        } = client(protocol, members, data)?;
+        let client_metadata = parameters::client_metadata(members, metadata).map_err(parameter)?;
         let raw = members
-            .remove("dcql_query")
+            .get("dcql_query")
             .ok_or(NoQuery::PayloadHasNoDcqlQuery)?;
-        let query = DcqlQuery::parse(&raw).map_err(NoQuery::Malformed)?;
-        parameters::verifier_info(members.get("verifier_info"), &query).map_err(parameter)?;
-        let transaction_data = match members.remove("transaction_data") {
+        let query = DcqlQuery::parse(raw).map_err(NoQuery::Malformed)?;
+        let verifier_info =
+            parameters::verifier_info(members.get("verifier_info"), &query).map_err(parameter)?;
+        let transaction_data = match members.get("transaction_data") {
             None => Vec::new(),
             Some(entries) => {
-                TransactionDataItem::list(&entries).map_err(NoQuery::TransactionData)?
+                TransactionDataItem::list(entries).map_err(NoQuery::TransactionData)?
             }
         };
         Ok(Self {
             protocol,
             nonce,
-            state,
-            object,
+            encoding,
+            client,
+            expected_origins,
+            client_metadata,
+            verifier_info,
             query,
             transaction_data,
         })
@@ -239,12 +262,6 @@ impl UnverifiedRequest {
         &self.nonce
     }
 
-    /// The request's `state`, when it has one.
-    #[must_use]
-    pub fn state(&self) -> Option<&State> {
-        self.state.as_ref()
-    }
-
     /// How the request arrived: a request under a signed protocol arrives as a JWS, whose
     /// signature intake verifies at selection.
     #[must_use]
@@ -256,24 +273,18 @@ impl UnverifiedRequest {
         }
     }
 
-    /// The request object's `response_mode`, when it names a Response Mode.
+    /// The request's Response Mode: `dc_api` or `dc_api.jwt`.
     #[must_use]
-    pub fn response_mode(&self) -> Option<ResponseMode> {
-        ResponseMode::named(self.object.get("response_mode")?.as_str()?)
+    pub fn response_mode(&self) -> ResponseMode {
+        self.encoding.mode()
     }
 
-    /// The `format` of each `verifier_info` attestation that names one as a string, in the
-    /// request's order (Section 5.1).
+    /// The `format` of each `verifier_info` attestation of the request object, in the request's
+    /// order (Section 5.1). A multisigned request carries `verifier_info` in its signatures'
+    /// protected headers, which intake reads of the signature that qualifies: none here.
     #[must_use]
-    pub fn verifier_info_formats(&self) -> Vec<AttestationFormat> {
-        self.object
-            .get("verifier_info")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(|attestation| attestation.get("format")?.as_str())
-            .map(AttestationFormat::new)
-            .collect()
+    pub fn verifier_info_formats(&self) -> &[AttestationFormat] {
+        &self.verifier_info
     }
 
     /// The `transaction_data` strings as received; empty when the request has none.
@@ -282,27 +293,26 @@ impl UnverifiedRequest {
         &self.transaction_data
     }
 
-    /// The request object's `client_id`, when it is a string.
+    /// The Client Identifier of a signed request; `None` for an unsigned one, whose
+    /// `client_id` the Wallet ignores (A.2), and for a multisigned one, whose Client
+    /// Identifiers are its signatures' (A.3.2.2).
     #[must_use]
-    pub fn client_id(&self) -> Option<&str> {
-        self.object.get("client_id")?.as_str()
+    pub fn client_id(&self) -> Option<&ClientId> {
+        self.client.as_ref()
     }
 
-    /// The request object's `expected_origins`, when it is an array of strings.
+    /// The `expected_origins` of a signed request; `None` for an unsigned one, whose
+    /// `expected_origins` the Wallet ignores (A.2).
     #[must_use]
-    pub fn expected_origins(&self) -> Option<Vec<&str>> {
-        self.object
-            .get("expected_origins")?
-            .as_array()?
-            .iter()
-            .map(Value::as_str)
-            .collect()
+    pub fn expected_origins(&self) -> Option<&[String]> {
+        self.expected_origins.as_deref()
     }
 
-    /// The request object's `client_metadata`, whole.
+    /// The request's `client_metadata`, when the Verifier metadata comes from the request;
+    /// `None` for an `openid_federation` client, whose Trust Chain carries it (Section 5.9.3).
     #[must_use]
     pub fn client_metadata(&self) -> Option<&Value> {
-        self.object.get("client_metadata")
+        self.client_metadata.as_ref()
     }
 
     /// The request object's `dcql_query`.
@@ -312,40 +322,69 @@ impl UnverifiedRequest {
     }
 }
 
-/// Whether the Verifier metadata of a request under `protocol` comes from its `client_metadata`,
-/// after the Client Identifier rules intake applies before it verifies a signature: a signed
-/// request's payload names a supported Client Identifier, not of the `redirect_uri` prefix
-/// (Sections 5.9, 5.9.3; A.2), and an `openid_federation` client's metadata comes from its Trust
-/// Chain; a multisigned payload names none (A.3.2.2), and its metadata comes from the signature
-/// intake verifies.
+/// The Client Identifier rules intake applies before it verifies a signature, over the payload
+/// `members` of the request `data` under `protocol`.
+///
+/// A signed payload names a supported Client Identifier, not of the `redirect_uri` prefix
+/// (Sections 5.9, 5.9.3; A.2), and `expected_origins`. A multisigned payload names no
+/// `client_id` and no `verifier_info`, which travel in each signature's protected header, and
+/// `expected_origins` (A.3.2.2). The Verifier metadata comes from the request, except for an
+/// `openid_federation` client, whose Trust Chain carries it: a signed request's, or one a
+/// multisigned request's protected header names.
 ///
 /// # Errors
 ///
-/// [`NoQuery`]: the Client Identifier rule the payload `members` breaks.
-fn from_request(
+/// [`NoQuery`]: the Client Identifier rule the payload breaks.
+fn client(
     protocol: Protocol,
     members: &serde_json::Map<String, Value>,
-) -> Result<bool, NoQuery> {
+    data: &Value,
+) -> Result<Client, NoQuery> {
+    let origins = || parameters::expected_origins(members).map_err(NoQuery::Parameter);
+    let metadata = |federation: bool| {
+        if federation {
+            Metadata::TrustChain(None)
+        } else {
+            Metadata::Request
+        }
+    };
     match protocol {
-        Protocol::Unsigned => Ok(true),
+        Protocol::Unsigned => Ok(Client {
+            client: None,
+            expected_origins: None,
+            metadata: Metadata::Request,
+        }),
         Protocol::Signed => {
             let text = members
                 .get("client_id")
                 .and_then(Value::as_str)
                 .ok_or(NoQuery::ClientIdMissing)?;
-            let prefix = ClientId::parse(text).map_err(NoQuery::ClientId)?.prefix();
-            if prefix == ClientIdPrefix::RedirectUri {
+            let client = ClientId::parse(text).map_err(NoQuery::ClientId)?;
+            if client.prefix() == ClientIdPrefix::RedirectUri {
                 return Err(NoQuery::SignedRedirectUri);
             }
-            parameters::expected_origins(members).map_err(NoQuery::Parameter)?;
-            Ok(prefix != ClientIdPrefix::OpenidFederation)
+            let federation = client.prefix() == ClientIdPrefix::OpenidFederation;
+            Ok(Client {
+                client: Some(client),
+                expected_origins: Some(origins()?),
+                metadata: metadata(federation),
+            })
         }
         Protocol::Multisigned => {
             if members.contains_key("client_id") {
                 return Err(NoQuery::ClientIdInPayload);
             }
-            parameters::expected_origins(members).map_err(NoQuery::Parameter)?;
-            Ok(false)
+            if members.contains_key("verifier_info") {
+                return Err(NoQuery::VerifierInfoInPayload);
+            }
+            let federation = shape::signature_clients(data)
+                .iter()
+                .any(|client| client.prefix() == ClientIdPrefix::OpenidFederation);
+            Ok(Client {
+                client: None,
+                expected_origins: Some(origins()?),
+                metadata: metadata(federation),
+            })
         }
     }
 }

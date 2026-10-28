@@ -4,14 +4,14 @@
 use serde_json::{Map, Value};
 use siros_dcql::DcqlQuery;
 
-use super::signature::{Metadata, UriRule, Verifier};
+use super::signature::{UriRule, Verifier};
 use super::trust::Verdict;
 use super::{IntakeError, JwkFault};
 use crate::client_id::ClientId;
 use crate::fetch::HttpsUrl;
 use crate::handover::ec_jwk_thumbprint;
 use crate::jose;
-use crate::parameters::{self, DcApiEncoding, Encoding, Plain};
+use crate::parameters::{self, Carrier, DcApiEncoding, Encoding, Metadata, Plain};
 use crate::protocol::Protocol;
 use crate::request::{TransactionDataInvalid, TransactionDataItem};
 use crate::values::{Kid, Origin};
@@ -40,7 +40,12 @@ pub(super) fn verified(
     arrival: Arrival<'_>,
 ) -> Result<VerifiedRequest, IntakeError> {
     let text = |name: &str| params.get(name).and_then(Value::as_str);
-    let Plain { nonce, state } = parameters::plain(params)?;
+    let carrier = match &arrival {
+        Arrival::Redirect(_) => Carrier::Redirect,
+        Arrival::DcApiSigned { .. } => Carrier::SignedObject,
+        Arrival::DcApiUnsigned { .. } => Carrier::UnsignedData,
+    };
+    let Plain { nonce, state } = parameters::plain(params, carrier)?;
     let mode = text("response_mode");
     let (target, trusted, certificate, metadata) = match arrival {
         Arrival::Redirect(verifier) => {
@@ -93,10 +98,7 @@ pub(super) fn verified(
     };
     let (dcql_query, dcql_query_json) = dcql_query(params)?;
     let verifier_info = parameters::verifier_info(params.get("verifier_info"), &dcql_query)?;
-    let client_metadata = match metadata {
-        Metadata::Request => parameters::request_metadata(params)?,
-        Metadata::TrustChain(metadata) => metadata,
-    };
+    let client_metadata = parameters::client_metadata(params, metadata)?;
     let transaction_data = match params.get("transaction_data") {
         None => Vec::new(),
         Some(entries) => TransactionDataItem::list(entries)

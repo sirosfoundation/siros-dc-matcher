@@ -263,7 +263,7 @@ impl Signer {
     }
 
     /// The protected header of a Request Object, with `x5c`.
-    fn header(self) -> Value {
+    pub fn header(self) -> Value {
         let (_, der) = certificate(self);
         let mut x5c = base64url::encode(&der)
             .into_string()
@@ -276,14 +276,14 @@ impl Signer {
     }
 
     /// The signature of `input`, `r ‖ s`, base64url.
-    fn sign(self, input: &str) -> String {
+    pub fn sign(self, input: &str) -> String {
         let (key, _) = certificate(self);
         let signature: Signature = key.sign(input.as_bytes());
         b64(&signature.to_bytes())
     }
 
     /// `request_object` as a compact JWS.
-    fn compact(self, request_object: &Value) -> String {
+    pub fn compact(self, request_object: &Value) -> String {
         let input = format!(
             "{}.{}",
             b64(self.header().to_string().as_bytes()),

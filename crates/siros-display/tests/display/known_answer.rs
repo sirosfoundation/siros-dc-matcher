@@ -315,3 +315,79 @@ fn an_issuer_template_has_its_placeholder_once_in_safe_text() {
         );
     }
 }
+
+/// A blank OPTIONAL display member reads as absent (OpenID4VCI 1.0, Section 12.2.4): the
+/// issuer's `name`, a claim's `name` and a logo's `alt_text`, which the host's wording, the
+/// claim key or nothing then stand for. A blank REQUIRED label is refused: the credential's
+/// display `name`, and the Type Metadata display `name` and claim `label`.
+#[test]
+fn a_blank_optional_name_is_absent_and_a_blank_required_one_refused() {
+    let language = Locale::parse("en-US").unwrap();
+    let issuer = |edit: &dyn Fn(&mut Value)| {
+        let mut issuer = json!({
+            "credential_issuer": ISSUER,
+            "credential_endpoint": "https://issuer.example/credential",
+            "credential_configurations_supported": serde_json::from_str::<Value>(CONFIGURATIONS)
+                .unwrap()
+        });
+        edit(&mut issuer);
+        IssuerMetadata::merge(&issuer, CONFIGURATION, None)
+    };
+
+    let cache = |metadata: IssuerMetadata| DisplayCache::new(vec![metadata], vec![]).unwrap();
+
+    let named = issuer(&|i| i["display"] = json!([{"name": " ", "locale": "en-US"}])).unwrap();
+    let card = cache(named).card(&credential(), &language, &wording(None));
+    assert_eq!(
+        card.issuer().as_str(),
+        "Unknown issuer",
+        "the issuer's blank name"
+    );
+
+    let claim = issuer(&|i| metadata(i)["claims"][0]["display"][0]["name"] = json!(" ")).unwrap();
+    let rows = cache(claim)
+        .claim_rows(&credential(), &[pointer(&["given_name"])], &language)
+        .unwrap();
+    assert_eq!(
+        rows[0].label().as_str(),
+        "given_name",
+        "a claim's blank name"
+    );
+
+    let logo = issuer(&|i| metadata(i)["display"][0]["logo"]["alt_text"] = json!("")).unwrap();
+    let card = cache(logo).card(&credential(), &language, &wording(None));
+    assert!(
+        card.logo().unwrap().alt_text().is_none(),
+        "a logo's blank alt_text"
+    );
+
+    let title = issuer(&|i| metadata(i)["display"][0]["name"] = json!(" "));
+    assert_eq!(
+        title.err(),
+        Some(siros_display::DisplayError::Text(TextError::Empty)),
+        "the credential's blank display name"
+    );
+    let type_metadata = |display: Value, claims: Value| {
+        siros_display::TypeMetadata::parse(
+            &json!({"vct": CONFIGURATION, "display": display, "claims": claims}),
+        )
+        .map(drop)
+        .map_err(|error| error.code())
+    };
+    let label = |text: &str| json!([{"path": ["given_name"], "display": [{"locale": "fr", "label": text}]}]);
+    assert_eq!(
+        type_metadata(json!([{"locale": "fr", "name": " "}]), label("Prénom")),
+        Err("text_empty"),
+        "the Type Metadata's blank display name"
+    );
+    assert_eq!(
+        type_metadata(json!([{"locale": "fr", "name": "Identité"}]), label(" ")),
+        Err("text_empty"),
+        "a Type Metadata claim's blank label"
+    );
+}
+
+/// The `credential_metadata` of the configuration in `issuer`.
+fn metadata(issuer: &mut Value) -> &mut Value {
+    &mut issuer["credential_configurations_supported"][CONFIGURATION]["credential_metadata"]
+}

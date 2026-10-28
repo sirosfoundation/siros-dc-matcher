@@ -72,16 +72,27 @@ pub(super) fn intake(
                 .and_then(Value::as_str)
                 .ok_or_else(malformed)?;
             let payload = jose::segment(payload_b64).map_err(IntakeError::from)?;
-            let params = request_object(&payload)?;
-            // A.3.2.2: `client_id` travels in each signature's protected header only.
+            let mut params = request_object(&payload)?;
+            // A.3.2.2: `client_id` and `verifier_info` travel in each signature's protected
+            // header only.
             if params.contains_key("client_id") {
                 return Err(IntakeError::ClientIdInPayload.into());
+            }
+            if params.contains_key("verifier_info") {
+                return Err(IntakeError::VerifierInfoInPayload.into());
             }
             let signatures = jws
                 .get("signatures")
                 .and_then(Value::as_array)
                 .ok_or_else(malformed)?;
-            let verifier = first_qualifying(signatures, payload_b64, now, answers)?;
+            let Qualified {
+                verifier,
+                verifier_info,
+            } = first_qualifying(signatures, payload_b64, now, answers)?;
+            // The request's `verifier_info` is the qualifying signature's.
+            if let Some(verifier_info) = verifier_info {
+                drop(params.insert("verifier_info".to_owned(), verifier_info));
+            }
             Ok(request::verified(
                 &params,
                 Arrival::DcApiSigned {
@@ -133,6 +144,7 @@ fn rule(refusal: &NoQuery) -> Option<IntakeError> {
         NoQuery::ClientId(error) => IntakeError::ClientId(*error),
         NoQuery::SignedRedirectUri => IntakeError::SignedRedirectUri,
         NoQuery::ClientIdInPayload => IntakeError::ClientIdInPayload,
+        NoQuery::VerifierInfoInPayload => IntakeError::VerifierInfoInPayload,
         NoQuery::NoData
         | NoQuery::NoQueryAndNoRequest
         | NoQuery::RequestNotAJwsOrObject
@@ -165,13 +177,15 @@ fn first_qualifying(
     payload_b64: &str,
     now: DateTime,
     answers: &mut Answers<'_>,
-) -> Result<Verifier, Halt> {
+) -> Result<Qualified, Halt> {
     let mut first_untrusted = None;
     for entry in signatures {
         match qualify(entry, payload_b64, now, answers) {
-            Ok(verifier) if verifier.trusted == Verdict::Trusted => return Ok(verifier),
-            Ok(verifier) => {
-                first_untrusted.get_or_insert(verifier);
+            Ok(qualified) if qualified.verifier.trusted == Verdict::Trusted => {
+                return Ok(qualified)
+            }
+            Ok(qualified) => {
+                first_untrusted.get_or_insert(qualified);
             }
             Err(Halt::Failed(_)) => {}
             Err(halt) => return Err(halt),
@@ -180,13 +194,20 @@ fn first_qualifying(
     first_untrusted.ok_or_else(|| IntakeError::NoVerifiableSignature.into())
 }
 
+/// A signature of a multisigned request that qualifies: its Verifier, and the `verifier_info`
+/// of its protected header.
+struct Qualified {
+    verifier: Verifier,
+    verifier_info: Option<Value>,
+}
+
 /// One signature object `{"protected", "signature"}` of the JWS JSON Serialization.
 fn qualify(
     entry: &Value,
     payload_b64: &str,
     now: DateTime,
     answers: &mut Answers<'_>,
-) -> Result<Verifier, Halt> {
+) -> Result<Qualified, Halt> {
     let text = |name: &str| entry.get(name).and_then(Value::as_str);
     let (Some(protected), Some(signature)) = (text("protected"), text("signature")) else {
         return Err(IntakeError::JwsMalformed(JwsFault::Serialization).into());
@@ -195,5 +216,9 @@ fn qualify(
     let client_id = signed
         .text("client_id")
         .ok_or(IntakeError::ClientIdMissing)?;
-    signature::authenticate(&signed, ClientId::parse(client_id)?, now, answers)
+    let verifier = signature::authenticate(&signed, ClientId::parse(client_id)?, now, answers)?;
+    Ok(Qualified {
+        verifier,
+        verifier_info: signed.header().get("verifier_info").cloned(),
+    })
 }

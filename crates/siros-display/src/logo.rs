@@ -32,7 +32,7 @@ impl Logo {
         Ok(Self {
             uri,
             integrity,
-            alt_text: json::label(logo, "alt_text", malformed(LogoFault::AltText))?,
+            alt_text: json::optional_label(logo, "alt_text", malformed(LogoFault::AltText))?,
         })
     }
 

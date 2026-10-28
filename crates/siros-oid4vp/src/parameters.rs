@@ -6,20 +6,21 @@
 use serde_json::{Map, Value};
 use siros_dcql::DcqlQuery;
 
-use crate::request::AttestationFormat;
+use crate::request::{AttestationFormat, ResponseMode};
 
 /// A rule of a request's parameters that a request breaks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 #[error("{}", self.code())]
 pub enum ParameterFault {
-    /// The Request Object holds `request` or `request_uri` (RFC 9101, Section 4).
+    /// A Request Object or a redirect's parameters hold `request` or `request_uri` (RFC 9101,
+    /// Section 4).
     NestedRequest,
     /// `response_type` is not `vp_token` (Section 5.6).
     ResponseTypeUnsupported,
     /// `nonce` is missing, empty, or holds a character other than ASCII URL-safe ones
     /// (Section 5.2).
     NonceInvalid,
-    /// `state` holds a character other than ASCII URL-safe ones (Section 5.2).
+    /// `state` of a redirect holds a character other than ASCII URL-safe ones (Section 5.2).
     StateInvalid,
     /// `response_mode` is missing, unknown, or of the other channel: `direct_post`,
     /// `direct_post.jwt` and `direct_post.cwt` over redirects, `dc_api` and `dc_api.jwt` over
@@ -130,21 +131,40 @@ impl State {
     }
 }
 
-/// The parameters of every request: its `nonce` and `state`.
+/// How a request's parameters reached the wallet, which sets the rules that apply to them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Carrier {
+    /// The request of a redirect: its parameters, or its Request Object.
+    Redirect,
+    /// The Request Object of a signed DC API request.
+    SignedObject,
+    /// The `data` of an unsigned DC API request.
+    UnsignedData,
+}
+
+/// The parameters of every request: its `nonce`, and its `state` over redirects.
 pub(crate) struct Plain {
     pub(crate) nonce: Nonce,
     pub(crate) state: Option<State>,
 }
 
-/// The `nonce` and `state` of the request parameters `params`, which hold no nested request
-/// and `response_type` `vp_token`.
+/// The `nonce` and `state` of the request parameters `params`, which `carrier` brought.
+///
+/// `response_type` is `vp_token` (Section 5.6). A Request Object, and the parameters of a
+/// redirect, hold no `request` or `request_uri` (RFC 9101, Section 4); in the `data` of an
+/// unsigned DC API request they are unrecognized parameters, which the Wallet ignores (A.2).
+/// `state` is a parameter of redirects; the DC API defines none, so the Wallet ignores it there.
 ///
 /// # Errors
 ///
 /// [`ParameterFault`]: the first rule `params` breaks.
-pub(crate) fn plain(params: &Map<String, Value>) -> Result<Plain, ParameterFault> {
+pub(crate) fn plain(
+    params: &Map<String, Value>,
+    carrier: Carrier,
+) -> Result<Plain, ParameterFault> {
     let text = |name: &str| params.get(name).and_then(Value::as_str);
-    if params.contains_key("request") || params.contains_key("request_uri") {
+    let nested = params.contains_key("request") || params.contains_key("request_uri");
+    if nested && carrier != Carrier::UnsignedData {
         return Err(ParameterFault::NestedRequest);
     }
     if text("response_type") != Some("vp_token") {
@@ -153,15 +173,18 @@ pub(crate) fn plain(params: &Map<String, Value>) -> Result<Plain, ParameterFault
     let nonce = text("nonce")
         .and_then(Nonce::parse)
         .ok_or(ParameterFault::NonceInvalid)?;
-    let state = params
-        .get("state")
-        .map(|state| {
-            state
-                .as_str()
-                .and_then(State::parse)
-                .ok_or(ParameterFault::StateInvalid)
-        })
-        .transpose()?;
+    let state = match carrier {
+        Carrier::Redirect => params
+            .get("state")
+            .map(|state| {
+                state
+                    .as_str()
+                    .and_then(State::parse)
+                    .ok_or(ParameterFault::StateInvalid)
+            })
+            .transpose()?,
+        Carrier::SignedObject | Carrier::UnsignedData => None,
+    };
     Ok(Plain { nonce, state })
 }
 
@@ -188,6 +211,7 @@ impl Encoding {
 }
 
 /// The `data` a DC API Response Mode names (A.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DcApiEncoding {
     /// `dc_api`: the response parameters.
     Json,
@@ -204,6 +228,43 @@ impl DcApiEncoding {
             _ => Err(ParameterFault::ResponseModeUnsupported),
         }
     }
+
+    /// The Response Mode that names the encoding.
+    pub(crate) fn mode(self) -> ResponseMode {
+        match self {
+            Self::Json => ResponseMode::DcApi,
+            Self::Jwe => ResponseMode::DcApiJwt,
+        }
+    }
+}
+
+/// Where the Verifier metadata comes from.
+pub(crate) enum Metadata {
+    /// `client_metadata` of the request.
+    Request,
+    /// The Trust Chain of an `openid_federation` client, when intake resolved it;
+    /// `client_metadata` is ignored (Section 5.9.3).
+    TrustChain(Option<Value>),
+}
+
+/// The Verifier metadata of the request parameters `params`, from where `source` says.
+///
+/// # Errors
+///
+/// [`ParameterFault::ClientMetadataInvalid`] for a `client_metadata` of the request that is no
+/// JSON object.
+pub(crate) fn client_metadata(
+    params: &Map<String, Value>,
+    source: Metadata,
+) -> Result<Option<Value>, ParameterFault> {
+    match source {
+        Metadata::Request => match params.get("client_metadata") {
+            None => Ok(None),
+            Some(metadata @ Value::Object(_)) => Ok(Some(metadata.clone())),
+            Some(_) => Err(ParameterFault::ClientMetadataInvalid),
+        },
+        Metadata::TrustChain(metadata) => Ok(metadata),
+    }
 }
 
 /// `expected_origins` of a signed DC API request: a non-empty array of strings (A.2).
@@ -217,22 +278,6 @@ pub(crate) fn expected_origins(params: &Map<String, Value>) -> Result<Vec<String
         .and_then(strings)
         .filter(|origins| !origins.is_empty())
         .ok_or(ParameterFault::ExpectedOriginsMissing)
-}
-
-/// `client_metadata` of a request whose Verifier metadata comes from the request: a JSON
-/// object, when present.
-///
-/// # Errors
-///
-/// [`ParameterFault::ClientMetadataInvalid`] for another JSON value.
-pub(crate) fn request_metadata(
-    params: &Map<String, Value>,
-) -> Result<Option<Value>, ParameterFault> {
-    match params.get("client_metadata") {
-        None => Ok(None),
-        Some(metadata @ Value::Object(_)) => Ok(Some(metadata.clone())),
-        Some(_) => Err(ParameterFault::ClientMetadataInvalid),
-    }
 }
 
 /// The `format` of each attestation of `verifier_info` (Section 5.1): a non-empty array of

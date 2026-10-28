@@ -6,7 +6,7 @@ use serde_json::{Map, Value};
 use crate::colour::Colour;
 use crate::error::{ColourFault, DisplayError, EntryFault};
 use crate::locale::Locale;
-use crate::text::LabelText;
+use crate::text::{LabelText, TextError};
 
 /// How many entries an array member holds.
 #[derive(Clone, Copy)]
@@ -32,6 +32,19 @@ pub(crate) fn string<'a>(
         None => Ok(None),
         Some(Value::String(text)) => Ok(Some(text)),
         Some(_) => Err(malformed),
+    }
+}
+
+/// The OPTIONAL string member `name` as a label; `None` when absent or blank, which the host's
+/// wording or the claim key then stands for.
+pub(crate) fn optional_label(
+    object: &Map<String, Value>,
+    name: &str,
+    malformed: DisplayError,
+) -> Result<Option<LabelText>, DisplayError> {
+    match label(object, name, malformed) {
+        Err(DisplayError::Text(TextError::Empty)) => Ok(None),
+        read => read,
     }
 }
 

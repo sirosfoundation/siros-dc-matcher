@@ -23,7 +23,8 @@ impl Localized for Label {
 
 /// The labels of the `display` member of an OpenID4VCI metadata object (OpenID4VCI 1.0, Section
 /// 12.2.4 and Appendix B.2): a non-empty array of objects with an optional `name` and an
-/// optional `locale`, one object per locale. An entry without a `name` gives no label.
+/// optional `locale`, one object per locale. An entry without a `name`, or with a blank one,
+/// gives no label.
 pub(crate) fn named_labels(
     object: &Map<String, Value>,
     malformed: fn(EntryFault) -> DisplayError,
@@ -35,7 +36,7 @@ pub(crate) fn named_labels(
         .map(|entry| {
             let entry = json::entry(entry, malformed)?;
             let locale = json::locale(entry, malformed(EntryFault::MemberType))?;
-            let name = json::label(entry, "name", malformed(EntryFault::MemberType))?;
+            let name = json::optional_label(entry, "name", malformed(EntryFault::MemberType))?;
             Ok((locale, name))
         })
         .collect::<Result<Vec<_>, DisplayError>>()?;

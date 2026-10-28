@@ -306,19 +306,21 @@ pub fn picker_offers(captured: &Captured, level: u32) -> Vec<Offered> {
     offers.into_iter().map(|(_, offer)| offer).collect()
 }
 
-/// Whether the picks of the entries of the picker's offer at `offer` select that offer of
-/// `planned`, which the wallet then chooses (K3): from its background service when the picker
-/// delegated the offer, with what the host showed of the picked entries (K4), else on its UI.
-pub fn chosen_through_picks(planned: &Planned<'_>, captured: &Captured, offer: usize) -> bool {
+/// The offer of `planned` the picks of the entries of the picker's offer at `offer` select,
+/// when the wallet then chooses it (K3): from its background service when the picker delegated
+/// the offer, with what the host showed of the picked entries (K4), else on its UI.
+pub fn chosen_through_picks(
+    planned: &Planned<'_>,
+    captured: &Captured,
+    offer: usize,
+) -> Option<usize> {
     let entries: Vec<&CapturedEntry> = captured
         .entries
         .iter()
         .filter(|entry| entry.set_id == format!("siros-{offer}"))
         .collect();
     let picks: Vec<Pick> = entries.iter().map(|entry| pick(entry)).collect();
-    let Ok(selection) = planned.picked(&picks) else {
-        return false;
-    };
+    let selection = planned.picked(&picks).ok()?;
     let fulfilment = if entries.iter().all(|entry| entry.delegation == Some(1)) {
         Fulfilment::Background(HostDisplay::of(entries.iter().map(|entry| {
             match Picked::parse(entry.metadata.as_deref().unwrap())
@@ -332,5 +334,8 @@ pub fn chosen_through_picks(planned: &Planned<'_>, captured: &Captured, offer: u
     } else {
         Fulfilment::WalletUi
     };
-    planned.choose(&selection, fulfilment).is_ok()
+    planned
+        .choose(&selection, fulfilment)
+        .ok()
+        .map(|_| selection.offer().value())
 }

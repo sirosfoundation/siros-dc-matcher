@@ -28,15 +28,16 @@ const UNVERIFIED: &str = "(unverified request)";
 pub fn rows(query: &ZkpReqQuery, option: &QueryOption) -> Result<Vec<Field>, DisplayError> {
     items(query, option)
         .map(|item| {
-            let (label, detail) = parts(item?);
+            let (label, detail) = statement(item?)?;
             // Clipping shortens the detail and keeps the marker.
             let value = match detail {
                 None => FieldText::fit(UNVERIFIED),
-                Some(detail) => FieldText::fit_within(&detail, FIELD_MAX - UNVERIFIED.len() - 1)
-                    .marked(UNVERIFIED),
+                Some(detail) => {
+                    FieldText::fit_within(detail.as_str(), FIELD_MAX - UNVERIFIED.len() - 1)
+                        .marked(UNVERIFIED)
+                }
             };
-            let name = LabelText::new(label).map_err(DisplayError::Text)?;
-            Ok(Field::new(FieldName::of(&name), Some(value)))
+            Ok(Field::new(FieldName::of(&label), Some(value)))
         })
         .collect()
 }
@@ -52,6 +53,23 @@ fn items<'q>(
             .item(index)
             .ok_or(DisplayError::OptionItemUnknown(index.value()))
     })
+}
+
+/// The label of `item` and the detail it shows, as display text: the one display rule of the
+/// picker's rows and the wallet's.
+///
+/// # Errors
+///
+/// [`DisplayError::Text`] for a label or a detail that is no display text.
+#[inline]
+fn statement(item: &ReqItem) -> Result<(LabelText, Option<DisplayText>), DisplayError> {
+    let (label, detail) = parts(item);
+    let label = LabelText::new(label).map_err(DisplayError::Text)?;
+    let detail = detail
+        .map(|detail| DisplayText::value(&detail))
+        .transpose()
+        .map_err(DisplayError::Text)?;
+    Ok((label, detail))
 }
 
 /// The label of `item` and the detail it shows.
@@ -98,14 +116,8 @@ pub fn verified_rows(
 ) -> Result<Vec<ProofRow>, DisplayError> {
     items(query, option)
         .map(|item| {
-            let (label, detail) = parts(item?);
-            Ok(ProofRow {
-                label: LabelText::new(label).map_err(DisplayError::Text)?,
-                value: detail
-                    .map(|detail| DisplayText::value(&detail))
-                    .transpose()
-                    .map_err(DisplayError::Text)?,
-            })
+            let (label, value) = statement(item?)?;
+            Ok(ProofRow { label, value })
         })
         .collect()
 }

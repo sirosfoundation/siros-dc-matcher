@@ -172,8 +172,6 @@ pub fn signed_and_encrypted<R: PolicyRequest>(
     Ok(client)
 }
 
-/// The request as the credential picker reads it. The picker holds no trust verdict: the wallet
-/// judges the Client Identifier at intake, and refuses the selection of an untrusted one.
 /// What `request` meets of the policy and of the `verifier_id` rule its Client Identifier decides:
 /// the policy ([`signed_and_encrypted`]), and in the `x509_san_dns` form the Client Identifier's
 /// prefix. Gives the `verifier_id` of the `x509_san_dns` form; `None` in the `semantic` form,
@@ -197,14 +195,13 @@ pub fn admitted<R: PolicyRequest>(
     }
 }
 
+/// The request as the credential picker reads it. The picker holds no trust verdict: the wallet
+/// judges the Client Identifier at intake, and refuses the selection of an untrusted one.
 impl PolicyRequest for UnverifiedRequest {
-    type Client<'a> = ClientId;
+    type Client<'a> = &'a ClientId;
 
-    fn client(&self) -> Option<ClientId> {
-        if !self.protocol().is_signed() {
-            return None;
-        }
-        ClientId::parse(self.client_id()?).ok()
+    fn client(&self) -> Option<&ClientId> {
+        self.client_id()
     }
 
     fn dc_api_protocol(&self) -> Option<Protocol> {
@@ -216,10 +213,10 @@ impl PolicyRequest for UnverifiedRequest {
     }
 
     fn response_mode(&self) -> Option<ResponseMode> {
-        UnverifiedRequest::response_mode(self)
+        Some(UnverifiedRequest::response_mode(self))
     }
 
     fn attestation_formats(&self) -> Vec<AttestationFormat> {
-        self.verifier_info_formats()
+        self.verifier_info_formats().to_vec()
     }
 }

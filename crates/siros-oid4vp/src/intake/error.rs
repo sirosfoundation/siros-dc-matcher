@@ -53,7 +53,7 @@ pub enum IntakeError {
     /// The Request Object does not echo the `wallet_nonce` the wallet posted (Section 5.10.1).
     WalletNonceMismatch,
     /// The `client_id` is not one this wallet supports (Section 5.9).
-    ClientId(ClientIdError),
+    ClientId(#[source] ClientIdError),
     /// A signed request uses the `redirect_uri` prefix (Section 5.9.3).
     SignedRedirectUri,
     /// An unsigned request uses a prefix other than `redirect_uri` (Section 5.9.3).
@@ -82,12 +82,15 @@ pub enum IntakeError {
     RedirectUriNotAttested,
     /// An `openid4vp-v1-multisigned` payload holds `client_id` (A.3.2.2).
     ClientIdInPayload,
+    /// An `openid4vp-v1-multisigned` payload holds `verifier_info`, which travels in each
+    /// signature's protected header (A.3.2.2).
+    VerifierInfoInPayload,
     /// No signature of an `openid4vp-v1-multisigned` request verifies.
     NoVerifiableSignature,
     /// The DC API request has no entry this wallet reads.
     EnvelopeUnreadable,
     /// The DC API request is no JSON text.
-    EnvelopeNotJson(JsonTextError),
+    EnvelopeNotJson(#[source] JsonTextError),
     /// The calling origin is not in `expected_origins` (A.2).
     OriginNotExpected,
     /// A `direct_post` request has no `response_uri` (Section 8.2).
@@ -334,6 +337,7 @@ impl IntakeError {
             Self::AttestationSignatureInvalid => "attestation_signature_invalid",
             Self::RedirectUriNotAttested => "redirect_uri_not_attested",
             Self::ClientIdInPayload => "client_id_in_payload",
+            Self::VerifierInfoInPayload => "verifier_info_in_payload",
             Self::NoVerifiableSignature => "no_verifiable_signature",
             Self::EnvelopeUnreadable | Self::EnvelopeNotJson(_) => "envelope_unreadable",
             Self::OriginNotExpected => "origin_not_expected",
@@ -395,6 +399,7 @@ impl IntakeError {
             | Self::AttestationSignatureInvalid
             | Self::RedirectUriNotAttested
             | Self::ClientIdInPayload
+            | Self::VerifierInfoInPayload
             | Self::NoVerifiableSignature
             | Self::EnvelopeUnreadable
             | Self::EnvelopeNotJson(_)

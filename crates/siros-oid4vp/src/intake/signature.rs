@@ -1,7 +1,6 @@
 //! A signed Request Object authenticated under the rule of its Client Identifier Prefix
 //! (OpenID4VP 1.0, Section 5.9.3).
 
-use serde_json::Value;
 use sha2::{Digest, Sha256};
 use siros_codec::base64url;
 use siros_codec::date::DateTime;
@@ -10,7 +9,7 @@ use super::trust::{self, KeyMaterial, MetadataAnswer, TrustSubject, Verdict};
 use super::{attestation, Answers, Halt, IntakeError, JwsFault};
 use crate::client_id::{ClientId, ClientIdPrefix};
 use crate::jose::Signed;
-use crate::parameters::strings;
+use crate::parameters::{strings, Metadata};
 use crate::values::{Kid, TrustChain};
 use crate::verified::AccessCertificate;
 use crate::x509::Chain;
@@ -26,14 +25,6 @@ pub(super) struct Verifier {
     pub(super) certificate: Option<AccessCertificate>,
     pub(super) metadata: Metadata,
     pub(super) response_uri: UriRule,
-}
-
-/// Where the Verifier metadata comes from.
-pub(super) enum Metadata {
-    /// `client_metadata` of the request.
-    Request,
-    /// The Trust Chain of an `openid_federation` client; `client_metadata` is ignored.
-    TrustChain(Option<Value>),
 }
 
 /// What the `response_uri` of a redirect request must be, beyond an `https` URL.

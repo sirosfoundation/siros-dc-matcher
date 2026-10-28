@@ -79,6 +79,11 @@ impl Selection {
             subsets,
         }
     }
+
+    /// The plan's offer the selection chooses.
+    pub fn offer(&self) -> OfferIndex {
+        self.offer
+    }
 }
 
 /// How the wallet fulfils a request.

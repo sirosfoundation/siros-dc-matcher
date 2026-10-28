@@ -11,6 +11,7 @@ use siros_codec::base64url;
 use siros_codec::json::JsonTextError;
 
 use super::{CompactFault, NoQuery, PayloadFault};
+use crate::client_id::ClientId;
 use crate::protocol::Protocol;
 
 /// The request object an entry carries; it has a `dcql_query`. The unsigned shape borrows
@@ -105,4 +106,23 @@ fn decode_payload(payload: &str) -> Result<Vec<u8>, NoQuery> {
         return Err(NoQuery::PayloadNotBase64url(PayloadFault::TooLong));
     }
     base64url::decode(payload).map_err(|e| NoQuery::PayloadNotBase64url(PayloadFault::Encoding(e)))
+}
+
+/// The Client Identifier each signature of a multisigned request's JWS JSON Serialization names
+/// in its protected header, unverified; a header that does not decode names none.
+pub(super) fn signature_clients(data: &Value) -> Vec<ClientId> {
+    let jws = match data.get("request") {
+        Some(request @ Value::Object(_)) => request,
+        _ => data,
+    };
+    jws.get("signatures")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|signature| {
+            let header = decode_payload(signature.get("protected")?.as_str()?).ok()?;
+            let header: Value = serde_json::from_slice(&header).ok()?;
+            ClientId::parse(header.get("client_id")?.as_str()?).ok()
+        })
+        .collect()
 }
