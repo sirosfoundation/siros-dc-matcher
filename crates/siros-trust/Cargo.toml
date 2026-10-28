@@ -33,3 +33,6 @@ p384 = { version = "0.13.1", default-features = false, features = ["ecdsa", "all
 x509-cert = { version = "0.2.5", default-features = false, features = ["std", "builder", "hazmat"] }
 sha2 = { version = "0.10.9", features = ["oid"] }
 serde_json = { workspace = true }
+
+[lints]
+workspace = true
