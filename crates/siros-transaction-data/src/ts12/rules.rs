@@ -161,7 +161,7 @@ fn is_date_time(text: &str) -> bool {
     };
     let rest = match rest.strip_prefix('.') {
         Some(fraction) => {
-            let digits = fraction.bytes().take_while(|b| b.is_ascii_digit()).count();
+            let digits = fraction.bytes().take_while(u8::is_ascii_digit).count();
             if digits == 0 {
                 return false;
             }

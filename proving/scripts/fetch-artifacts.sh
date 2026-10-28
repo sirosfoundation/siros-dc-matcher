@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # Downloads the circuit artifacts the system rulebooks pin (Section 8) from their reference copies
 # in readdit-demo at the commit of Section 10, and checks them against the pins.
 #
@@ -7,9 +7,13 @@ set -eu
 cd "$(dirname "$0")/.."
 base=https://raw.githubusercontent.com/AltmannPeter/readdit-demo/1cf3f2610318e896b0a1cde4b30d6b15d94ccfd0/native
 fetch() {
-    mkdir -p "artifacts/$1"
-    curl -fsSL -o "artifacts/$1/$2" "$base/$3"
-    echo "$4  artifacts/$1/$2" | sha256sum -c -
+    local system="$1"
+    local name="$2"
+    local path="$3"
+    local pin="$4"
+    mkdir -p "artifacts/$system"
+    curl --proto '=https' -fsSL -o "artifacts/$system/$name" "$base/$path"
+    echo "$pin  artifacts/$system/$name" | sha256sum -c -
 }
 fetch longfellow circuits.zst longfellow/circuits/mdoc/circuits.zst \
     6c4b96ed431ee547a3a2e5b62621943a9a0a44646267653bf2db0fcc269b5c3b
