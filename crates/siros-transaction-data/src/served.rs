@@ -151,6 +151,33 @@ impl<D> ServedTypes<D> {
         }
     }
 
+    /// What `self` serves for the types of `named`, each type once, each definition replaced by
+    /// what `f` gives for it, and [`ServedTypes::otherwise`] for every type `named` leaves out.
+    ///
+    /// # Errors
+    ///
+    /// The first error of `f`.
+    pub fn select<E, X>(
+        &self,
+        named: &[TypeId],
+        mut f: impl FnMut(&D) -> Result<E, X>,
+    ) -> Result<ServedTypes<E>, X> {
+        let mut types: Vec<(TypeId, Result<E, Unserved>)> = Vec::new();
+        for type_id in named {
+            if types.iter().all(|(listed, _)| listed != type_id) {
+                let served = match self.serve(type_id) {
+                    Ok(definition) => Ok(f(definition)?),
+                    Err(reason) => Err(reason),
+                };
+                types.push((type_id.clone(), served));
+            }
+        }
+        Ok(ServedTypes {
+            types,
+            otherwise: self.otherwise,
+        })
+    }
+
     /// The types with each definition replaced by what `f` gives for it.
     ///
     /// # Errors

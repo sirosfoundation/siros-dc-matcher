@@ -87,6 +87,7 @@ impl EntryRefusal {
             Self::NotBase64url(_) => "transaction_data_not_base64url",
             Self::NotJson(JsonFault::RepeatedMember(_)) => "transaction_data_duplicate_key",
             Self::NotJson(JsonFault::Read(ReadFault::TooDeep)) => "transaction_data_too_deep",
+            Self::NotJson(JsonFault::Read(ReadFault::TooLong)) => "transaction_data_too_long",
             Self::NotUtf8(_)
             | Self::NotJson(JsonFault::Read(
                 ReadFault::Text(_) | ReadFault::NumberUnrepresentable,

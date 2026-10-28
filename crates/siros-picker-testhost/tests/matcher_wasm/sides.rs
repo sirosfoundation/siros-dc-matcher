@@ -202,7 +202,17 @@ fn texts(field: &Field) -> (String, Option<String>) {
 
 /// The registration the wallet writes for the picker, at the time of the plan.
 pub fn registration(wallet: &Wallet, icons: &[CredentialIcon]) -> Vec<u8> {
-    write(&RegistrationInput {
+    write(&input(wallet, icons, &icon(64, 64))).unwrap()
+}
+
+/// What the wallet writes its registration from, at the time of the plan: its state, the
+/// icons the host prepared, and `default_icon`.
+pub fn input<'a>(
+    wallet: &'a Wallet,
+    icons: &'a [CredentialIcon],
+    default_icon: &'a RasterIcon,
+) -> RegistrationInput<'a> {
+    RegistrationInput {
         credentials: &wallet.credentials,
         records: wallet.records(),
         display: &wallet.display,
@@ -215,11 +225,10 @@ pub fn registration(wallet: &Wallet, icons: &[CredentialIcon]) -> Vec<u8> {
         verifier_id: wallet.verifier_id,
         background: &wallet.background,
         icons,
-        default_icon: &icon(64, 64),
+        default_icon,
         diagnostics: Diagnostics::Hidden,
         now: DateTime::from_unix(NOW).unwrap(),
-    })
-    .unwrap()
+    }
 }
 
 /// A PNG of `width` by `height` pixels, as far as its header reads: the signature and the IHDR

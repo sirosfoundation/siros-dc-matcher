@@ -123,7 +123,7 @@ CI also enforces four things a green build does not imply:
   table and the WASI functions the host provides.
 - **A 409,600-byte (400 KiB) size budget** for `matcher.wasm`, which runs in someone else's
   process. The picker runs the wallet's matching and transaction data selection over the
-  registration (K2): with images passed through and `wasm-opt -Oz` it measures 366,631 bytes,
+  registration (K2): with images passed through and `wasm-opt -Oz` it measures 392,363 bytes,
   and the measured alternatives that drop parts of K2 were declined. Raising the budget takes a
   line in `.github/workflows/ci.yml` and a reason.
 - **Browser imports.** The browser presenter's module imports only wasm-bindgen's modules, the
@@ -181,7 +181,7 @@ Two profile details are load-bearing and easy to undo:
 | [`siros-display`](crates/siros-display) | any | Display metadata and its locale, credential cards, claim labels and rows, display text, purpose lines, proof statement rows and picker fields. |
 | [`siros-transaction-data`](crates/siros-transaction-data) | any | `transaction_data` on the PaSO model, with the four EC TS12 types as built-in rulebooks: type definitions and their sources, payload conformance, images, rendering and selection. Without `wallet`, the selection for the picker. |
 | [`siros-presentation`](crates/siros-presentation) | any | The plan of a request over the wallet's credentials and its consent view. Without `wallet`, the matching for the picker. |
-| [`siros-registration`](crates/siros-registration) | any | The picker's registration: the projection of the wallet's credentials the wallet writes (feature `wallet`) and the picker reads. |
+| [`siros-registration`](crates/siros-registration) | any | The picker's registration: the projection of the wallet's credentials, in a binary layout the wallet writes (feature `wallet`) and the picker reads at offsets through `Read + Seek`. |
 | [`siros-picker`](crates/siros-picker) | `wasm32-wasip1` | The credential picker over the presentation component's matching. Ships `matcher.wasm`. |
 | [`android-credman`](crates/android-credman) | any | The host ABI as types: nullability, version gating, set shape, the picked entry. |
 | [`android-credman-sys`](crates/android-credman-sys) | `wasm32` | The Credential Manager host imports, one module per host level. [`ABI.md`](crates/android-credman-sys/ABI.md) is the contract and its evidence. |
@@ -193,7 +193,8 @@ Two profile details are load-bearing and easy to undo:
 | [`siros-zkp-backend-vega`](proving/siros-zkp-backend-vega) | any | The Vega nym_auth system on `vega-v1`: zk-cred-vega behind the rulebook's artifact pins. In `proving/`. |
 | [`siros-zkp-proving-e2e`](proving/e2e) | native, dev | Real proofs of both nym_auth systems through the presenter and the Verifier. In `proving/`. |
 
-[`docs/abi.md`](docs/abi.md) covers the host ABI as `matcher.wasm` uses it.
+[`docs/abi.md`](docs/abi.md) covers the host ABI as `matcher.wasm` uses it, and
+[`docs/registration.md`](docs/registration.md) the registration's layout.
 [`docs/zkp_req_core.md`](docs/zkp_req_core.md) covers the `zkp_req` crates, their API and the
 prover interface. [`docs/zkp_req_request.md`](docs/zkp_req_request.md) and
 [`docs/zkp_req_response.md`](docs/zkp_req_response.md) cover the `zkp_req` request and
@@ -230,6 +231,16 @@ signature verifies. The picker authenticates no signature, so it shows a
 request whose signature fails, whose certificate does not name its client, or
 whose `openid_federation` client does not chain. The wallet decides these
 after the pick, and refuses such a request.
+
+The registration is binary, laid out for reads at offsets
+([`docs/registration.md`](docs/registration.md)): a header with its version, a
+directory of sections, an index of the credential types sorted for binary
+search, the records of each type, and tables of the definitions and icons the
+records name by number. The picker reads it through `ReadCredentialsBuffer`,
+part by part: the header, the directory, the index, the types' names, the
+tables and the facts when it opens it, then the records of the types the
+request asks for, the definitions the request's transaction data entries name,
+and the icons of the entries it shows.
 
 ## Privacy note
 

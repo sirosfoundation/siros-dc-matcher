@@ -12,13 +12,16 @@ rust-version.workspace = true
 [features]
 # The strict JSON reader. serde_json's `raw_value` gives each value as its text, which keeps
 # numbers as their writer wrote them.
-json = ["dep:rustc-hash", "dep:serde", "serde_json/raw_value"]
+json = ["dep:serde", "serde_json/raw_value"]
 
 [dependencies]
-rustc-hash = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+
+[[test]]
+name = "json"
+required-features = ["json"]
 
 [lints]
 workspace = true

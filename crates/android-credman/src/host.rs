@@ -105,28 +105,6 @@ impl Host {
         copied
     }
 
-    /// The credential blob the wallet registered, read in as many calls as
-    /// the host needs. A matcher reads it once.
-    ///
-    /// # Panics
-    ///
-    /// When the reported length cannot be allocated, when the host copies
-    /// nothing before that length, and when it reports more bytes than it
-    /// was asked for.
-    pub fn credentials(&self) -> Vec<u8> {
-        let size = self.credentials_size();
-        // The blob is the matcher's only input besides the request. A size
-        // the module cannot allocate leaves nothing to match against: past
-        // `isize::MAX` the allocation panics, below it a failed allocation
-        // aborts.
-        let mut blob = vec![0; size];
-        let mut delivered = 0;
-        while let Some(rest) = blob.get_mut(delivered..).filter(|rest| !rest.is_empty()) {
-            delivered += self.read_credentials_before_end(rest, delivered, size);
-        }
-        blob
-    }
-
     /// The app that called the Digital Credentials API, converted once.
     ///
     /// # Panics

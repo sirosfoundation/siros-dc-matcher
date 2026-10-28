@@ -2,7 +2,7 @@
 //! `age_over_18` and `family_name`, labelled in English, with the picker's diagnostics shown.
 //! `scripts/run_matcher.mjs` runs `matcher.wasm` over it.
 //!
-//!     cargo run -p siros-registration --features wallet --example sample_registration -- out.cbor
+//!     cargo run -p siros-registration --features wallet --example sample_registration -- out.bin
 
 use std::process::ExitCode;
 

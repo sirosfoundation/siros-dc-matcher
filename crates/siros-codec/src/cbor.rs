@@ -1,10 +1,11 @@
 //! A strict CBOR reader and a deterministic CBOR writer (RFC 8949).
 //!
 //! The reader takes untrusted input. It accepts one data item with definite lengths and nothing
-//! after it. It keeps the encoded bytes of every item, because a digest or a signature covers
-//! an item as it was written. It refuses floating-point numbers, indefinite lengths, simple values
-//! other than `false`, `true`, `null` and `undefined`, a map key that repeats, and nesting deeper
-//! than [`MAX_DEPTH`].
+//! after it, or a CBOR sequence of such items (RFC 8742). It keeps the encoded bytes of every
+//! item, because a digest or a signature covers an item as it was written. It refuses
+//! floating-point numbers, indefinite lengths, simple values other than `false`, `true`, `null`
+//! and `undefined`, a map key that repeats, nesting deeper than [`MAX_DEPTH`], and input longer
+//! than [`MAX_INPUT`].
 //!
 //! The writer emits the core deterministic encoding of RFC 8949, Section 4.2.1: shortest heads,
 //! definite lengths, and map keys sorted by their encoded bytes.
@@ -13,6 +14,25 @@ use std::str::Utf8Error;
 
 /// The deepest nesting the reader accepts.
 pub const MAX_DEPTH: usize = 32;
+
+/// The most heap bytes the reader allocates per byte of input. Each item but the outermost
+/// starts at its own byte and takes a slot of [`Item`] in the vector of its array, map or
+/// sequence, or in the box of its tag. A vector grows as its items decode: from four slots,
+/// doubling when full. It holds at most twice the slots it fills, or four for one item, and the
+/// vectors it outgrew hold as many again on an allocator that never frees: four slots per item.
+/// The duplicate check of a map sorts a slice of each key's encoding in a vector of the map's
+/// size, which the sort leaves as it is, and a key and its value take two bytes at least.
+///
+/// 100 bytes on wasm32 (an `Item` of 24 bytes, a slice of 8) and 200 on a 64-bit target (48
+/// and 16).
+pub const HEAP_PER_BYTE: usize = 4 * size_of::<Item<'static>>() + size_of::<&[u8]>() / 2;
+
+/// The longest input the reader decodes: its items then take at most `isize::MAX` heap bytes,
+/// the most one allocation holds. 21,474,836 bytes on wasm32.
+pub const MAX_INPUT: usize = match (isize::MAX as usize).checked_div(HEAP_PER_BYTE) {
+    Some(bytes) => bytes,
+    None => 0,
+};
 
 /// Why bytes are not one CBOR item the reader accepts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -35,6 +55,9 @@ pub enum CborError {
     /// Arrays, maps and tags nest deeper than [`MAX_DEPTH`].
     #[error("CBOR nests too deeply")]
     TooDeep,
+    /// The input is longer than [`MAX_INPUT`].
+    #[error("CBOR input is longer than the reader decodes")]
+    TooLong,
 }
 
 /// An encoding the reader refuses.
@@ -65,6 +88,7 @@ impl CborError {
             Self::InvalidUtf8(_) => "cbor_invalid_utf8",
             Self::DuplicateKey => "cbor_duplicate_key",
             Self::TooDeep => "cbor_too_deep",
+            Self::TooLong => "cbor_too_long",
         }
     }
 }
@@ -179,13 +203,33 @@ impl<'a> Item<'a> {
 }
 
 /// Decodes `bytes` as exactly one item.
+///
+/// # Errors
+///
+/// [`CborError`]: the first rule the item breaks, [`CborError::TooLong`] first.
 pub fn decode(bytes: &[u8]) -> Result<Item<'_>, CborError> {
-    let mut reader = Reader { bytes, at: 0 };
+    let mut reader = Reader::of(bytes)?;
     let item = reader.item(0)?;
     if reader.at != bytes.len() {
         return Err(CborError::TrailingBytes);
     }
     Ok(item)
+}
+
+/// Decodes `bytes` as a CBOR sequence (RFC 8742): items one after another up to the last byte,
+/// each complete.
+///
+/// # Errors
+///
+/// [`CborError`]: [`CborError::TooLong`] first, then the first item that does not decode,
+/// [`CborError::Truncated`] for one the input ends inside.
+pub fn decode_sequence(bytes: &[u8]) -> Result<Vec<Item<'_>>, CborError> {
+    let mut reader = Reader::of(bytes)?;
+    let mut items = Vec::new();
+    while reader.at < bytes.len() {
+        items.push(reader.item(0)?);
+    }
+    Ok(items)
 }
 
 struct Reader<'a> {
@@ -194,6 +238,14 @@ struct Reader<'a> {
 }
 
 impl<'a> Reader<'a> {
+    /// A reader at the start of `bytes`.
+    fn of(bytes: &'a [u8]) -> Result<Self, CborError> {
+        if bytes.len() > MAX_INPUT {
+            return Err(CborError::TooLong);
+        }
+        Ok(Self { bytes, at: 0 })
+    }
+
     /// The next byte.
     fn byte(&mut self) -> Result<u8, CborError> {
         let byte = *self.bytes.get(self.at).ok_or(CborError::Truncated)?;
@@ -279,27 +331,42 @@ impl<'a> Reader<'a> {
         }
     }
 
+    /// The array of the `argument` items that follow. The vector grows as they decode.
     fn array(&mut self, argument: u64, depth: usize) -> Result<Kind<'a>, CborError> {
         let n = self.length(argument)?;
-        (0..n)
-            .map(|_| self.item(depth + 1))
-            .collect::<Result<_, _>>()
-            .map(Kind::Array)
+        let mut items = Vec::new();
+        for _ in 0..n {
+            items.push(self.item(depth + 1)?);
+        }
+        Ok(Kind::Array(items))
     }
 
+    /// The map of the `argument` entries that follow, each key once. The vector grows as they
+    /// decode.
     fn map(&mut self, argument: u64, depth: usize) -> Result<Kind<'a>, CborError> {
         let n = self.length(argument)?;
-        let mut entries: Vec<(Item<'a>, Item<'a>)> = Vec::with_capacity(n);
+        let mut entries = Vec::new();
         for _ in 0..n {
             let key = self.item(depth + 1)?;
-            if entries.iter().any(|(k, _)| k.raw == key.raw) {
-                return Err(CborError::DuplicateKey);
-            }
             let value = self.item(depth + 1)?;
             entries.push((key, value));
         }
+        distinct_keys(&entries)?;
         Ok(Kind::Map(entries))
     }
+}
+
+/// Checks that the keys of `entries` differ. Their encodings sorted once, a repeated key lies
+/// next to its first: `sort_unstable` takes O(n log n) comparisons for `n` keys, whatever the
+/// keys, and allocates nothing.
+fn distinct_keys(entries: &[(Item<'_>, Item<'_>)]) -> Result<(), CborError> {
+    let mut keys: Vec<&[u8]> = Vec::with_capacity(entries.len());
+    keys.extend(entries.iter().map(|(key, _)| key.raw));
+    keys.sort_unstable();
+    if keys.windows(2).any(|pair| matches!(pair, [a, b] if a == b)) {
+        return Err(CborError::DuplicateKey);
+    }
+    Ok(())
 }
 
 /// The item of major type 7 that `head` starts.

@@ -27,8 +27,8 @@ fn mdl_invocation() -> Invocation {
     }
 }
 
-/// The matcher reads the registration until it is complete, so a host that copies one byte
-/// per call yields the output of a host that copies it whole.
+/// The matcher reads each part of the registration until it is complete, so a host that copies
+/// one byte per call yields the output of a host that copies each part whole.
 #[test]
 fn a_registration_delivered_in_short_reads_gives_the_output_of_a_whole_one() {
     let whole = run(matcher_wasm(), mdl_invocation()).expect("matcher ran");
@@ -46,17 +46,15 @@ fn a_registration_delivered_in_short_reads_gives_the_output_of_a_whole_one() {
 
 /// A host that reports more bytes than it was asked for, or copies none before the end of the
 /// registration, breaks `ReadCredentialsBuffer`'s contract: the matcher traps with the panic
-/// `android-credman` documents.
+/// `android-credman` documents. Its first read asks for the header's 12 bytes
+/// (`docs/registration.md`).
 #[test]
 fn a_host_that_breaks_the_read_contract_traps() {
     let size = mdl_invocation().credentials.len();
     for (credential_reads, panic) in [
         (
             CredentialReads::OverReport,
-            format!(
-                "host reported {} credential bytes for a {size}-byte buffer",
-                size + 1
-            ),
+            "host reported 13 credential bytes for a 12-byte buffer".to_owned(),
         ),
         (
             CredentialReads::Stall,

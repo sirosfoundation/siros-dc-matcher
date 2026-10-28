@@ -140,12 +140,11 @@ pub mod credman {
         pub fn GetRequestSize(size: *mut u32);
 
         /// Copies up to `len` bytes of the credential blob, from byte
-        /// `offset`, into `buffer`, and returns the count copied. A matcher
-        /// reads the whole blob once at start.
+        /// `offset`, into `buffer`, and returns the count copied.
         ///
         /// `buffer` holds `len` bytes. The count can be lower than `len` and
-        /// is 0 past the end, so a matcher reads until it has the
-        /// [`GetCredentialsSize`] length or a read returns 0.
+        /// is 0 past the end, so a matcher reads until it has the bytes it
+        /// asked for, within the [`GetCredentialsSize`] length.
         pub fn ReadCredentialsBuffer(buffer: *mut c_void, offset: usize, len: usize) -> usize;
 
         /// Writes the length in bytes of the credential blob to `size`. The

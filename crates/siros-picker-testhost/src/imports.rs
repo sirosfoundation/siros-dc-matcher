@@ -56,6 +56,7 @@ pub(crate) fn add_credman(linker: &mut Linker<State>) -> Result<()> {
                     .answer(&input.credentials, offset as usize, len as usize);
             let copied = copied.to_vec();
             write_bytes(&mut c, ptr, &copied)?;
+            c.data_mut().out.credential_bytes += copied.len();
             i32::try_from(reported).context("a read count beyond i32")
         },
     )?;
