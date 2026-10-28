@@ -112,10 +112,14 @@ The reader refuses, with a `RegistrationError` that names the part and the cause
 - records of a type out of the wallet's order, and two records read with one position,
   `credentialId` or batch;
 - a definition of no UTF-8, no projection, or another language than the facts';
-- a part longer than a buffer of the platform holds (`isize::MAX` bytes).
+- an icon or a definition longer than a buffer of the platform holds (`isize::MAX` bytes), and
+  facts or records of a type longer than `cbor::MAX_INPUT` of siros-codec: 16,909,320 bytes on
+  wasm32.
 
-The buffer the reader allocates for a part is the length of its span, which lies within the
-blob.
+The reader reads a part into a buffer of the part's length, which lies within the blob.
+Decoding a CBOR part allocates at most `cbor::HEAP_PER_BYTE` bytes per byte of it: 127 on wasm32
+and 243 on a 64-bit target. A vector of items grows as they decode, from four slots, and a map
+keeps a hash set of its keys. Its items thus take at most `isize::MAX` bytes.
 
 ## Writing
 
@@ -143,7 +147,8 @@ length-delimited records.
   registration states each fact once, and its sections tile the blob.
 - **FlatBuffers and Cap'n Proto** address data by offsets inside one buffer. Their verifiers
   check every offset against the buffer, and cap nesting and traversal against amplification.
-  Here every allocation is bounded by its section, and CBOR nesting by the codec's depth.
+  Here the items of a CBOR part take at most `cbor::HEAP_PER_BYTE` bytes per byte of it, and
+  CBOR nesting stops at the codec's depth.
 - **CBOR sequences** (RFC 8742) frame only their items: a sequence cut between two items reads
   as a whole one. The index gives each sequence its exact length, and the reader decodes it to
   the last byte.

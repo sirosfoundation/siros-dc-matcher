@@ -86,7 +86,7 @@ impl<R: Read + Seek> Registration<R> {
         let entries = directory
             .index_entries()
             .map_err(|length| RegistrationError::IndexLength(ByteCount::new(length.into())))?;
-        let bytes = blob.read(&directory.facts, directory.facts.whole())?;
+        let bytes = blob.read_cbor(&directory.facts, directory.facts.whole())?;
         let item = cbor::decode(&bytes)
             .map_err(|error| RegistrationError::Facts(FactsFault::Cbor(error)))?;
         let facts = record::facts(&item, &directory.icons).map_err(RegistrationError::Facts)?;
@@ -271,7 +271,7 @@ impl<R: Read + Seek> Registration<R> {
         key: &RegisteredType,
         span: Span<RecordsPart>,
     ) -> Result<Vec<Positioned>, RegistrationError> {
-        let bytes = self.blob.read(&self.directory.records, span)?;
+        let bytes = self.blob.read_cbor(&self.directory.records, span)?;
         let items = cbor::decode_sequence(&bytes)
             .map_err(|error| RegistrationError::Records(key.clone(), error))?;
         let mut records: Vec<Positioned> = Vec::new();
@@ -331,6 +331,24 @@ impl<R: Read + Seek> Blob<R> {
         let mut bytes = vec![0; size];
         self.fill(at, &mut bytes)?;
         Ok(bytes)
+    }
+
+    /// The bytes `span` spans in `bounds`, a CBOR part.
+    ///
+    /// # Errors
+    ///
+    /// [`RegistrationError::TooLong`] for a part longer than [`cbor::MAX_INPUT`], which the
+    /// CBOR reader refuses: the bytes stay unread.
+    fn read_cbor<S: Part>(
+        &mut self,
+        bounds: &Bounds<S>,
+        span: Span<S>,
+    ) -> Result<Vec<u8>, RegistrationError> {
+        let length = span.length();
+        if usize::try_from(length).map_or(true, |length| length > cbor::MAX_INPUT) {
+            return Err(RegistrationError::TooLong(ByteCount::new(length.into())));
+        }
+        self.read(bounds, span)
     }
 
     /// Fills `out` with the bytes at `at` from the blob's start.

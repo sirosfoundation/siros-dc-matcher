@@ -361,7 +361,8 @@ binaryen version_116.
 
 - `siros-codec`, the encodings every wallet core crate shares: a strict CBOR reader (definite
   lengths, no duplicate keys, found with one hash set insertion per key, no trailing bytes, at
-  most `cbor::MAX_DEPTH` (32) levels), of one item
+  most `cbor::MAX_DEPTH` (32) levels, input of at most `cbor::MAX_INPUT` bytes, whose items take
+  at most `cbor::HEAP_PER_BYTE` heap bytes per byte of it), of one item
   or of a CBOR sequence (`cbor::decode_sequence`, RFC 8742), and a deterministic writer; unpadded
   base64url and the padded base64 of `x5c` certificates (RFC 4648, Sections 4 and 5); the calendar
   dates and UTC times of CBOR's `full-date` and `tdate`; the ES256 signature value
@@ -733,7 +734,8 @@ binaryen version_116.
   then `credentials` of the types asked, `definition` and `icon` by span, each definition and icon
   once, and `projection` the whole. It refuses every version but `Version::CURRENT` (1), every
   offset or length past its part, an index entry out of order on a search's path, the records of a
-  type out of the wallet's order, a part longer than a buffer of the platform holds, and every
+  type out of the wallet's order, an icon or a definition longer than a buffer of the platform
+  holds, facts or records of a type longer than `cbor::MAX_INPUT`, and every
   unexpected member, with a `RegistrationError` that names the part and its cause. The reader and
   the writer give an error for every input. The writer (feature `wallet`): `project` takes the
   parsed credentials, the presentation records, the display cache and language, the held transaction
