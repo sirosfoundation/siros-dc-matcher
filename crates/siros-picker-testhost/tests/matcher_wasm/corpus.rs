@@ -12,7 +12,7 @@ use siros_presentation::testing::verifier::{
     SIGNER,
 };
 use siros_presentation::testing::wallet::{
-    base64, mdoc, mdoc_by, nym_auth, sd_jwt_x5c, Held, Wallet, MDL, MDL_NS, VCT,
+    base64, mdoc, mdoc_by, nym_auth, sd_jwt, sd_jwt_x5c, Held, Wallet, MDL, MDL_NS, VCT,
 };
 use siros_registration::CredentialIcon;
 use siros_trust::{Certificate, TrustStore};
@@ -21,6 +21,7 @@ use siros_zkp_req_nym_auth::system::NymAuthSystem;
 use siros_zkp_req_nym_auth::testing::{query as nym_query, Issuer, Spec};
 
 use crate::differential::{Case, Exception};
+use crate::paso::{PID, PID_2};
 
 /// The wallet of the corpus: one mDL, as `credentialId` `id`, holding `age_over_18` and
 /// `family_name`.
@@ -96,6 +97,7 @@ fn case(name: &str, request: Vec<u8>, wallet: Wallet) -> Case {
 /// The G2 corpus.
 pub fn cases() -> Vec<Case> {
     let mut cases = mdl_cases();
+    cases.push(interleaved());
     cases.extend(request_cases());
     cases.extend(nym_cases());
     cases.extend(trust_cases());
@@ -192,6 +194,22 @@ fn mdl_cases() -> Vec<Case> {
             plain().all_in_background(),
         ),
     ]
+}
+
+/// A query of two SD-JWT VC types whose credentials alternate in the wallet's order: the picker
+/// reads the records of each type and merges them by position, as the wallet's plan lists its
+/// candidates.
+fn interleaved() -> Case {
+    let name = [("given_name", json!("Erika"))];
+    let wallet = Wallet::new(vec![
+        Held::new(1, "dc+sd-jwt", sd_jwt(PID, &name)),
+        Held::new(2, "dc+sd-jwt", sd_jwt(PID_2, &name)),
+        Held::new(3, "dc+sd-jwt", sd_jwt(PID, &name)),
+        Held::new(4, "dc+sd-jwt", sd_jwt(PID_2, &name)),
+    ]);
+    let query = json!({"dcql_query": {"credentials": [{"id": "pid", "format": "dc+sd-jwt",
+        "meta": {"vct_values": [PID_2, PID]}, "claims": [{"path": ["given_name"]}]}]}});
+    case("two types interleaved", unsigned(query), wallet)
 }
 
 /// The requests the transcript test sends that no wallet state changes: unknown protocols,

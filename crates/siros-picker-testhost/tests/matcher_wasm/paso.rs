@@ -25,18 +25,20 @@ macro_rules! vector {
     };
 }
 
-const CARD: &str = "https://bank.example/sca/card";
-const ACCOUNT: &str = "https://bank.example/sca/account";
-const PID: &str = "https://credentials.example/pid";
-const PID_2: &str = "https://credentials.example/pid-2";
-const LOYALTY: &str = "https://shop.example/loyalty";
-const PAYMENT: &str = "urn:paso:sca:global:payment:1";
+pub const CARD: &str = "https://bank.example/sca/card";
+pub const ACCOUNT: &str = "https://bank.example/sca/account";
+pub const PID: &str = "https://credentials.example/pid";
+pub const PID_2: &str = "https://credentials.example/pid-2";
+pub const LOYALTY: &str = "https://shop.example/loyalty";
+pub const PAYMENT: &str = "urn:paso:sca:global:payment:1";
+/// A transaction data type a configuration defines, of the generic rulebook.
+pub const POINTS: &str = "urn:example:loyalty-points:1";
 const VERSIONED: &str = "https://bank.example/sca/versioned";
 const LEGACY: &str = "https://bank.example/sca/legacy";
 const IBAN: &str = "https://issuer.bank.example/credentials/sca/iban/1.0";
 
 /// The signed DC API request of `dcql_query` carrying `entries`.
-fn request(dcql_query: Value, entries: &[Value]) -> Vec<u8> {
+pub fn request(dcql_query: Value, entries: &[Value]) -> Vec<u8> {
     let transaction_data: Vec<String> = entries
         .iter()
         .map(|entry| b64(entry.to_string().as_bytes()))
@@ -63,7 +65,7 @@ fn query(id: &str, vct: &str, claims: &[&str]) -> Value {
 }
 
 /// The PaSO payment definition of Proof Metadata, Annex A.2.
-fn payment_definition() -> Value {
+pub fn payment_definition() -> Value {
     vector!("paso/metadata-a2-payload.json")["credential_metadata"]["transaction_data_types"]
         [PAYMENT]
         .clone()
@@ -71,7 +73,7 @@ fn payment_definition() -> Value {
 
 /// A wallet holding `held`, the host configuring `configured` and holding no type metadata of
 /// the credentials' types.
-fn configured_wallet(held: Vec<Held>, configured: &Value, absent: &[&str]) -> Wallet {
+pub fn configured_wallet(held: Vec<Held>, configured: &Value, absent: &[&str]) -> Wallet {
     let mut wallet = Wallet::new(held);
     wallet.configuration = Configuration::parse(&configured.to_string()).unwrap();
     wallet.metadata = holding_absent(absent);
@@ -94,7 +96,44 @@ pub fn cases() -> Vec<Case> {
     let mut cases = core_annex();
     cases.extend(sources());
     cases.extend(cs12());
+    cases.push(two_definitions());
     cases
+}
+
+/// The definition of [`POINTS`]: one claim, `points`.
+pub fn points_definition() -> Value {
+    json!({"claims": [{"path": ["points"], "display": [{"locale": "en", "name": "Points"}]}]})
+}
+
+/// A card and a loyalty card in one offer, each taking an entry of a type the configuration
+/// defines for it alone: the picker reads two definitions in one run and shows each on its
+/// credential.
+fn two_definitions() -> Case {
+    let configured = json!([
+        {"type": PAYMENT, "vct_values": [CARD], "definition": payment_definition()},
+        {"type": POINTS, "vct_values": [LOYALTY], "definition": points_definition()}
+    ]);
+    let card = [("pan_last_four", json!("4242")), ("scheme", json!("visa"))];
+    let wallet = configured_wallet(
+        vec![
+            Held::new(1, "dc+sd-jwt", sd_jwt(CARD, &card)),
+            Held::new(2, "dc+sd-jwt", sd_jwt(LOYALTY, &[])),
+        ],
+        &configured,
+        &[CARD, LOYALTY],
+    );
+    let points = json!({"type": POINTS, "credential_ids": ["loyalty"],
+                        "payload": {"points": "120"}});
+    let dcql_query = json!({
+        "credentials": [query("sca_card", CARD, &[]), query("loyalty", LOYALTY, &[])],
+        "credential_sets": [{"options": [["sca_card", "loyalty"]]}]
+    });
+    case(
+        "two definitions in one run",
+        dcql_query,
+        vec![vector!("paso/core-a1-entry.json"), points],
+        wallet,
+    )
 }
 
 /// PaSO Core, Annex A.1, A.5, A.6 and A.7.

@@ -1,5 +1,6 @@
-//! The CBOR form of a registration's parts: maps with text keys, and the claims path pointers,
-//! entry references, trust store authorities and served-type reasons they carry.
+//! The CBOR form of a registration's facts and records: maps with text keys, and the numbers of
+//! table entries, claims path pointers, entry references, trust store authorities and
+//! served-type reasons they carry.
 
 #[cfg(feature = "wallet")]
 use siros_codec::cbor::Value as Cbor;
@@ -12,25 +13,20 @@ use siros_trust::{StoreAuthority, StoreType};
 use siros_wallet_state::{BatchId, CredentialId, InstanceId};
 use siros_zkp_req_nym_auth::verifier_id::VerifierIdForm;
 
-use crate::error::{CredentialFault, Member, RegistrationError};
+use crate::error::{CredentialFault, FactsFault, Member};
 
 impl Member {
     /// The member's name in the registration's CBOR.
     pub(crate) fn name(self) -> &'static str {
         match self {
-            Self::Version => "version",
             Self::RegisteredAt => "registered_at",
             Self::Language => "language",
             Self::Diagnostics => "diagnostics",
             Self::Systems => "systems",
             Self::VerifierId => "verifier_id",
-            Self::Icons => "icons",
             Self::DefaultIcon => "default_icon",
-            Self::Definitions => "definitions",
-            Self::Credentials => "credentials",
+            Self::Position => "position",
             Self::Entry => "entry",
-            Self::Format => "format",
-            Self::Type => "type",
             Self::Key => "key",
             Self::Claims => "claims",
             Self::Card => "card",
@@ -55,7 +51,7 @@ impl Member {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Malformed(pub(crate) Member, pub(crate) MemberFault);
 
-impl From<Malformed> for RegistrationError {
+impl From<Malformed> for FactsFault {
     fn from(Malformed(member, fault): Malformed) -> Self {
         Self::Member(member, fault)
     }
@@ -118,10 +114,13 @@ pub(crate) fn unsigned(item: &Item<'_>) -> Option<u64> {
     }
 }
 
-/// A position in a table: an unsigned integer within the platform's addresses, the type of a
-/// table reference.
+/// A credential's position in the wallet's order: an unsigned integer below 2^32 on every
+/// target, as the records of a records section under 4 GiB number fewer.
 pub(crate) fn position(item: &Item<'_>) -> Option<usize> {
-    unsigned(item).and_then(|n| usize::try_from(n).ok())
+    // A u32 fits the usize of every target the crate builds for.
+    unsigned(item)
+        .and_then(|n| u32::try_from(n).ok())
+        .map(|n| n as usize)
 }
 
 /// A boolean.
@@ -189,7 +188,7 @@ pub(crate) fn verifier_id_form(name: &str) -> Option<VerifierIdForm> {
 }
 
 /// Every reason a registration records.
-const UNSERVED: [Unserved; 10] = [
+pub(crate) const UNSERVED: [Unserved; 10] = [
     Unserved::Format,
     Unserved::TypeUnsupported,
     Unserved::TypeUndeclared,
@@ -245,6 +244,12 @@ pub(crate) mod write {
                 .map(|(member, value)| (Cbor::text(member.name()), value))
                 .collect(),
         )
+    }
+
+    /// The number of an entry of a table.
+    pub(crate) fn number(number: usize) -> Cbor {
+        // A usize is at most 64 bits on every target Rust supports.
+        Cbor::Unsigned(number as u64)
     }
 
     /// `[credentialId, batchId, instanceId]`.

@@ -189,21 +189,20 @@ pub enum NoOffer<U, R> {
     Unmatched(Failure<U, R>),
 }
 
-impl<D> Transactions<D> {
-    /// The entries of `request` and the first match of each candidate of `answered` whose query
-    /// an entry targets, through `source` (PaSO Core, Sections 7.4.1 and 7.4.2).
+/// The `transaction_data` entries of a request: each read against its DCQL query, and all of
+/// them checked against its signature and its credential sets (PaSO Core, Sections 3 and
+/// 7.4.1).
+#[derive(Debug, Clone)]
+pub struct RequestEntries(Vec<Entry>);
+
+impl RequestEntries {
+    /// The entries of `request`.
     ///
     /// # Errors
     ///
-    /// [`TransactionDataError`]: an entry that does not read; credential sets that break
-    /// Section 7.4.1; an unsigned request a PaSO type or source needs signed; a type no source
-    /// defines for any candidate, unless the first match serves every credential the entry
-    /// targets (OpenID4VP 1.0, Section 5.1); or no compatible candidate left.
-    pub fn read<C: MatchCredential, R>(
-        request: &impl MatchRequest,
-        answered: &Answered<'_, C, R>,
-        source: &impl TransactionSource<C, Deferral = D>,
-    ) -> Result<Self, TransactionDataError> {
+    /// [`TransactionDataError`]: an entry that does not read; an unsigned request with a
+    /// PaSO-targeted entry; credential sets that break Section 7.4.1.
+    pub fn read(request: &impl MatchRequest) -> Result<Self, TransactionDataError> {
         let query = request.dcql_query();
         let entries: Vec<Entry> = request
             .transaction_data()
@@ -216,6 +215,45 @@ impl<D> Transactions<D> {
             })
             .try_collect()?;
         check_request(&entries, query, request.signature())?;
+        Ok(Self(entries))
+    }
+
+    /// The entries, in the request's order.
+    pub fn entries(&self) -> &[Entry] {
+        &self.0
+    }
+}
+
+impl<D> Transactions<D> {
+    /// The entries of `request` and the first match of each candidate of `answered` whose query
+    /// an entry targets, through `source` (PaSO Core, Sections 7.4.1 and 7.4.2):
+    /// [`RequestEntries::read`], then [`Transactions::select`].
+    ///
+    /// # Errors
+    ///
+    /// [`TransactionDataError`]: the first error of either step.
+    pub fn read<C: MatchCredential, R>(
+        request: &impl MatchRequest,
+        answered: &Answered<'_, C, R>,
+        source: &impl TransactionSource<C, Deferral = D>,
+    ) -> Result<Self, TransactionDataError> {
+        Self::select(RequestEntries::read(request)?, answered, source)
+    }
+
+    /// The first match of each candidate of `answered` whose query an entry of `entries`
+    /// targets, through `source` (PaSO Core, Section 7.4.2).
+    ///
+    /// # Errors
+    ///
+    /// [`TransactionDataError`]: an unsigned request a PaSO source needs signed; a type no
+    /// source defines for any candidate, unless the first match serves every credential the
+    /// entry targets (OpenID4VP 1.0, Section 5.1); or no compatible candidate left.
+    pub fn select<C: MatchCredential, R>(
+        entries: RequestEntries,
+        answered: &Answered<'_, C, R>,
+        source: &impl TransactionSource<C, Deferral = D>,
+    ) -> Result<Self, TransactionDataError> {
+        let RequestEntries(entries) = entries;
         let mut candidacies = Vec::new();
         for (index, answers) in answered.indexed() {
             let targeting: Vec<&Entry> = entries.iter().filter(|e| e.names(answers.id())).collect();

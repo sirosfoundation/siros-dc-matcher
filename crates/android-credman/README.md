@@ -11,7 +11,7 @@ let host = Host::connect_with(HostOptions {
 });
 let Some(mut sets) = host.entry_sets() else { return };
 let request = host.request();
-let blob = host.credentials();
+let mut registration = CredentialReader::new(host);
 
 let entry = SetEntry::new(cred_id, VerificationDisplay {
     icon,
@@ -26,6 +26,8 @@ let entry = SetEntry::new(cred_id, VerificationDisplay {
 sets.add_entry_set(&EntrySet::new(set_id, Slot::one(&entry), &[]));
 ```
 
+- `CredentialReader` reads the blob the wallet registered as `Read` and
+  `Seek`, each read one `ReadCredentialsBuffer` call at an offset.
 - `V1` to `V7` give each host level's functions as safe calls.
   `host.credman()` hands out the base, `Credman`; `version::<Credman5>()`
   grants level 5's singleton when the host reports level 5. Every call is

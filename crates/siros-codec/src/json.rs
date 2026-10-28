@@ -1,7 +1,7 @@
 //! JSON text errors as serde_json reports them, and, with the feature `json`, the strict JSON
 //! reader (RFC 8259): one value, members in document order, every number with the text its
-//! writer chose, at most [`MAX_DEPTH`] levels of objects and arrays, and each member name once
-//! per object.
+//! writer chose, at most [`MAX_DEPTH`] levels of objects and arrays, each member name once per
+//! object, and at most [`MAX_TEXT`] bytes.
 //!
 //! RFC 7519, Section 4 lets a JWT parser reject duplicate claim names, and a record a host
 //! provisions names each member once: [`Json::parse_unique`] refuses a repeated name at every
@@ -15,7 +15,7 @@ use serde_json::error::Category;
 mod reader;
 
 #[cfg(feature = "json")]
-pub use reader::{Json, JsonFault, JsonNumber, ReadFault, MAX_DEPTH};
+pub use reader::{Json, JsonFault, JsonNumber, ReadFault, HEAP_PER_BYTE, MAX_DEPTH, MAX_TEXT};
 
 /// What serde_json found in text that is no JSON value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]

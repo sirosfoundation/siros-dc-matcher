@@ -23,7 +23,7 @@ wallet = [
 
 [dependencies]
 serde_json = { workspace = true }
-siros-codec = { workspace = true }
+siros-codec = { workspace = true, features = ["json"] }
 siros-credential = { workspace = true }
 siros-dcql = { workspace = true }
 siros-oid4vp = { workspace = true }
@@ -34,6 +34,7 @@ siros-trust = { workspace = true }
 siros-wallet-state = { workspace = true }
 siros-zkp-req = { workspace = true }
 siros-zkp-req-nym-auth = { workspace = true }
+rustc-hash = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
@@ -45,6 +46,10 @@ required-features = ["wallet"]
 
 [[test]]
 name = "icon"
+required-features = ["wallet"]
+
+[[test]]
+name = "refusals"
 required-features = ["wallet"]
 
 [[test]]

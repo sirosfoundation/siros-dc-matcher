@@ -2,9 +2,11 @@
 
 use siros_oid4vp::UnverifiedRequest;
 use siros_presentation::{MatchRequest, TransactionSource};
-use siros_transaction_data::{Deferral, Entry, Selection, Selector, TransactionDataError};
+use siros_transaction_data::{
+    Deferral, Entry, Projected, Selection, Selector, TransactionDataError,
+};
 
-use crate::registration::{RegisteredCredential, Registration};
+use crate::registration::{Facts, RegisteredCredential};
 
 /// The picker's selection: each credential's first match over the definitions the wallet
 /// registered, at the registration's time, over the channel the request came by. An entry with
@@ -14,32 +16,34 @@ pub struct Unverified {
 }
 
 impl Unverified {
-    /// The selection over `registration` of `request`.
-    pub fn new(registration: &Registration, request: &UnverifiedRequest) -> Self {
+    /// The selection of `request` over a registration of `facts`.
+    pub fn new<I>(facts: &Facts<I>, request: &UnverifiedRequest) -> Self {
         Self {
             selector: Selector {
                 channel: request.channel(),
                 signature: request.signature(),
-                now: registration.registered_at(),
+                now: facts.registered_at(),
             },
         }
     }
 }
 
-impl<'c> TransactionSource<&'c RegisteredCredential> for Unverified {
+/// A credential with the definitions read that its sources serve for the types the request's
+/// entries name for it ([`RegisteredCredential::select`]).
+impl<'c, I> TransactionSource<&'c RegisteredCredential<Projected, I>> for Unverified {
     type Deferral = Deferral;
 
     fn first_match(
         &self,
         entries: &[&Entry],
-        credential: &&'c RegisteredCredential,
+        credential: &&'c RegisteredCredential<Projected, I>,
     ) -> Result<Selection<Deferral>, TransactionDataError> {
         self.selector.first_match_unverified(entries, *credential)
     }
 
     /// Whether a source defines the entry's type: the entry's ad-hoc metadata does when it has
     /// some, verified or not; else the registered sources.
-    fn knows(&self, entry: &Entry, credential: &&'c RegisteredCredential) -> bool {
+    fn knows(&self, entry: &Entry, credential: &&'c RegisteredCredential<Projected, I>) -> bool {
         entry.metadata().is_some()
             || credential
                 .transactions

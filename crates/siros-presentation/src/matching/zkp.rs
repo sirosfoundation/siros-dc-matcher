@@ -4,11 +4,9 @@
 use itertools::Itertools;
 use serde_json::Value;
 use siros_codec::date::Date;
-use siros_credential::Format;
 use siros_dcql::CredentialQuery;
 use siros_zkp_req::{
-    CredentialType, ErrorCode, PairRefusal, ProofBackend, QueryOption, RequestRule, ZkpFormats,
-    ZkpReqQuery,
+    ErrorCode, PairRefusal, ProofBackend, QueryOption, RequestRule, ZkpFormats, ZkpReqQuery,
 };
 use siros_zkp_req_nym_auth::catalogue::{CatalogueRule, NymAuthQuery};
 use siros_zkp_req_nym_auth::pair::{NymAuthOption, UsablePair};
@@ -17,6 +15,7 @@ use siros_zkp_req_nym_auth::system::{pair_code, NymAuthSystem, Unsupported};
 
 use crate::credential::{KeyHolding, MatchCredential};
 use crate::ids::OptionIndex;
+use crate::matching::AskedType;
 
 /// A nym_auth query of a request that meets the nym_auth policy, with the options that have a
 /// usable pair at the proof date.
@@ -202,18 +201,17 @@ impl ZkpQuery {
             .map_err(ChoiceError::Pair)
     }
 
-    /// The instances of `instances` the query's systems prove over: mdocs of the query's
-    /// `docType` whose key the wallet holds, the catalogue requiring holder binding.
+    /// The instances of `instances` the query's systems prove over: credentials of the type
+    /// [`AskedType::proven`] gives whose key the wallet holds, the catalogue requiring holder
+    /// binding.
     pub(crate) fn provable<C: MatchCredential + Clone>(&self, instances: &[&C]) -> Vec<C> {
-        let CredentialType::MsoMdoc { doctype } = self.query.query().credential_type() else {
+        let Some(proven) = AskedType::proven(self.query.query().credential_type()) else {
             return Vec::new();
         };
         instances
             .iter()
             .filter(|credential| {
-                credential.format() == Format::Mdoc
-                    && credential.credential_type() == doctype.as_str()
-                    && credential.key_holding() == KeyHolding::Held
+                proven.holds(**credential) && credential.key_holding() == KeyHolding::Held
             })
             .map(|credential| (*credential).clone())
             .collect()

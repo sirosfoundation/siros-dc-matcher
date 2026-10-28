@@ -158,6 +158,8 @@ pub struct Captured {
     pub entries: Vec<CapturedEntry>,
     /// What the matcher wrote to stderr.
     pub stderr: Vec<u8>,
+    /// The bytes of the registration `ReadCredentialsBuffer` copied, over every call.
+    pub credential_bytes: usize,
 }
 
 impl Captured {

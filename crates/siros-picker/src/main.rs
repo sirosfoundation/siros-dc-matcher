@@ -1,9 +1,10 @@
 //! The matcher binary.
 //!
 //! Android Credential Manager runs it inside the credential picker: no network, no filesystem,
-//! no clock, and a hard time budget. It reads the verifier's request and the registration the
-//! wallet registered with it, runs the presentation component's matching over them (K2), and
-//! fills the picker with one entry set per offer (K3, K4).
+//! no clock, and a hard time budget. It reads the verifier's request and, of the registration
+//! the wallet registered with it, the parts the request needs, runs the presentation
+//! component's matching over them (K2), and fills the picker with one entry set per offer (K3,
+//! K4).
 //!
 //! # A trap is a silent failure
 //!
@@ -37,6 +38,7 @@
 // keeps dead code an error.
 #![cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 
+mod candidates;
 mod diagnostics;
 mod entries;
 mod fields;
@@ -57,6 +59,8 @@ extern "C" fn _start() {
     main();
 }
 
+use std::io::{Read, Seek};
+
 use android_credman::SetSink;
 use siros_registration::Registration;
 
@@ -72,37 +76,40 @@ fn main() {
         return;
     };
     let request = host.request();
-    let registration = host.credentials();
     let input = Input {
         request: &request,
-        registration: &registration,
         level: HostLevel::reported(host.credman()),
     };
-    run(&input, &mut sets);
+    run(
+        &input,
+        android_credman::CredentialReader::new(host),
+        &mut sets,
+    );
 }
 
 /// Off the wasm target there is no host: the test host runs the built module.
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {}
 
-/// What the host hands one invocation.
+/// What the host hands one invocation besides the registration.
 struct Input<'a> {
     /// The DC API request JSON.
     request: &'a [u8],
-    /// The registration the wallet registered.
-    registration: &'a [u8],
     /// The host level, which decides what the entries show (`display_skipped`).
     level: HostLevel,
 }
 
-/// One matcher invocation, from the host's inputs to emitted entry sets.
+/// One matcher invocation, from the host's inputs to emitted entry sets: the request, and of
+/// the registration `registration` reads, the parts the request needs.
 ///
-/// A registration this picker cannot read gives nothing: the debug flag lives inside it, and
-/// the wallet registers the projection together with this binary.
-fn run(input: &Input<'_>, sets: &mut impl SetSink) {
-    let Ok(registration) = Registration::read(input.registration) else {
-        return;
-    };
-    let unshown = matching::pick(input.request, &registration, input.level, sets);
-    Diagnostics::of(&registration).emit(sets, &unshown);
+/// A registration whose header, directory, index, names, tables or facts do not read gives
+/// nothing: the debug flag is one of the facts, and the wallet registers the projection together
+/// with this binary.
+fn run(input: &Input<'_>, registration: impl Read + Seek, sets: &mut impl SetSink) {
+    Registration::open(registration, |mut registration| {
+        let diagnostics = Diagnostics::of(registration.facts());
+        let unshown = matching::pick(input, &mut registration, sets);
+        diagnostics.emit(&mut registration, sets, &unshown);
+    })
+    .unwrap_or_default();
 }

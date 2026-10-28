@@ -2,6 +2,8 @@
 //! carries to the credential picker (K1), read with the pointers and the types of the stored
 //! credential (C2, C3).
 
+use std::fmt;
+
 use serde_json::Number;
 use siros_codec::cbor::{Item, Kind, Value as Cbor};
 use siros_codec::date::{Date, DateTime};
@@ -21,9 +23,29 @@ const FULL_DATE: u64 = 1004;
 
 /// The claims of a credential with their types: the processed payload of an SD-JWT VC, its
 /// array positions kept, or the namespaces of an mdoc with their elements.
+///
+/// Two trees are equal when they hold the same claims in the same format: their CBOR forms
+/// encode alike, the deterministic encoding ordering each object's members.
 pub struct ClaimTree {
     format: Format,
     root: Members,
+}
+
+impl PartialEq for ClaimTree {
+    fn eq(&self, other: &Self) -> bool {
+        self.format == other.format && self.to_cbor().encode() == other.to_cbor().encode()
+    }
+}
+
+impl Eq for ClaimTree {}
+
+impl fmt::Debug for ClaimTree {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ClaimTree")
+            .field("format", &self.format)
+            .field("claims", &self.to_cbor())
+            .finish()
+    }
 }
 
 /// A claim value of a [`ClaimTree`].

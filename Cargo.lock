@@ -2441,7 +2441,6 @@ checksum = "38b58827f4464d87d377d175e90bf58eb00fd8716ff0a62f80356b5e61555d0d"
 name = "siros-codec"
 version = "0.11.0"
 dependencies = [
- "rustc-hash",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
@@ -2584,6 +2583,7 @@ dependencies = [
  "anyhow",
  "serde_json",
  "siros-codec",
+ "siros-credential",
  "siros-display",
  "siros-oid4vp",
  "siros-presentation",
@@ -2630,6 +2630,7 @@ dependencies = [
 name = "siros-registration"
 version = "0.11.0"
 dependencies = [
+ "rustc-hash",
  "serde_json",
  "siros-codec",
  "siros-credential",
