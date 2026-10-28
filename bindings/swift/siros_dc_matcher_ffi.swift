@@ -555,11 +555,7 @@ public protocol FfiPreparedProtocol : AnyObject {
      *
      * # Errors
      *
-     * `device_binding` for a signature that does not verify.
-     *
-     * # Panics
-     *
-     * When `device_signature` is not 64 bytes.
+     * `device_binding`, or [`ZkpReqError::Host`] for a signature that is not 64 bytes.
      */
     func job(deviceSignature: Data) throws  -> FfiProofJob
     
@@ -660,11 +656,7 @@ open func dataToSign() -> Data {
      *
      * # Errors
      *
-     * `device_binding` for a signature that does not verify.
-     *
-     * # Panics
-     *
-     * When `device_signature` is not 64 bytes.
+     * `device_binding`, or [`ZkpReqError::Host`] for a signature that is not 64 bytes.
      */
 open func job(deviceSignature: Data)throws  -> FfiProofJob {
     return try  FfiConverterTypeFfiProofJob.lift(try rustCallWithError(FfiConverterTypeZkpReqError.lift) {
@@ -4872,10 +4864,6 @@ public func zkpReqJwkThumbprint(jwkJson: String)throws  -> Data {
  * # Errors
  *
  * [`ZkpReqError::Host`] for an input the presenter cannot use.
- *
- * # Panics
- *
- * When the query has `trusted_authorities` and `anchors` is `None`.
  */
 public func zkpReqMatch(queryJson: String, clientMetadataJson: String, credentials: [FfiStoredCredential], anchors: [Data]?, systems: [String], now: Int64)throws  -> FfiZkpMatch {
     return try  FfiConverterTypeFfiZkpMatch.lift(try rustCallWithError(FfiConverterTypeZkpReqError.lift) {
@@ -4897,11 +4885,6 @@ public func zkpReqMatch(queryJson: String, clientMetadataJson: String, credentia
  * # Errors
  *
  * [`ZkpReqError`]: what fails, with the Section 9 codes.
- *
- * # Panics
- *
- * When `secret_seed` is not 16 bytes, `credential` is not the candidate's, or the query has
- * `trusted_authorities` and `anchors` is `None`.
  */
 public func zkpReqPrepare(candidate: FfiCandidate, queryJson: String, clientMetadataJson: String, session: FfiSession, credential: FfiStoredCredential, secretSeed: Data, anchors: [Data]?, now: Int64)throws  -> FfiPrepared {
     return try  FfiConverterTypeFfiPrepared.lift(try rustCallWithError(FfiConverterTypeZkpReqError.lift) {
@@ -4925,11 +4908,7 @@ public func zkpReqPrepare(candidate: FfiCandidate, queryJson: String, clientMeta
  * # Errors
  *
  * [`ZkpReqError::InvalidRequest`] for a rule of the policy or of the verifier identity, and
- * [`ZkpReqError::Host`] for a thumbprint that is not 32 bytes.
- *
- * # Panics
- *
- * When the thumbprint is of no key in the request.
+ * [`ZkpReqError::Host`] for a thumbprint that is not 32 bytes or of no key in the request.
  */
 public func zkpReqSession(requestObjectJson: String, signed: Bool, channel: FfiChannel, jwkThumbprint: Data, verifierId: FfiVerifierIdForm)throws  -> FfiSession {
     return try  FfiConverterTypeFfiSession.lift(try rustCallWithError(FfiConverterTypeZkpReqError.lift) {
@@ -5023,13 +5002,13 @@ private var initializationResult: InitializationResult = {
     if (uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_jwk_thumbprint() != 44324) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_match() != 30181) {
+    if (uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_match() != 50997) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_prepare() != 63902) {
+    if (uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_prepare() != 12649) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_session() != 479) {
+    if (uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_session() != 45790) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_verify() != 17520) {
@@ -5047,7 +5026,7 @@ private var initializationResult: InitializationResult = {
     if (uniffi_siros_dc_matcher_ffi_checksum_method_ffiprepared_data_to_sign() != 20262) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_siros_dc_matcher_ffi_checksum_method_ffiprepared_job() != 16846) {
+    if (uniffi_siros_dc_matcher_ffi_checksum_method_ffiprepared_job() != 17581) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_siros_dc_matcher_ffi_checksum_method_ffiprepared_key_id() != 33064) {

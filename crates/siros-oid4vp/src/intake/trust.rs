@@ -112,15 +112,6 @@ impl TrustAnswer {
 }
 
 /// The verdict on a subject whose key the request carries or the request is unsigned.
-///
-/// # Panics
-///
-/// When the host's answer carries a key or Verifier metadata.
-#[expect(
-    clippy::panic,
-    reason = "the lookup asks for a verdict only; a key or metadata in the answer is a bug of \
-              the host, and no request verified on it can be trusted"
-)]
 pub(super) fn verdict(
     answers: &mut Answers<'_>,
     subject: TrustSubject,
@@ -128,7 +119,7 @@ pub(super) fn verdict(
 ) -> Result<Verdict, Halt> {
     let answer = answers.trust(Trust { subject, key })?;
     if answer.key.is_some() || answer.metadata.is_some() {
-        panic!("the host answered a verdict lookup with a key or Verifier metadata");
+        return Err(Halt::HostFault(IntakeError::UnexpectedTrustKey));
     }
     Ok(answer.trusted)
 }
@@ -139,7 +130,7 @@ pub(super) fn verdict(
 pub(super) enum MetadataAnswer {
     /// The answer may carry Verifier metadata.
     Taken,
-    /// An answer with Verifier metadata is a bug of the host.
+    /// An answer with Verifier metadata is a host fault.
     Refused,
 }
 
@@ -151,16 +142,6 @@ pub(super) struct Resolved {
 }
 
 /// The verdict and the resolved key of `subject`.
-///
-/// # Panics
-///
-/// When the host's answer carries Verifier metadata and `metadata` refuses it.
-#[expect(
-    clippy::panic,
-    reason = "only an `openid_federation` client's lookup asks for Verifier metadata; metadata \
-              in another answer is a bug of the host, and no request verified on it can be \
-              trusted"
-)]
 pub(super) fn resolve(
     answers: &mut Answers<'_>,
     subject: TrustSubject,
@@ -173,7 +154,7 @@ pub(super) fn resolve(
         key: KeyMaterial::Resolve { kid, trust_chain },
     })?;
     if answer.metadata.is_some() && metadata == MetadataAnswer::Refused {
-        panic!("the host answered a key lookup with Verifier metadata it did not ask for");
+        return Err(Halt::HostFault(IntakeError::UnexpectedTrustKey));
     }
     let key = answer
         .key

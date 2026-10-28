@@ -53,3 +53,6 @@ serde_json = { workspace = true }
 sha2 = { version = "0.10.9", features = ["oid"] }
 siros-codec = { workspace = true }
 x509-cert = { version = "0.2.5", default-features = false, features = ["std", "builder"] }
+
+[lints]
+workspace = true

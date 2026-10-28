@@ -17,3 +17,6 @@ sha2 = "0.10.9"
 siros-codec = { workspace = true }
 siros-dcql = { workspace = true }
 thiserror = { workspace = true }
+
+[lints]
+workspace = true

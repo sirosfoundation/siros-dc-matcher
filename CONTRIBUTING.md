@@ -81,6 +81,16 @@ uniffi's bindgen chain and wasmtime need it — and neither ships in the picker.
 The `proving/` workspace holds 1.95. If you raise a floor, raise it in the manifest that owns it and say
 why there.
 
+Only the DC API matcher panics: `android-credman-sys`, `android-credman` and
+`siros-dc-matcher-wasm`, where Credential Manager shows nothing on a trap.
+Each of their panics carries an `#[expect(..., reason)]` that says why it
+cannot recover. A test host runs the matcher in the tests, and its code is
+test code. In every other crate a panic crashes the wallet, so nothing
+panics outside the tests: a type makes the impossible state unrepresentable,
+or the caller receives an error. CI holds each crate to it with clippy and
+`scripts/check_panic_sites.py`, which fails on a new crate until its root
+denies the panic lints outside the tests, as the other roots do.
+
 ## Changelog
 
 Changes that a user or a downstream consumer would notice go in

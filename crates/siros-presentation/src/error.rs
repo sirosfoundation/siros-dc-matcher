@@ -3,12 +3,12 @@
 
 use siros_credential::EntryRef;
 use siros_display::DisplayError;
-use siros_oid4vp::{ErrorCode, ResponseError};
+use siros_oid4vp::{ErrorCode, HttpsUrl, ResponseError};
 use siros_sdjwt::KeyBindingError;
 use siros_transaction_data::TransactionDataError;
 use siros_zkp_req_nym_auth::presenter::{ProveError, Unanswerable};
 
-use crate::ids::{AdditionIndex, OfferIndex, SetIndex};
+use crate::ids::{AdditionIndex, CandidateIndex, OfferIndex, QueryIndex, SetIndex};
 use crate::matching::{AskedError, ChoiceError, Failure};
 use crate::plan::{DigestError, EntryPosition, Unproven};
 use crate::respond::{PickError, SignatureError, SubsetError};
@@ -67,6 +67,10 @@ pub enum PresentationError {
     Time,
     /// The request names its audience neither by an origin nor by a Client Identifier.
     AudienceMissing,
+    /// The host answered a fetch of this URL twice.
+    FetchRepeated(HttpsUrl),
+    /// The plan contradicts itself.
+    Inconsistent(#[from] Inconsistency),
     /// A proof choice gives no option or usable pair of its query.
     Choice(#[from] ChoiceError),
     /// A nym_auth credential no longer passes its tests, or its seed does not open.
@@ -83,6 +87,35 @@ pub enum PresentationError {
     Signature(#[from] SignatureError),
     /// The `vp_token` or its submission could not be built. The code is its own.
     Response(#[from] ResponseError),
+}
+
+/// How a plan contradicts itself: a position or an answer that a list of the plan lacks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
+pub enum Inconsistency {
+    /// A member names a query the matching lacks.
+    Query(QueryIndex),
+    /// A member names a candidate its query lacks.
+    Candidate(QueryIndex, CandidateIndex),
+    /// A proof answers a query without a nym_auth query.
+    ZkpQuery(QueryIndex),
+    /// A binding names an entry the request lacks.
+    Entry,
+    /// A binding names a credential the offer lacks.
+    BoundCredential,
+}
+
+impl Inconsistency {
+    /// A stable identifier.
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Query(_) => "plan_query_unknown",
+            Self::Candidate(..) => "plan_candidate_unknown",
+            Self::ZkpQuery(_) => "plan_zkp_query_missing",
+            Self::Entry => "plan_entry_unknown",
+            Self::BoundCredential => "plan_bound_credential_unknown",
+        }
+    }
 }
 
 impl PresentationError {
@@ -110,6 +143,8 @@ impl PresentationError {
             Self::HolderKeyMissing => "holder_key_missing",
             Self::Time => "time_before_epoch",
             Self::AudienceMissing => "audience_missing",
+            Self::FetchRepeated(_) => "fetch_repeated",
+            Self::Inconsistent(e) => e.code(),
             Self::Choice(e) => e.code(),
             Self::Unproven(e) => e.code(),
             Self::Unanswerable(e) => e.code(),
@@ -149,6 +184,8 @@ impl PresentationError {
             | Self::HolderKeyMissing
             | Self::Time
             | Self::AudienceMissing
+            | Self::FetchRepeated(_)
+            | Self::Inconsistent(_)
             | Self::Choice(_)
             | Self::Unproven(_)
             | Self::Unanswerable(_)

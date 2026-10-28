@@ -16,7 +16,7 @@ commit `e65861c`), and adds the components of the SIROS wallet core.
 **Breaking**: requests and presentations follow the draft, the FFI loses `zkp_req_plan`, and the
 vectors move to the crates that own their rules. Consumers that keep a copy of the vectors
 (siros-sdk-kotlin, siros-sdk-swift) must re-copy them from the new directories; the vector set
-digest below identifies them. `matcher.wasm` is 299,514 bytes
+digest below identifies them. `matcher.wasm` is 299,969 bytes
 against the 307,200-byte budget (303,418 at v0.11.0).
 
 ### Changed
@@ -39,13 +39,6 @@ against the 307,200-byte budget (303,418 at v0.11.0).
   (16 before).
 - **BREAKING (FFI):** `zkp_req_plan` and `ZkpReqPlanError` are removed. Bindings are
   regenerated.
-- **BREAKING (FFI):** the `zkp_req` functions panic on a host input that breaks their
-  contract, where they returned `ZkpReqError::Host`: no anchors for a query with
-  `trusted_authorities` (`anchors_missing`), a secret seed of other than 16 bytes
-  (`seed_length`), a credential other than the candidate's (`credential_mismatch`), a device
-  signature of other than 64 bytes (`signature_length`), and a JWK thumbprint of no key in the
-  request (`thumbprint_not_in_request`). Those codes are gone. UniFFI raises the panic as an
-  internal error; the browser presenter traps.
 - The matcher calls the host through the new `android-credman-sys` and
   `android-credman` crates (MIT OR Apache-2.0, from
   APTITUDE-Consortium/dcapi-matcher). `crates/android-credman-sys/ABI.md`
@@ -83,6 +76,34 @@ against the 307,200-byte budget (303,418 at v0.11.0).
   `IntakeError`, `InvalidRequest`, `MdocError`, `PresentationError`, `ProveError`,
   `QueryRefusal`, `Rejection`, `RequestRefusal`, `ResponseError`, `TransactionDataError`,
   `Unproven`, `Unusable`, `WalletStateError` and `ZkpRefusal`.
+- Only the DC API matcher panics. `siros-dcql` turns one dial per query to
+  enumerate an option's combinations, where it divided by each query's
+  candidate count. The test host writes the calling-app fields and finds a
+  captured entry without indexing or `copy_from_slice`.
+- `CapabilitiesError` is an enum: `Json` holds the `serde_json::Error` as its
+  source, and `Schema` holds the `SchemaViolation` with the reason the text
+  carried before.
+- The wallet core returns an error where a broken contract panicked:
+  - `siros-presentation`: `PresentationError::Inconsistent` with `Inconsistency`
+    (`plan_query_unknown`, `plan_candidate_unknown`, `plan_zkp_query_missing`,
+    `plan_entry_unknown`, `plan_bound_credential_unknown`) for a plan that contradicts
+    itself, and `PresentationError::FetchRepeated` (`fetch_repeated`) for a fetch the host
+    answers twice.
+  - `siros-oid4vp`: `IntakeError::AnswerMismatch`, `UnexpectedTrustKey` and `UnusedAnswer`
+    for a host that breaks intake's effect protocol.
+  - `siros-zkp-req-nym-auth`: `HostError::AnchorsMissing`, `SeedLength`, `SignatureLength`
+    and `CredentialMismatch`, `KeyNotInRequest` from `CheckedRequest::handover`, and
+    `Unanswerable::ProofDate`, for a host that breaks the presenter's contract. The FFI's
+    `ZkpReqError::Host` and the browser presenter's `{kind: "host"}` carry the codes
+    `anchors_missing`, `seed_length`, `credential_mismatch`, `signature_length` and
+    `thumbprint_not_in_request`. Bindings are regenerated.
+- `siros-mdoc`'s `P256Key::sec1`, `siros-transaction-data`'s member lookup,
+  `siros-presentation`'s seed opening and `siros-dc-matcher-core`'s
+  `ZkpReqSelection::to_json` have no panic path.
+- The proof backends' `ArtifactError` holds its cause as its source: `Decompress` zstd's
+  `io::Error`, `Circuits` and `Shapes` the zk-cred-longfellow and zk-cred-vega errors; it
+  drops `Clone`, `PartialEq` and `Eq`. `EncodingError::Cbor` shows its source's text once in
+  a cause chain.
 
 ### Fixed
 
@@ -261,6 +282,12 @@ against the 307,200-byte budget (303,418 at v0.11.0).
   exports. CI and the release job run it.
 - `clippy.toml` forbids std's `HashMap`, `HashSet` and `RandomState` in the
   crates that link into `matcher.wasm`.
+- Each crate root but the matcher's and the test host's denies clippy's panic
+  lints outside the tests, and `clippy.toml` names the std methods that panic on an argument
+  and share their name with a method that does not.
+  `scripts/check_panic_sites.py` fails on a root without the lints and on an
+  `allow` of them outside the tests, and finds the panics no lint covers. CI
+  runs both.
 
 ### Removed
 

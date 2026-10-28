@@ -182,15 +182,19 @@ impl ZkpReqSelection<'_> {
     /// `_req_sets`. Everything comes from the unauthenticated request; the wallet checks it.
     #[must_use]
     pub fn to_json(&self) -> Value {
-        let mut out = serde_json::json!({
-            "circuit": self.capability,
-            "proof_backend": self.proof_backend,
-            "items": self.option.items,
-        });
-        if let Some(req_set) = self.option.req_set {
-            out["req_set"] = req_set.into();
+        match self.option.req_set {
+            Some(req_set) => serde_json::json!({
+                "circuit": self.capability,
+                "proof_backend": self.proof_backend,
+                "req_set": req_set,
+                "items": self.option.items,
+            }),
+            None => serde_json::json!({
+                "circuit": self.capability,
+                "proof_backend": self.proof_backend,
+                "items": self.option.items,
+            }),
         }
-        out
     }
 }
 

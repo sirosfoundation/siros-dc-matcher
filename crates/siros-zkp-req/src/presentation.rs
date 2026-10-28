@@ -42,7 +42,7 @@ impl Member {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum EncodingError {
     /// Not one CBOR item the strict reader accepts.
-    #[error("{0}")]
+    #[error(transparent)]
     Cbor(#[from] CborError),
     /// The item is not a map.
     #[error("not a CBOR map")]

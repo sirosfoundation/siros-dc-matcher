@@ -35,8 +35,16 @@ pub const MAX_ZK_PROOF: usize = 1 << 20;
 pub enum HostError {
     /// `now` lies outside 0000-01-01T00:00:00Z to 9999-12-31T23:59:59Z.
     Time,
+    /// The query names trusted authorities and the host passed no anchors for them.
+    AnchorsMissing,
+    /// The secret seed is not 16 bytes.
+    SeedLength,
+    /// The device signature is not 64 bytes, `r ‖ s`.
+    SignatureLength,
     /// The candidate names an option, system or proof backend `match` does not give.
     CandidateMismatch,
+    /// The credential is not the candidate's.
+    CredentialMismatch,
 }
 
 impl HostError {
@@ -44,7 +52,11 @@ impl HostError {
     pub fn code(self) -> &'static str {
         match self {
             Self::Time => "time",
+            Self::AnchorsMissing => "anchors_missing",
+            Self::SeedLength => "seed_length",
+            Self::SignatureLength => "signature_length",
             Self::CandidateMismatch => "candidate_mismatch",
+            Self::CredentialMismatch => "credential_mismatch",
         }
     }
 }
@@ -101,23 +113,14 @@ fn plan_option<'q>(
 }
 
 /// The anchors to check the issuer against: required when the query names authorities.
-///
-/// # Panics
-///
-/// When the query names authorities and the host passed no anchors.
-#[expect(
-    clippy::panic,
-    reason = "MatchInput and ProveInput require anchors when the query has \
-              `trusted_authorities`; none is a bug of the host, and the issuer could not be \
-              checked against the authorities the query names"
-)]
-fn anchors_for<'a>(query: &NymAuthQuery, anchors: Option<&'a [Vec<u8>]>) -> Option<&'a [Vec<u8>]> {
+fn anchors_for<'a>(
+    query: &NymAuthQuery,
+    anchors: Option<&'a [Vec<u8>]>,
+) -> Result<Option<&'a [Vec<u8>]>, HostError> {
     match (&query.query().trusted_authorities, anchors) {
-        (None, _) => None,
-        (Some(_), Some(anchors)) => Some(anchors),
-        (Some(_), None) => {
-            panic!("the query names trusted authorities and the host passed no anchors")
-        }
+        (None, _) => Ok(None),
+        (Some(_), Some(anchors)) => Ok(Some(anchors)),
+        (Some(_), None) => Err(HostError::AnchorsMissing),
     }
 }
 

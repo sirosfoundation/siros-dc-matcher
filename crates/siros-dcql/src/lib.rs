@@ -23,7 +23,21 @@
 
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
-#![deny(clippy::unwrap_used, clippy::expect_used)]
+// Nothing panics outside the tests. scripts/check_panic_sites.py refuses an
+// allow of these lints there and finds the panics they cannot see.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::panic,
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::unreachable,
+        clippy::todo,
+        clippy::unimplemented,
+        clippy::indexing_slicing,
+        clippy::disallowed_methods
+    )
+)]
 
 pub mod eval;
 pub mod id;

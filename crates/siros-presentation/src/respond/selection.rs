@@ -5,7 +5,7 @@ use siros_dcql::QueryId;
 use siros_wallet_state::CredentialId;
 
 use crate::display_rule::WalletDisplay;
-use crate::error::PresentationError;
+use crate::error::{Inconsistency, PresentationError};
 use crate::ids::{AdditionIndex, CandidateIndex, OfferIndex, QueryIndex};
 use crate::offers::{Addition, Member, Offer};
 use crate::plan::{PlanDigest, Planned};
@@ -143,7 +143,7 @@ impl<'a> Planned<'a> {
                 .chain(added.iter_mut())
                 .find(|member| member.query() == query)
                 .ok_or_else(|| PresentationError::SubsetMember(subset.query.clone()))?;
-            let held = self.held(member);
+            let held = self.held(member)?;
             *member = chosen(member, &held, &subset.credentials)?;
         }
         self.keeps_bound_credentials(offer, &members)?;
@@ -205,15 +205,20 @@ impl<'a> Planned<'a> {
     /// Each candidate of `member`, a member of the plan, with the `credentialId` of its
     /// credential.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// When `member` names a query or a candidate the matching lacks.
-    pub(super) fn held(&self, member: &Member) -> Vec<(CandidateIndex, CredentialId)> {
-        crate::plan::offered(&self.answered, std::slice::from_ref(member))
-            .into_iter()
-            .flat_map(|offered| offered.candidates)
-            .map(|(index, c)| (index, c.credential().credential().entry().credential_id()))
-            .collect()
+    /// [`Inconsistency`] when `member` names a query or a candidate the matching lacks.
+    pub(super) fn held(
+        &self,
+        member: &Member,
+    ) -> Result<Vec<(CandidateIndex, CredentialId)>, Inconsistency> {
+        Ok(
+            crate::plan::offered(&self.answered, std::slice::from_ref(member))?
+                .into_iter()
+                .flat_map(|offered| offered.candidates)
+                .map(|(index, c)| (index, c.credential().credential().entry().credential_id()))
+                .collect(),
+        )
     }
 
     /// Checks that `members` keep every credential a transaction entry of `offer` binds to, so
@@ -223,7 +228,7 @@ impl<'a> Planned<'a> {
         offer: &Offer,
         members: &[Member],
     ) -> Result<(), PresentationError> {
-        let chosen = crate::plan::offered(&self.answered, members);
+        let chosen = crate::plan::offered(&self.answered, members)?;
         for (bound, binding) in self.transactions.bind(&self.answered, offer.members())? {
             let kept = chosen.iter().any(|member| {
                 member
@@ -240,7 +245,7 @@ impl<'a> Planned<'a> {
                 )]
                 let entry = self
                     .transactions
-                    .positions(&binding)
+                    .positions(&binding)?
                     .first()
                     .copied()
                     .expect("a binding binds at least one entry");

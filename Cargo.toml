@@ -66,6 +66,11 @@ itertools = "0.12.1"
 # Every error type derives `Display` and `Error` with it.
 thiserror = "2"
 
+# clippy.toml names the std methods that panic on an argument. The tests may
+# call them; each crate root denies them outside its tests.
+[workspace.lints.clippy]
+disallowed_methods = "allow"
+
 # Host and mobile builds. Unwinding, deliberately: UniFFI turns panics into
 # errors with `catch_unwind`, which cannot work without it — an aborting build
 # silently removes the error handling the generated bindings appear to provide,

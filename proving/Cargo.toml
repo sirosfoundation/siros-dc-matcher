@@ -34,6 +34,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ciborium = "0.2"
 
+# clippy.toml names the std methods that panic on an argument. The tests may
+# call them; each crate root denies them outside its tests.
+[workspace.lints.clippy]
+disallowed_methods = "allow"
+
 # Proving speed matters in the browser. The real-proof tests run with --release.
 [profile.release]
 opt-level = 3

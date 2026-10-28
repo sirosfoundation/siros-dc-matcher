@@ -4,7 +4,7 @@ use siros_dcql::QueryId;
 use siros_wallet_state::CredentialId;
 
 use super::selection::{Selection, Subset};
-use crate::error::PresentationError;
+use crate::error::{Inconsistency, PresentationError};
 use crate::ids::{AdditionIndex, OfferIndex, QueryIndex};
 use crate::offers::{Addition, Member};
 use crate::plan::Planned;
@@ -139,7 +139,7 @@ impl Planned<'_> {
                 Some(named) => named,
                 None => return Err(PickError::Missing(self.query_id(member.query())).into()),
             };
-            named.held_in(&self.ids([member]))?;
+            named.held_in(&self.ids([member])?)?;
             subsets.extend(self.subset(named));
         }
         let left: Vec<&Picked> = picked
@@ -158,7 +158,7 @@ impl Planned<'_> {
         }
         let mut fitting: Vec<(AdditionIndex, &Addition)> = Vec::new();
         for (index, addition) in additions {
-            if self.fits(addition, &left) {
+            if self.fits(addition, &left)? {
                 fitting.push((index, addition));
             }
         }
@@ -194,12 +194,19 @@ impl Planned<'_> {
     }
 
     /// The `credentialId`s of the candidates of `members`.
-    fn ids<'m>(&self, members: impl IntoIterator<Item = &'m Member>) -> Vec<CredentialId> {
-        members
-            .into_iter()
-            .flat_map(|member| self.held(member))
-            .map(|(_, id)| id)
-            .collect()
+    ///
+    /// # Errors
+    ///
+    /// [`Inconsistency`] when a member names a query or a candidate the matching lacks.
+    fn ids<'m>(
+        &self,
+        members: impl IntoIterator<Item = &'m Member>,
+    ) -> Result<Vec<CredentialId>, Inconsistency> {
+        let mut ids = Vec::new();
+        for member in members {
+            ids.extend(self.held(member)?.into_iter().map(|(_, id)| id));
+        }
+        Ok(ids)
     }
 
     /// Checks that the members of `additions` that answer the query of `picks` hold each of its
@@ -217,17 +224,25 @@ impl Planned<'_> {
         if members.is_empty() {
             return Err(PickError::Query(picks.id.clone()).into());
         }
-        Ok(picks.held_in(&self.ids(members))?)
+        Ok(picks.held_in(&self.ids(members)?)?)
     }
 
     /// Whether the picks `left` name a credential of each member of `addition`, and only
     /// credentials the member holds for its query.
-    fn fits(&self, addition: &Addition, left: &[&Picked]) -> bool {
-        addition.members().iter().all(|member| {
-            left.iter()
-                .find(|picked| picked.query == member.query())
-                .is_some_and(|picks| picks.held_in(&self.ids([member])).is_ok())
-        })
+    ///
+    /// # Errors
+    ///
+    /// [`Inconsistency`] when a member names a query or a candidate the matching lacks.
+    fn fits(&self, addition: &Addition, left: &[&Picked]) -> Result<bool, Inconsistency> {
+        for member in addition.members() {
+            let Some(picks) = left.iter().find(|picked| picked.query == member.query()) else {
+                return Ok(false);
+            };
+            if picks.held_in(&self.ids([member])?).is_err() {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     /// The subset of `picks` when they answer a `multiple` Credential Query.

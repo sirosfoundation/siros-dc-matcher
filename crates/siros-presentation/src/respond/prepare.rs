@@ -93,8 +93,8 @@ impl<'p, 'a> Chosen<'p, 'a> {
         let bindings = planned
             .transactions
             .bind(&planned.answered, self.offer.members())?;
-        let offer = crate::plan::offered(&planned.answered, &self.members);
-        let added = crate::plan::offered(&planned.answered, &self.added);
+        let offer = crate::plan::offered(&planned.answered, &self.members)?;
+        let added = crate::plan::offered(&planned.answered, &self.added)?;
         let mut signs = Vec::new();
         // The bindings name credentials of the offer's members; the additions' carry none.
         let members = offer
