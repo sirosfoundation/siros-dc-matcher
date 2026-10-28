@@ -37,28 +37,29 @@ impl ProjectionMember {
 }
 
 /// Why a text is no projection.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum ProjectionError {
     /// The text is no JSON document the strict reader holds.
-    Json(JsonFault),
+    Json(#[source] JsonFault),
     /// The document is no object.
     NotObject,
     /// A member is absent or of the wrong type.
-    Member(ProjectionMember, MemberFault),
+    Member(ProjectionMember, #[source] MemberFault),
     /// The projection has this member, which it does not define.
     MemberUnknown(String),
     /// `language` is no language tag.
-    Language(LocaleError),
+    Language(#[source] LocaleError),
     /// `source` names no source.
     Source(String),
     /// `rulebook` names no rulebook.
     Rulebook(String),
     /// `definition` breaks PaSO Proof Metadata, Section 3, under the rules of its source.
-    Definition(DefinitionError),
+    Definition(#[source] DefinitionError),
     /// This localised array holds other than one entry.
-    EntryCount(Unmatched),
+    EntryCount(#[source] Unmatched),
     /// The one entry of this array is not the one the locale function takes for `language`.
-    Unmatched(Unmatched),
+    Unmatched(#[source] Unmatched),
 }
 
 impl ProjectionError {
@@ -78,10 +79,6 @@ impl ProjectionError {
         }
     }
 }
-
-siros_codec::display_code!(ProjectionError);
-
-impl std::error::Error for ProjectionError {}
 
 impl Projected {
     /// The projection of the JSON text `text`: `language`, `source`, `rulebook`, and a

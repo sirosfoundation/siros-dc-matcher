@@ -50,7 +50,8 @@ pub enum Ts12Member {
 }
 
 /// Why TS12 type metadata gives no definition of a type (Sections 3.2, 3.3 and 4.1).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum Ts12Fault {
     /// The credential's `vct#integrity` or a `transaction_data_types[…]#integrity` claim is no
     /// integrity metadata this wallet reads (SD-JWT VC, Section 7): its claims path processing
@@ -66,13 +67,13 @@ pub enum Ts12Fault {
     /// entry references.
     Absent(HttpsUrl),
     /// A document's bytes are no UTF-8 text.
-    NotUtf8(Utf8Error),
+    NotUtf8(#[source] Utf8Error),
     /// A document's text is no JSON document the strict reader holds.
-    NotJson(JsonFault),
+    NotJson(#[source] JsonFault),
     /// A document does not match its `#integrity` claim (SD-JWT VC, Section 7).
-    Integrity(IntegrityFault),
+    Integrity(#[source] IntegrityFault),
     /// A member breaks its rule.
-    Member(Ts12Member, MemberFault),
+    Member(Ts12Member, #[source] MemberFault),
     /// The document describes another `vct` than the credential's (SD-JWT VC, Section 6.3).
     VctMismatch,
     /// An entry gives both or neither of a member and its `_uri` form (Section 4.1).
@@ -91,7 +92,7 @@ pub enum Ts12Fault {
     /// The catalogue has no `affirmative_action_label` (Section 3.3.3).
     AffirmativeAbsent,
     /// The mapped definition breaks PaSO Proof Metadata, Section 3.
-    Definition(DefinitionError),
+    Definition(#[source] DefinitionError),
 }
 
 impl Ts12Fault {
@@ -118,10 +119,6 @@ impl Ts12Fault {
         }
     }
 }
-
-siros_codec::display_code!(Ts12Fault);
-
-impl std::error::Error for Ts12Fault {}
 
 /// The transaction metadata of a credential's type metadata: its `transaction_data_types`
 /// entries, every type the credential supports (Section 3.2, steps 1 and 2). Type metadata of

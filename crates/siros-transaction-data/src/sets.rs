@@ -12,7 +12,8 @@ siros_codec::position!(
 );
 
 /// Why the credential sets of a request break PaSO Core, Section 7.4.1.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum SetsFault {
     /// This targeted Credential Query appears in the options of no credential set, or of
     /// another set than the first targeted query's.
@@ -35,10 +36,6 @@ impl SetsFault {
         }
     }
 }
-
-siros_codec::display_code!(SetsFault);
-
-impl std::error::Error for SetsFault {}
 
 /// Checks the credential sets of `query` against the queries `entries` target: without
 /// `credential_sets` every query is required together, which holds. With them, one set's

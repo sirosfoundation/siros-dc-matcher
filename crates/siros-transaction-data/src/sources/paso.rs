@@ -20,12 +20,13 @@ const TYP: &str = "credential-metadata+jwt";
 
 /// Why a credential's signed credential metadata is invalid. The credential is then excluded
 /// from PaSO processing (Section 7).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum CredentialMetadataFault {
     /// The host holds no JWT for the credential's configuration.
     NotHeld,
     /// The JWT is invalid (Section 7).
-    Invalid(SignedFault),
+    Invalid(#[source] SignedFault),
     /// `transaction_data_types` has a member with an empty name.
     TypeEmpty,
     /// The JWT's `credential_metadata_uri` claim holds this text, which differs from the URL
@@ -45,10 +46,6 @@ impl CredentialMetadataFault {
         }
     }
 }
-
-siros_codec::display_code!(CredentialMetadataFault);
-
-impl std::error::Error for CredentialMetadataFault {}
 
 /// The transaction data types of a verified signed credential metadata JWT, each with its
 /// definition or why the definition breaks Section 3.

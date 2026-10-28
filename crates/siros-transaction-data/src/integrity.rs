@@ -15,7 +15,8 @@ pub struct Integrity {
 }
 
 /// Why integrity metadata refuses a document.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum IntegrityFault {
     /// The metadata has no expression of SHA-256, SHA-384 or SHA-512, or one whose value is
     /// not the base64 of a digest of its algorithm.
@@ -34,10 +35,6 @@ impl IntegrityFault {
         }
     }
 }
-
-siros_codec::display_code!(IntegrityFault);
-
-impl std::error::Error for IntegrityFault {}
 
 impl Integrity {
     /// The integrity metadata `text`: whitespace-separated `alg-base64` expressions, each with

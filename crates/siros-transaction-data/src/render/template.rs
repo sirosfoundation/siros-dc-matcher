@@ -11,7 +11,8 @@ use crate::projection::ProjectedClaim;
 use crate::view::Segment;
 
 /// Why a template does not interpolate. The entry is then not compatible.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum TemplateFault {
     /// The placeholder names the claim at this position, which is an `image`, a `label_only`
     /// or a `template:` claim.
@@ -21,7 +22,7 @@ pub enum TemplateFault {
     /// The claim at this position has no value type, and its value is no string.
     NotString(ClaimIndex),
     /// The string of the claim at this position, which has no value type, breaks a rule.
-    Value(ClaimIndex, ValueFault),
+    Value(ClaimIndex, #[source] ValueFault),
     /// The claim at this position is absent from the payload: the locale entry is discarded,
     /// and no other locale is left.
     Absent(ClaimIndex),
@@ -40,10 +41,6 @@ impl TemplateFault {
         }
     }
 }
-
-siros_codec::display_code!(TemplateFault);
-
-impl std::error::Error for TemplateFault {}
 
 /// What a template reads: the claims, the payload and its typed values.
 pub(super) struct Sources<'s> {

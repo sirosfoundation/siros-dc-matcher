@@ -26,7 +26,8 @@ pub(crate) use values::{scalar, typed};
 pub(crate) const INTEGRITY_SUFFIX: &str = "#integrity";
 
 /// Why a payload does not conform to a definition.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum PayloadFault {
     /// The field at this location is covered by no claim's `path` (Core, Section 7.4.2).
     Uncovered(Location),
@@ -38,25 +39,26 @@ pub enum PayloadFault {
     MandatoryAbsent(ClaimIndex),
     /// Processing the `path` of the claim at this position aborts (OpenID4VP 1.0, Section
     /// 7.1.1).
-    Path(ClaimIndex, PathError),
+    Path(ClaimIndex, #[source] PathError),
     /// The value at this location of the claim at this position does not conform to its value
     /// type.
-    Value(ClaimIndex, Location, ValueFault),
+    Value(ClaimIndex, Location, #[source] ValueFault),
     /// The string at this location breaks a directional rule (Proof Metadata, Section 3.3).
-    Text(Location, TextFault),
+    Text(Location, #[source] TextFault),
 }
 
 /// Why a value does not conform to its claim's value type (PaSO View, Section 3).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum ValueFault {
     /// A value without a value type, or of a string type, is no string.
     NotString,
     /// The value is no value of this type.
     Type(crate::definition::BaseType),
     /// The image reference breaks a rule.
-    Image(ImageFault),
+    Image(#[source] ImageFault),
     /// The string breaks a directional rule (Proof Metadata, Section 3.3).
-    Text(TextFault),
+    Text(#[source] TextFault),
 }
 
 impl PayloadFault {
@@ -86,10 +88,6 @@ impl ValueFault {
         }
     }
 }
-
-siros_codec::display_code!(PayloadFault, ValueFault);
-
-impl std::error::Error for PayloadFault {}
 
 /// The typed value of each displayed claim instance of a payload, by location.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

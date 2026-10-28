@@ -106,7 +106,8 @@ impl Factor {
 }
 
 /// The authentication factors cover fewer than two categories (EC TS12 v1.0.1, Section 3.6).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub struct AmrCategories;
 
 impl AmrCategories {
@@ -116,10 +117,6 @@ impl AmrCategories {
         "transaction_data_amr_categories"
     }
 }
-
-siros_codec::display_code!(AmrCategories);
-
-impl std::error::Error for AmrCategories {}
 
 /// The factors of a signing key, at least two categories among them.
 #[derive(Debug, Clone, PartialEq, Eq)]

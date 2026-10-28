@@ -11,14 +11,15 @@ use siros_trust::Certificate;
 use crate::json::{self, Fields};
 
 /// Why a text is no JWS this wallet verifies.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum JwsFault {
     /// The text is not three dot-separated segments.
     Segments,
     /// A segment is no unpadded base64url.
-    Encoding(Base64Error),
+    Encoding(#[source] Base64Error),
     /// The protected header or the payload is no JSON document the strict reader holds.
-    Json(JsonFault),
+    Json(#[source] JsonFault),
     /// The protected header or the payload is no JSON object.
     NotObject,
     /// `alg` is absent, or names no algorithm of ES256 and ES384.
@@ -42,10 +43,6 @@ impl JwsFault {
         }
     }
 }
-
-siros_codec::display_code!(JwsFault);
-
-impl std::error::Error for JwsFault {}
 
 /// A JWS: its protected header, its payload, and the signature over both.
 pub(crate) struct Jws {
@@ -127,7 +124,8 @@ fn object(segment: &str) -> Result<Fields, JwsFault> {
 }
 
 /// Why a JWK is no EC public key this wallet verifies with.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum JwkFault {
     /// `kty` is not `EC`, or `crv` neither `P-256` nor `P-384`.
     KeyType,
@@ -148,10 +146,6 @@ impl JwkFault {
         }
     }
 }
-
-siros_codec::display_code!(JwkFault);
-
-impl std::error::Error for JwkFault {}
 
 impl VerifyingKey {
     /// The key of `certificate`'s subject, when it is a P-256 or P-384 key.

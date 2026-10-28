@@ -29,13 +29,14 @@ pub const MAX_ITEMS: usize = 200;
 
 /// Why an entry cannot render in full. The entry is then not compatible (PaSO View, Section
 /// 2).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum RenderFault {
     /// A template does not interpolate.
-    Template(TemplateFault),
+    Template(#[source] TemplateFault),
     /// The interpolated label of the claim at this position, or of a UI element, breaks a rule
     /// of PaSO Proof Metadata, Section 3.3.
-    Label(Option<ClaimIndex>, TextFault),
+    Label(Option<ClaimIndex>, #[source] TextFault),
     /// The view would show this many items, more than [`MAX_ITEMS`].
     TooManyItems(usize),
     /// A TS12 leaf parameter at this location has no localised name, and its level is not 4
@@ -45,7 +46,7 @@ pub enum RenderFault {
     AffirmativeAbsent,
     /// The interpolated value of the claim at this location is no value of the template's
     /// inner type.
-    Value(Location, ValueFault),
+    Value(Location, #[source] ValueFault),
 }
 
 impl RenderFault {
@@ -62,10 +63,6 @@ impl RenderFault {
         }
     }
 }
-
-siros_codec::display_code!(RenderFault);
-
-impl std::error::Error for RenderFault {}
 
 /// A displayed claim instance: the claim, its display entry, its location, the array positions
 /// its `null`s took, and its value.

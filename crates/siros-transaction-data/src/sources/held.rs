@@ -116,7 +116,8 @@ impl Renewal {
 }
 
 /// Why the host's metadata does not read.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum HeldError {
     /// Two JWTs are held for this credential configuration.
     JwtRepeated(IssuerIdentifier, ConfigurationId),
@@ -134,10 +135,6 @@ impl HeldError {
         }
     }
 }
-
-siros_codec::display_code!(HeldError);
-
-impl std::error::Error for HeldError {}
 
 /// The metadata the host holds: a signed credential metadata JWT per credential configuration,
 /// and documents by URL.
@@ -300,12 +297,13 @@ pub enum Wanted {
 }
 
 /// Why the documents a held document references are unknown.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum WantedFault {
     /// The held Type Metadata does not read.
-    TypeMetadata(Ts12Fault),
+    TypeMetadata(#[source] Ts12Fault),
     /// The held JWT VC Issuer Metadata does not read.
-    KeySet(KeySetFault),
+    KeySet(#[source] KeySetFault),
 }
 
 impl WantedFault {
@@ -318,7 +316,3 @@ impl WantedFault {
         }
     }
 }
-
-siros_codec::display_code!(WantedFault);
-
-impl std::error::Error for WantedFault {}

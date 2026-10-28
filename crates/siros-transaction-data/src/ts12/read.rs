@@ -25,10 +25,11 @@ impl MemberPath {
 
 /// Why a payload breaks the schema of its EC TS12 v1.0.1 type, or a rule of Sections 4.3.1 to
 /// 4.3.4.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum Ts12PayloadFault {
     /// A member is absent or has the wrong JSON type.
-    Member(MemberPath, MemberFault),
+    Member(MemberPath, #[source] MemberFault),
     /// A member has a value its type does not allow.
     Invalid(MemberPath),
     /// The payload holds this member, which its schema does not define.
@@ -50,10 +51,6 @@ impl Ts12PayloadFault {
         }
     }
 }
-
-siros_codec::display_code!(Ts12PayloadFault);
-
-impl std::error::Error for Ts12PayloadFault {}
 
 /// The members of a payload object, read at their paths.
 pub(crate) trait Members {
