@@ -4,7 +4,9 @@ A credential matcher for the W3C Digital Credentials API on Android, and the
 matching half of the SIROS wallet core: reading a request, matching it against
 the wallet's credentials, and the consent view. The Rust workspace also holds
 the DCQL engine, the `zkp_req` protocol with the nym_auth catalogue and its
-provers, and typed bindings of the Credential Manager host ABI.
+provers, and typed bindings of the Credential Manager host ABI. The architecture
+contract, [`docs/wallet-core-architecture.md`](docs/wallet-core-architecture.md),
+states each component's requirements and boundaries.
 
 On Android, a wallet does not answer a `navigator.credentials.get({digital: …})`
 call directly. It registers a snapshot of its credentials with Play Services
