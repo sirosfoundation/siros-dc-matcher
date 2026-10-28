@@ -131,7 +131,7 @@ impl Host {
     ///
     /// # Panics
     ///
-    /// When a field holds no NUL, or bytes before it that are not UTF-8.
+    /// When a field's text is not UTF-8.
     pub fn calling_app(&self) -> CallingApp {
         CallingApp::from_host(&self.credman.calling_app_info())
     }
