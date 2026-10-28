@@ -42,9 +42,10 @@ siros_codec::text_value!(
 pub struct FnId(String);
 
 /// Why a text is no `fn_id`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum FnIdError {
     /// The text is empty.
+    #[error("the text is empty")]
     Empty,
 }
 
@@ -74,11 +75,13 @@ impl FnId {
 pub struct ReturnHandle(String);
 
 /// Why a text is no `return` handle.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum ReturnHandleError {
     /// The text is empty.
+    #[error("the text is empty")]
     Empty,
     /// The text holds this character, which is not an ASCII letter, a digit, `_` or `-`.
+    #[error("the text holds this character, which is not an ASCII letter, a digit, `_` or `-`")]
     Character(char),
 }
 
