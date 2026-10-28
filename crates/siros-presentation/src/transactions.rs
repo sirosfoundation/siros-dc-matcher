@@ -185,8 +185,8 @@ pub enum NoOffer<U, R> {
     )]
     CredentialUnavailable,
     /// Why the matching gives no offer.
-    #[error("{0}")]
-    Unmatched(#[source] Failure<U, R>),
+    #[error(transparent)]
+    Unmatched(Failure<U, R>),
 }
 
 impl<D> Transactions<D> {
