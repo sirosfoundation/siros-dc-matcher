@@ -69,22 +69,6 @@ macro_rules! position {
 
 pub(crate) use position;
 
-/// Implements `Display` for each type, showing its stable code: what its `code()` returns.
-/// siros-codec's macro of the same name serves the other crates; this crate depends on none.
-macro_rules! display_code {
-    ($($name:ty),+ $(,)?) => {
-        $(
-            impl ::core::fmt::Display for $name {
-                fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-                    f.write_str(self.code())
-                }
-            }
-        )+
-    };
-}
-
-pub(crate) use display_code;
-
 pub mod authority;
 mod combinations;
 pub mod eval;

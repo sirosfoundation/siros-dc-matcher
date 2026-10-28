@@ -101,7 +101,8 @@ impl TrustedAuthority {
 }
 
 /// Why a `trusted_authorities` member breaks §6.1.1.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum TrustedAuthorityError {
     /// The member is no array.
     NotArray,
@@ -139,7 +140,3 @@ impl TrustedAuthorityError {
         }
     }
 }
-
-crate::display_code!(TrustedAuthorityError);
-
-impl std::error::Error for TrustedAuthorityError {}

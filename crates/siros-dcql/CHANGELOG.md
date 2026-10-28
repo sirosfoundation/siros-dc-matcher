@@ -93,8 +93,12 @@ this file.
 - `QueryResult::combinations` walks the candidates of each query as an odometer, the first
   query turning fastest: the order of the combinations is unchanged.
 - The crate depends on `rustc-hash`, `serde`, `serde_json` and `thiserror` only.
-- `PathError`, `QueryIdError` and `ClaimIdError` derive `Display` and `Error` with `thiserror`,
-  a new dependency. Their text is unchanged.
+- Every error type derives `Display` and `Error` with `thiserror`, a new dependency, and keeps
+  its text: `PathError`, `QueryIdError`, `ClaimIdError`, `ClaimPathError`,
+  `TrustedAuthorityError`, `QueryError` and `QueryTextError`. `FormFault` and
+  `ClaimPathRefusal` implement `Error`, with the first sentence of their documentation as text.
+  `QueryError::Form` returns its `FormFault` from `source()`, and `ClaimPathRefusal` its
+  `PathError`.
 
 ### Added
 

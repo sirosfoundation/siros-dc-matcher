@@ -46,7 +46,8 @@ crate::position!(
 pub struct ClaimPath(Vec<PathComponent>);
 
 /// Why a value is no claims path pointer (§7).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum ClaimPathError {
     /// The value is no array.
     NotArray,
@@ -67,10 +68,6 @@ impl ClaimPathError {
         }
     }
 }
-
-crate::display_code!(ClaimPathError);
-
-impl std::error::Error for ClaimPathError {}
 
 impl ClaimPath {
     /// The pointer of `components`.
