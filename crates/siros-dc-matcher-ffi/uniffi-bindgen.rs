@@ -13,7 +13,6 @@
         clippy::disallowed_methods
     )
 )]
-#![cfg_attr(test, allow(clippy::disallowed_methods))]
 
 fn main() {
     uniffi::uniffi_bindgen_main()

@@ -21,3 +21,6 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 siros-dc-matcher-core = { workspace = true, features = ["test-fixtures"] }
+
+[lints]
+workspace = true

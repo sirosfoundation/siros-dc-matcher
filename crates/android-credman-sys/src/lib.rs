@@ -16,6 +16,9 @@
 // Links to the wasm32-only functions resolve on wasm32, where rustdoc checks
 // them.
 #![cfg_attr(not(target_arch = "wasm32"), allow(rustdoc::broken_intra_doc_links))]
+// A panicking std method that clippy.toml names takes an #[expect] with the
+// reason it cannot recover, as each panic of the matcher does.
+#![cfg_attr(not(test), deny(clippy::disallowed_methods))]
 
 pub use core::ffi::c_char;
 
