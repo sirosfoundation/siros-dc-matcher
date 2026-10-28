@@ -8,7 +8,7 @@ cd "$(dirname "$0")/.."
 base=https://raw.githubusercontent.com/AltmannPeter/readdit-demo/1cf3f2610318e896b0a1cde4b30d6b15d94ccfd0/native
 fetch() {
     mkdir -p "artifacts/$1"
-    curl -fsSL -o "artifacts/$1/$2" "$base/$3"
+    curl --proto '=https' -fsSL -o "artifacts/$1/$2" "$base/$3"
     echo "$4  artifacts/$1/$2" | sha256sum -c -
 }
 fetch longfellow circuits.zst longfellow/circuits/mdoc/circuits.zst \
