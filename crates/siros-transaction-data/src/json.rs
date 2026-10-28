@@ -16,8 +16,19 @@ impl Fields {
 
     /// Takes member `name`.
     pub(crate) fn take(&mut self, name: &str) -> Option<Json> {
-        let at = self.0.iter().position(|(n, _)| n == name)?;
-        Some(self.0.remove(at).1)
+        let mut taken = None;
+        self.0 = std::mem::take(&mut self.0)
+            .into_iter()
+            .filter_map(|(n, value)| {
+                if taken.is_none() && n == name {
+                    taken = Some(value);
+                    None
+                } else {
+                    Some((n, value))
+                }
+            })
+            .collect();
+        taken
     }
 
     /// Takes member `name`, which must be present.

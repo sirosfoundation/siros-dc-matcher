@@ -15,6 +15,10 @@ pub enum Inconsistency {
     Candidate(QueryIndex, CandidateIndex),
     /// A candidate takes an entry the transactions lack.
     Entry(EntryPosition),
+    /// A proof answers a query without a nym_auth query.
+    ZkpQuery(QueryIndex),
+    /// A proof answers a request the nym_auth policy refuses.
+    NymAuthRequest,
 }
 
 impl Inconsistency {
@@ -24,6 +28,8 @@ impl Inconsistency {
             Self::Query(_) => "plan_query_unknown",
             Self::Candidate(..) => "plan_candidate_unknown",
             Self::Entry(_) => "plan_entry_unknown",
+            Self::ZkpQuery(_) => "plan_zkp_query_missing",
+            Self::NymAuthRequest => "plan_nym_auth_request_refused",
         }
     }
 }

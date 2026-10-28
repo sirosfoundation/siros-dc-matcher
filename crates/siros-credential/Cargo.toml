@@ -28,3 +28,6 @@ thiserror = { workspace = true }
 [dev-dependencies]
 siros-credential = { path = ".", features = ["chain"] }
 sha2 = "0.10.9"
+
+[lints]
+workspace = true

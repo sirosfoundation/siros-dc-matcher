@@ -29,6 +29,9 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 #![deny(clippy::indexing_slicing)]
+// A panicking std method that clippy.toml names takes an #[expect] with the
+// reason it cannot recover, as each panic of the matcher does.
+#![cfg_attr(not(test), deny(clippy::disallowed_methods))]
 // Off the wasm target there is no host, and nothing reaches the decision path:
 // the test host runs it in the built module. The wasm build, which CI lints,
 // keeps dead code an error.

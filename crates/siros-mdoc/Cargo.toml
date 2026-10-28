@@ -20,3 +20,6 @@ rustc-hash = { workspace = true }
 sha2 = "0.10.9"
 p256 = { version = "0.13.2", default-features = false, features = ["ecdsa", "alloc"], optional = true }
 thiserror = { workspace = true }
+
+[lints]
+workspace = true

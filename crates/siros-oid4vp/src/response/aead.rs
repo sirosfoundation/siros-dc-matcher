@@ -23,28 +23,23 @@ pub(super) struct Agreement {
 }
 
 /// A fresh ephemeral key from `rng`, agreed with the chosen key.
-///
-/// # Panics
-///
-/// When the ephemeral public key has no affine coordinates.
-#[expect(
-    clippy::panic,
-    reason = "a p256 PublicKey is never the identity, so its uncompressed point has both \
-              coordinates; a point without them is a bug of the library, and no agreement \
-              can be sent from it"
-)]
-pub(super) fn agree(encryption: &Encryption, rng: &mut impl CryptoRngCore) -> Agreement {
+pub(super) fn agree(
+    encryption: &Encryption,
+    rng: &mut impl CryptoRngCore,
+) -> Result<Agreement, ResponseError> {
     let ephemeral = EphemeralSecret::random(rng);
     let shared = ephemeral.diffie_hellman(&encryption.key);
     let point = ephemeral.public_key().to_encoded_point(false);
     let (Some(x), Some(y)) = (point.x(), point.y()) else {
-        panic!("the ephemeral public key has no affine coordinates");
+        return Err(ResponseError::EncryptionFailed(
+            EncryptionFault::EphemeralKey,
+        ));
     };
-    Agreement {
+    Ok(Agreement {
         x: (*x).into(),
         y: (*y).into(),
         shared,
-    }
+    })
 }
 
 /// A content encryption key: as many bytes as its `enc` takes.
@@ -53,20 +48,11 @@ pub struct ContentKey(Vec<u8>);
 
 impl ContentKey {
     /// The key derived for `enc` from the KDF output `derived`.
-    ///
-    /// # Panics
-    ///
-    /// When `derived` is shorter than `enc`'s key.
-    #[expect(
-        clippy::expect_used,
-        reason = "both KDFs give at least the key of every `enc`: the 32 bytes of SHA-256, or \
-                  HKDF's output of the key's length; a shorter one is a bug of the core"
-    )]
-    pub(super) fn of(enc: ContentEncryption, derived: &[u8]) -> Self {
+    pub(super) fn of(enc: ContentEncryption, derived: &[u8]) -> Result<Self, ResponseError> {
         derived
             .get(..enc.key_len())
             .map(|key| Self(key.to_vec()))
-            .expect("the KDF output holds the content key")
+            .ok_or(ResponseError::EncryptionFailed(EncryptionFault::KdfLength))
     }
 
     /// The key.
@@ -90,19 +76,6 @@ pub(super) struct Sealed {
 }
 
 /// `plaintext` sealed under `key` with `iv` and `aad`.
-///
-/// # Panics
-///
-/// When `key` is not of `enc`'s length.
-///
-/// # Errors
-///
-/// [`EncryptionFault::Seal`] when AES GCM refuses `plaintext` or `aad` as too long.
-#[expect(
-    clippy::expect_used,
-    reason = "the callers derive `key` for `enc`, so it has `enc`'s length; another length is \
-              a bug of the core, and no ciphertext can be sent"
-)]
 pub(super) fn seal(
     enc: ContentEncryption,
     key: &ContentKey,
@@ -112,17 +85,17 @@ pub(super) fn seal(
 ) -> Result<Sealed, ResponseError> {
     let nonce = Nonce::from(iv);
     let mut ciphertext = plaintext.to_vec();
+    let failed = |_| ResponseError::EncryptionFailed(EncryptionFault::Seal);
     let key = key.as_bytes();
-    let length = "a content key has the length of its enc";
     let tag = match enc {
         ContentEncryption::A128Gcm => Aes128Gcm::new_from_slice(key)
-            .expect(length)
+            .map_err(failed)?
             .encrypt_in_place_detached(&nonce, aad, &mut ciphertext),
         ContentEncryption::A192Gcm => AesGcm::<Aes192, U12>::new_from_slice(key)
-            .expect(length)
+            .map_err(failed)?
             .encrypt_in_place_detached(&nonce, aad, &mut ciphertext),
         ContentEncryption::A256Gcm => Aes256Gcm::new_from_slice(key)
-            .expect(length)
+            .map_err(failed)?
             .encrypt_in_place_detached(&nonce, aad, &mut ciphertext),
     }
     .map_err(|_| ResponseError::EncryptionFailed(EncryptionFault::Seal))?;

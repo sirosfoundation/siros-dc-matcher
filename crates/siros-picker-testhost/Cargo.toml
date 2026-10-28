@@ -30,3 +30,6 @@ siros-transaction-data = { workspace = true, features = ["wallet"] }
 siros-trust = { workspace = true, features = ["chain"] }
 siros-wallet-state = { workspace = true }
 siros-zkp-req-nym-auth = { workspace = true, features = ["test-fixtures"] }
+
+[lints]
+workspace = true

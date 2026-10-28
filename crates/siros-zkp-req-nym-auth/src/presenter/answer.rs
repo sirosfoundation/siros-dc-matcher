@@ -22,16 +22,19 @@ pub enum Unanswerable {
     /// The attestation is usable for the authorities of another query than the pair's: another
     /// `id`, or other `trusted_authorities`.
     OtherQuery,
+    /// The attestation was tested at another date than the pair's proof date.
+    ProofDate,
     /// Items of the option fail for the attestation: an assertion, or the `pseudonym`'s seed.
     Failed(Vec<ZkpError>),
 }
 
 impl Unanswerable {
-    /// A stable identifier: `other_query`, or `credential` for failed items, with their codes
-    /// in the variant.
+    /// A stable identifier: `other_query`, `proof_date`, or `credential` for failed items, with
+    /// their codes in the variant.
     pub fn code(&self) -> &'static str {
         match self {
             Self::OtherQuery => "other_query",
+            Self::ProofDate => "proof_date",
             Self::Failed(_) => "credential",
         }
     }
@@ -44,12 +47,9 @@ impl<'q> Answer<'q> {
     /// # Errors
     ///
     /// [`Unanswerable::OtherQuery`] for an attestation usable for the authorities of another
-    /// query, and [`Unanswerable::Failed`] with the `age_check` that fails and `seed_mismatch`
-    /// for a seed that does not open `ssc`.
-    ///
-    /// # Panics
-    ///
-    /// When `attestation` was tested at another date than `pair`'s proof date.
+    /// query, [`Unanswerable::ProofDate`] for one tested at another date than the pair's, and
+    /// [`Unanswerable::Failed`] with the `age_check` that fails and `seed_mismatch` for a seed
+    /// that does not open `ssc`.
     pub fn new(
         pair: UsablePair<'q>,
         attestation: UsableAttestation,
@@ -59,12 +59,9 @@ impl<'q> Answer<'q> {
         if !attestation.issuer().authorities().are_those_of(query) {
             return Err(Unanswerable::OtherQuery);
         }
-        // The caller tests the attestation at the proof time whose date the pair was made for.
-        // Another date is a bug of the caller, and the proof would bind dates that disagree.
-        assert!(
-            attestation.proof_time().date() == pair.date(),
-            "the attestation was tested at another date than the pair's proof date"
-        );
+        if attestation.proof_time().date() != pair.date() {
+            return Err(Unanswerable::ProofDate);
+        }
         let seed = opened_seed(&pair, attestation.credential(), secret_seed)
             .map_err(Unanswerable::Failed)?;
         Ok(Self {

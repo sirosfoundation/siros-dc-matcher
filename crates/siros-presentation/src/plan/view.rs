@@ -16,6 +16,7 @@ use crate::display_rule::{
 };
 use crate::error::PresentationError;
 use crate::ids::SetIndex;
+use crate::inconsistency::Inconsistency;
 use crate::matching::{Answer, Candidate};
 use crate::offers::{Addition, Member, Offer, Offers};
 use crate::transactions::Transactions;
@@ -390,15 +391,6 @@ fn credential_view(
 
 /// What `candidate`, a candidate of `member`, shows: its claim rows or its proof statement
 /// rows, and the credential picker's fields of them.
-///
-/// # Panics
-///
-/// When `candidate` answers with a proof and `member`'s query has no nym_auth query.
-#[expect(
-    clippy::expect_used,
-    reason = "the matching answers with a proof only for a query it read as nym_auth; a proof \
-              without one is a bug of the core, and its view would show nothing true"
-)]
 fn shown(
     member: &Offered<'_, '_>,
     candidate: &Candidate<siros_credential::UsableCredential<'_>>,
@@ -418,7 +410,7 @@ fn shown(
             let zkp = member
                 .answers
                 .zkp()
-                .expect("a proof answers a query the matching read as nym_auth");
+                .ok_or(Inconsistency::ZkpQuery(member.query))?;
             let (query, option) = (zkp.query().query(), zkp.option(choice)?);
             (
                 Shown::Proof(verified_rows(query, option)?),

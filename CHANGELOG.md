@@ -122,9 +122,6 @@ binaryen version_116.
   (16 before).
 - **BREAKING (FFI):** `zkp_req_plan` and `ZkpReqPlanError` are removed. Bindings are
   regenerated.
-- **BREAKING (FFI):** `zkp_req_session` panics for a JWK thumbprint of no key in the
-  request, where it returned `ZkpReqError::Host` with `thumbprint_not_in_request`; that code is
-  gone. UniFFI raises the panic as an internal error.
 - The matcher calls the host through the new `android-credman-sys` and
   `android-credman` crates (MIT OR Apache-2.0, from
   APTITUDE-Consortium/dcapi-matcher). `crates/android-credman-sys/ABI.md`
@@ -298,42 +295,51 @@ binaryen version_116.
     `Unreadable` (`Form`, `Signer`).
 - A variant that wraps one error is transparent, its text and source those of the error:
   `siros-codec`'s `ReadFault::Text` and `JsonFault::Read`, `siros-dcql`'s
-  `QueryTextError::Query`, and `siros-presentation`'s `NoOffer::Unmatched`.
-- **BREAKING (Rust API):** a broken guarantee panics, with its reason, where an error variant
-  reported it. The variants and their codes are gone:
-  - `siros-oid4vp`: a host whose results do not answer intake's effects
-    (`IntakeError::AnswerMismatch`, `::UnexpectedTrustKey`, `::UnusedAnswer`); an ephemeral
-    key without coordinates and a KDF output shorter than its key (`EncryptionFault::EphemeralKey`,
-    `::KdfLength`). `cose_kdf` returns the `ContentKey`.
-  - `siros-zkp-req-nym-auth`: an attestation tested at another date than its pair's
-    (`Unanswerable::ProofDate`, with `HostError` and `ProveError::Host`); a JWK thumbprint of no
-    key in the request (`KeyNotInRequest`). `CheckedRequest::handover` returns the `Handover`.
-  - `siros-presentation`: a proof whose query the matching read as no nym_auth query, or of a
-    request that breaks the nym_auth policy; a signing key without the factors `PlanInput` carries
-    (`KeyFactorsMissing`); SD-JWT claims or mdoc elements of the matching the credential does
-    not disclose; a `Sign` effect answered twice and an answer to no effect
-    (`SignatureError::Repeated`, `::Unknown`). `PresentationError::Disclosure` is
-    `ElementRepeated` (`repeated_selection`).
-- Outside the picker's crates, a broken guarantee that no type rules out is an error:
-  - `siros-presentation`: a member, a candidate or an entry the plan's matching lacks
-    (`PresentationError::Inconsistent` with `Inconsistency::Query`, `::Candidate`, `::Entry`;
-    `plan_query_unknown`, `plan_candidate_unknown`, `plan_entry_unknown`), which
-    `Transactions::bind` returns too; a proof choice of another query
-    (`ChoiceError::OptionUnknown`, `choice_option_unknown`); an admission of another issuer
-    (`Unproven::Issuer`); a claims pointer of an mdoc that names no namespace and element
-    (`PresentationError::Pointer`).
-  - `siros-zkp-req-nym-auth`: an admission of another certificate or query
-    (`OtherIssuer::Certificate`, `::Query`; `admission_other_certificate`,
-    `admission_other_query`), and an attestation usable for another query than its pair's
-    (`Unanswerable::OtherQuery`, `ProveError::OtherQuery`; `other_query`).
-  - `siros-display`: an option of another query (`DisplayError::OptionItemUnknown`,
-    `option_item_unknown`).
+  `QueryTextError::Query`, `siros-presentation`'s `NoOffer::Unmatched` and `siros-zkp-req`'s
+  `EncodingError::Cbor`.
+- Only the DC API matcher panics: `android-credman-sys`, `android-credman` and `siros-picker`,
+  each panic with the reason it cannot recover. Every other crate returns an error where a
+  broken contract panicked, or a type rules the state out:
+  - `siros-presentation`: `PresentationError::Inconsistent` with `Inconsistency` (`Query`,
+    `Candidate`, `Entry`, `ZkpQuery`, `NymAuthRequest`; `plan_query_unknown`,
+    `plan_candidate_unknown`, `plan_entry_unknown`, `plan_zkp_query_missing`,
+    `plan_nym_auth_request_refused`) for a plan that contradicts the matching it was built
+    from, which `Transactions::bind` returns too; `ChoiceError::OptionUnknown`
+    (`choice_option_unknown`) for a proof choice of another query; `Unproven::Issuer` for an
+    admission of another issuer; `PresentationError::Pointer` and `Disclosure` for a claims
+    pointer or a disclosure the credential refuses, `Disclosure` in place of `ElementRepeated`;
+    `KeyFactorsMissing` for a signing key without its authentication factors; and
+    `SignatureError::Unknown` and `Repeated` for a signature of no `Sign` effect and a second
+    one.
+  - `siros-oid4vp`: `IntakeError::AnswerMismatch`, `UnexpectedTrustKey` and `UnusedAnswer`
+    for a host that breaks intake's effect protocol, and `EncryptionFault::EphemeralKey`,
+    `KdfLength` and `Seal` for an encryption the core cannot complete.
+  - `siros-zkp-req-nym-auth`: `OtherIssuer::Certificate` and `Query`
+    (`admission_other_certificate`, `admission_other_query`) for an admission of another
+    certificate or query; `Unanswerable::OtherQuery` and `ProveError::OtherQuery`
+    (`other_query`) for an attestation usable for another query than its pair's, and
+    `Unanswerable::ProofDate` and `ProveError::ProofDate` (`proof_date`) for one tested at
+    another date; `KeyNotInRequest` from `CheckedRequest::handover`, which the FFI's
+    `zkp_req_session` returns as `ZkpReqError::Host` with `thumbprint_not_in_request`.
+    Bindings are regenerated.
+  - `siros-display`: `DisplayError::OptionItemUnknown` (`option_item_unknown`) for an option of
+    another query.
+  - `siros-mdoc`'s `P256Key::sec1`, `siros-transaction-data`'s member lookup, payload and
+    template splits and sorted helpers, `siros-presentation`'s seed opening,
+    `siros-dc-matcher-core`'s `ZkpReqSelection::to_json` and the test host's calling-app
+    fields and entry lookup have no panic path.
 - **BREAKING (Rust API):** `Prepared::finish` takes the host's signatures as
   `Es256Signature`, which `Es256Signature::parse` reads from the 64 bytes of `r ‖ s`.
 - The picker panics, with its reason, on an `Inconsistency` or a `ChoiceError` the
   presentation component returns for an offer: no entry is right for it.
-  - `android-credman`: a host that breaks its ABI (`CredentialsError`, `CallingAppError`).
-    `Host::credentials` returns the blob, and `Host::calling_app` the `CallingApp`.
+- **BREAKING (Rust API):** `android-credman` panics on a host that breaks its ABI; its
+  `CredentialsError` and `CallingAppError` are gone. `Host::credentials` returns the blob, and
+  `Host::calling_app` the `CallingApp`.
+- `CapabilitiesError` is an enum: `Json` holds the `serde_json::Error` as its source, and
+  `Schema` holds the `SchemaViolation` with the reason the text carried before.
+- The proof backends' `ArtifactError` holds its cause as its source: `Decompress` zstd's
+  `io::Error`, `Circuits` and `Shapes` the zk-cred-longfellow and zk-cred-vega errors; it
+  drops `Clone`, `PartialEq` and `Eq`.
 - Vector set digest: `db62a22cfaccb912bf717c63d2a107e41e5437caa72e21594ceb3bb395eab431`.
 
 ### Fixed
@@ -727,6 +733,12 @@ binaryen version_116.
   exports. CI and the release job run it.
 - `clippy.toml` forbids std's `HashMap`, `HashSet` and `RandomState` in the
   crates that link into `matcher.wasm`.
+- Each crate root but the matcher's and the test host's denies clippy's panic
+  lints outside the tests, and `clippy.toml` names the std methods that panic on an argument
+  and share their name with a method that does not.
+  `scripts/check_panic_sites.py` fails on a root without the lints and on an
+  `allow` of them outside the tests, and finds the panics no lint covers. CI
+  runs both.
 
 ### Removed
 

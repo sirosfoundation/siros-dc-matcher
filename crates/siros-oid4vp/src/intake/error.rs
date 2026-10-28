@@ -126,6 +126,12 @@ pub enum IntakeError {
     /// `encrypted_response_enc_values_supported` names no `enc` of the Response Mode's
     /// envelope: `A128GCM` or `A256GCM` for a JWE, these or `A192GCM` for a `COSE_Encrypt`.
     EncryptionUnsupported,
+    /// The host answered an effect with the result of the other kind.
+    AnswerMismatch,
+    /// The host's trust answer carries a key or metadata the subject takes none of.
+    UnexpectedTrustKey,
+    /// The state holds more answers than the request asked effects.
+    UnusedAnswer,
 }
 
 /// Why an authorization request URI has no query of form-encoded parameters (Section 5).
@@ -388,6 +394,9 @@ impl IntakeError {
             Self::EncryptionKeyMissing => "encryption_key_missing",
             Self::EncryptionKeyInvalid(_) => "encryption_key_invalid",
             Self::EncryptionUnsupported => "encryption_unsupported",
+            Self::AnswerMismatch => "answer_mismatch",
+            Self::UnexpectedTrustKey => "unexpected_trust_key",
+            Self::UnusedAnswer => "unused_answer",
         }
     }
 
@@ -446,7 +455,10 @@ impl IntakeError {
             | Self::Parameter(_)
             | Self::EncryptionKeyMissing
             | Self::EncryptionKeyInvalid(_)
-            | Self::EncryptionUnsupported => ErrorCode::InvalidRequest,
+            | Self::EncryptionUnsupported
+            | Self::AnswerMismatch
+            | Self::UnexpectedTrustKey
+            | Self::UnusedAnswer => ErrorCode::InvalidRequest,
         }
     }
 }

@@ -121,6 +121,8 @@ fn opening(entry: &Json) -> Result<SecretSeed, NoSeed> {
     if decoded.len() != seed.len() {
         return Err(NoSeed::OpeningLength(decoded.len()));
     }
-    seed.copy_from_slice(&decoded);
+    for (slot, byte) in seed.iter_mut().zip(decoded.iter()) {
+        *slot = *byte;
+    }
     Ok(SecretSeed::new(seed))
 }

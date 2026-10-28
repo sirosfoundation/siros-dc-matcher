@@ -64,6 +64,7 @@ cargo clippy --locked -p siros-picker --target wasm32-wasip1 \
   --profile wasm-release -- -D warnings
 cargo clippy --locked -p android-credman-sys -p android-credman \
   --target wasm32-wasip1 -- -D warnings
+python3 scripts/check_panic_sites.py Cargo.toml proving/Cargo.toml
 make matcher && python3 scripts/check_matcher_abi.py \
   target/wasm32-wasip1/wasm-release/matcher.wasm
 make check-bindings    # committed bindings match the current API
@@ -106,8 +107,15 @@ cargo clippy --locked -p siros-zkp-req-wasm --target wasm32-unknown-unknown \
 cargo build --locked -p siros-zkp-req-wasm --target wasm32-unknown-unknown --release
 ```
 
-CI also enforces three things a green build does not imply:
+CI also enforces four things a green build does not imply:
 
+- **No panic outside the tests and the matcher.** Each crate root but the
+  matcher's and the test host's denies clippy's panic lints outside the
+  tests, a new crate's included.
+  `scripts/check_panic_sites.py` fails on a root without them and on an
+  `allow` of them outside the tests, and finds the panics no lint covers:
+  `assert!`, the std methods that panic on an argument, map indexing and
+  division by a value.
 - **Host ABI imports.** `scripts/check_matcher_abi.py` checks each import of
   `matcher.wasm`, with its signature, against the Credential Manager ABI
   table and the WASI functions the host provides.

@@ -12,19 +12,19 @@ fn an_unpinned_artifact_is_refused() {
     let lf = NymAuthSystem::LongfellowV1.circuit_artifact().compressed;
     let vg = NymAuthSystem::VegaV1.circuit_artifact().compressed;
     for bytes in [vec![0u8; lf.len], Vec::new()] {
-        assert_eq!(
-            LongfellowProver::load(&bytes).err(),
-            Some(longfellow::ArtifactError::Pin(lf))
-        );
-        assert_eq!(
-            LongfellowVerifier::load(&bytes).err(),
-            Some(longfellow::ArtifactError::Pin(lf))
-        );
+        assert!(matches!(
+            LongfellowProver::load(&bytes),
+            Err(longfellow::ArtifactError::Pin(pin)) if pin == lf
+        ));
+        assert!(matches!(
+            LongfellowVerifier::load(&bytes),
+            Err(longfellow::ArtifactError::Pin(pin)) if pin == lf
+        ));
     }
     for bytes in [vec![0u8; vg.len], Vec::new()] {
-        assert_eq!(
-            VegaNymAuth::load(&bytes).err(),
-            Some(vega::ArtifactError::Pin(vg))
-        );
+        assert!(matches!(
+            VegaNymAuth::load(&bytes),
+            Err(vega::ArtifactError::Pin(pin)) if pin == vg
+        ));
     }
 }

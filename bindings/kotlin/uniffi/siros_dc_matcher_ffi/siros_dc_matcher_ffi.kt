@@ -1023,7 +1023,7 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_jwk_thumbprint() != 44324.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_session() != 479.toShort()) {
+    if (lib.uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_session() != 45790.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_verify() != 31681.toShort()) {
@@ -4185,11 +4185,7 @@ public object FfiConverterMapStringString: FfiConverterRustBuffer<Map<kotlin.Str
          * # Errors
          *
          * [`ZkpReqError::InvalidRequest`] for a rule of the policy or of the verifier identity, and
-         * [`ZkpReqError::Host`] for a thumbprint that is not 32 bytes.
-         *
-         * # Panics
-         *
-         * When the thumbprint is of no key in the request.
+         * [`ZkpReqError::Host`] for a thumbprint that is not 32 bytes or of no key in the request.
          */
     @Throws(ZkpReqException::class) fun `zkpReqSession`(`requestObjectJson`: kotlin.String, `signed`: kotlin.Boolean, `channel`: FfiChannel, `jwkThumbprint`: kotlin.ByteArray, `verifierId`: FfiVerifierIdForm): FfiSession {
             return FfiConverterTypeFfiSession.lift(

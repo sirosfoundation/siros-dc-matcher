@@ -30,6 +30,6 @@ fn cose_wg_ecdh_direct_hkdf_256() {
         ),
     ];
     for (enc, cek) in cases {
-        assert_eq!(cose_kdf(&z, enc).as_bytes(), hex(cek), "{enc:?}");
+        assert_eq!(cose_kdf(&z, enc).unwrap().as_bytes(), hex(cek), "{enc:?}");
     }
 }

@@ -34,3 +34,6 @@ thiserror = { workspace = true }
 # siros-dc-matcher-core` alone would fail while `--workspace` passed.
 siros-dc-matcher-core = { path = ".", features = ["test-fixtures"] }
 serde_json.workspace = true
+
+[lints]
+workspace = true

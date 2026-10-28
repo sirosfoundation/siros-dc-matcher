@@ -37,7 +37,7 @@ pub fn concat_kdf(
     }
     // SuppPubInfo: the key length in bits.
     round.update(enc.key_bits().to_be_bytes());
-    Ok(ContentKey::of(enc, &round.finalize()))
+    ContentKey::of(enc, &round.finalize())
 }
 
 /// `payload` encrypted to the chosen key, with an ephemeral key and an IV from `rng`.
@@ -46,7 +46,7 @@ pub(super) fn encrypt(
     payload: &[u8],
     rng: &mut impl CryptoRngCore,
 ) -> Result<String, ResponseError> {
-    let agreement = aead::agree(encryption, rng);
+    let agreement = aead::agree(encryption, rng)?;
     let z: &[u8] = agreement.shared.raw_secret_bytes();
     let cek = concat_kdf(z, encryption.enc, &[], &[])?;
     let mut epk = Map::new();

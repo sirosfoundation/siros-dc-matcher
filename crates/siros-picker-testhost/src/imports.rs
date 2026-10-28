@@ -70,9 +70,9 @@ pub(crate) fn add_credman(linker: &mut Linker<State>) -> Result<()> {
                 let i = &c.data().input;
                 (i.calling_package.clone(), i.origin.clone())
             };
-            let mut buf = vec![0u8; 256 + 512];
-            write_padded(&mut buf, 0, 256, &pkg);
-            write_padded(&mut buf, 256, 512, &origin);
+            let mut buf = Vec::with_capacity(256 + 512);
+            buf.extend_from_slice(&padded::<256>(&pkg));
+            buf.extend_from_slice(&padded::<512>(&origin));
             write_bytes(&mut c, ptr, &buf)
         },
     )?;
@@ -361,26 +361,25 @@ fn entry_at<'o>(
     cred_id: &str,
 ) -> Result<&'o mut CapturedEntry> {
     let at_position = |e: &CapturedEntry| e.set_id == set_id && e.index == index;
-    if let Some(i) = out
-        .entries
-        .iter()
-        .position(|e| at_position(e) && e.credential_id == cred_id)
-    {
-        return Ok(&mut out.entries[i]);
-    }
-    let added: Vec<&str> = out
+    let added: Vec<String> = out
         .entries
         .iter()
         .filter(|e| at_position(e))
-        .map(|e| e.credential_id.as_str())
+        .map(|e| e.credential_id.clone())
         .collect();
-    if added.is_empty() {
-        return Err(anyhow::anyhow!("call for unknown entry {set_id}[{index}]"));
-    }
-    Err(anyhow::anyhow!(
-        "call for entry {set_id}[{index}] carries credential id {cred_id:?}, \
-         but the entries there were added as {added:?}"
-    ))
+    out.entries
+        .iter_mut()
+        .find(|e| at_position(e) && e.credential_id == cred_id)
+        .ok_or_else(|| {
+            if added.is_empty() {
+                anyhow::anyhow!("call for unknown entry {set_id}[{index}]")
+            } else {
+                anyhow::anyhow!(
+                    "call for entry {set_id}[{index}] carries credential id {cred_id:?}, \
+                     but the entries there were added as {added:?}"
+                )
+            }
+        })
 }
 
 /// The guest's linear memory.
@@ -453,12 +452,13 @@ fn read_cstr(c: &mut Caller<'_, State>, ptr: i32) -> Result<String> {
     String::from_utf8(text.to_vec()).context("matcher passed a string that is no UTF-8")
 }
 
-/// Write `value` NUL-padded into a fixed-width ABI field.
-fn write_padded(buf: &mut [u8], offset: usize, width: usize, value: &str) {
-    let src = value.as_bytes();
-    let n = src.len().min(width.saturating_sub(1));
-    if let (Some(dst), Some(src)) = (buf.get_mut(offset..offset + n), src.get(..n)) {
-        // Both slices hold `n` bytes, the length `copy_from_slice` requires.
-        dst.copy_from_slice(src);
+/// `value` NUL-padded into a fixed-width ABI field, cut to leave the last
+/// byte NUL.
+fn padded<const WIDTH: usize>(value: &str) -> [u8; WIDTH] {
+    let mut field = [0u8; WIDTH];
+    let room = WIDTH.saturating_sub(1);
+    for (slot, byte) in field.iter_mut().zip(value.bytes().take(room)) {
+        *slot = byte;
     }
+    field
 }

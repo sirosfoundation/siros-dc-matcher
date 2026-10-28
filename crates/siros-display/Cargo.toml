@@ -34,3 +34,6 @@ siros-codec = { workspace = true }
 siros-credential = { workspace = true }
 siros-dcql = { workspace = true }
 siros-wallet-state = { workspace = true }
+
+[lints]
+workspace = true

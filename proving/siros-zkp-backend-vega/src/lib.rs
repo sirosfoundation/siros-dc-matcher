@@ -6,11 +6,20 @@
 
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
-#![deny(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::panic
+// Nothing panics outside the tests. scripts/check_panic_sites.py refuses an
+// allow of these lints there and finds the panics they cannot see.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::panic,
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::unreachable,
+        clippy::todo,
+        clippy::unimplemented,
+        clippy::indexing_slicing,
+        clippy::disallowed_methods
+    )
 )]
 
 use siros_codec::date::Date;
@@ -28,17 +37,17 @@ use zk_cred_vega::nymauth_vega::engine::statement::{
 const SYSTEM: NymAuthSystem = NymAuthSystem::VegaV1;
 
 /// Why `shapes.zst` was not loaded.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum ArtifactError {
     /// The bytes are not the pinned file.
     #[error("not the pinned {} ({} bytes)", .0.name, .0.len)]
     Pin(ArtifactPin),
-    /// The pinned file does not decompress within its content's length: zstd's message.
-    #[error("the shapes do not decompress: {0}")]
-    Decompress(String),
+    /// The pinned file does not decompress within its content's length.
+    #[error("the shapes do not decompress")]
+    Decompress(#[source] std::io::Error),
     /// zk-cred-vega refused the shapes.
-    #[error("shapes refused: {0}")]
-    Shapes(String),
+    #[error("zk-cred-vega refused the shapes")]
+    Shapes(#[source] Error),
 }
 
 /// The prover and verifier keys of the system.
@@ -56,10 +65,10 @@ impl VegaNymAuth {
             return Err(ArtifactError::Pin(artifact.compressed));
         }
         let shapes = zstd::bulk::decompress(shapes_zst, artifact.content.len)
-            .map_err(|error| ArtifactError::Decompress(error.to_string()))?;
+            .map_err(ArtifactError::Decompress)?;
         Keys::from_shapes(&shapes)
             .map(Self)
-            .map_err(|e| ArtifactError::Shapes(e.to_string()))
+            .map_err(ArtifactError::Shapes)
     }
 }
 

@@ -3602,11 +3602,7 @@ public func zkpReqJwkThumbprint(jwkJson: String)throws  -> Data {
  * # Errors
  *
  * [`ZkpReqError::InvalidRequest`] for a rule of the policy or of the verifier identity, and
- * [`ZkpReqError::Host`] for a thumbprint that is not 32 bytes.
- *
- * # Panics
- *
- * When the thumbprint is of no key in the request.
+ * [`ZkpReqError::Host`] for a thumbprint that is not 32 bytes or of no key in the request.
  */
 public func zkpReqSession(requestObjectJson: String, signed: Bool, channel: FfiChannel, jwkThumbprint: Data, verifierId: FfiVerifierIdForm)throws  -> FfiSession {
     return try  FfiConverterTypeFfiSession.lift(try rustCallWithError(FfiConverterTypeZkpReqError.lift) {
@@ -3701,7 +3697,7 @@ private var initializationResult: InitializationResult = {
     if (uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_jwk_thumbprint() != 44324) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_session() != 479) {
+    if (uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_session() != 45790) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_verify() != 31681) {

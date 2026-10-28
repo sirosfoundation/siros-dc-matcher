@@ -4,10 +4,12 @@
 use siros_credential::EntryRef;
 use siros_dcql::PathError;
 use siros_display::DisplayError;
+use siros_mdoc::DisclosureError;
 use siros_oid4vp::{ErrorCode, ResponseError};
 use siros_sdjwt::KeyBindingError;
 use siros_transaction_data::TransactionDataError;
 use siros_trust::{ChainRefusal, Unadmitted};
+use siros_wallet_state::KeyId;
 use siros_zkp_req_nym_auth::presenter::{ProveError, Unanswerable};
 
 use crate::ids::{AdditionIndex, OfferIndex, SetIndex};
@@ -65,6 +67,9 @@ pub enum PresentationError {
     KeyIdMissing,
     /// A member's credential is an SD-JWT VC bound to no key: it has no `cnf`.
     HolderKeyMissing,
+    /// The host reported no authentication factors for this key, whose KB-JWT carries `amr`
+    /// (H3).
+    KeyFactorsMissing(KeyId),
     /// The time is before 1970-01-01T00:00:00Z, which `iat` cannot carry.
     Time,
     /// The request names its audience neither by an origin nor by a Client Identifier.
@@ -77,12 +82,12 @@ pub enum PresentationError {
     Unproven(#[from] Unproven),
     /// A nym_auth credential does not answer its option.
     Unanswerable(#[from] Unanswerable),
-    /// A claims path pointer of the plan selects nothing in its mdoc. The code is its own.
-    Pointer(#[source] PathError),
+    /// A claims path pointer of the plan selects nothing. The code is its own.
+    Pointer(#[from] PathError),
     /// The KB-JWT claims collide (S4). The code is its own.
     KeyBinding(#[from] KeyBindingError),
-    /// The request selects one mdoc element in two claims queries (M2).
-    ElementRepeated,
+    /// The mdoc elements are no disclosure (M2, M3). The code is its own.
+    Disclosure(#[from] DisclosureError),
     /// The nym_auth proof failed. The code is its own.
     Prove(#[from] ProveError),
     /// The host's signatures do not answer the `Sign` effects (A5).
@@ -113,6 +118,7 @@ impl PresentationError {
             Self::WalletDisplayNeeded => "wallet_display_needed",
             Self::KeyIdMissing => "key_id_missing",
             Self::HolderKeyMissing => "holder_key_missing",
+            Self::KeyFactorsMissing(_) => "key_factors_missing",
             Self::Time => "time_before_epoch",
             Self::AudienceMissing => "audience_missing",
             Self::Inconsistent(e) => e.code(),
@@ -121,7 +127,7 @@ impl PresentationError {
             Self::Unanswerable(e) => e.code(),
             Self::Pointer(e) => e.code(),
             Self::KeyBinding(e) => e.code(),
-            Self::ElementRepeated => "repeated_selection",
+            Self::Disclosure(e) => e.code(),
             Self::Prove(e) => e.code(),
             Self::Signature(e) => e.code(),
             Self::Response(e) => e.code(),
@@ -153,6 +159,7 @@ impl PresentationError {
             | Self::WalletDisplayNeeded
             | Self::KeyIdMissing
             | Self::HolderKeyMissing
+            | Self::KeyFactorsMissing(_)
             | Self::Time
             | Self::AudienceMissing
             | Self::Inconsistent(_)
@@ -161,7 +168,7 @@ impl PresentationError {
             | Self::Unanswerable(_)
             | Self::Pointer(_)
             | Self::KeyBinding(_)
-            | Self::ElementRepeated
+            | Self::Disclosure(_)
             | Self::Signature(_)
             | Self::Response(_) => ErrorCode::AccessDenied,
         }
