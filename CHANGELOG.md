@@ -16,16 +16,16 @@ commit `e65861c`), and adds the components of the SIROS wallet core. **Breaking*
 presentations follow the draft, the DCQL parse enforces OpenID4VP 1.0, Section 6, the FFI loses
 `zkp_req_plan`, and the vectors move to the crates that own their rules. Consumers that keep a
 copy of the vectors (siros-sdk-kotlin, siros-sdk-swift) must re-copy them from the new
-directories; the vector set digest below identifies them. `matcher.wasm` is 367,801 bytes
+directories; the vector set digest below identifies them. `matcher.wasm` is 388,850 bytes
 against the 409,600-byte budget (303,418 at v0.11.0), sha256
-`104fd6282bc7260ed73a93ccb2cd78c1479a7c70378c04ca6aa884f85d3be418` with Rust 1.99.1 and
+`bdaee7ae05a642218572d671e712b9fc83e2d2d2b285ca0cfa72430fba1623d8` with Rust 1.99.1 and
 binaryen version_116.
 
 ### Changed
 
 - The `matcher.wasm` size budget is 409,600 bytes (400 KiB), up from 307,200. The picker runs
   the wallet's matching and transaction data selection over the registration (K2): with images
-  passed through and `wasm-opt -Oz` it measures 367,801 bytes, and the measured alternatives
+  passed through and `wasm-opt -Oz` it measures 388,850 bytes, and the measured alternatives
   that drop parts of K2 were declined.
 - The matcher crate `siros-dc-matcher-wasm` is `siros-picker`, and its test host
   `siros-dc-matcher-testhost` is `siros-picker-testhost`. `make matcher` builds `matcher.wasm`
