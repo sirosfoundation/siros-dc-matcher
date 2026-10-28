@@ -29,6 +29,8 @@ use crate::verifier_id::{pseudonym_sha256, verifier_input, ProverInput, Pseudony
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{}", self.code())]
 pub enum ProveError {
+    /// The attestation is usable for another query than the answer's.
+    OtherQuery,
     /// The pair is no longer usable for its option.
     NotUsable(#[source] PairRefusal<Unsupported>),
     /// The credential fails for the option.
@@ -53,6 +55,7 @@ impl ProveError {
     #[must_use]
     pub fn code(&self) -> &'static str {
         match self {
+            Self::OtherQuery => "other_query",
             Self::NotUsable(refusal) => pair_code(refusal),
             Self::Rejected(_) => "credential",
             Self::Prover(e) => e.code(),
@@ -65,6 +68,7 @@ impl ProveError {
 impl From<Unanswerable> for ProveError {
     fn from(e: Unanswerable) -> Self {
         match e {
+            Unanswerable::OtherQuery => Self::OtherQuery,
             Unanswerable::Failed(errors) => Self::Rejected(errors),
         }
     }

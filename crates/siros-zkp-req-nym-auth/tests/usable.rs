@@ -1,5 +1,5 @@
 //! N3: a usable attestation takes only the admission of its own Document Signer by the
-//! authorities of its own query. Another admission is a bug of the caller, and panics.
+//! authorities of its own query.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -13,7 +13,7 @@ use siros_mdoc::Mdoc;
 use siros_trust::{
     AdmittedIssuer, ChainRefusal, IssuerChain, QueryAuthorities, TrustStore, Unadmitted,
 };
-use siros_zkp_req_nym_auth::attestation::{TestedAttestation, UsableAttestation};
+use siros_zkp_req_nym_auth::attestation::{OtherIssuer, TestedAttestation, UsableAttestation};
 use support::*;
 
 /// The admission, for the Credential Query `query`, of the issuer whose chain is `der`.
@@ -33,20 +33,8 @@ fn admitted(query: &Value, der: &[u8], now: DateTime) -> AdmittedIssuer {
     admission(query, der, now).unwrap()
 }
 
-/// The panic message of `run`, which must panic.
-fn panic_message(run: impl FnOnce()) -> String {
-    let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(run))
-        .err()
-        .unwrap_or_else(|| panic!("no panic"));
-    payload
-        .downcast_ref::<&str>()
-        .map(|text| (*text).to_owned())
-        .or_else(|| payload.downcast_ref::<String>().cloned())
-        .unwrap()
-}
-
 #[test]
-fn the_admission_of_another_certificate_or_query_panics() {
+fn the_admission_of_another_certificate_or_query_is_refused() {
     let now = DateTime::from_unix(NOW).unwrap();
     let query = query(None, false);
     let nym = nym_query(&query);
@@ -57,24 +45,24 @@ fn the_admission_of_another_certificate_or_query_panics() {
     other_query["id"] = json!("other");
     let usable = |issuer: AdmittedIssuer| {
         let tested = TestedAttestation::of(&mdoc, now).unwrap();
-        drop(UsableAttestation::new(tested, issuer, &nym));
+        UsableAttestation::new(tested, issuer, &nym).map(drop)
     };
 
-    usable(admitted(&query, &ds.der, now));
+    assert_eq!(usable(admitted(&query, &ds.der, now)), Ok(()));
     assert_eq!(
-        panic_message(|| usable(admitted(&query, &other_signer.der, now))),
-        "the admission names another certificate than the attestation's Document Signer"
+        usable(admitted(&query, &other_signer.der, now)),
+        Err(OtherIssuer::Certificate)
     );
     assert_eq!(
-        panic_message(|| usable(admitted(&other_query, &ds.der, now))),
-        "the admission is for the authorities of another query"
+        usable(admitted(&other_query, &ds.der, now)),
+        Err(OtherIssuer::Query)
     );
 }
 
 /// An admission by a query without `trusted_authorities` does not make the attestation usable
 /// for a query of the same `id` whose `aki` refuses its Document Signer.
 #[test]
-fn the_admission_of_the_same_id_with_other_authorities_panics() {
+fn the_admission_of_the_same_id_with_other_authorities_is_refused() {
     let now = DateTime::from_unix(NOW).unwrap();
     let unconstrained = query(None, false);
     let mut constrained = unconstrained.clone();
@@ -86,11 +74,7 @@ fn the_admission_of_the_same_id_with_other_authorities_panics() {
     let tested = TestedAttestation::of(&mdoc, now).unwrap();
     let issuer = admitted(&unconstrained, &ds.der, now);
     assert_eq!(
-        panic_message(|| drop(UsableAttestation::new(
-            tested,
-            issuer,
-            &nym_query(&constrained)
-        ))),
-        "the admission is for the authorities of another query"
+        UsableAttestation::new(tested, issuer, &nym_query(&constrained)).map(drop),
+        Err(OtherIssuer::Query)
     );
 }

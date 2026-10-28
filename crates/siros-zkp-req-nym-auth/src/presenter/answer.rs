@@ -19,14 +19,19 @@ pub struct Answer<'q> {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{}", self.code())]
 pub enum Unanswerable {
+    /// The attestation is usable for the authorities of another query than the pair's: another
+    /// `id`, or other `trusted_authorities`.
+    OtherQuery,
     /// Items of the option fail for the attestation: an assertion, or the `pseudonym`'s seed.
     Failed(Vec<ZkpError>),
 }
 
 impl Unanswerable {
-    /// A stable identifier: `credential`, with the codes of the failed items in the variant.
+    /// A stable identifier: `other_query`, or `credential` for failed items, with their codes
+    /// in the variant.
     pub fn code(&self) -> &'static str {
         match self {
+            Self::OtherQuery => "other_query",
             Self::Failed(_) => "credential",
         }
     }
@@ -38,26 +43,22 @@ impl<'q> Answer<'q> {
     ///
     /// # Errors
     ///
-    /// [`Unanswerable::Failed`] with the `age_check` that fails and `seed_mismatch` for a seed
-    /// that does not open `ssc`.
+    /// [`Unanswerable::OtherQuery`] for an attestation usable for the authorities of another
+    /// query, and [`Unanswerable::Failed`] with the `age_check` that fails and `seed_mismatch`
+    /// for a seed that does not open `ssc`.
     ///
     /// # Panics
     ///
-    /// When `attestation` is usable for the authorities of another query than `pair`'s, or was
-    /// tested at another date than `pair`'s proof date.
+    /// When `attestation` was tested at another date than `pair`'s proof date.
     pub fn new(
         pair: UsablePair<'q>,
         attestation: UsableAttestation,
         secret_seed: &SecretSeed,
     ) -> Result<Self, Unanswerable> {
         let query = pair.option().query().query().credential_query();
-        // The caller answers the pair's query with an attestation usable for it. Another
-        // query's attestation is a bug of the caller, and the proof would rest on a trust
-        // decision about other authorities.
-        assert!(
-            attestation.issuer().authorities().are_those_of(query),
-            "the attestation is usable for the authorities of another query"
-        );
+        if !attestation.issuer().authorities().are_those_of(query) {
+            return Err(Unanswerable::OtherQuery);
+        }
         // The caller tests the attestation at the proof time whose date the pair was made for.
         // Another date is a bug of the caller, and the proof would bind dates that disagree.
         assert!(

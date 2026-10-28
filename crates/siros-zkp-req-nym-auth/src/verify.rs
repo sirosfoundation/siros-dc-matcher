@@ -122,7 +122,7 @@ pub enum ResultsFault {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum IssuerKeySetError {
     /// It holds this many certificates, where the systems take one.
-    #[error("it holds this many certificates, where the systems take one")]
+    #[error("`issuer_key_set` holds {0} certificates, where the systems take one")]
     Count(usize),
     /// The certificate is not one of the systems' form.
     #[error("the certificate is not one of the systems' form")]
@@ -136,10 +136,10 @@ pub enum IssuerKeySetError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum ProofTimeError {
     /// It is not exactly `YYYY-MM-DDThh:mm:ssZ`, a real UTC second.
-    #[error("it is not exactly `YYYY-MM-DDThh:mm:ssZ`, a real UTC second")]
+    #[error("`proof_time` is not exactly `YYYY-MM-DDThh:mm:ssZ`, a real UTC second")]
     Malformed,
     /// It lies beyond the tolerance of the Verifier's clock.
-    #[error("it lies beyond the tolerance of the Verifier's clock")]
+    #[error("`proof_time` lies beyond the tolerance of the Verifier's clock")]
     Tolerance,
 }
 

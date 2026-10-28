@@ -6,7 +6,7 @@ use siros_codec::date::DateTime;
 use siros_credential::{Parsed, UsableCredential};
 use siros_trust::AdmittedIssuer;
 use siros_zkp_req_nym_auth::attestation::{
-    SecretSeed, TestedAttestation, Unreadable, Unusable, UsableAttestation,
+    OtherIssuer, SecretSeed, TestedAttestation, Unreadable, Unusable, UsableAttestation,
 };
 use siros_zkp_req_nym_auth::outcome::CredentialCode;
 use siros_zkp_req_nym_auth::presenter::{Answer as NymAnswer, Unanswerable};
@@ -25,6 +25,8 @@ pub enum Unproven {
     OtherDocType,
     /// The credential cannot be read in the nym_auth form: `credential_form`.
     Unreadable(#[source] Unreadable),
+    /// The admission of the credential's issuer is for another certificate or query.
+    Issuer(#[from] OtherIssuer),
     /// The credential fails these tests at the proof time.
     Fails(Vec<CredentialCode>),
     /// The issuer delivered no usable `secret_seed`.
@@ -52,6 +54,7 @@ impl Unproven {
             Self::NotAnMdoc => "not_an_mdoc",
             Self::OtherDocType => "other_doc_type",
             Self::Unreadable(_) => CredentialCode::CredentialForm.code(),
+            Self::Issuer(e) => e.code(),
             Self::Fails(_) => "credential",
             Self::Seed(e) => e.code(),
             Self::Options(_) => "no_option_answered",
@@ -128,7 +131,7 @@ fn tested(
         return Err(Unproven::NotAnMdoc);
     };
     let tested = TestedAttestation::of(mdoc, now)?;
-    let attestation = UsableAttestation::new(tested, issuer.clone(), zkp.query());
+    let attestation = UsableAttestation::new(tested, issuer.clone(), zkp.query())?;
     let seed = seed::delivered(credential.credential())?;
     Ok((attestation, seed))
 }
