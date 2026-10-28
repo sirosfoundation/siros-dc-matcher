@@ -30,7 +30,7 @@ pub struct PlanDigest([u8; 32]);
 #[error("{}", self.code())]
 pub enum DigestError {
     /// The text is not unpadded base64url.
-    Encoding(Base64Error),
+    Encoding(#[source] Base64Error),
     /// The text decodes to this many bytes; a digest has 32.
     Length(usize),
 }

@@ -13,9 +13,9 @@ use crate::credential::MatchCredential;
 #[error("{}", self.code())]
 pub enum QueryRefusal {
     /// `trusted_authorities` holds an `aki` value that encodes no keyIdentifier (TR3).
-    Authorities(AuthorityError),
+    Authorities(#[source] AuthorityError),
     /// The `zkp_req` query is refused.
-    Zkp(ZkpRefusal),
+    Zkp(#[source] ZkpRefusal),
 }
 
 impl QueryRefusal {
@@ -46,6 +46,7 @@ pub enum Failure<U, R> {
         /// The query.
         query: QueryId,
         /// Why.
+        #[source]
         refusal: QueryRefusal,
     },
     /// Credentials of a query's format and type exist, and the query excludes each.

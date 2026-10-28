@@ -181,13 +181,18 @@ pub struct Transactions<D = Infallible> {
 }
 
 /// Why a request has no offer: its transaction data, or the matching.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum NoOffer<U, R> {
     /// The queries the request's entries target have no candidate: the referenced credentials
     /// are not available (OpenID4VP 1.0, Section 8.5).
+    #[error(
+        "the queries the request's entries target have no candidate: the referenced \
+         credentials are not available (OpenID4VP 1.0, Section 8.5)"
+    )]
     CredentialUnavailable,
     /// Why the matching gives no offer.
-    Unmatched(Failure<U, R>),
+    #[error("{0}")]
+    Unmatched(#[source] Failure<U, R>),
 }
 
 impl<D> Transactions<D> {

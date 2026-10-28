@@ -419,7 +419,7 @@ fn shown(
                 .answers
                 .zkp()
                 .expect("a proof answers a query the matching read as nym_auth");
-            let (query, option) = (zkp.query().query(), zkp.option(choice)?);
+            let (query, option) = (zkp.query().query(), zkp.option(choice));
             (
                 Shown::Proof(verified_rows(query, option)?),
                 proof::rows(query, option)?,

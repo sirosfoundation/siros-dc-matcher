@@ -434,14 +434,17 @@ pub struct Excluded<C: MatchCredential, R> {
 
 /// Why a query excludes a credential of its format and type. `U` is why the query's
 /// authorities refuse its issuer, `R` why it answers no option of a `zkp_req` query.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum Exclusion<U, R> {
     /// The query's `trusted_authorities` refuse its issuer (TR3).
-    Unadmitted(U),
+    #[error("the query's `trusted_authorities` refuse its issuer (TR3)")]
+    Unadmitted(#[source] U),
     /// Its claims path processing gives an error (OpenID4VP 1.0, Sections 7.1.1 and 7.2.1).
-    ClaimPath(PathError),
+    #[error("its claims path processing gives an error (OpenID4VP 1.0, Sections 7.1.1 and 7.2.1)")]
+    ClaimPath(#[source] PathError),
     /// It answers no option of the `zkp_req` query.
-    Unproven(R),
+    #[error("it answers no option of the `zkp_req` query")]
+    Unproven(#[source] R),
 }
 
 impl<C: MatchCredential> Excluded<C, Infallible> {

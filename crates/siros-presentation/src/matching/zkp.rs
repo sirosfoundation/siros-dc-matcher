@@ -41,17 +41,17 @@ pub struct ProofChoice {
 #[error("{}", self.code())]
 pub enum ZkpRefusal {
     /// The query breaks a rule of `zkp_req`.
-    Query(RequestRule),
+    Query(#[source] RequestRule),
     /// The request has no `client_metadata` to list the Verifier's systems.
     ClientMetadataMissing,
     /// `client_metadata` breaks a rule of `zkp_req`, Section 1.2.
-    ClientMetadata(RequestRule),
+    ClientMetadata(#[source] RequestRule),
     /// The query breaks a rule of the nym_auth catalogue.
-    Catalogue(CatalogueRule),
+    Catalogue(#[source] CatalogueRule),
     /// The query asks for another credential type than nym_auth's.
     OtherType,
     /// The request breaks the nym_auth policy.
-    Policy(RequestRefusal),
+    Policy(#[source] RequestRefusal),
     /// No option has a usable pair: the refusal of each system for each option.
     NoUsablePair(Vec<PairRefusal<Unsupported>>),
 }
@@ -83,21 +83,18 @@ impl ZkpRefusal {
     }
 }
 
-/// Why a [`ProofChoice`] gives no option or usable pair of a query.
+/// Why a [`ProofChoice`] gives no usable pair of a query.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{}", self.code())]
 pub enum ChoiceError {
-    /// The query has no option at the choice's position: the choice is another query's.
-    OptionUnknown(OptionIndex),
     /// The choice's system no longer forms a usable pair for the option.
-    Pair(PairRefusal<Unsupported>),
+    Pair(#[source] PairRefusal<Unsupported>),
 }
 
 impl ChoiceError {
     /// A stable identifier.
     pub fn code(&self) -> &'static str {
         match self {
-            Self::OptionUnknown(_) => "choice_option_unknown",
             Self::Pair(refusal) => pair_code(refusal),
         }
     }
@@ -175,29 +172,44 @@ impl ZkpQuery {
         &self.choices
     }
 
-    /// The option of `choice`.
+    /// The option of `choice`, a choice of this query.
     ///
-    /// # Errors
+    /// # Panics
     ///
-    /// [`ChoiceError::OptionUnknown`] for a choice of another query.
-    pub fn option(&self, choice: &ProofChoice) -> Result<&QueryOption, ChoiceError> {
+    /// When `choice` is another query's.
+    #[expect(
+        clippy::expect_used,
+        reason = "the matching makes the choices of each query from its own options; a choice of \
+                  another query is a bug of the caller, and its option would be another query's"
+    )]
+    pub fn option(&self, choice: &ProofChoice) -> &QueryOption {
         self.query
             .query()
             .options()
             .get(choice.option.value())
-            .ok_or(ChoiceError::OptionUnknown(choice.option))
+            .expect("a choice names an option of its query")
     }
 
-    /// The usable pair of `choice` again, at the proof date of the matching.
+    /// The usable pair of `choice`, a choice of this query, again at the proof date of the
+    /// matching.
     ///
     /// # Errors
     ///
-    /// [`ChoiceError`]: a choice of another query, or a pair no longer usable.
+    /// [`ChoiceError::Pair`] for a pair no longer usable.
+    ///
+    /// # Panics
+    ///
+    /// When `choice` is another query's.
+    #[expect(
+        clippy::expect_used,
+        reason = "the matching makes the choices of each query from its own options; a choice of \
+                  another query is a bug of the caller, and its pair would be another query's"
+    )]
     pub fn pair(&self, choice: &ProofChoice) -> Result<UsablePair<'_>, ChoiceError> {
         self.query
             .options()
             .nth(choice.option.value())
-            .ok_or(ChoiceError::OptionUnknown(choice.option))?
+            .expect("a choice names an option of its query")
             .pair(&self.formats, choice.system, self.date)
             .map_err(ChoiceError::Pair)
     }
