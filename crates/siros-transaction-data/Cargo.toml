@@ -1,7 +1,7 @@
 [package]
 name = "siros-transaction-data"
 version = "0.11.0"
-description = "OpenID4VP transaction data for the SIROS wallet core on the PaSO model: type definitions and their sources, payload conformance, images, generic rendering and selection"
+description = "OpenID4VP transaction data for the SIROS wallet core on the PaSO model: type definitions and their sources, payload conformance, images, generic rendering, selection and the KB-JWT binding"
 publish = false
 edition.workspace = true
 license.workspace = true
