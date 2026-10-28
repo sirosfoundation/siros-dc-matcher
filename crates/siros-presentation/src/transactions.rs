@@ -15,6 +15,7 @@ use siros_transaction_data::{
 
 use crate::credential::MatchCredential;
 use crate::ids::{CandidateIndex, QueryIndex};
+use crate::inconsistency::Inconsistency;
 use crate::matching::{Answered, Answers, Candidate, Failure};
 use crate::offers::{Member, Offers};
 use crate::request::MatchRequest;
@@ -109,40 +110,33 @@ impl<C: MatchCredential, R> Offered<'_, '_, C, R> {
 
 /// Each member of `members` as the matching answers it, in order.
 ///
-/// # Panics
+/// # Errors
 ///
-/// When a member names a query or a candidate `answered` lacks.
-#[expect(
-    clippy::expect_used,
-    reason = "the offers come from `answered`, so their members name its queries and \
-              candidates; another one is a bug of the core, and no plan built on it is sound"
-)]
+/// [`Inconsistency`]: a member names a query or a candidate `answered` lacks.
 pub(crate) fn offered<'w, 'a, C: MatchCredential, R>(
     answered: &'w Answered<'a, C, R>,
     members: &[Member],
-) -> Vec<Offered<'w, 'a, C, R>> {
+) -> Result<Vec<Offered<'w, 'a, C, R>>, Inconsistency> {
     members
         .iter()
         .map(|member| {
             let query = member.query();
-            let answers = answered
-                .answers(query)
-                .expect("an offer's member names a query of its matching");
+            let answers = answered.answers(query).ok_or(Inconsistency::Query(query))?;
             let candidates = member
                 .candidates()
                 .iter()
                 .map(|&index| {
-                    let candidate = answers
+                    answers
                         .candidate(index)
-                        .expect("an offer's member names candidates of its query");
-                    (index, candidate)
+                        .map(|candidate| (index, candidate))
+                        .ok_or(Inconsistency::Candidate(query, index))
                 })
-                .collect();
-            Offered {
+                .collect::<Result<_, _>>()?;
+            Ok(Offered {
                 query,
                 answers,
                 candidates,
-            }
+            })
         })
         .collect()
 }
@@ -327,21 +321,16 @@ impl<D> Transactions<D> {
     /// comes first in its `credential_ids`, then the first presented (OpenID4VP 1.0, Section
     /// 5.1). An entry the wallet decides after selection binds nothing here (K2).
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// When a member names a query or a candidate `answered` lacks, or a candidate takes an
-    /// entry these transactions lack.
-    #[expect(
-        clippy::expect_used,
-        reason = "the candidacies come from these transactions' entries; an entry they lack is \
-                  a bug of the core, and no binding built on it is sound"
-    )]
+    /// [`Inconsistency`]: a member names a query or a candidate `answered` lacks, or a candidate
+    /// takes an entry these transactions lack.
     pub fn bind<'t, C: MatchCredential, R>(
         &'t self,
         answered: &Answered<'_, C, R>,
         members: &[Member],
-    ) -> Vec<BoundEntry<'t>> {
-        let presented: Vec<(Bound, &'t Candidacy<D>)> = offered(answered, members)
+    ) -> Result<Vec<BoundEntry<'t>>, Inconsistency> {
+        let presented: Vec<(Bound, &'t Candidacy<D>)> = offered(answered, members)?
             .iter()
             .flat_map(|member| {
                 member
@@ -364,7 +353,7 @@ impl<D> Transactions<D> {
             let entry = self
                 .entries
                 .get(taken.entry().value())
-                .expect("a candidate takes an entry of its transactions");
+                .ok_or(Inconsistency::Entry(taken.entry()))?;
             let rank = |query: &QueryId| entry.credential_ids().iter().position(|id| id == query);
             let first = presented
                 .iter()
@@ -381,7 +370,7 @@ impl<D> Transactions<D> {
                 });
             }
         }
-        bound
+        Ok(bound)
     }
 
     /// The offers of `answered` over the candidates the first match leaves.

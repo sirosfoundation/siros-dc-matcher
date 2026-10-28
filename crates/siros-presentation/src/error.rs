@@ -2,6 +2,7 @@
 //! OpenID4VP 1.0, Section 8.5 code the verifier receives.
 
 use siros_credential::EntryRef;
+use siros_dcql::PathError;
 use siros_display::DisplayError;
 use siros_oid4vp::{ErrorCode, ResponseError};
 use siros_sdjwt::KeyBindingError;
@@ -10,6 +11,7 @@ use siros_trust::{ChainRefusal, Unadmitted};
 use siros_zkp_req_nym_auth::presenter::{ProveError, Unanswerable};
 
 use crate::ids::{AdditionIndex, OfferIndex, SetIndex};
+use crate::inconsistency::Inconsistency;
 use crate::matching::{ChoiceError, Failure};
 use crate::plan::{DigestError, Unproven};
 use crate::respond::{PickError, SignatureError, SubsetError};
@@ -67,12 +69,16 @@ pub enum PresentationError {
     Time,
     /// The request names its audience neither by an origin nor by a Client Identifier.
     AudienceMissing,
+    /// The plan contradicts the matching it was built from.
+    Inconsistent(#[from] Inconsistency),
     /// A proof choice gives no option or usable pair of its query.
     Choice(#[from] ChoiceError),
     /// A nym_auth credential no longer passes its tests, or its seed does not open.
     Unproven(#[from] Unproven),
     /// A nym_auth credential does not answer its option.
     Unanswerable(#[from] Unanswerable),
+    /// A claims path pointer of the plan selects nothing in its mdoc. The code is its own.
+    Pointer(#[source] PathError),
     /// The KB-JWT claims collide (S4). The code is its own.
     KeyBinding(#[from] KeyBindingError),
     /// The request selects one mdoc element in two claims queries (M2).
@@ -109,9 +115,11 @@ impl PresentationError {
             Self::HolderKeyMissing => "holder_key_missing",
             Self::Time => "time_before_epoch",
             Self::AudienceMissing => "audience_missing",
+            Self::Inconsistent(e) => e.code(),
             Self::Choice(e) => e.code(),
             Self::Unproven(e) => e.code(),
             Self::Unanswerable(e) => e.code(),
+            Self::Pointer(e) => e.code(),
             Self::KeyBinding(e) => e.code(),
             Self::ElementRepeated => "repeated_selection",
             Self::Prove(e) => e.code(),
@@ -147,9 +155,11 @@ impl PresentationError {
             | Self::HolderKeyMissing
             | Self::Time
             | Self::AudienceMissing
+            | Self::Inconsistent(_)
             | Self::Choice(_)
             | Self::Unproven(_)
             | Self::Unanswerable(_)
+            | Self::Pointer(_)
             | Self::KeyBinding(_)
             | Self::ElementRepeated
             | Self::Signature(_)

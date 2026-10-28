@@ -102,25 +102,8 @@ impl Sign {
         &self.input.0
     }
 
-    /// The signature `signature`, `r ‖ s`, when it verifies under the holder key (A5).
-    ///
-    /// # Panics
-    ///
-    /// When `signature` is not 64 bytes.
-    #[expect(
-        clippy::panic,
-        reason = "the host returns ES256 signatures as `r ‖ s` (H3); another length is a bug of \
-                  the host, and no presentation can carry it"
-    )]
-    fn verified(&self, signature: Vec<u8>) -> Result<VerifiedSignature, SignatureError> {
-        let signature = match Es256Signature::parse(&signature) {
-            Ok(signature) => signature,
-            Err(length) => panic!(
-                "the host's signature of effect {} has {} bytes; r || s has 64",
-                self.id.value(),
-                length.0
-            ),
-        };
+    /// The signature `signature` when it verifies under the holder key (A5).
+    fn verified(&self, signature: Es256Signature) -> Result<VerifiedSignature, SignatureError> {
         if es256_verifies(&self.holder, &self.input.0, &signature) {
             Ok(VerifiedSignature(signature))
         } else {
@@ -150,7 +133,7 @@ pub(crate) fn key_id(credential: &Credential) -> Result<KeyId, PresentationError
 ///
 /// # Panics
 ///
-/// When a signature names no effect, two answer one effect, or one is not 64 bytes.
+/// When a signature names no effect, or two answer one effect.
 #[expect(
     clippy::panic,
     reason = "the host answers each `Sign` effect once, by its identifier (A5); an answer to no \
@@ -159,7 +142,7 @@ pub(crate) fn key_id(credential: &Credential) -> Result<KeyId, PresentationError
 )]
 pub(crate) fn verified(
     signs: &[Sign],
-    signatures: Vec<(SignId, Vec<u8>)>,
+    signatures: Vec<(SignId, Es256Signature)>,
 ) -> Result<Vec<VerifiedSignature>, SignatureError> {
     let mut by_id: Vec<Option<VerifiedSignature>> = vec![None; signs.len()];
     for (id, signature) in signatures {

@@ -37,13 +37,23 @@ impl<'a> Matched<'a, '_> {
     /// # Panics
     ///
     /// When `offer` breaks the presentation component's guarantee: its members and additions
-    /// name queries and candidates of the matching it was built from.
+    /// name queries and candidates of the matching it was built from, and its candidates take
+    /// entries of the transactions.
+    #[expect(
+        clippy::panic,
+        reason = "an offer that names what its matching or transactions lack is a bug of the \
+                  presentation component, and no entry the picker could emit for it is right"
+    )]
     pub(crate) fn shown(
         &self,
         index: OfferIndex,
         offer: &Offer,
     ) -> Result<Vec<Presented<'a>>, Unshown> {
-        let bindings = self.transactions.bind(self.answered, offer.members());
+        // The presentation component's guarantee. `let … else` keeps the error's `Debug`
+        // formatting out of the module.
+        let Ok(bindings) = self.transactions.bind(self.answered, offer.members()) else {
+            panic!("an offer's members name its matching's queries, candidates and entries");
+        };
         let mut presented = Vec::new();
         for member in offer.members() {
             let (answers, candidates) = self.candidates(member);
@@ -123,6 +133,7 @@ impl<'a> Matched<'a, '_> {
 /// When a proof answer's query has no `zkp_req` query or no option of its choice.
 #[expect(
     clippy::expect_used,
+    clippy::panic,
     reason = "a proof answer without its query's `zkp_req` option is a bug of the presentation \
               component, and no proof rows the picker could show for it are right"
 )]
@@ -144,7 +155,10 @@ fn fields(
             let zkp = answers
                 .zkp()
                 .expect("a proof answer's query is a zkp_req query");
-            let option = zkp.option(choice);
+            // `let … else` keeps the error's `Debug` formatting out of the module.
+            let Ok(option) = zkp.option(choice) else {
+                panic!("a proof answer's choice is an option of its query");
+            };
             siros_display::proof::rows(zkp.query().query(), option)
                 .map_err(|error| Unshown::Display(index, error.code()))
         }

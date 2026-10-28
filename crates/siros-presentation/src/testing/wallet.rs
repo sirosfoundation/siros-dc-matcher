@@ -12,6 +12,7 @@ use sha2::{Digest, Sha256};
 use siros_codec::base64url;
 use siros_codec::cbor::Value as Cbor;
 use siros_codec::date::DateTime;
+use siros_codec::signature::Es256Signature;
 use siros_credential::Credential;
 use siros_dcql::QueryId;
 use siros_display::{CardText, CardWording, DisplayCache, Locale};
@@ -418,13 +419,13 @@ pub fn ready<'a>(input: &PlanInput<'a>) -> Result<Planned<'a>, PresentationError
 }
 
 /// The host's signatures for every `Sign` effect of `prepared`, with the holder's key.
-pub fn sign_all(signs: &[crate::Sign]) -> Vec<(SignId, Vec<u8>)> {
+pub fn sign_all(signs: &[crate::Sign]) -> Vec<(SignId, Es256Signature)> {
     signs
         .iter()
         .map(|sign| {
             assert!(sign.key().as_str().starts_with("key-"));
             let signature: Signature = holder().sign(sign.input());
-            (sign.id(), signature.to_bytes().to_vec())
+            (sign.id(), Es256Signature::new(signature.to_bytes().into()))
         })
         .collect()
 }

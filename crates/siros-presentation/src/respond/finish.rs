@@ -3,6 +3,7 @@
 
 use itertools::Itertools;
 use rand_core::CryptoRngCore;
+use siros_codec::signature::Es256Signature;
 use siros_dcql::QueryId;
 use siros_oid4vp::{Presentation, Submission};
 use siros_wallet_state::{CredentialId, PresentationId, PresentationRecord, TransactionId};
@@ -41,7 +42,7 @@ impl Prepared<'_, '_> {
         &self.signs
     }
 
-    /// The response, with `signatures` the host made for [`Prepared::signs`].
+    /// The response, with `signatures` the host made for [`Prepared::signs`], each `r ‖ s`.
     ///
     /// Each signature answers one `Sign` effect and verifies under the key it names, and every
     /// effect has one (A5). `prover` proves each nym_auth statement in-process. One `vp_token`
@@ -52,11 +53,15 @@ impl Prepared<'_, '_> {
     ///
     /// # Errors
     ///
-    /// [`PresentationError`]: a signature missing, repeated, unknown, not 64 bytes or not
-    /// verifying, a proof that failed, or a `vp_token` or submission that could not be built.
+    /// [`PresentationError`]: an effect without a signature, a signature that does not verify,
+    /// a proof that failed, or a `vp_token` or submission that could not be built.
+    ///
+    /// # Panics
+    ///
+    /// When a signature names no effect, or two answer one effect.
     pub fn finish(
         self,
-        signatures: Vec<(SignId, Vec<u8>)>,
+        signatures: Vec<(SignId, Es256Signature)>,
         prover: &dyn NymAuthProver,
         rng: &mut impl CryptoRngCore,
     ) -> Result<Response, PresentationError> {

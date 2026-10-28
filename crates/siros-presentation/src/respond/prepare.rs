@@ -70,13 +70,14 @@ impl<'p, 'a> Chosen<'p, 'a> {
     /// # Errors
     ///
     /// [`PresentationError`]: a member whose credential names no key pair or holder key, a
-    /// nym_auth credential that no longer passes its tests, or a presentation its format
-    /// refuses.
+    /// nym_auth credential that no longer passes its tests, a presentation its format refuses,
+    /// or a member, a candidate, an entry or a claims pointer the plan's matching lacks.
     ///
     /// # Panics
     ///
     /// When the host reported no factors for a key whose KB-JWT carries `amr` (H3), and when
-    /// the plan contradicts the matching it was built from.
+    /// the plan answers with a proof without a nym_auth query or request, or selects SD-JWT
+    /// claims or mdoc elements the credential does not disclose.
     pub fn prepare(
         self,
         rng: &mut impl CryptoRngCore,
@@ -86,16 +87,16 @@ impl<'p, 'a> Chosen<'p, 'a> {
         // keep every candidate an entry is bound to.
         let mut bindings = planned
             .transactions
-            .bind(&planned.answered, self.offer.members());
+            .bind(&planned.answered, self.offer.members())?;
         for addition in &self.additions {
             bindings.extend(
                 planned
                     .transactions
-                    .bind(&planned.answered, addition.members()),
+                    .bind(&planned.answered, addition.members())?,
             );
         }
-        let offer = offered(&planned.answered, &self.members);
-        let added = offered(&planned.answered, &self.added);
+        let offer = offered(&planned.answered, &self.members)?;
+        let added = offered(&planned.answered, &self.added)?;
         let mut signs = Vec::new();
         let members = offer
             .iter()
@@ -250,13 +251,14 @@ impl<'p, 'a> Chosen<'p, 'a> {
     ///
     /// # Errors
     ///
-    /// [`PresentationError::ElementRepeated`] when the claims select one element twice.
+    /// [`PresentationError::Pointer`] when a pointer of `claims` names no namespace and
+    /// element, and [`PresentationError::ElementRepeated`] when the claims select one element
+    /// twice.
     ///
     /// # Panics
     ///
-    /// When a pointer of `claims` is no element of `mdoc`.
+    /// When the elements of `claims` are no disclosure of `mdoc`.
     #[expect(
-        clippy::expect_used,
         clippy::panic,
         reason = "the matching selected the pointers of `claims` as elements of this mdoc; one \
                   that is no element now is a bug of the core"
@@ -271,14 +273,14 @@ impl<'p, 'a> Chosen<'p, 'a> {
             .pointers()
             .iter()
             .map(|pointer| {
-                let (name_space, identifier) = mdoc_components(pointer)
-                    .expect("the matching's pointers name a namespace and an element");
-                ElementId {
+                let (name_space, identifier) =
+                    mdoc_components(pointer).map_err(PresentationError::Pointer)?;
+                Ok(ElementId {
                     name_space,
                     identifier,
-                }
+                })
             })
-            .collect();
+            .collect::<Result<_, PresentationError>>()?;
         // The request may name one element in two claims queries; the other refusals of
         // `disclose` need an element the matching did not select, or `DeviceSigned` elements,
         // which this presentation has none of.

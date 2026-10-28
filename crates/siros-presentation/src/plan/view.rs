@@ -334,8 +334,8 @@ fn member_views(
     members: &[Member],
     sources: &Sources<'_, '_>,
 ) -> Result<Vec<MemberView>, PresentationError> {
-    let bindings = sources.transactions.bind(sources.answered, members);
-    offered(sources.answered, members)
+    let bindings = sources.transactions.bind(sources.answered, members)?;
+    offered(sources.answered, members)?
         .iter()
         .map(|member| {
             let credentials = member
@@ -419,7 +419,7 @@ fn shown(
                 .answers
                 .zkp()
                 .expect("a proof answers a query the matching read as nym_auth");
-            let (query, option) = (zkp.query().query(), zkp.option(choice));
+            let (query, option) = (zkp.query().query(), zkp.option(choice)?);
             (
                 Shown::Proof(verified_rows(query, option)?),
                 proof::rows(query, option)?,

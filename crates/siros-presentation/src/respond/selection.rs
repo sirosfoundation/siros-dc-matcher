@@ -7,6 +7,7 @@ use siros_wallet_state::CredentialId;
 use crate::display_rule::{DisplayFacts, HostDisplay, WalletDisplay};
 use crate::error::PresentationError;
 use crate::ids::{AdditionIndex, CandidateIndex, OfferIndex, QueryIndex};
+use crate::inconsistency::Inconsistency;
 use crate::offers::{Addition, Member, Offer};
 use crate::plan::{PlanDigest, Planned};
 
@@ -152,7 +153,7 @@ impl<'a> Planned<'a> {
                 .chain(added.iter_mut())
                 .find(|member| member.query() == query)
                 .ok_or_else(|| PresentationError::SubsetMember(subset.query.clone()))?;
-            let held = self.held(member);
+            let held = self.held(member)?;
             *member = chosen(member, &held, &subset.credentials)?;
         }
         self.keeps_bound_credentials(offer.members(), &members)?;
@@ -201,7 +202,7 @@ impl<'a> Planned<'a> {
             });
             if let Some(member) = shared {
                 return Err(PresentationError::AdditionQueryRepeated(
-                    self.query_id(member.query()),
+                    self.query_id(member.query())?,
                 ));
             }
             additions.push(addition);
@@ -224,33 +225,20 @@ impl<'a> Planned<'a> {
     /// Each candidate of `member`, a member of an offer of this plan, with the `credentialId`
     /// of its credential.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// When `member` names a query or a candidate the plan's matching lacks.
-    #[expect(
-        clippy::expect_used,
-        reason = "the plan's offers come from its matching, so their members name its queries \
-                  and candidates; another one is a bug of the core, and no selection checked \
-                  against it is sound"
-    )]
-    pub(super) fn held(&self, member: &Member) -> Vec<(CandidateIndex, CredentialId)> {
-        let answers = self
-            .answered
-            .answers(member.query())
-            .expect("an offer's member names a query of its matching");
-        member
-            .candidates()
-            .iter()
-            .map(|&index| {
-                let candidate = answers
-                    .candidate(index)
-                    .expect("an offer's member names candidates of its query");
-                (
-                    index,
-                    candidate.credential().credential().entry().credential_id(),
-                )
-            })
-            .collect()
+    /// [`Inconsistency`]: `member` names a query or a candidate the plan's matching lacks.
+    pub(super) fn held(
+        &self,
+        member: &Member,
+    ) -> Result<Vec<(CandidateIndex, CredentialId)>, Inconsistency> {
+        Ok(
+            crate::transactions::offered(&self.answered, std::slice::from_ref(member))?
+                .into_iter()
+                .flat_map(|offered| offered.candidates)
+                .map(|(index, c)| (index, c.credential().credential().entry().credential_id()))
+                .collect(),
+        )
     }
 
     /// Checks that `chosen` keep every credential a transaction entry binds to among `planned`,
@@ -261,8 +249,8 @@ impl<'a> Planned<'a> {
         planned: &[Member],
         chosen: &[Member],
     ) -> Result<(), PresentationError> {
-        let chosen = crate::transactions::offered(&self.answered, chosen);
-        for binding in self.transactions.bind(&self.answered, planned) {
+        let chosen = crate::transactions::offered(&self.answered, chosen)?;
+        for binding in self.transactions.bind(&self.answered, planned)? {
             let kept = chosen.iter().any(|member| {
                 member
                     .candidates
@@ -281,20 +269,14 @@ impl<'a> Planned<'a> {
 
     /// The `id` of the Credential Query at `index`, a query of an offer of this plan.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// When the plan's matching has no query at `index`.
-    #[expect(
-        clippy::expect_used,
-        reason = "the plan's offers name the queries of its matching; another index is a bug of \
-                  the core"
-    )]
-    pub(super) fn query_id(&self, index: QueryIndex) -> QueryId {
+    /// [`Inconsistency::Query`] when the plan's matching has no query at `index`.
+    pub(super) fn query_id(&self, index: QueryIndex) -> Result<QueryId, Inconsistency> {
         self.answered
             .answers(index)
-            .expect("an offer names a query of its matching")
-            .id()
-            .clone()
+            .map(|answers| answers.id().clone())
+            .ok_or(Inconsistency::Query(index))
     }
 }
 

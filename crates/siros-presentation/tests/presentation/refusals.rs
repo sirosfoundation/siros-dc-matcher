@@ -6,6 +6,7 @@ use p256::ecdsa::Signature;
 use serde_json::json;
 use siros_codec::base64url;
 use siros_codec::cbor::Value as Cbor;
+use siros_codec::signature::Es256Signature;
 use siros_presentation::{
     AdditionIndex, DigestError, Fulfilment, OfferIndex, PlanDigest, PresentationError, Selection,
     Sign, SignId, SignatureError,
@@ -121,42 +122,37 @@ fn selections_and_signatures_parse_against_the_plan() {
     }
 
     // A5: (case, the signatures from the honest ones, outcome); the first effect is 0, the
-    // second 1. A host that answers an effect twice, one of no effect, or with a signature of
-    // other than 64 bytes breaks the protocol and panics.
+    // second 1. A host that answers an effect twice or one of no effect breaks the protocol and
+    // panics.
     enum Outcome {
         Answered,
         Refused(SignatureError),
         Panics(&'static str),
     }
-    type Edit = fn(&[Sign], &mut Vec<(SignId, Vec<u8>)>);
+    type Edit = fn(&[Sign], &mut Vec<(SignId, Es256Signature)>);
     let first = SignId::new(0);
-    let signatures: [(&str, Edit, Outcome); 6] = [
+    let signatures: [(&str, Edit, Outcome); 5] = [
         ("every signature once", |_, _| {}, Outcome::Answered),
         (
             "the second missing",
-            |_, s| drop(s.pop()),
+            |_, s| s.truncate(1),
             Outcome::Refused(SignatureError::Missing(SignId::new(1))),
         ),
         (
             "the first twice",
-            |_, s| s.push(s[0].clone()),
+            |_, s| s.push(s[0]),
             Outcome::Panics("the host answered Sign effect 0 twice"),
         ),
         (
             "one of no effect",
-            |_, s| s.push((SignId::new(2), s[0].1.clone())),
+            |_, s| s.push((SignId::new(2), s[0].1)),
             Outcome::Panics("the host signed effect 2, which no Sign effect has"),
-        ),
-        (
-            "the first of 63 bytes",
-            |_, s| s[0].1.truncate(63),
-            Outcome::Panics("the host's signature of effect 0 has 63 bytes; r || s has 64"),
         ),
         (
             "the first under another key",
             |signs, s| {
                 let other: Signature = testing::key(0x55).sign(signs[0].input());
-                s[0].1 = other.to_bytes().to_vec();
+                s[0].1 = Es256Signature::new(other.to_bytes().into());
             },
             Outcome::Refused(SignatureError::Invalid(first)),
         ),

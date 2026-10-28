@@ -83,10 +83,12 @@ impl ZkpRefusal {
     }
 }
 
-/// Why a [`ProofChoice`] gives no usable pair of a query.
+/// Why a [`ProofChoice`] gives no option or usable pair of a query.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{}", self.code())]
 pub enum ChoiceError {
+    /// The query has no option at the choice's position: the choice is another query's.
+    OptionUnknown(OptionIndex),
     /// The choice's system no longer forms a usable pair for the option.
     Pair(#[source] PairRefusal<Unsupported>),
 }
@@ -95,6 +97,7 @@ impl ChoiceError {
     /// A stable identifier.
     pub fn code(&self) -> &'static str {
         match self {
+            Self::OptionUnknown(_) => "choice_option_unknown",
             Self::Pair(refusal) => pair_code(refusal),
         }
     }
@@ -172,44 +175,29 @@ impl ZkpQuery {
         &self.choices
     }
 
-    /// The option of `choice`, a choice of this query.
+    /// The option of `choice`.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// When `choice` is another query's.
-    #[expect(
-        clippy::expect_used,
-        reason = "the matching makes the choices of each query from its own options; a choice of \
-                  another query is a bug of the caller, and its option would be another query's"
-    )]
-    pub fn option(&self, choice: &ProofChoice) -> &QueryOption {
+    /// [`ChoiceError::OptionUnknown`] for a choice of another query.
+    pub fn option(&self, choice: &ProofChoice) -> Result<&QueryOption, ChoiceError> {
         self.query
             .query()
             .options()
             .get(choice.option.value())
-            .expect("a choice names an option of its query")
+            .ok_or(ChoiceError::OptionUnknown(choice.option))
     }
 
-    /// The usable pair of `choice`, a choice of this query, again at the proof date of the
-    /// matching.
+    /// The usable pair of `choice` again, at the proof date of the matching.
     ///
     /// # Errors
     ///
-    /// [`ChoiceError::Pair`] for a pair no longer usable.
-    ///
-    /// # Panics
-    ///
-    /// When `choice` is another query's.
-    #[expect(
-        clippy::expect_used,
-        reason = "the matching makes the choices of each query from its own options; a choice of \
-                  another query is a bug of the caller, and its pair would be another query's"
-    )]
+    /// [`ChoiceError`]: a choice of another query, or a pair no longer usable.
     pub fn pair(&self, choice: &ProofChoice) -> Result<UsablePair<'_>, ChoiceError> {
         self.query
             .options()
             .nth(choice.option.value())
-            .expect("a choice names an option of its query")
+            .ok_or(ChoiceError::OptionUnknown(choice.option))?
             .pair(&self.formats, choice.system, self.date)
             .map_err(ChoiceError::Pair)
     }
