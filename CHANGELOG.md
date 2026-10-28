@@ -241,8 +241,8 @@ binaryen version_116.
   - `siros-oid4vp`: `HandoverInvalid` (`Cbor`); `IntakeError` (`AttestationInvalid`,
     `CertificateChainInvalid`, `EncryptionKeyInvalid`, `JwsMalformed`,
     `NotAnAuthorizationRequest`, `ResolvedKeyInvalid`); `NoQuery` (`NotACompactJws`,
-    `PayloadNotBase64url`); `ResponseError` (`EncryptionFailed`, `ReplyNotObject`);
-    `SemanticIdError` (`Encoding`, `Policies`).
+    `PayloadNotBase64url`); `ReplyFault` (`NotJson`, `TooLarge`); `ResponseError`
+    (`EncryptionFailed`, `ReplyUnreadable`); `SemanticIdError` (`Encoding`, `Policies`).
   - `siros-presentation`: `ChoiceError` (`Pair`); `DigestError` (`Encoding`); `PickFault`
     (`Member`); `PresentationError` (`NoOffer`); `QueryRefusal` (`Authorities`, `Zkp`);
     `Unproven` (`Seed`, `Unreadable`); `ZkpRefusal` (`Catalogue`, `ClientMetadata`,
@@ -323,13 +323,13 @@ binaryen version_116.
     from, which `Transactions::bind` returns too; `ChoiceError::OptionUnknown`
     (`choice_option_unknown`) for a proof choice of another query; `Unproven::Issuer` for an
     admission of another issuer; `PresentationError::Pointer` and `Disclosure` for a claims
-    pointer or a disclosure the credential refuses, `Disclosure` in place of `ElementRepeated`;
+    pointer or a disclosure the credential refuses;
     `KeyFactorsMissing` for a signing key without its authentication factors; and
     `SignatureError::Unknown` and `Repeated` for a signature of no `Sign` effect and a second
     one.
   - `siros-oid4vp`: `IntakeError::AnswerMismatch`, `UnexpectedTrustKey` and `UnusedAnswer`
     for a host that breaks intake's effect protocol, and `EncryptionFault::EphemeralKey`,
-    `KdfLength` and `Seal` for an encryption the core cannot complete.
+    `KdfInput`, `KdfLength` and `Seal` for an encryption the core cannot complete.
   - `siros-zkp-req-nym-auth`: `OtherIssuer::Certificate` and `Query`
     (`admission_other_certificate`, `admission_other_query`) for an admission of another
     certificate or query; `Unanswerable::OtherQuery` and `ProveError::OtherQuery`
