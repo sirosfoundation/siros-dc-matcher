@@ -61,7 +61,7 @@ cargo clippy --locked -p siros-dc-matcher-wasm --target wasm32-wasip1 \
   --profile wasm-release -- -D warnings
 cargo clippy --locked -p android-credman-sys -p android-credman \
   --target wasm32-wasip1 -- -D warnings
-python3 scripts/check_panic_sites.py Cargo.toml
+python3 scripts/check_panic_sites.py Cargo.toml proving/Cargo.toml
 make matcher && python3 scripts/check_matcher_abi.py \
   target/wasm32-wasip1/wasm-release/matcher.wasm
 make check-bindings    # committed bindings match the current API

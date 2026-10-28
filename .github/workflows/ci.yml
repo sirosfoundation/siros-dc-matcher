@@ -53,12 +53,12 @@ jobs:
       - run: cargo clippy --locked -p siros-dc-matcher-wasm --target wasm32-wasip1 --profile wasm-release -- -D warnings
       # The host calls of the credman crates exist on wasm32 only.
       - run: cargo clippy --locked -p android-credman-sys -p android-credman --target wasm32-wasip1 -- -D warnings
-      # Only the DC API matcher panics. The clippy steps above enforce the
-      # lints each other crate root denies outside its tests; the script fails
-      # on a root without them and on an allow of them outside the tests, and
-      # finds the panics no lint covers.
+      # Only the DC API matcher panics. The clippy steps, here and in the proving
+      # job, enforce the lints each other crate root denies outside its tests;
+      # the script fails on a root without them and on an allow of them outside
+      # the tests, and finds the panics no lint covers.
       - name: No panic outside the tests and the matcher
-        run: python3 scripts/check_panic_sites.py Cargo.toml
+        run: python3 scripts/check_panic_sites.py Cargo.toml proving/Cargo.toml
 
   wasm:
     name: Build matcher.wasm
