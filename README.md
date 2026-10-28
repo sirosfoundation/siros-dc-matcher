@@ -47,7 +47,7 @@ make matcher                            # target/wasm32-wasip1/wasm-release/matc
 
 `cargo test` covers the matcher binary too, not just the libraries.
 `siros-dc-matcher-testhost` is a wasmtime host implementing the Credential
-Manager ABI, so its `tests/matcher_wasm.rs` drives the same `.wasm` a device
+Manager ABI, so its `tests/matcher_wasm/` drives the same `.wasm` a device
 would run. It builds the module on demand, so `make matcher` is not a
 prerequisite — but without the wasm target installed those tests **fail**,
 deliberately, rather than skipping and reporting a green run that checked
