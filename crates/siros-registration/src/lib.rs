@@ -21,11 +21,15 @@
 #![deny(unused_results)]
 #![deny(clippy::cognitive_complexity)]
 #![deny(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
-#![deny(
+// Nothing here panics: no attribute can allow these lints.
+#![forbid(
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::indexing_slicing,
-    clippy::panic
+    clippy::panic,
+    clippy::unreachable,
+    clippy::todo,
+    clippy::unimplemented
 )]
 
 mod error;
