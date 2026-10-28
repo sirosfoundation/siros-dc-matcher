@@ -1,4 +1,0 @@
-# This crate runs as native code in the wallet app and never links into
-# matcher.wasm, so the workspace rule against std's HashMap and HashSet
-# (../../clippy.toml) does not apply. UniFFI's records expose std's HashMap
-# to Kotlin and Swift.
