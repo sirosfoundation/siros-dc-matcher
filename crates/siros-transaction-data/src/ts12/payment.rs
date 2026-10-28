@@ -1,15 +1,16 @@
 //! `urn:eudi:sca:payment:1`: payment confirmation (EC TS12 v1.0.1, Section 4.3.1).
 
 use siros_codec::date::{Date, DateTime};
+use siros_codec::json::{Json, JsonNumber};
 
-use crate::error::{MemberPath, TransactionDataError};
-use crate::json::{self, optional, Fields, Json, Number};
-use crate::kind::SupportedType;
-use crate::ts12::currency::CurrencyCode;
-use crate::ts12::display::Leaves;
-use crate::ts12::rules::{self, Amount, DateTimeText, DomainName, ImageUrl, WebUrl};
+use crate::currency::CurrencyCode;
+use crate::definition::Prominence;
+use crate::payload::Frequency;
+use crate::ts12::leaves::Leaves;
+use crate::ts12::read::{self as json, optional, Fields};
+use crate::ts12::read::{MemberPath, Members, Ts12PayloadFault};
+use crate::ts12::rules::{self, Amount, DateTimeText, DomainName, LogoUrl, WebUrl};
 use crate::ts12::{member, transaction_id, Payload, TransactionId};
-use crate::view::{Frequency, Level};
 
 /// A payment: the payload of `urn:eudi:sca:payment:1`, also the `payment_payload` of an
 /// e-mandate.
@@ -31,7 +32,7 @@ pub(crate) struct Payment {
 struct Payee {
     name: String,
     id: String,
-    logo: Option<ImageUrl>,
+    logo: Option<LogoUrl>,
     website: Option<WebUrl>,
     rest: Vec<(String, Json)>,
 }
@@ -56,7 +57,7 @@ pub(crate) struct PartyPaths {
 struct Recurrence {
     start_date: Option<Date>,
     end_date: Option<Date>,
-    number: Option<Number>,
+    number: Option<JsonNumber>,
     frequency: Frequency,
     mit_options: Option<MitOptions>,
     rest: Vec<(String, Json)>,
@@ -69,8 +70,8 @@ struct MitOptions {
     max_amount: Option<Amount>,
     total_amount: Option<Amount>,
     initial_amount: Option<Amount>,
-    initial_amount_number: Option<Number>,
-    apr: Option<Number>,
+    initial_amount_number: Option<JsonNumber>,
+    apr: Option<JsonNumber>,
     rest: Vec<(String, Json)>,
 }
 
@@ -81,8 +82,6 @@ const PISP: PartyPaths = PartyPaths {
 };
 
 impl Payload for Payment {
-    const TYPE: SupportedType = SupportedType::Payment;
-
     /// The payment of `fields` at the time `now`.
     ///
     /// Besides its schema, Section 4.3.1 requires: `currency` an ISO 4217 code; `amount` and the
@@ -90,9 +89,9 @@ impl Payload for Payment {
     /// the UTC date of `now`, and absent when `recurrence` is present; dates and dates and times
     /// in ISO 8601; `payee.logo` a resolvable or `data` URL, `payee.website` a resolvable URL;
     /// `pisp.domain_name` a domain name.
-    fn parse(mut fields: Fields, now: DateTime) -> Result<Self, TransactionDataError> {
+    fn parse(mut fields: Fields, now: DateTime) -> Result<Self, Ts12PayloadFault> {
         let currency = rules::currency(
-            fields.require("currency", member("currency"))?,
+            fields.require_member("currency", member("currency"))?,
             member("currency"),
         )?;
         let payment = Self {
@@ -104,7 +103,7 @@ impl Payload for Payment {
                 rules::date_time,
             )?,
             payee: Payee::parse(json::object(
-                fields.require("payee", member("payee"))?,
+                fields.require_member("payee", member("payee"))?,
                 member("payee"),
             )?)?,
             pisp: optional(&mut fields, "pisp", member("pisp"), |value, path| {
@@ -117,14 +116,14 @@ impl Payload for Payment {
                 |value, path| {
                     let date = rules::date(value, path)?;
                     if date < now.date() {
-                        return Err(TransactionDataError::InvalidValue(path));
+                        return Err(Ts12PayloadFault::Invalid(path));
                     }
                     Ok(date)
                 },
             )?,
             currency,
             amount: rules::amount(
-                fields.require("amount", member("amount"))?,
+                fields.require_member("amount", member("amount"))?,
                 member("amount"),
                 currency,
             )?,
@@ -150,20 +149,22 @@ impl Payload for Payment {
         };
         fields.finish()?;
         if payment.execution_date.is_some() && payment.recurrence.is_some() {
-            return Err(TransactionDataError::MemberNotAllowed(member(
-                "execution_date",
-            )));
+            return Err(Ts12PayloadFault::NotAllowed(member("execution_date")));
         }
         Ok(payment)
     }
 
     fn leaves(&self, leaves: &mut Leaves) {
-        leaves.text("transaction_id", &self.transaction_id, Some(Level::Main));
-        leaves.optional_text("date_time", self.date_time.as_ref());
+        leaves.text(
+            "transaction_id",
+            &self.transaction_id,
+            Some(Prominence::Main),
+        );
+        leaves.optional_date_time("date_time", self.date_time.as_ref());
         leaves.object("payee", |payee| {
-            payee.text("name", &self.payee.name, Some(Level::Prominent));
-            payee.text("id", &self.payee.id, Some(Level::Main));
-            payee.optional_image("logo", self.payee.logo.as_ref());
+            payee.text("name", &self.payee.name, Some(Prominence::Prominent));
+            payee.text("id", &self.payee.id, Some(Prominence::Main));
+            payee.optional_logo("logo", self.payee.logo.as_ref());
             payee.optional_text("website", self.payee.website.as_ref());
             payee.rest(&self.payee.rest);
         });
@@ -171,8 +172,8 @@ impl Payload for Payment {
             leaves.object("pisp", |leaves| pisp.leaves(leaves));
         }
         leaves.optional_date("execution_date", self.execution_date);
-        leaves.text("currency", &self.currency.as_str(), Some(Level::Prominent));
-        leaves.number("amount", self.amount.number(), Some(Level::Prominent));
+        leaves.currency("currency", self.currency, Some(Prominence::Prominent));
+        leaves.number("amount", self.amount.number(), Some(Prominence::Prominent));
         leaves.optional_boolean("amount_estimated", self.amount_estimated);
         leaves.optional_boolean("amount_earmarked", self.amount_earmarked);
         leaves.optional_boolean("sct_inst", self.sct_inst);
@@ -183,12 +184,12 @@ impl Payload for Payment {
 }
 
 impl Payee {
-    fn parse(mut fields: Fields) -> Result<Self, TransactionDataError> {
+    fn parse(mut fields: Fields) -> Result<Self, Ts12PayloadFault> {
         const NAME: MemberPath = MemberPath::new("payee.name");
         const ID: MemberPath = MemberPath::new("payee.id");
         Ok(Self {
-            name: json::text(fields.require("name", NAME)?, NAME)?,
-            id: json::text(fields.require("id", ID)?, ID)?,
+            name: json::text(fields.require_member("name", NAME)?, NAME)?,
+            id: json::text(fields.require_member("id", ID)?, ID)?,
             logo: optional(
                 &mut fields,
                 "logo",
@@ -208,21 +209,18 @@ impl Payee {
 
 impl Party {
     /// The party of `fields`, its members at `paths`.
-    pub(crate) fn parse(
-        mut fields: Fields,
-        paths: &PartyPaths,
-    ) -> Result<Self, TransactionDataError> {
+    pub(crate) fn parse(mut fields: Fields, paths: &PartyPaths) -> Result<Self, Ts12PayloadFault> {
         Ok(Self {
             legal_name: json::text(
-                fields.require("legal_name", paths.legal_name)?,
+                fields.require_member("legal_name", paths.legal_name)?,
                 paths.legal_name,
             )?,
             brand_name: json::text(
-                fields.require("brand_name", paths.brand_name)?,
+                fields.require_member("brand_name", paths.brand_name)?,
                 paths.brand_name,
             )?,
             domain_name: rules::domain_name(
-                fields.require("domain_name", paths.domain_name)?,
+                fields.require_member("domain_name", paths.domain_name)?,
                 paths.domain_name,
             )?,
             rest: fields.rest(),
@@ -240,7 +238,7 @@ impl Party {
 
 impl Recurrence {
     /// The recurrence of `fields` of a payment in `currency`.
-    fn parse(mut fields: Fields, currency: CurrencyCode) -> Result<Self, TransactionDataError> {
+    fn parse(mut fields: Fields, currency: CurrencyCode) -> Result<Self, Ts12PayloadFault> {
         Ok(Self {
             start_date: optional(
                 &mut fields,
@@ -261,7 +259,7 @@ impl Recurrence {
                 json::integer,
             )?,
             frequency: frequency(
-                fields.require("frequency", MemberPath::new("recurrence.frequency"))?,
+                fields.require_member("frequency", MemberPath::new("recurrence.frequency"))?,
             )?,
             mit_options: optional(
                 &mut fields,
@@ -287,7 +285,7 @@ impl Recurrence {
 
 impl MitOptions {
     /// The options of `fields`, their amounts in `currency`.
-    fn parse(mut fields: Fields, currency: CurrencyCode) -> Result<Self, TransactionDataError> {
+    fn parse(mut fields: Fields, currency: CurrencyCode) -> Result<Self, Ts12PayloadFault> {
         let amount = |value: Json, path: MemberPath| rules::amount(value, path, currency);
         const AMOUNT_VARIABLE: MemberPath =
             MemberPath::new("recurrence.mit_options.amount_variable");
@@ -339,7 +337,7 @@ impl MitOptions {
 }
 
 /// `recurrence.frequency`: one of the ISO 20022 codes the schema enumerates.
-fn frequency(value: Json) -> Result<Frequency, TransactionDataError> {
+fn frequency(value: Json) -> Result<Frequency, Ts12PayloadFault> {
     const PATH: MemberPath = MemberPath::new("recurrence.frequency");
-    Frequency::named(&json::text(value, PATH)?).ok_or(TransactionDataError::InvalidValue(PATH))
+    Frequency::named(&json::text(value, PATH)?).ok_or(Ts12PayloadFault::Invalid(PATH))
 }

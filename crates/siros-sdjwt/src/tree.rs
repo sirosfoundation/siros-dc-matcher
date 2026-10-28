@@ -64,10 +64,6 @@ impl Claim {
     pub fn disclosure(&self) -> Option<DisclosureId> {
         self.disclosure.as_ref().map(|d| d.id)
     }
-
-    pub(crate) fn disclosure_text(&self) -> Option<&str> {
-        self.disclosure.as_ref().map(|d| d.encoded.as_str())
-    }
 }
 
 /// A claim value of the processed payload.
@@ -95,21 +91,23 @@ pub enum Element {
     Withheld,
 }
 
-/// A disclosure of the stored credential, named by its position in the compact form.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct DisclosureId(usize);
+siros_codec::position!(
+    /// A disclosure of the stored credential, named by its position among the disclosures of
+    /// the compact form.
+    pub DisclosureId
+);
 
-/// A disclosure as stored: its position and its base64url text.
+/// A disclosure as stored: its position.
 pub(crate) struct Disclosure {
     id: DisclosureId,
-    encoded: String,
 }
 
 impl Disclosure {
-    pub(crate) fn new(position: usize, encoded: String) -> Self {
-        Self {
-            id: DisclosureId(position),
-            encoded,
-        }
+    pub(crate) fn new(id: DisclosureId) -> Self {
+        Self { id }
+    }
+
+    pub(crate) fn id(&self) -> DisclosureId {
+        self.id
     }
 }

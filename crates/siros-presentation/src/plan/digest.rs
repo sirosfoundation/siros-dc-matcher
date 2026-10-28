@@ -10,10 +10,12 @@ use siros_dcql::PathComponent;
 use siros_oid4vp::VerifiedRequest;
 use siros_zkp_req_nym_auth::verifier_id::VerifierId;
 
-use super::transactions::EntryPosition;
-use super::view::{AdditionView, CredentialView, MemberView, OfferView};
+use super::view::{AdditionView, BoundTransaction, CredentialView, MemberView, OfferView};
 use crate::display_rule::WalletDisplay;
-use crate::matching::{Answer, HolderBinding};
+use siros_dcql::HolderBinding;
+use siros_transaction_data::EntryPosition;
+
+use crate::matching::Answer;
 
 /// The domain of the digest, which names this encoding.
 const DOMAIN: &str = "siros-presentation plan 2";
@@ -23,48 +25,15 @@ const DOMAIN: &str = "siros-presentation plan 2";
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PlanDigest([u8; 32]);
 
-/// Why a selection's plan digest does not read.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
-#[error("{}", self.code())]
-pub enum DigestError {
-    /// The text is not unpadded base64url.
-    Encoding,
-    /// The text decodes to this many bytes; a digest has 32.
-    Length(usize),
-}
-
-impl DigestError {
-    /// A stable identifier.
-    pub fn code(self) -> &'static str {
-        match self {
-            Self::Encoding => "selection_digest_encoding",
-            Self::Length(_) => "selection_digest_length",
-        }
-    }
-}
-
 impl PlanDigest {
-    /// The digest of the text `text`, as the view gave it.
-    ///
-    /// # Errors
-    ///
-    /// [`DigestError`]: text that is not unpadded base64url, or not of 32 bytes.
-    pub fn parse(text: &str) -> Result<Self, DigestError> {
-        let bytes = base64url::decode(text).map_err(|_| DigestError::Encoding)?;
-        let length = bytes.len();
-        <[u8; 32]>::try_from(bytes)
-            .map(Self)
-            .map_err(|_| DigestError::Length(length))
-    }
-
     /// The digest of the plan of `request`, whose nym_auth `verifier_id` is `verifier_id`, and
     /// whose offers the user sees as `views`.
     ///
     /// It covers the request's response mode, Client Identifier, trust verdict, origin,
     /// response URI, `nonce`, `state`, `dcql_query` as sent, `transaction_data` and the
     /// nym_auth `verifier_id`; and for each offer its members with every candidate's
-    /// `credentialId`, instance and answer and the positions of the entries bound to it, its
-    /// additions, and whether it needs the wallet's display.
+    /// `credentialId`, instance and answer and the position of the entry bound to it, its
+    /// additions with theirs, and whether it needs the wallet's display.
     pub(crate) fn of(
         request: &VerifiedRequest,
         verifier_id: Option<&VerifierId>,
@@ -153,7 +122,8 @@ impl Encode for MemberView {
     }
 }
 
-/// Its `credentialId` and instance, its answer, and the positions of the entries bound to it.
+/// Its `credentialId` and instance, its answer, and the entry bound to it, in an array of none
+/// or one.
 impl Encode for CredentialView {
     fn encode(&self) -> Value {
         let entry = self.entry();
@@ -161,7 +131,20 @@ impl Encode for CredentialView {
             Value::text(&entry.credential_id().to_string()),
             Value::text(&entry.instance_id().to_string()),
             self.answer().encode(),
-            list(self.entries()),
+            Value::Array(self.transaction().map(Encode::encode).into_iter().collect()),
+        ])
+    }
+}
+
+/// The entry's position, the source of the definition that renders it, and its payload's
+/// rulebook, which decides the KB-JWT's TS12 claims.
+impl Encode for BoundTransaction {
+    fn encode(&self) -> Value {
+        let view = self.view();
+        Value::Array(vec![
+            self.entry().encode(),
+            Value::text(view.source().as_str()),
+            Value::text(view.rulebook().as_str()),
         ])
     }
 }
@@ -191,7 +174,7 @@ impl Encode for Answer {
             Self::Proof(choice) => Value::Array(vec![
                 Value::Unsigned(1),
                 Value::Unsigned(choice.option().value() as u64),
-                Value::text(choice.system().id()),
+                Value::text(choice.system().id().as_str()),
                 Value::text(choice.backend().as_str()),
             ]),
         }

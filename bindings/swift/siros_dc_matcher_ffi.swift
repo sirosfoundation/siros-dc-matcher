@@ -531,219 +531,6 @@ fileprivate struct FfiConverterData: FfiConverterRustBuffer {
 
 
 /**
- * A presentation ready for the device signature, then for the prover.
- */
-public protocol FfiPreparedProtocol : AnyObject {
-    
-    /**
-     * The `ZkpPresentation` (CBOR) of the prover's output.
-     *
-     * # Errors
-     *
-     * [`ZkpReqError::Host`] when the prover's pseudonym is not the catalogue's, or its
-     * `zk_proof` breaks the backend's length rules.
-     */
-    func assemble(zkProof: Data, pseudonym: Data) throws  -> Data
-    
-    /**
-     * The data the device key signs with ES256.
-     */
-    func dataToSign()  -> Data
-    
-    /**
-     * The prover's job, once `device_signature` (`r ‖ s`) verifies under the MSO's device key.
-     *
-     * # Errors
-     *
-     * `device_binding`, or [`ZkpReqError::Host`] for a signature that is not 64 bytes.
-     */
-    func job(deviceSignature: Data) throws  -> FfiProofJob
-    
-    /**
-     * The identifier of the device key.
-     */
-    func keyId()  -> String
-    
-    /**
-     * The statement the proof establishes.
-     */
-    func statement()  -> FfiStatement
-    
-}
-
-/**
- * A presentation ready for the device signature, then for the prover.
- */
-open class FfiPrepared:
-    FfiPreparedProtocol {
-    fileprivate let pointer: UnsafeMutableRawPointer!
-
-    /// Used to instantiate a [FFIObject] without an actual pointer, for fakes in tests, mostly.
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-    public struct NoPointer {
-        public init() {}
-    }
-
-    // TODO: We'd like this to be `private` but for Swifty reasons,
-    // we can't implement `FfiConverter` without making this `required` and we can't
-    // make it `required` without making it `public`.
-    required public init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
-        self.pointer = pointer
-    }
-
-    // This constructor can be used to instantiate a fake object.
-    // - Parameter noPointer: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
-    //
-    // - Warning:
-    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing [Pointer] the FFI lower functions will crash.
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-    public init(noPointer: NoPointer) {
-        self.pointer = nil
-    }
-
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-    public func uniffiClonePointer() -> UnsafeMutableRawPointer {
-        return try! rustCall { uniffi_siros_dc_matcher_ffi_fn_clone_ffiprepared(self.pointer, $0) }
-    }
-    // No primary constructor declared for this class.
-
-    deinit {
-        guard let pointer = pointer else {
-            return
-        }
-
-        try! rustCall { uniffi_siros_dc_matcher_ffi_fn_free_ffiprepared(pointer, $0) }
-    }
-
-    
-
-    
-    /**
-     * The `ZkpPresentation` (CBOR) of the prover's output.
-     *
-     * # Errors
-     *
-     * [`ZkpReqError::Host`] when the prover's pseudonym is not the catalogue's, or its
-     * `zk_proof` breaks the backend's length rules.
-     */
-open func assemble(zkProof: Data, pseudonym: Data)throws  -> Data {
-    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeZkpReqError.lift) {
-    uniffi_siros_dc_matcher_ffi_fn_method_ffiprepared_assemble(self.uniffiClonePointer(),
-        FfiConverterData.lower(zkProof),
-        FfiConverterData.lower(pseudonym),$0
-    )
-})
-}
-    
-    /**
-     * The data the device key signs with ES256.
-     */
-open func dataToSign() -> Data {
-    return try!  FfiConverterData.lift(try! rustCall() {
-    uniffi_siros_dc_matcher_ffi_fn_method_ffiprepared_data_to_sign(self.uniffiClonePointer(),$0
-    )
-})
-}
-    
-    /**
-     * The prover's job, once `device_signature` (`r ‖ s`) verifies under the MSO's device key.
-     *
-     * # Errors
-     *
-     * `device_binding`, or [`ZkpReqError::Host`] for a signature that is not 64 bytes.
-     */
-open func job(deviceSignature: Data)throws  -> FfiProofJob {
-    return try  FfiConverterTypeFfiProofJob.lift(try rustCallWithError(FfiConverterTypeZkpReqError.lift) {
-    uniffi_siros_dc_matcher_ffi_fn_method_ffiprepared_job(self.uniffiClonePointer(),
-        FfiConverterData.lower(deviceSignature),$0
-    )
-})
-}
-    
-    /**
-     * The identifier of the device key.
-     */
-open func keyId() -> String {
-    return try!  FfiConverterString.lift(try! rustCall() {
-    uniffi_siros_dc_matcher_ffi_fn_method_ffiprepared_key_id(self.uniffiClonePointer(),$0
-    )
-})
-}
-    
-    /**
-     * The statement the proof establishes.
-     */
-open func statement() -> FfiStatement {
-    return try!  FfiConverterTypeFfiStatement.lift(try! rustCall() {
-    uniffi_siros_dc_matcher_ffi_fn_method_ffiprepared_statement(self.uniffiClonePointer(),$0
-    )
-})
-}
-    
-
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeFfiPrepared: FfiConverter {
-
-    typealias FfiType = UnsafeMutableRawPointer
-    typealias SwiftType = FfiPrepared
-
-    public static func lift(_ pointer: UnsafeMutableRawPointer) throws -> FfiPrepared {
-        return FfiPrepared(unsafeFromRawPointer: pointer)
-    }
-
-    public static func lower(_ value: FfiPrepared) -> UnsafeMutableRawPointer {
-        return value.uniffiClonePointer()
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiPrepared {
-        let v: UInt64 = try readInt(&buf)
-        // The Rust code won't compile if a pointer won't fit in a UInt64.
-        // We have to go via `UInt` because that's the thing that's the size of a pointer.
-        let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
-        if (ptr == nil) {
-            throw UniffiInternalError.unexpectedNullPointer
-        }
-        return try lift(ptr!)
-    }
-
-    public static func write(_ value: FfiPrepared, into buf: inout [UInt8]) {
-        // This fiddling is because `Int` is the thing that's the same size as a pointer.
-        // The Rust code won't compile if a pointer won't fit in a `UInt64`.
-        writeInt(&buf, UInt64(bitPattern: Int64(Int(bitPattern: lower(value)))))
-    }
-}
-
-
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeFfiPrepared_lift(_ pointer: UnsafeMutableRawPointer) throws -> FfiPrepared {
-    return try FfiConverterTypeFfiPrepared.lift(pointer)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeFfiPrepared_lower(_ value: FfiPrepared) -> UnsafeMutableRawPointer {
-    return FfiConverterTypeFfiPrepared.lower(value)
-}
-
-
-
-
-/**
  * A system's verifier, implemented by the host.
  */
 public protocol FfiProofVerifier : AnyObject {
@@ -1412,129 +1199,6 @@ public func FfiConverterTypeSirosBlobBuilder_lower(_ value: SirosBlobBuilder) ->
 
 
 /**
- * A credential, option, system and proof backend that answer a query.
- */
-public struct FfiCandidate {
-    /**
-     * The wallet's identifier of the credential.
-     */
-    public var credentialId: String
-    /**
-     * The system of the pair.
-     */
-    public var systemId: String
-    /**
-     * The proof backend of the pair.
-     */
-    public var proofBackend: String
-    /**
-     * The option's index in `_req_sets`; `None` without them.
-     */
-    public var reqSet: UInt64?
-    /**
-     * The `_req` indexes of the option.
-     */
-    public var items: [UInt64]
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(
-        /**
-         * The wallet's identifier of the credential.
-         */credentialId: String, 
-        /**
-         * The system of the pair.
-         */systemId: String, 
-        /**
-         * The proof backend of the pair.
-         */proofBackend: String, 
-        /**
-         * The option's index in `_req_sets`; `None` without them.
-         */reqSet: UInt64?, 
-        /**
-         * The `_req` indexes of the option.
-         */items: [UInt64]) {
-        self.credentialId = credentialId
-        self.systemId = systemId
-        self.proofBackend = proofBackend
-        self.reqSet = reqSet
-        self.items = items
-    }
-}
-
-
-
-extension FfiCandidate: Equatable, Hashable {
-    public static func ==(lhs: FfiCandidate, rhs: FfiCandidate) -> Bool {
-        if lhs.credentialId != rhs.credentialId {
-            return false
-        }
-        if lhs.systemId != rhs.systemId {
-            return false
-        }
-        if lhs.proofBackend != rhs.proofBackend {
-            return false
-        }
-        if lhs.reqSet != rhs.reqSet {
-            return false
-        }
-        if lhs.items != rhs.items {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(credentialId)
-        hasher.combine(systemId)
-        hasher.combine(proofBackend)
-        hasher.combine(reqSet)
-        hasher.combine(items)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeFfiCandidate: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiCandidate {
-        return
-            try FfiCandidate(
-                credentialId: FfiConverterString.read(from: &buf), 
-                systemId: FfiConverterString.read(from: &buf), 
-                proofBackend: FfiConverterString.read(from: &buf), 
-                reqSet: FfiConverterOptionUInt64.read(from: &buf), 
-                items: FfiConverterSequenceUInt64.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: FfiCandidate, into buf: inout [UInt8]) {
-        FfiConverterString.write(value.credentialId, into: &buf)
-        FfiConverterString.write(value.systemId, into: &buf)
-        FfiConverterString.write(value.proofBackend, into: &buf)
-        FfiConverterOptionUInt64.write(value.reqSet, into: &buf)
-        FfiConverterSequenceUInt64.write(value.items, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeFfiCandidate_lift(_ buf: RustBuffer) throws -> FfiCandidate {
-    return try FfiConverterTypeFfiCandidate.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeFfiCandidate_lower(_ value: FfiCandidate) -> RustBuffer {
-    return FfiConverterTypeFfiCandidate.lower(value)
-}
-
-
-/**
  * Something this wallet can produce beyond what it stores, such as a ZK proof
  * over an mdoc.
  */
@@ -2022,87 +1686,6 @@ public func FfiConverterTypeFfiCredential_lower(_ value: FfiCredential) -> RustB
 
 
 /**
- * A credential that cannot answer, and why.
- */
-public struct FfiJudged {
-    /**
-     * The wallet's identifier of the credential.
-     */
-    public var credentialId: String
-    /**
-     * The failures, in the verifier's order of options.
-     */
-    public var errors: [FfiZkpError]
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(
-        /**
-         * The wallet's identifier of the credential.
-         */credentialId: String, 
-        /**
-         * The failures, in the verifier's order of options.
-         */errors: [FfiZkpError]) {
-        self.credentialId = credentialId
-        self.errors = errors
-    }
-}
-
-
-
-extension FfiJudged: Equatable, Hashable {
-    public static func ==(lhs: FfiJudged, rhs: FfiJudged) -> Bool {
-        if lhs.credentialId != rhs.credentialId {
-            return false
-        }
-        if lhs.errors != rhs.errors {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(credentialId)
-        hasher.combine(errors)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeFfiJudged: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiJudged {
-        return
-            try FfiJudged(
-                credentialId: FfiConverterString.read(from: &buf), 
-                errors: FfiConverterSequenceTypeFfiZkpError.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: FfiJudged, into buf: inout [UInt8]) {
-        FfiConverterString.write(value.credentialId, into: &buf)
-        FfiConverterSequenceTypeFfiZkpError.write(value.errors, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeFfiJudged_lift(_ buf: RustBuffer) throws -> FfiJudged {
-    return try FfiConverterTypeFfiJudged.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeFfiJudged_lower(_ value: FfiJudged) -> RustBuffer {
-    return FfiConverterTypeFfiJudged.lower(value)
-}
-
-
-/**
  * The outcome of matching.
  */
 public struct FfiMatchOutcome {
@@ -2425,279 +2008,6 @@ public func FfiConverterTypeFfiMatchedCredential_lift(_ buf: RustBuffer) throws 
 #endif
 public func FfiConverterTypeFfiMatchedCredential_lower(_ value: FfiMatchedCredential) -> RustBuffer {
     return FfiConverterTypeFfiMatchedCredential.lower(value)
-}
-
-
-/**
- * An option without a usable pair.
- */
-public struct FfiOptionRefusal {
-    /**
-     * The option's index in `_req_sets`; `None` without them.
-     */
-    public var reqSet: UInt64?
-    /**
-     * Each system's refusal.
-     */
-    public var systems: [FfiPairRefusal]
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(
-        /**
-         * The option's index in `_req_sets`; `None` without them.
-         */reqSet: UInt64?, 
-        /**
-         * Each system's refusal.
-         */systems: [FfiPairRefusal]) {
-        self.reqSet = reqSet
-        self.systems = systems
-    }
-}
-
-
-
-extension FfiOptionRefusal: Equatable, Hashable {
-    public static func ==(lhs: FfiOptionRefusal, rhs: FfiOptionRefusal) -> Bool {
-        if lhs.reqSet != rhs.reqSet {
-            return false
-        }
-        if lhs.systems != rhs.systems {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(reqSet)
-        hasher.combine(systems)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeFfiOptionRefusal: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiOptionRefusal {
-        return
-            try FfiOptionRefusal(
-                reqSet: FfiConverterOptionUInt64.read(from: &buf), 
-                systems: FfiConverterSequenceTypeFfiPairRefusal.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: FfiOptionRefusal, into buf: inout [UInt8]) {
-        FfiConverterOptionUInt64.write(value.reqSet, into: &buf)
-        FfiConverterSequenceTypeFfiPairRefusal.write(value.systems, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeFfiOptionRefusal_lift(_ buf: RustBuffer) throws -> FfiOptionRefusal {
-    return try FfiConverterTypeFfiOptionRefusal.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeFfiOptionRefusal_lower(_ value: FfiOptionRefusal) -> RustBuffer {
-    return FfiConverterTypeFfiOptionRefusal.lower(value)
-}
-
-
-/**
- * Why a system forms no usable pair for an option.
- */
-public struct FfiPairRefusal {
-    /**
-     * The system.
-     */
-    public var systemId: String
-    /**
-     * `system_not_listed`, `no_listed_backend`, `credential_type`, or the system's
-     * `unsupported` reason.
-     */
-    public var code: String
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(
-        /**
-         * The system.
-         */systemId: String, 
-        /**
-         * `system_not_listed`, `no_listed_backend`, `credential_type`, or the system's
-         * `unsupported` reason.
-         */code: String) {
-        self.systemId = systemId
-        self.code = code
-    }
-}
-
-
-
-extension FfiPairRefusal: Equatable, Hashable {
-    public static func ==(lhs: FfiPairRefusal, rhs: FfiPairRefusal) -> Bool {
-        if lhs.systemId != rhs.systemId {
-            return false
-        }
-        if lhs.code != rhs.code {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(systemId)
-        hasher.combine(code)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeFfiPairRefusal: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiPairRefusal {
-        return
-            try FfiPairRefusal(
-                systemId: FfiConverterString.read(from: &buf), 
-                code: FfiConverterString.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: FfiPairRefusal, into buf: inout [UInt8]) {
-        FfiConverterString.write(value.systemId, into: &buf)
-        FfiConverterString.write(value.code, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeFfiPairRefusal_lift(_ buf: RustBuffer) throws -> FfiPairRefusal {
-    return try FfiConverterTypeFfiPairRefusal.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeFfiPairRefusal_lower(_ value: FfiPairRefusal) -> RustBuffer {
-    return FfiConverterTypeFfiPairRefusal.lower(value)
-}
-
-
-/**
- * What a system's prover needs.
- */
-public struct FfiProofJob {
-    /**
-     * The public values.
-     */
-    public var statement: FfiStatement
-    /**
-     * The credential's `IssuerSigned`, as issued.
-     */
-    public var issuerSigned: Data
-    /**
-     * The 16-byte `secret_seed`. The host zeroes its copy after proving.
-     */
-    public var secretSeed: Data
-    /**
-     * The device signature, `r ‖ s`, verified under the MSO's device key.
-     */
-    public var deviceSignature: Data
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(
-        /**
-         * The public values.
-         */statement: FfiStatement, 
-        /**
-         * The credential's `IssuerSigned`, as issued.
-         */issuerSigned: Data, 
-        /**
-         * The 16-byte `secret_seed`. The host zeroes its copy after proving.
-         */secretSeed: Data, 
-        /**
-         * The device signature, `r ‖ s`, verified under the MSO's device key.
-         */deviceSignature: Data) {
-        self.statement = statement
-        self.issuerSigned = issuerSigned
-        self.secretSeed = secretSeed
-        self.deviceSignature = deviceSignature
-    }
-}
-
-
-
-extension FfiProofJob: Equatable, Hashable {
-    public static func ==(lhs: FfiProofJob, rhs: FfiProofJob) -> Bool {
-        if lhs.statement != rhs.statement {
-            return false
-        }
-        if lhs.issuerSigned != rhs.issuerSigned {
-            return false
-        }
-        if lhs.secretSeed != rhs.secretSeed {
-            return false
-        }
-        if lhs.deviceSignature != rhs.deviceSignature {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(statement)
-        hasher.combine(issuerSigned)
-        hasher.combine(secretSeed)
-        hasher.combine(deviceSignature)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeFfiProofJob: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiProofJob {
-        return
-            try FfiProofJob(
-                statement: FfiConverterTypeFfiStatement.read(from: &buf), 
-                issuerSigned: FfiConverterData.read(from: &buf), 
-                secretSeed: FfiConverterData.read(from: &buf), 
-                deviceSignature: FfiConverterData.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: FfiProofJob, into buf: inout [UInt8]) {
-        FfiConverterTypeFfiStatement.write(value.statement, into: &buf)
-        FfiConverterData.write(value.issuerSigned, into: &buf)
-        FfiConverterData.write(value.secretSeed, into: &buf)
-        FfiConverterData.write(value.deviceSignature, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeFfiProofJob_lift(_ buf: RustBuffer) throws -> FfiProofJob {
-    return try FfiConverterTypeFfiProofJob.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeFfiProofJob_lower(_ value: FfiProofJob) -> RustBuffer {
-    return FfiConverterTypeFfiProofJob.lower(value)
 }
 
 
@@ -3092,117 +2402,6 @@ public func FfiConverterTypeFfiStatement_lower(_ value: FfiStatement) -> RustBuf
 
 
 /**
- * A credential the wallet stores.
- */
-public struct FfiStoredCredential {
-    /**
-     * The wallet's identifier.
-     */
-    public var id: String
-    /**
-     * The credential format, `mso_mdoc`.
-     */
-    public var format: String
-    /**
-     * The credential as issued: base64url without padding of an `IssuerSigned`, a `Document`
-     * or a one-document `DeviceResponse`.
-     */
-    public var data: String
-    /**
-     * The identifier of the device key.
-     */
-    public var kid: String
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(
-        /**
-         * The wallet's identifier.
-         */id: String, 
-        /**
-         * The credential format, `mso_mdoc`.
-         */format: String, 
-        /**
-         * The credential as issued: base64url without padding of an `IssuerSigned`, a `Document`
-         * or a one-document `DeviceResponse`.
-         */data: String, 
-        /**
-         * The identifier of the device key.
-         */kid: String) {
-        self.id = id
-        self.format = format
-        self.data = data
-        self.kid = kid
-    }
-}
-
-
-
-extension FfiStoredCredential: Equatable, Hashable {
-    public static func ==(lhs: FfiStoredCredential, rhs: FfiStoredCredential) -> Bool {
-        if lhs.id != rhs.id {
-            return false
-        }
-        if lhs.format != rhs.format {
-            return false
-        }
-        if lhs.data != rhs.data {
-            return false
-        }
-        if lhs.kid != rhs.kid {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(id)
-        hasher.combine(format)
-        hasher.combine(data)
-        hasher.combine(kid)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeFfiStoredCredential: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiStoredCredential {
-        return
-            try FfiStoredCredential(
-                id: FfiConverterString.read(from: &buf), 
-                format: FfiConverterString.read(from: &buf), 
-                data: FfiConverterString.read(from: &buf), 
-                kid: FfiConverterString.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: FfiStoredCredential, into buf: inout [UInt8]) {
-        FfiConverterString.write(value.id, into: &buf)
-        FfiConverterString.write(value.format, into: &buf)
-        FfiConverterString.write(value.data, into: &buf)
-        FfiConverterString.write(value.kid, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeFfiStoredCredential_lift(_ buf: RustBuffer) throws -> FfiStoredCredential {
-    return try FfiConverterTypeFfiStoredCredential.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeFfiStoredCredential_lower(_ value: FfiStoredCredential) -> RustBuffer {
-    return FfiConverterTypeFfiStoredCredential.lower(value)
-}
-
-
-/**
  * What an accepted presentation establishes.
  */
 public struct FfiVerified {
@@ -3417,105 +2616,6 @@ public func FfiConverterTypeFfiVpTokenEntry_lift(_ buf: RustBuffer) throws -> Ff
 #endif
 public func FfiConverterTypeFfiVpTokenEntry_lower(_ value: FfiVpTokenEntry) -> RustBuffer {
     return FfiConverterTypeFfiVpTokenEntry.lower(value)
-}
-
-
-/**
- * Why a credential cannot answer: an item's failure, or the credential's.
- */
-public struct FfiZkpError {
-    /**
-     * The system rulebook's code (Section 9): `age_out_of_range`, `seed_mismatch`,
-     * `validity`, `issuer_signature`, `issuer_untrusted`, `device_binding`,
-     * `credential_form`.
-     */
-    public var code: String
-    /**
-     * The `_req` index of a failing item; `None` for the credential's own checks.
-     */
-    public var item: UInt64?
-    /**
-     * The option's index in `_req_sets` of a failing item.
-     */
-    public var reqSet: UInt64?
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(
-        /**
-         * The system rulebook's code (Section 9): `age_out_of_range`, `seed_mismatch`,
-         * `validity`, `issuer_signature`, `issuer_untrusted`, `device_binding`,
-         * `credential_form`.
-         */code: String, 
-        /**
-         * The `_req` index of a failing item; `None` for the credential's own checks.
-         */item: UInt64?, 
-        /**
-         * The option's index in `_req_sets` of a failing item.
-         */reqSet: UInt64?) {
-        self.code = code
-        self.item = item
-        self.reqSet = reqSet
-    }
-}
-
-
-
-extension FfiZkpError: Equatable, Hashable {
-    public static func ==(lhs: FfiZkpError, rhs: FfiZkpError) -> Bool {
-        if lhs.code != rhs.code {
-            return false
-        }
-        if lhs.item != rhs.item {
-            return false
-        }
-        if lhs.reqSet != rhs.reqSet {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(code)
-        hasher.combine(item)
-        hasher.combine(reqSet)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeFfiZkpError: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiZkpError {
-        return
-            try FfiZkpError(
-                code: FfiConverterString.read(from: &buf), 
-                item: FfiConverterOptionUInt64.read(from: &buf), 
-                reqSet: FfiConverterOptionUInt64.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: FfiZkpError, into buf: inout [UInt8]) {
-        FfiConverterString.write(value.code, into: &buf)
-        FfiConverterOptionUInt64.write(value.item, into: &buf)
-        FfiConverterOptionUInt64.write(value.reqSet, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeFfiZkpError_lift(_ buf: RustBuffer) throws -> FfiZkpError {
-    return try FfiConverterTypeFfiZkpError.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeFfiZkpError_lower(_ value: FfiZkpError) -> RustBuffer {
-    return FfiConverterTypeFfiZkpError.lower(value)
 }
 
 
@@ -3871,123 +2971,6 @@ extension FfiVerifierIdForm: Equatable, Hashable {}
 
 
 
-// Note that we don't yet support `indirect` for enums.
-// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
-/**
- * The outcome of matching one query.
- */
-
-public enum FfiZkpMatch {
-    
-    /**
-     * The credentials that can answer, best first: show the consent screen.
-     */
-    case candidates(
-        /**
-         * The candidates.
-         */candidates: [FfiCandidate]
-    )
-    /**
-     * No credential can answer: send `access_denied`.
-     */
-    case rejected(
-        /**
-         * Each credential that matched the query's type, and why it cannot answer.
-         */rejected: [FfiJudged]
-    )
-    /**
-     * No option has a usable pair: send `vp_formats_not_supported`.
-     */
-    case unsupported(
-        /**
-         * Each option and why.
-         */options: [FfiOptionRefusal]
-    )
-    /**
-     * The query breaks a rule: send `invalid_request`.
-     */
-    case invalid(
-        /**
-         * The rule's identifier.
-         */code: String
-    )
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeFfiZkpMatch: FfiConverterRustBuffer {
-    typealias SwiftType = FfiZkpMatch
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiZkpMatch {
-        let variant: Int32 = try readInt(&buf)
-        switch variant {
-        
-        case 1: return .candidates(candidates: try FfiConverterSequenceTypeFfiCandidate.read(from: &buf)
-        )
-        
-        case 2: return .rejected(rejected: try FfiConverterSequenceTypeFfiJudged.read(from: &buf)
-        )
-        
-        case 3: return .unsupported(options: try FfiConverterSequenceTypeFfiOptionRefusal.read(from: &buf)
-        )
-        
-        case 4: return .invalid(code: try FfiConverterString.read(from: &buf)
-        )
-        
-        default: throw UniffiInternalError.unexpectedEnumCase
-        }
-    }
-
-    public static func write(_ value: FfiZkpMatch, into buf: inout [UInt8]) {
-        switch value {
-        
-        
-        case let .candidates(candidates):
-            writeInt(&buf, Int32(1))
-            FfiConverterSequenceTypeFfiCandidate.write(candidates, into: &buf)
-            
-        
-        case let .rejected(rejected):
-            writeInt(&buf, Int32(2))
-            FfiConverterSequenceTypeFfiJudged.write(rejected, into: &buf)
-            
-        
-        case let .unsupported(options):
-            writeInt(&buf, Int32(3))
-            FfiConverterSequenceTypeFfiOptionRefusal.write(options, into: &buf)
-            
-        
-        case let .invalid(code):
-            writeInt(&buf, Int32(4))
-            FfiConverterString.write(code, into: &buf)
-            
-        }
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeFfiZkpMatch_lift(_ buf: RustBuffer) throws -> FfiZkpMatch {
-    return try FfiConverterTypeFfiZkpMatch.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeFfiZkpMatch_lower(_ value: FfiZkpMatch) -> RustBuffer {
-    return FfiConverterTypeFfiZkpMatch.lower(value)
-}
-
-
-
-extension FfiZkpMatch: Equatable, Hashable {}
-
-
-
 
 /**
  * Why a request could not be matched.
@@ -4114,29 +3097,7 @@ public enum ZkpReqError {
          */code: String
     )
     /**
-     * The credential cannot answer the candidate's option.
-     */
-    case Rejected(
-        /**
-         * `access_denied`.
-         */errorCode: String, 
-        /**
-         * Each failure, with the system rulebook's code.
-         */errors: [FfiZkpError]
-    )
-    /**
-     * The candidate's system and backend no longer form a usable pair for its option.
-     */
-    case Unsupported(
-        /**
-         * `access_denied`.
-         */errorCode: String, 
-        /**
-         * Why the pair is not usable.
-         */code: String
-    )
-    /**
-     * An input of the host, or the prover's output, is not one the presenter can use.
+     * An input of the host is not one the core can use.
      */
     case Host(
         /**
@@ -4177,19 +3138,11 @@ public struct FfiConverterTypeZkpReqError: FfiConverterRustBuffer {
             errorCode: try FfiConverterString.read(from: &buf), 
             code: try FfiConverterString.read(from: &buf)
             )
-        case 2: return .Rejected(
-            errorCode: try FfiConverterString.read(from: &buf), 
-            errors: try FfiConverterSequenceTypeFfiZkpError.read(from: &buf)
-            )
-        case 3: return .Unsupported(
+        case 2: return .Host(
             errorCode: try FfiConverterString.read(from: &buf), 
             code: try FfiConverterString.read(from: &buf)
             )
-        case 4: return .Host(
-            errorCode: try FfiConverterString.read(from: &buf), 
-            code: try FfiConverterString.read(from: &buf)
-            )
-        case 5: return .Refused(
+        case 3: return .Refused(
             code: try FfiConverterString.read(from: &buf), 
             detail: try FfiConverterString.read(from: &buf)
             )
@@ -4211,26 +3164,14 @@ public struct FfiConverterTypeZkpReqError: FfiConverterRustBuffer {
             FfiConverterString.write(code, into: &buf)
             
         
-        case let .Rejected(errorCode,errors):
-            writeInt(&buf, Int32(2))
-            FfiConverterString.write(errorCode, into: &buf)
-            FfiConverterSequenceTypeFfiZkpError.write(errors, into: &buf)
-            
-        
-        case let .Unsupported(errorCode,code):
-            writeInt(&buf, Int32(3))
-            FfiConverterString.write(errorCode, into: &buf)
-            FfiConverterString.write(code, into: &buf)
-            
-        
         case let .Host(errorCode,code):
-            writeInt(&buf, Int32(4))
+            writeInt(&buf, Int32(2))
             FfiConverterString.write(errorCode, into: &buf)
             FfiConverterString.write(code, into: &buf)
             
         
         case let .Refused(code,detail):
-            writeInt(&buf, Int32(5))
+            writeInt(&buf, Int32(3))
             FfiConverterString.write(code, into: &buf)
             FfiConverterString.write(detail, into: &buf)
             
@@ -4298,55 +3239,6 @@ fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-fileprivate struct FfiConverterOptionSequenceData: FfiConverterRustBuffer {
-    typealias SwiftType = [Data]?
-
-    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
-        guard let value = value else {
-            writeInt(&buf, Int8(0))
-            return
-        }
-        writeInt(&buf, Int8(1))
-        FfiConverterSequenceData.write(value, into: &buf)
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
-        switch try readInt(&buf) as Int8 {
-        case 0: return nil
-        case 1: return try FfiConverterSequenceData.read(from: &buf)
-        default: throw UniffiInternalError.unexpectedOptionalTag
-        }
-    }
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-fileprivate struct FfiConverterSequenceUInt64: FfiConverterRustBuffer {
-    typealias SwiftType = [UInt64]
-
-    public static func write(_ value: [UInt64], into buf: inout [UInt8]) {
-        let len = Int32(value.count)
-        writeInt(&buf, len)
-        for item in value {
-            FfiConverterUInt64.write(item, into: &buf)
-        }
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [UInt64] {
-        let len: Int32 = try readInt(&buf)
-        var seq = [UInt64]()
-        seq.reserveCapacity(Int(len))
-        for _ in 0 ..< len {
-            seq.append(try FfiConverterUInt64.read(from: &buf))
-        }
-        return seq
-    }
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
 fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
     typealias SwiftType = [String]
 
@@ -4389,31 +3281,6 @@ fileprivate struct FfiConverterSequenceData: FfiConverterRustBuffer {
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterData.read(from: &buf))
-        }
-        return seq
-    }
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-fileprivate struct FfiConverterSequenceTypeFfiCandidate: FfiConverterRustBuffer {
-    typealias SwiftType = [FfiCandidate]
-
-    public static func write(_ value: [FfiCandidate], into buf: inout [UInt8]) {
-        let len = Int32(value.count)
-        writeInt(&buf, len)
-        for item in value {
-            FfiConverterTypeFfiCandidate.write(item, into: &buf)
-        }
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [FfiCandidate] {
-        let len: Int32 = try readInt(&buf)
-        var seq = [FfiCandidate]()
-        seq.reserveCapacity(Int(len))
-        for _ in 0 ..< len {
-            seq.append(try FfiConverterTypeFfiCandidate.read(from: &buf))
         }
         return seq
     }
@@ -4497,31 +3364,6 @@ fileprivate struct FfiConverterSequenceTypeFfiCombination: FfiConverterRustBuffe
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-fileprivate struct FfiConverterSequenceTypeFfiJudged: FfiConverterRustBuffer {
-    typealias SwiftType = [FfiJudged]
-
-    public static func write(_ value: [FfiJudged], into buf: inout [UInt8]) {
-        let len = Int32(value.count)
-        writeInt(&buf, len)
-        for item in value {
-            FfiConverterTypeFfiJudged.write(item, into: &buf)
-        }
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [FfiJudged] {
-        let len: Int32 = try readInt(&buf)
-        var seq = [FfiJudged]()
-        seq.reserveCapacity(Int(len))
-        for _ in 0 ..< len {
-            seq.append(try FfiConverterTypeFfiJudged.read(from: &buf))
-        }
-        return seq
-    }
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
 fileprivate struct FfiConverterSequenceTypeFfiMatchedCredential: FfiConverterRustBuffer {
     typealias SwiftType = [FfiMatchedCredential]
 
@@ -4539,56 +3381,6 @@ fileprivate struct FfiConverterSequenceTypeFfiMatchedCredential: FfiConverterRus
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeFfiMatchedCredential.read(from: &buf))
-        }
-        return seq
-    }
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-fileprivate struct FfiConverterSequenceTypeFfiOptionRefusal: FfiConverterRustBuffer {
-    typealias SwiftType = [FfiOptionRefusal]
-
-    public static func write(_ value: [FfiOptionRefusal], into buf: inout [UInt8]) {
-        let len = Int32(value.count)
-        writeInt(&buf, len)
-        for item in value {
-            FfiConverterTypeFfiOptionRefusal.write(item, into: &buf)
-        }
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [FfiOptionRefusal] {
-        let len: Int32 = try readInt(&buf)
-        var seq = [FfiOptionRefusal]()
-        seq.reserveCapacity(Int(len))
-        for _ in 0 ..< len {
-            seq.append(try FfiConverterTypeFfiOptionRefusal.read(from: &buf))
-        }
-        return seq
-    }
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-fileprivate struct FfiConverterSequenceTypeFfiPairRefusal: FfiConverterRustBuffer {
-    typealias SwiftType = [FfiPairRefusal]
-
-    public static func write(_ value: [FfiPairRefusal], into buf: inout [UInt8]) {
-        let len = Int32(value.count)
-        writeInt(&buf, len)
-        for item in value {
-            FfiConverterTypeFfiPairRefusal.write(item, into: &buf)
-        }
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [FfiPairRefusal] {
-        let len: Int32 = try readInt(&buf)
-        var seq = [FfiPairRefusal]()
-        seq.reserveCapacity(Int(len))
-        for _ in 0 ..< len {
-            seq.append(try FfiConverterTypeFfiPairRefusal.read(from: &buf))
         }
         return seq
     }
@@ -4647,31 +3439,6 @@ fileprivate struct FfiConverterSequenceTypeFfiResult: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-fileprivate struct FfiConverterSequenceTypeFfiStoredCredential: FfiConverterRustBuffer {
-    typealias SwiftType = [FfiStoredCredential]
-
-    public static func write(_ value: [FfiStoredCredential], into buf: inout [UInt8]) {
-        let len = Int32(value.count)
-        writeInt(&buf, len)
-        for item in value {
-            FfiConverterTypeFfiStoredCredential.write(item, into: &buf)
-        }
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [FfiStoredCredential] {
-        let len: Int32 = try readInt(&buf)
-        var seq = [FfiStoredCredential]()
-        seq.reserveCapacity(Int(len))
-        for _ in 0 ..< len {
-            seq.append(try FfiConverterTypeFfiStoredCredential.read(from: &buf))
-        }
-        return seq
-    }
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
 fileprivate struct FfiConverterSequenceTypeFfiVpTokenEntry: FfiConverterRustBuffer {
     typealias SwiftType = [FfiVpTokenEntry]
 
@@ -4689,31 +3456,6 @@ fileprivate struct FfiConverterSequenceTypeFfiVpTokenEntry: FfiConverterRustBuff
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeFfiVpTokenEntry.read(from: &buf))
-        }
-        return seq
-    }
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-fileprivate struct FfiConverterSequenceTypeFfiZkpError: FfiConverterRustBuffer {
-    typealias SwiftType = [FfiZkpError]
-
-    public static func write(_ value: [FfiZkpError], into buf: inout [UInt8]) {
-        let len = Int32(value.count)
-        writeInt(&buf, len)
-        for item in value {
-            FfiConverterTypeFfiZkpError.write(item, into: &buf)
-        }
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [FfiZkpError] {
-        let len: Int32 = try readInt(&buf)
-        var seq = [FfiZkpError]()
-        seq.reserveCapacity(Int(len))
-        for _ in 0 ..< len {
-            seq.append(try FfiConverterTypeFfiZkpError.read(from: &buf))
         }
         return seq
     }
@@ -4853,54 +3595,6 @@ public func zkpReqJwkThumbprint(jwkJson: String)throws  -> Data {
 })
 }
 /**
- * Matches one `zkp_req` Credential Query against the wallet's credentials.
- *
- * `query_json` is the Credential Query, `client_metadata_json` the request's
- * `client_metadata`. `credentials` are those of the query's format and type, a superset is
- * fine. `anchors` are the DER certificates the query's `trusted_authorities` designate,
- * required when it has some. `systems` are the system ids the host proves, in the wallet's
- * order of preference. `now` is the wallet's clock in seconds since the epoch.
- *
- * # Errors
- *
- * [`ZkpReqError::Host`] for an input the presenter cannot use.
- */
-public func zkpReqMatch(queryJson: String, clientMetadataJson: String, credentials: [FfiStoredCredential], anchors: [Data]?, systems: [String], now: Int64)throws  -> FfiZkpMatch {
-    return try  FfiConverterTypeFfiZkpMatch.lift(try rustCallWithError(FfiConverterTypeZkpReqError.lift) {
-    uniffi_siros_dc_matcher_ffi_fn_func_zkp_req_match(
-        FfiConverterString.lower(queryJson),
-        FfiConverterString.lower(clientMetadataJson),
-        FfiConverterSequenceTypeFfiStoredCredential.lower(credentials),
-        FfiConverterOptionSequenceData.lower(anchors),
-        FfiConverterSequenceString.lower(systems),
-        FfiConverterInt64.lower(now),$0
-    )
-})
-}
-/**
- * Checks the consented candidate again and builds its statement (system rulebooks,
- * Section 7). The same inputs as [`zkp_req_match`], with the session and the credential's
- * delivered `secret_seed`.
- *
- * # Errors
- *
- * [`ZkpReqError`]: what fails, with the Section 9 codes.
- */
-public func zkpReqPrepare(candidate: FfiCandidate, queryJson: String, clientMetadataJson: String, session: FfiSession, credential: FfiStoredCredential, secretSeed: Data, anchors: [Data]?, now: Int64)throws  -> FfiPrepared {
-    return try  FfiConverterTypeFfiPrepared.lift(try rustCallWithError(FfiConverterTypeZkpReqError.lift) {
-    uniffi_siros_dc_matcher_ffi_fn_func_zkp_req_prepare(
-        FfiConverterTypeFfiCandidate.lower(candidate),
-        FfiConverterString.lower(queryJson),
-        FfiConverterString.lower(clientMetadataJson),
-        FfiConverterTypeFfiSession.lower(session),
-        FfiConverterTypeFfiStoredCredential.lower(credential),
-        FfiConverterData.lower(secretSeed),
-        FfiConverterOptionSequenceData.lower(anchors),
-        FfiConverterInt64.lower(now),$0
-    )
-})
-}
-/**
  * The session of a validated Request Object: the policy of signed requests and encrypted
  * responses, the `Handover` for the response-encryption key with this JWK thumbprint, and
  * `verifier_id` in the trust framework's form.
@@ -4922,12 +3616,13 @@ public func zkpReqSession(requestObjectJson: String, signed: Bool, channel: FfiC
 })
 }
 /**
- * Verifies a presentation against the verifier's own query, session, clock and trust
- * anchors, with the host's proof verifier.
+ * Verifies a presentation against the verifier's own query, session, clock and
+ * `trust_anchors` (DER certificates), with the host's proof verifier.
  *
  * # Errors
  *
- * [`ZkpReqError::Refused`] with the system rulebook's code.
+ * [`ZkpReqError::Refused`] with the system rulebook's code, and [`ZkpReqError::Host`] with
+ * the certificate's code for a trust anchor that does not parse.
  */
 public func zkpReqVerify(queryJson: String, clientMetadataJson: String, session: FfiSession, presentation: Data, now: Int64, toleranceFuture: Int64, tolerancePast: Int64, trustAnchors: [Data], verifier: FfiProofVerifier)throws  -> FfiVerified {
     return try  FfiConverterTypeFfiVerified.lift(try rustCallWithError(FfiConverterTypeZkpReqError.lift) {
@@ -5002,37 +3697,16 @@ private var initializationResult: InitializationResult = {
     if (uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_jwk_thumbprint() != 44324) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_match() != 50997) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_prepare() != 12649) {
-        return InitializationResult.apiChecksumMismatch
-    }
     if (uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_session() != 45790) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_verify() != 17520) {
+    if (uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_verify() != 31681) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_vp_token_cbor() != 9199) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_siros_dc_matcher_ffi_checksum_func_zkp_req_vp_token_json() != 3217) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_siros_dc_matcher_ffi_checksum_method_ffiprepared_assemble() != 17164) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_siros_dc_matcher_ffi_checksum_method_ffiprepared_data_to_sign() != 20262) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_siros_dc_matcher_ffi_checksum_method_ffiprepared_job() != 17581) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_siros_dc_matcher_ffi_checksum_method_ffiprepared_key_id() != 33064) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_siros_dc_matcher_ffi_checksum_method_ffiprepared_statement() != 39156) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_siros_dc_matcher_ffi_checksum_method_ffiproofverifier_verify() != 60481) {

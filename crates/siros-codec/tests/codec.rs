@@ -84,7 +84,12 @@ fn refusals() {
             &[0xfa, 0, 0, 0, 0],
             CborError::Unsupported(Unsupported::Float),
         ),
-        (&[0x62, 0xff, 0xfe], CborError::InvalidUtf8),
+        (
+            &[0x62, 0xff, 0xfe],
+            CborError::InvalidUtf8(
+                std::str::from_utf8(std::hint::black_box(&[0xff, 0xfe])).unwrap_err(),
+            ),
+        ),
         (&[0xa2, 0x01, 0x02, 0x01, 0x03], CborError::DuplicateKey),
     ];
     for (bytes, error) in cases {

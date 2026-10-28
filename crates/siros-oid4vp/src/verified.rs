@@ -4,13 +4,15 @@ use p256::PublicKey;
 use serde_json::Value;
 use siros_dcql::DcqlQuery;
 
-use crate::client_id::ClientId;
+use crate::client_id::{ClientId, ClientIdPrefix};
 use crate::fetch::HttpsUrl;
 use crate::handover::{Handover, JwkThumbprint};
 use crate::intake::Verdict;
+use crate::parameters::{Nonce, State};
 use crate::protocol::Protocol;
+use crate::request::{AttestationFormat, RequestSignature, ResponseMode, TransactionDataItem};
 use crate::semantic::{SemanticIdError, SemanticIdentifier};
-use crate::values::{Kid, Nonce, Origin, State, TransactionDataItem};
+use crate::values::{Kid, Origin};
 
 /// An OpenID4VP request that intake verified. Only intake constructs it.
 ///
@@ -75,35 +77,6 @@ pub(crate) enum PostEncoding {
     Cose(Encryption),
 }
 
-/// The Response Mode of a verified request (Sections 8.2, 8.3.1; A.2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ResponseMode {
-    /// `direct_post`.
-    DirectPost,
-    /// `direct_post.jwt`.
-    DirectPostJwt,
-    /// `direct_post.cwt` (`zkp_req.md`, Section 6.2).
-    DirectPostCwt,
-    /// `dc_api`.
-    DcApi,
-    /// `dc_api.jwt`.
-    DcApiJwt,
-}
-
-impl ResponseMode {
-    /// The `response_mode` value.
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::DirectPost => "direct_post",
-            Self::DirectPostJwt => "direct_post.jwt",
-            Self::DirectPostCwt => "direct_post.cwt",
-            Self::DcApi => "dc_api",
-            Self::DcApiJwt => "dc_api.jwt",
-        }
-    }
-}
-
 /// The content encryption of an encrypted response: AES GCM with a 96-bit IV and a 128-bit tag
 /// (RFC 7518, Section 5.3; RFC 9053, Section 4.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -130,33 +103,6 @@ impl ContentEncryption {
             Self::A128Gcm => "A128GCM",
             Self::A192Gcm => "A192GCM",
             Self::A256Gcm => "A256GCM",
-        }
-    }
-
-    /// The COSE algorithm value (RFC 9053, Section 4.1).
-    pub(crate) fn cose_alg(self) -> u64 {
-        match self {
-            Self::A128Gcm => 1,
-            Self::A192Gcm => 2,
-            Self::A256Gcm => 3,
-        }
-    }
-
-    /// The key length in bits.
-    pub(crate) fn key_bits(self) -> u32 {
-        match self {
-            Self::A128Gcm => 128,
-            Self::A192Gcm => 192,
-            Self::A256Gcm => 256,
-        }
-    }
-
-    /// The key length in bytes.
-    pub(crate) fn key_len(self) -> usize {
-        match self {
-            Self::A128Gcm => 16,
-            Self::A192Gcm => 24,
-            Self::A256Gcm => 32,
         }
     }
 }
@@ -223,18 +169,6 @@ impl AccessCertificate {
     }
 }
 
-/// The `format` of a `verifier_info` attestation (Section 5.1).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct AttestationFormat(pub(crate) String);
-
-impl AttestationFormat {
-    /// The format identifier.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
 /// Who asks, as the consent screen shows it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VerifierView<'a> {
@@ -285,6 +219,18 @@ impl VerifiedRequest {
             client_id,
             verdict: self.trusted,
             display,
+        }
+    }
+
+    /// Whether the request arrived signed: every Client Identifier Prefix but `redirect_uri`
+    /// signs (Section 5.9.3).
+    #[must_use]
+    pub fn signature(&self) -> RequestSignature {
+        match self.verifier().client_id {
+            Some(client_id) if client_id.prefix() != ClientIdPrefix::RedirectUri => {
+                RequestSignature::Signed
+            }
+            Some(_) | None => RequestSignature::Unsigned,
         }
     }
 

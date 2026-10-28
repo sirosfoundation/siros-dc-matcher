@@ -9,11 +9,13 @@
 //! The writer emits the core deterministic encoding of RFC 8949, Section 4.2.1: shortest heads,
 //! definite lengths, and map keys sorted by their encoded bytes.
 
+use std::str::Utf8Error;
+
 /// The deepest nesting the reader accepts.
 pub const MAX_DEPTH: usize = 32;
 
 /// Why bytes are not one CBOR item the reader accepts.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum CborError {
     /// The input ends inside an item.
     #[error("CBOR item is truncated")]
@@ -23,10 +25,10 @@ pub enum CborError {
     TrailingBytes,
     /// An encoding the reader refuses, named by [`Unsupported`].
     #[error("unsupported CBOR encoding")]
-    Unsupported(Unsupported),
+    Unsupported(#[source] Unsupported),
     /// A text string is not UTF-8.
     #[error("CBOR text is not UTF-8")]
-    InvalidUtf8,
+    InvalidUtf8(#[source] Utf8Error),
     /// A map has the same key twice.
     #[error("CBOR map repeats a key")]
     DuplicateKey,
@@ -36,15 +38,19 @@ pub enum CborError {
 }
 
 /// An encoding the reader refuses.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum Unsupported {
     /// Additional information 31: an indefinite length, or the break that ends one.
+    #[error("additional information 31: an indefinite length, or the break that ends one")]
     IndefiniteLength,
     /// Additional information 28 to 30, which RFC 8949 reserves.
+    #[error("additional information 28 to 30, which RFC 8949 reserves")]
     ReservedInfo,
     /// A floating-point number.
+    #[error("a floating-point number")]
     Float,
     /// A simple value other than `false`, `true`, `null` and `undefined`.
+    #[error("a simple value other than `false`, `true`, `null` and `undefined`")]
     SimpleValue,
 }
 
@@ -56,7 +62,7 @@ impl CborError {
             Self::Truncated => "cbor_truncated",
             Self::TrailingBytes => "cbor_trailing_bytes",
             Self::Unsupported(_) => "cbor_unsupported",
-            Self::InvalidUtf8 => "cbor_invalid_utf8",
+            Self::InvalidUtf8(_) => "cbor_invalid_utf8",
             Self::DuplicateKey => "cbor_duplicate_key",
             Self::TooDeep => "cbor_too_deep",
         }
@@ -263,8 +269,7 @@ impl<'a> Reader<'a> {
             }
             Major::Text => {
                 let n = self.length(argument)?;
-                let text =
-                    std::str::from_utf8(self.take(n)?).map_err(|_| CborError::InvalidUtf8)?;
+                let text = std::str::from_utf8(self.take(n)?).map_err(CborError::InvalidUtf8)?;
                 Ok(Kind::Text(text))
             }
             Major::Array => self.array(argument, depth),

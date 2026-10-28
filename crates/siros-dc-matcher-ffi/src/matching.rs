@@ -28,8 +28,8 @@ use std::collections::HashMap;
 
 use siros_dc_matcher_core::db::CredentialDatabase;
 use siros_dc_matcher_core::evaluator::{credentials, resolve, ProfilePolicy};
-use siros_dcql::{execute, DcqlQuery};
-use siros_oid4vp::{UnverifiedQuery, UnverifiedRequest};
+use siros_dcql::{execute, DcqlQuery, Satisfaction};
+use siros_oid4vp::UnverifiedRequest;
 
 use crate::FfiCapability;
 
@@ -212,7 +212,7 @@ pub fn match_dc_api_request(
     // declined. One reader, or they drift again.
     let registered = |label: &str| db.profile.parser_for(label).is_some();
     let found = UnverifiedRequest::first_registered(request_json.as_bytes(), &registered)
-        .and_then(|unverified| Some((unverified.query().matching_query()?, unverified)));
+        .map(|unverified| (unverified.query().clone(), unverified));
     let (query, unverified) = match found {
         Some(found) => found,
         None => {
@@ -235,12 +235,7 @@ pub fn match_dc_api_request(
         }
     };
 
-    Ok(evaluate(
-        &db,
-        &query,
-        unverified.query(),
-        unverified.client_metadata(),
-    ))
+    Ok(evaluate(&db, &query, unverified.client_metadata()))
 }
 
 /// Match a bare DCQL query.
@@ -281,27 +276,8 @@ pub fn match_dcql_with_context(
         .map(|text| serde_json::from_str::<serde_json::Value>(&text).map_err(request_err))
         .transpose()?;
 
-    let strict = DcqlQuery::from_json(&dcql_json);
-    let unverified = UnverifiedQuery::parse(raw).map_err(|e| {
-        request_err(
-            strict
-                .as_ref()
-                .err()
-                .map_or_else(|| e.to_string(), ToString::to_string),
-        )
-    })?;
-    let query = match strict {
-        Ok(query) => query,
-        // The identifier checks `from_json` makes still apply to anything that
-        // is DCQL; only a `zkp_req` query DCQL cannot represent is let past.
-        Err(e) if unverified.typed().is_some() => return Err(request_err(e)),
-        Err(e) => {
-            let query = unverified.matching_query().ok_or_else(|| request_err(&e))?;
-            query.validate().map_err(request_err)?;
-            query
-        }
-    };
-    Ok(evaluate(&db, &query, &unverified, client_metadata.as_ref()))
+    let query = DcqlQuery::parse(&raw).map_err(request_err)?;
+    Ok(evaluate(&db, &query, client_metadata.as_ref()))
 }
 
 fn decode(blob: &[u8]) -> Result<CredentialDatabase, MatchError> {
@@ -322,16 +298,15 @@ fn request_err(e: impl core::fmt::Display) -> MatchError {
 fn evaluate(
     db: &CredentialDatabase,
     query: &DcqlQuery,
-    unverified: &UnverifiedQuery,
     client_metadata: Option<&serde_json::Value>,
 ) -> FfiMatchOutcome {
     let held = credentials(db);
-    let policy = ProfilePolicy::new(&db.profile).with_context(unverified, client_metadata);
+    let policy = ProfilePolicy::new(&db.profile).with_client_metadata(client_metadata);
     let result = execute(query, &held, &policy);
     let enumerated = result.combinations(MAX_COMBINATIONS);
-    let dropped_count = u32::try_from(enumerated.dropped.count()).unwrap_or(u32::MAX);
+    let dropped_count = u32::try_from(enumerated.dropped().count()).unwrap_or(u32::MAX);
 
-    let member = |query_id: &String, candidate: &siros_dcql::Candidate| {
+    let member = |query_id: &str, candidate: &siros_dcql::Candidate| {
         // Resolved by core, not here: the matcher binary derives exactly the
         // same details for its picker metadata, and two derivations are how
         // the two would come to disagree about which capability satisfied a
@@ -340,8 +315,8 @@ fn evaluate(
             .credential(query_id)
             .map(|cq| resolve(&policy, cq, candidate));
         FfiMatchedCredential {
-            query_id: query_id.clone(),
-            credential_id: candidate.credential_id.clone(),
+            query_id: query_id.to_owned(),
+            credential_id: candidate.credential_id().as_str().to_owned(),
             claims: resolved
                 .as_ref()
                 .map(|r| r.claims.clone())
@@ -373,29 +348,29 @@ fn evaluate(
     };
 
     let matches = result
-        .matches
+        .matches()
         .iter()
         .map(|query_match| FfiQueryMatch {
-            query_id: query_match.query_id.to_string(),
+            query_id: query_match.query_id().to_string(),
             credentials: query_match
-                .candidates
+                .candidates()
                 .iter()
-                .map(|candidate| member(&query_match.query_id.to_string(), candidate))
+                .map(|candidate| member(query_match.query_id(), candidate))
                 .collect(),
         })
         .collect();
 
     let combinations = enumerated
-        .combinations
+        .combinations()
         .iter()
         .map(|combination| FfiCombination {
             members: combination
-                .members
+                .members()
                 .iter()
                 .map(|(query_id, candidate)| member(query_id, candidate))
                 .collect(),
             purposes: combination
-                .purposes
+                .purposes()
                 .iter()
                 .map(siros_display::purpose::display)
                 .collect(),
@@ -404,14 +379,14 @@ fn evaluate(
 
     FfiMatchOutcome {
         matches,
-        satisfiable: result.satisfiable,
+        satisfiable: result.satisfaction() == Satisfaction::Satisfiable,
         combinations,
         dropped: dropped_count,
         // Exact only if the engine's count was exact *and* it survived the
         // narrowing. A clamped value reported as exact would say u32::MAX
         // combinations were dropped and mean it — the same overstated
         // precision this field exists to prevent, reintroduced by the cast.
-        dropped_is_exact: enumerated.dropped.is_exact()
-            && usize::try_from(dropped_count) == Ok(enumerated.dropped.count()),
+        dropped_is_exact: enumerated.dropped().is_exact()
+            && usize::try_from(dropped_count) == Ok(enumerated.dropped().count()),
     }
 }

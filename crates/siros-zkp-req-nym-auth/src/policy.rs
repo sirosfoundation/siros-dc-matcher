@@ -1,23 +1,19 @@
-//! The signed-request and encrypted-response policy of nym_auth (nym_auth catalogue, "Binding"
-//! and "Response confidentiality"), and the session it gives.
+//! The rules of the signed-request and encrypted-response policy of nym_auth (nym_auth
+//! catalogue, "Binding" and "Response confidentiality"), over a verified request and over the
+//! request the credential picker reads.
 
-use serde_json::Value;
+use std::borrow::Borrow;
 
-use siros_oid4vp::{ec_jwk_thumbprint, Handover, JwkThumbprint};
+use siros_oid4vp::{
+    AttestationFormat, ClientId, ClientIdError, ClientIdPrefix, Protocol, ResponseMode,
+    UnverifiedRequest,
+};
 
-use crate::verifier_id::VerifierIdRule;
+use crate::verifier_id::{Intermediary, VerifierId, VerifierIdForm, VerifierIdRule};
 
-/// The channel a request arrived on.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Channel {
-    /// The Digital Credentials API, with the origin of the calling web page.
-    DcApi {
-        /// The calling origin, as the platform reports it.
-        origin: String,
-    },
-    /// Redirects, including a `request_uri` from a QR code or a link.
-    Redirect,
-}
+/// The `format` of a registration certificate in `verifier_info` (ETSI TS 119 472-2 V1.2.1,
+/// OIDFVP-HAIP-COMMON-REQ-RO-15).
+const REGISTRATION_CERTIFICATE: &str = "registration_cert";
 
 /// A rule of the policy that a request breaks. Each makes the request invalid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
@@ -33,10 +29,15 @@ pub enum PolicyRule {
     Untrusted,
     /// The Request Object is not a JSON object.
     NotObject,
-    /// `client_id` is missing or not a string.
+    /// `client_id` is missing or no string.
     ClientIdMissing,
-    /// `nonce` is missing, empty or not a string.
+    /// `client_id` is no Client Identifier this wallet supports (OpenID4VP 1.0, Section 5.9).
+    ClientId(#[source] ClientIdError),
+    /// `nonce` is missing or no string.
     NonceMissing,
+    /// `nonce` is empty or holds a character outside the ASCII URL-safe ones (OpenID4VP 1.0,
+    /// Section 5.2).
+    NonceMalformed,
     /// The Response Mode is not one the channel allows: `direct_post.cwt` or
     /// `direct_post.jwt` over redirects, `dc_api.jwt` over the Digital Credentials API.
     ResponseMode,
@@ -50,6 +51,7 @@ pub enum PolicyRule {
 
 impl PolicyRule {
     /// A stable identifier.
+    #[must_use]
     pub fn code(self) -> &'static str {
         match self {
             Self::Unsigned => "unsigned",
@@ -57,7 +59,9 @@ impl PolicyRule {
             Self::Untrusted => "untrusted",
             Self::NotObject => "request_object_not_object",
             Self::ClientIdMissing => "client_id_missing",
+            Self::ClientId(error) => error.code(),
             Self::NonceMissing => "nonce_missing",
+            Self::NonceMalformed => "nonce_malformed",
             Self::ResponseMode => "response_mode",
             Self::ResponseUriMissing => "response_uri_missing",
             Self::OriginNotExpected => "origin_not_expected",
@@ -68,7 +72,7 @@ impl PolicyRule {
 
 /// Why a verified request is no nym_auth request: a rule of the policy, or of the Verifier
 /// identity. Each makes a nym_auth query invalid.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("{}", self.code())]
 pub enum RequestRefusal {
     /// A rule of the signed-request and encrypted-response policy.
@@ -79,6 +83,7 @@ pub enum RequestRefusal {
 
 impl RequestRefusal {
     /// The rule's stable identifier.
+    #[must_use]
     pub fn code(self) -> &'static str {
         match self {
             Self::Policy(rule) => rule.code(),
@@ -87,112 +92,125 @@ impl RequestRefusal {
     }
 }
 
-/// The channel's own value in the `Handover`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Endpoint {
-    /// The calling origin, over the Digital Credentials API.
-    Origin(String),
-    /// `response_uri`, over redirects.
-    ResponseUri(String),
-}
+/// What the policy reads of a request: the wallet's verified request, or the credential
+/// picker's unverified one.
+pub trait PolicyRequest {
+    /// The Client Identifier the request names.
+    type Client<'a>: Borrow<ClientId>
+    where
+        Self: 'a;
 
-/// A Request Object that follows the policy, read for the values the session binds.
-#[derive(Debug, Clone, PartialEq)]
-pub struct CheckedRequest {
-    /// `client_id`, with its Client Identifier Prefix.
-    pub client_id: String,
-    /// `nonce`.
-    pub nonce: String,
-    /// What the `Handover` binds besides `client_id` and `nonce`.
-    pub endpoint: Endpoint,
-    /// The keys of `client_metadata.jwks`.
-    pub encryption_keys: Vec<Value>,
-}
+    /// The Client Identifier of a signed request; `None` for an unsigned DC API request, whose
+    /// `client_id` the wallet ignores (OpenID4VP 1.0, A.2), and for a `client_id` the wallet does
+    /// not support.
+    fn client(&self) -> Option<Self::Client<'_>>;
 
-/// Checks a validated Request Object against the policy. `signed` says whether it arrived as a
-/// signed Request Object; the host checks the signature and the certificate chain.
-///
-/// # Errors
-///
-/// [`PolicyRule`]: the first rule the request breaks.
-pub fn check_request(
-    request_object: &Value,
-    signed: bool,
-    channel: Channel,
-) -> Result<CheckedRequest, PolicyRule> {
-    if !signed {
-        return Err(PolicyRule::Unsigned);
-    }
-    let request = request_object.as_object().ok_or(PolicyRule::NotObject)?;
-    let text = |name: &str| request.get(name).and_then(Value::as_str);
-    let client_id = text("client_id").ok_or(PolicyRule::ClientIdMissing)?;
-    let nonce = text("nonce")
-        .filter(|n| !n.is_empty())
-        .ok_or(PolicyRule::NonceMissing)?;
-    let endpoint = match channel {
-        Channel::Redirect => {
-            if !matches!(
-                text("response_mode"),
-                Some("direct_post.cwt" | "direct_post.jwt")
-            ) {
-                return Err(PolicyRule::ResponseMode);
-            }
-            let uri = text("response_uri").ok_or(PolicyRule::ResponseUriMissing)?;
-            Endpoint::ResponseUri(uri.to_owned())
-        }
-        Channel::DcApi { origin } => {
-            if text("response_mode") != Some("dc_api.jwt") {
-                return Err(PolicyRule::ResponseMode);
-            }
-            let expected = request.get("expected_origins").and_then(Value::as_array);
-            if !expected.is_some_and(|list| list.iter().any(|o| o.as_str() == Some(&origin))) {
-                return Err(PolicyRule::OriginNotExpected);
-            }
-            Endpoint::Origin(origin)
-        }
-    };
-    let encryption_keys = request
-        .get("client_metadata")
-        .and_then(|m| m.get("jwks"))
-        .and_then(|j| j.get("keys"))
-        .and_then(Value::as_array)
-        .filter(|keys| !keys.is_empty())
-        .ok_or(PolicyRule::EncryptionKeyMissing)?
-        .clone();
-    Ok(CheckedRequest {
-        client_id: client_id.to_owned(),
-        nonce: nonce.to_owned(),
-        endpoint,
-        encryption_keys,
-    })
-}
+    /// The protocol of a DC API request; `None` over redirects.
+    fn dc_api_protocol(&self) -> Option<Protocol>;
 
-/// The host chose an encryption key that is not one of the request's.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
-#[error("the JWK thumbprint is of no key in client_metadata.jwks")]
-pub struct KeyNotInRequest;
-
-impl CheckedRequest {
-    /// The `Handover` of this request, for the response-encryption key whose JWK SHA-256
-    /// Thumbprint is `jwk_thumbprint` (OpenID4VP 1.0, Section 8.3 picks the key).
+    /// Checks the host's trust verdict on the Client Identifier.
     ///
     /// # Errors
     ///
-    /// [`KeyNotInRequest`] when no key of `client_metadata.jwks` has that thumbprint: the
-    /// session binds only values of the validated Request Object.
-    pub fn handover(&self, jwk_thumbprint: &[u8; 32]) -> Result<Handover, KeyNotInRequest> {
-        let known = self.encryption_keys.iter().any(|k| {
-            ec_jwk_thumbprint(k).as_ref().map(JwkThumbprint::as_bytes) == Some(jwk_thumbprint)
-        });
-        if !known {
-            return Err(KeyNotInRequest);
+    /// [`PolicyRule::Untrusted`] for a negative verdict.
+    fn trusted(&self) -> Result<(), PolicyRule>;
+
+    /// The Response Mode the request names.
+    fn response_mode(&self) -> Option<ResponseMode>;
+
+    /// The `format` of each `verifier_info` attestation.
+    fn attestation_formats(&self) -> Vec<AttestationFormat>;
+}
+
+/// The Client Identifier of `request` when it meets the policy: signed under a prefix other
+/// than `redirect_uri`, over the Digital Credentials API as `openid4vp-v1-signed`, trusted, and
+/// answered in an encrypted Response Mode of its channel (`direct_post.cwt` or
+/// `direct_post.jwt` over redirects, `dc_api.jwt` over the Digital Credentials API). A request
+/// that carries a registration certificate in `verifier_info` is refused: the catalogue takes
+/// the semantic identifier from it, and no intake authenticates it.
+///
+/// # Errors
+///
+/// [`RequestRefusal`]: the first rule `request` breaks.
+pub fn signed_and_encrypted<R: PolicyRequest>(
+    request: &R,
+) -> Result<R::Client<'_>, RequestRefusal> {
+    let policy = RequestRefusal::Policy;
+    let client = request
+        .client()
+        .filter(|client| client.borrow().prefix() != ClientIdPrefix::RedirectUri)
+        .ok_or(policy(PolicyRule::Unsigned))?;
+    if request.dc_api_protocol() == Some(Protocol::Multisigned) {
+        return Err(policy(PolicyRule::Multisigned));
+    }
+    request.trusted().map_err(policy)?;
+    let encrypted = matches!(
+        (request.dc_api_protocol(), request.response_mode()),
+        (
+            None,
+            Some(ResponseMode::DirectPostCwt | ResponseMode::DirectPostJwt)
+        ) | (Some(_), Some(ResponseMode::DcApiJwt))
+    );
+    if !encrypted {
+        return Err(policy(PolicyRule::ResponseMode));
+    }
+    let registered = request
+        .attestation_formats()
+        .iter()
+        .any(|format| format.as_str() == REGISTRATION_CERTIFICATE);
+    if registered {
+        return Err(RequestRefusal::VerifierId(
+            VerifierIdRule::RegistrationCertificate,
+        ));
+    }
+    Ok(client)
+}
+
+/// What `request` meets of the policy and of the `verifier_id` rule its Client Identifier decides:
+/// the policy ([`signed_and_encrypted`]), and in the `x509_san_dns` form the Client Identifier's
+/// prefix. Gives the `verifier_id` of the `x509_san_dns` form; `None` in the `semantic` form,
+/// whose identifier comes from the access certificate intake authenticates.
+///
+/// # Errors
+///
+/// [`RequestRefusal`]: the first rule `request` breaks.
+pub fn admitted<R: PolicyRequest>(
+    request: &R,
+    form: VerifierIdForm,
+) -> Result<Option<VerifierId>, RequestRefusal> {
+    let client = signed_and_encrypted(request)?;
+    match form {
+        VerifierIdForm::X509SanDns => {
+            VerifierId::x509_san_dns(client.borrow(), Intermediary::Absent)
+                .map(Some)
+                .map_err(RequestRefusal::VerifierId)
         }
-        let thumbprint = JwkThumbprint::new(*jwk_thumbprint);
-        Ok(match &self.endpoint {
-            Endpoint::Origin(origin) => Handover::dc_api(origin, &self.nonce, Some(&thumbprint)),
-            Endpoint::ResponseUri(uri) => {
-                Handover::redirect(&self.client_id, &self.nonce, Some(&thumbprint), uri)
-            }
-        })
+        VerifierIdForm::Semantic => Ok(None),
+    }
+}
+
+/// The request as the credential picker reads it. The picker holds no trust verdict: the wallet
+/// judges the Client Identifier at intake, and refuses the selection of an untrusted one.
+impl PolicyRequest for UnverifiedRequest {
+    type Client<'a> = &'a ClientId;
+
+    fn client(&self) -> Option<&ClientId> {
+        self.client_id()
+    }
+
+    fn dc_api_protocol(&self) -> Option<Protocol> {
+        Some(self.protocol())
+    }
+
+    fn trusted(&self) -> Result<(), PolicyRule> {
+        Ok(())
+    }
+
+    fn response_mode(&self) -> Option<ResponseMode> {
+        Some(UnverifiedRequest::response_mode(self))
+    }
+
+    fn attestation_formats(&self) -> Vec<AttestationFormat> {
+        self.verifier_info_formats().to_vec()
     }
 }

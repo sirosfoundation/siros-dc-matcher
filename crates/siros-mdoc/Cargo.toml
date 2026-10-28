@@ -1,7 +1,7 @@
 [package]
 name = "siros-mdoc"
 version = "0.11.0"
-description = "ISO/IEC 18013-5 mdocs for the SIROS wallet core: the stored credential, element selection, DeviceResponse and the device signature's signing input"
+description = "ISO/IEC 18013-5 mdocs for the SIROS wallet core: the stored credential and the device signature's signing input"
 publish = false
 edition.workspace = true
 license.workspace = true
@@ -10,17 +10,16 @@ authors.workspace = true
 rust-version.workspace = true
 
 [features]
-# The Document Signer certificate and ES256 verification.
-crypto = ["dep:p256", "dep:x509-cert", "dep:der"]
+# ES256 verification.
+crypto = ["dep:p256"]
 
 [dependencies]
 siros-codec = { workspace = true }
+siros-dcql = { workspace = true }
 rustc-hash = { workspace = true }
 sha2 = "0.10.9"
 p256 = { version = "0.13.2", default-features = false, features = ["ecdsa", "alloc"], optional = true }
 thiserror = { workspace = true }
-x509-cert = { version = "0.2.5", default-features = false, features = ["std"], optional = true }
-der = { version = "0.7.10", optional = true }
 
 [lints]
 workspace = true

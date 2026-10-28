@@ -4,14 +4,14 @@ use serde_json::{Map, Value};
 
 use crate::error::{DisplayError, LogoFault};
 use crate::json;
-use crate::text::DisplayText;
+use crate::text::LabelText;
 
 /// A logo: where to obtain the image, and its alternative text.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Logo {
     uri: LogoUri,
     integrity: Option<Integrity>,
-    alt_text: Option<DisplayText>,
+    alt_text: Option<LabelText>,
 }
 
 impl Logo {
@@ -32,7 +32,7 @@ impl Logo {
         Ok(Self {
             uri,
             integrity,
-            alt_text: json::label(logo, "alt_text", malformed(LogoFault::AltText))?,
+            alt_text: json::optional_label(logo, "alt_text", malformed(LogoFault::AltText))?,
         })
     }
 
@@ -48,7 +48,7 @@ impl Logo {
     }
 
     /// The alternative text for the image.
-    pub fn alt_text(&self) -> Option<&DisplayText> {
+    pub fn alt_text(&self) -> Option<&LabelText> {
         self.alt_text.as_ref()
     }
 }

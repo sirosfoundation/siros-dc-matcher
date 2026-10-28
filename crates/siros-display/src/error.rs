@@ -1,6 +1,7 @@
 //! Why display refuses an input. Each error has a stable code.
 
-use siros_dcql::PathError;
+use siros_dcql::{ClaimPathError, PathError};
+use siros_zkp_req::ItemIndex;
 
 use crate::locale::LocaleError;
 use crate::text::TextError;
@@ -13,15 +14,16 @@ pub enum DisplayError {
     Text(#[source] TextError),
     /// A `locale` is no language tag. The code is its own.
     Locale(#[source] LocaleError),
-    /// A `zkp_req` option names this `_req` index, which its query lacks.
-    OptionItemUnknown(usize),
+    /// A `zkp_req` option names this `_req` index, which its query lacks: the option is
+    /// another query's.
+    OptionItemUnknown(ItemIndex),
     /// A metadata document, or one of its members, is no JSON object.
     NotObject,
-    /// `credential_issuer` is absent or no string.
+    /// `credential_issuer` is absent, no string, or empty.
     IssuerIdentifier,
     /// The Credential Issuer Metadata offers no configuration of that identifier.
     ConfigurationUnknown,
-    /// `credential_configuration_id` is absent or no string.
+    /// `credential_configuration_id` is absent, no string, or empty.
     ConfigurationId,
     /// Issuer metadata carries `auxiliary_data`, which only a Credential Response may carry
     /// (privatedata 3.1, Section 5A.3).
@@ -31,6 +33,8 @@ pub enum DisplayError {
     ResponseMetadataNotObject,
     /// The display metadata record has an unknown member.
     RecordMemberUnknown,
+    /// `credential_metadata_uri` is no `https` URL (PaSO Proof Metadata, Section 2).
+    CredentialMetadataUri,
     /// A `display` array or one of its entries breaks its rules.
     Display(#[source] EntryFault),
     /// Two `display` entries of one array have the same locale.
@@ -38,11 +42,11 @@ pub enum DisplayError {
     /// A `logo` breaks its rules.
     Logo(#[source] LogoFault),
     /// A colour is no numerical colour value of CSS Color Module Level 3.
-    Colour,
+    Colour(#[source] ColourFault),
     /// A `claims` array, a claim description or one of its `display` entries breaks its rules.
     Claims(#[source] EntryFault),
-    /// A claim `path` is no non-empty array of strings, nulls and non-negative integers.
-    ClaimPath,
+    /// A claim `path` is no claims path pointer.
+    ClaimPath(#[source] ClaimPathError),
     /// Two claims descriptions address the same claim (OpenID4VCI 1.0, Appendix B.3).
     ClaimRepeated,
     /// Two claims descriptions disagree on whether a claim is an object or an array, or address
@@ -75,6 +79,28 @@ pub enum DisplayError {
     PointerUnlabelled,
     /// A number has no `f64` value.
     NumberUnrepresentable,
+}
+
+/// Why text is no numerical colour value of CSS Color Module Level 3, Section 4.2.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+pub enum ColourFault {
+    /// The member is no string.
+    #[error("the member is no string")]
+    NotString,
+    /// The text after `#` is other than three or six hexadecimal digits.
+    #[error("the text after `#` is other than three or six hexadecimal digits")]
+    Hexadecimal,
+    /// The text has no `(`, or does not end with `)`.
+    #[error("the text has no `(`, or does not end with `)`")]
+    Notation,
+    /// The function is none of `rgb`, `rgba`, `hsl` and `hsla` with its number of arguments; it
+    /// has this many.
+    #[error("the function is none of `rgb`, `rgba`, `hsl` and `hsla` with its number of arguments; it has this many")]
+    Function(usize),
+    /// The argument at this position is no `<integer>`, `<number>` or `<percentage>` as its
+    /// place takes.
+    #[error("the argument at this position is no `<integer>`, `<number>` or `<percentage>` as its place takes")]
+    Argument(usize),
 }
 
 /// The rule an array of metadata entries, or one of its entries, breaks.
@@ -128,12 +154,13 @@ impl DisplayError {
             Self::AuxiliaryDataPublished => "auxiliary_data_published",
             Self::ResponseMetadataNotObject => "response_metadata_not_object",
             Self::RecordMemberUnknown => "record_member_unknown",
+            Self::CredentialMetadataUri => "credential_metadata_uri_malformed",
             Self::Display(_) => "display_malformed",
             Self::DisplayLocaleRepeated => "display_locale_repeated",
             Self::Logo(_) => "logo_malformed",
-            Self::Colour => "colour_malformed",
+            Self::Colour(_) => "colour_malformed",
             Self::Claims(_) => "claims_malformed",
-            Self::ClaimPath => "claim_path_malformed",
+            Self::ClaimPath(_) => "claim_path_malformed",
             Self::ClaimRepeated => "claim_repeated",
             Self::ClaimContradictory => "claim_contradictory",
             Self::Vct => "vct_malformed",

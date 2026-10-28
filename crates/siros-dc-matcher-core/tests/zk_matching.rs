@@ -33,7 +33,15 @@ fn longfellow(num_attributes: &str) -> Capability {
 /// A ZK request, as a verifier actually sends it. Note the shape of
 /// `zk_system_type`: `id` and `system`, then parameters as sibling keys.
 fn zk_query(zk_system_type: serde_json::Value) -> DcqlQuery {
-    serde_json::from_value(json!({
+    zk_query_with(zk_system_type, |_| {})
+}
+
+/// The query of [`zk_query`], with its `meta` edited by `edit`.
+fn zk_query_with(
+    zk_system_type: serde_json::Value,
+    edit: impl FnOnce(&mut serde_json::Value),
+) -> DcqlQuery {
+    let mut query = json!({
         "credentials": [{
             "id": "zk",
             "format": "mso_mdoc_zk",
@@ -43,8 +51,9 @@ fn zk_query(zk_system_type: serde_json::Value) -> DcqlQuery {
             },
             "claims": [{"path": ["org.iso.18013.5.1", "age_over_18"]}]
         }]
-    }))
-    .expect("valid DCQL")
+    });
+    edit(&mut query["credentials"][0]["meta"]);
+    serde_json::from_value(query).expect("valid DCQL")
 }
 
 fn matches(db: &CredentialDatabase, query: &DcqlQuery) -> Vec<String> {
@@ -53,9 +62,9 @@ fn matches(db: &CredentialDatabase, query: &DcqlQuery) -> Vec<String> {
     execute(query, &creds, &policy)
         .query("zk")
         .map(|m| {
-            m.candidates
+            m.candidates()
                 .iter()
-                .map(|c| c.credential_id.clone())
+                .map(|c| c.credential_id().as_str().to_owned())
                 .collect()
         })
         .unwrap_or_default()
@@ -227,12 +236,12 @@ fn the_zk_rule_does_not_reach_other_stored_formats() {
 #[test]
 fn ppid_context_does_not_affect_matching() {
     let db = wallet(vec![longfellow("4")]);
-    let mut q = zk_query(json!([{
-        "id": "1", "system": "longfellow-libzk-v1", "num_attributes": "4"
-    }]));
-    q.credentials[0]
-        .meta
-        .insert("ppid_context".into(), json!("https://rp.example/ctx"));
+    let q = zk_query_with(
+        json!([{
+            "id": "1", "system": "longfellow-libzk-v1", "num_attributes": "4"
+        }]),
+        |meta| meta["ppid_context"] = json!("https://rp.example/ctx"),
+    );
     assert_eq!(matches(&db, &q), ["mdl-1"]);
 }
 
@@ -257,12 +266,12 @@ fn a_plain_mdoc_request_is_unaffected() {
 #[test]
 fn a_different_doctype_does_not_match() {
     let db = wallet(vec![longfellow("4")]);
-    let mut q = zk_query(json!([{
-        "id": "1", "system": "longfellow-libzk-v1", "num_attributes": "4"
-    }]));
-    q.credentials[0]
-        .meta
-        .insert("doctype_value".into(), json!("org.iso.23220.photoid.1"));
+    let q = zk_query_with(
+        json!([{
+            "id": "1", "system": "longfellow-libzk-v1", "num_attributes": "4"
+        }]),
+        |meta| meta["doctype_value"] = json!("org.iso.23220.photoid.1"),
+    );
     assert!(matches(&db, &q).is_empty());
 }
 
@@ -387,7 +396,7 @@ fn zk_required_false_still_reports_the_chosen_system() {
     let creds = credentials(&capable);
     let policy = ProfilePolicy::new(&capable.profile);
     let result = execute(&q, &creds, &policy);
-    let candidate = &result.query("zk").expect("query").candidates[0];
+    let candidate = &result.query("zk").expect("query").candidates()[0];
     let resolved = resolve(&policy, q.credential("zk").expect("query"), candidate);
 
     assert_eq!(

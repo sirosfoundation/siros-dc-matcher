@@ -43,7 +43,7 @@ Codes: the `vp_token` reader's (`response_not_object`, `duplicate_member`, `quer
 (`system_not_listed`, `backend_not_listed`, `system_not_on_backend`, `req_set_missing`,
 `req_set_extra`, `req_set_unknown`, `result_keys`, `result_not_true`), and the system rulebooks'
 Section 9 (`request`, `proof_encoding`, `issuer_key_set`, `proof_time`, `results`). The Verifier's
-clock, its trust anchors and the proof are not judged here. The set ports v0.11.0's v0.4
+clock, its `trust_anchors` and the proof are not judged here. The set ports v0.11.0's v0.4
 response vectors without the BBS-CD cases, since no wallet proves `urn:mms:bbs-cd:nym_auth:v1`
 yet, and without the v0.4 orders of checks the draft does not make.
 

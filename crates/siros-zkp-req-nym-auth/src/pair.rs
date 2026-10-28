@@ -2,11 +2,11 @@
 //! option at a proof date (`zkp_req`, Section 1.3).
 
 use siros_codec::date::Date;
-use siros_zkp_req::{usable_backend, PairRefusal, QueryOption, ZkpFormats};
+use siros_zkp_req::{usable_backend, PairRefusal, ProofBackend, QueryOption, ZkpFormats};
 
 use crate::age::Bounds;
-use crate::catalogue::{Function, NymAuthQuery, Pseudonym};
-#[cfg(feature = "credential")]
+use crate::catalogue::{NymAuthQuery, PseudonymItem};
+#[cfg(feature = "request")]
 use crate::outcome::{ItemCode, ZkpError};
 use crate::system::{NymAuthSystem, Unsupported};
 
@@ -21,7 +21,7 @@ impl NymAuthQuery {
     /// The options, in the Verifier's order of preference.
     pub fn options(&self) -> impl Iterator<Item = NymAuthOption<'_>> {
         self.query()
-            .options
+            .options()
             .iter()
             .map(move |option| NymAuthOption {
                 query: self,
@@ -55,38 +55,25 @@ impl<'q> NymAuthOption<'q> {
     ) -> Result<UsablePair<'q>, PairRefusal<Unsupported>> {
         let bounds = self.query.option_bounds(self.option, d);
         let items = self.query.option_items(self.option).map(|(_, item)| item);
-        let backend = usable_backend(formats, &self.query.query().credential_type, &system, |s| {
-            s.supports(items, &bounds)
-        })?;
+        let backend = usable_backend(
+            formats,
+            self.query.query().credential_type(),
+            &system,
+            |s| s.supports(items, &bounds),
+        )?;
         // Every system supports only options with a `pseudonym`.
         let pseudonym = self
             .query
-            .option_items(self.option)
-            .find_map(|(index, item)| match &item.function {
-                Function::Pseudonym(pseudonym) => Some((index, pseudonym)),
-                Function::AgeCheck(_) => None,
-            })
+            .option_pseudonym(self.option)
             .ok_or(PairRefusal::Unsupported(Unsupported::NoPseudonym))?;
         Ok(UsablePair {
             option: self,
             system,
-            backend: ProofBackend(backend.to_owned()),
+            backend: backend.clone(),
             date: d,
             bounds,
             pseudonym,
         })
-    }
-}
-
-/// A proof backend of the Verifier's `proof_backend_values` that a system runs on (`zkp_req`,
-/// Section 1.2).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ProofBackend(String);
-
-impl ProofBackend {
-    /// The proof backend identifier.
-    pub fn as_str(&self) -> &str {
-        &self.0
     }
 }
 
@@ -100,7 +87,7 @@ pub struct UsablePair<'q> {
     backend: ProofBackend,
     date: Date,
     bounds: Bounds,
-    pseudonym: (usize, &'q Pseudonym),
+    pseudonym: PseudonymItem<'q>,
 }
 
 impl<'q> UsablePair<'q> {
@@ -129,14 +116,14 @@ impl<'q> UsablePair<'q> {
         &self.bounds
     }
 
-    /// The option's `pseudonym` item and its `_req` index.
-    pub fn pseudonym(&self) -> (usize, &'q Pseudonym) {
+    /// The option's `pseudonym` item.
+    pub fn pseudonym(&self) -> PseudonymItem<'q> {
         self.pseudonym
     }
 }
 
 /// The assertions of `option` that fail for `birth_date` under `bounds`: its `age_check`.
-#[cfg(feature = "credential")]
+#[cfg(feature = "request")]
 pub(crate) fn failed_assertions(
     query: &NymAuthQuery,
     option: &QueryOption,
@@ -145,13 +132,11 @@ pub(crate) fn failed_assertions(
 ) -> Vec<ZkpError> {
     query
         .option_items(option)
-        .filter_map(|(index, item)| match item.function {
-            Function::AgeCheck(_) if !bounds.holds(birth_date) => Some(ZkpError::Item {
-                option: option.req_set,
-                item: index,
-                code: ItemCode::AgeOutOfRange,
-            }),
-            _ => None,
+        .filter(|(_, item)| item.age_check().is_some() && !bounds.holds(birth_date))
+        .map(|(index, _)| ZkpError::Item {
+            option: option.req_set(),
+            item: index,
+            code: ItemCode::AgeOutOfRange,
         })
         .collect()
 }

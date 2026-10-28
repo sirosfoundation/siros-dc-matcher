@@ -1,19 +1,20 @@
-//! The `zkp_req` presenter through the FFI: one honest path, and the verifier's statement
-//! compared with the one the prover received.
+//! The `zkp_req` verifier through the FFI: a presentation made on the plan's path, verified with
+//! the statement the prover received.
 
 use std::sync::Arc;
 
-use p256::ecdsa::signature::Signer as _;
-use p256::ecdsa::Signature;
 use siros_dc_matcher_ffi::zkp_req::{
-    zkp_req_jwk_thumbprint, zkp_req_match, zkp_req_prepare, zkp_req_session, zkp_req_verify,
-    zkp_req_vp_token_json, FfiChannel, FfiProofCheck, FfiProofVerifier, FfiStatement,
-    FfiStoredCredential, FfiVerifierIdForm, FfiVpTokenEntry, FfiZkpMatch, ZkpReqError,
+    zkp_req_jwk_thumbprint, zkp_req_session, zkp_req_verify, zkp_req_vp_token_json, FfiChannel,
+    FfiProofCheck, FfiProofVerifier, FfiStatement, FfiVerifierIdForm, FfiVpTokenEntry, ZkpReqError,
 };
+use siros_zkp_req::ZkProof;
+use siros_zkp_req_nym_auth::prover::ProofOutput;
+use siros_zkp_req_nym_auth::system::NymAuthSystem;
 use siros_zkp_req_nym_auth::testing::{
-    client_metadata, encryption_jwk, expected_pseudonym, issue, key, query, request_object, Issuer,
-    Spec, CLIENT_ID, NONCE, NOW, SEED,
+    client_metadata, device_signature, encryption_jwk, expected_pseudonym, issue, prepared, query,
+    request_object, verified_request, Issuer, Spec, CLIENT_ID, NONCE, NOW, SEED,
 };
+use siros_zkp_req_nym_auth::verifier_id::PseudonymValue;
 
 /// A verifier that accepts exactly the statement the prover received.
 struct Expecting(FfiStatement);
@@ -43,46 +44,22 @@ fn session(nonce: &str) -> Arc<siros_dc_matcher_ffi::zkp_req::FfiSession> {
 }
 
 #[test]
-fn a_presentation_round_trips_through_the_ffi() {
-    let q = query(Some("18+"), true).to_string();
-    let cm = client_metadata().to_string();
+fn a_presentation_verifies_through_the_ffi() {
+    let q = query(Some("18+"), true);
     let ds = Issuer::root(0x11, "Test Document Signer");
-    let credential = FfiStoredCredential {
-        id: "c1".into(),
-        format: "mso_mdoc".into(),
-        data: issue(&ds, &Spec::default()),
-        kid: "k1".into(),
-    };
-    let systems = vec!["urn:circuits:longfellow:nym_auth:v1".to_owned()];
-    let matched = zkp_req_match(
-        q.clone(),
-        cm.clone(),
-        vec![credential.clone()],
-        None,
-        systems,
-        NOW,
-    )
-    .unwrap();
-    let FfiZkpMatch::Candidates { candidates } = matched else {
-        panic!("no candidate: {matched:?}");
-    };
-
-    let prepared = zkp_req_prepare(
-        candidates[0].clone(),
-        q.clone(),
-        cm.clone(),
-        session(NONCE),
-        credential,
-        SEED.to_vec(),
-        None,
-        NOW,
-    )
-    .unwrap();
-    let signature: Signature = key(Spec::default().device).sign(&prepared.data_to_sign());
-    let job = prepared.job(signature.to_bytes().to_vec()).unwrap();
-    assert_eq!(job.statement, prepared.statement());
-    let pseudonym = expected_pseudonym(&SEED, CLIENT_ID).to_vec();
-    let presentation = prepared.assemble(vec![7; 1024], pseudonym.clone()).unwrap();
+    let request = verified_request(&q, NONCE);
+    let data = issue(&ds, &Spec::default());
+    let prepared = prepared(NymAuthSystem::LongfellowV1, &q, &data, &SEED, &request).unwrap();
+    let signature = device_signature(Spec::default().device, prepared.data_to_sign().as_bytes());
+    let job = prepared.job(&signature).unwrap();
+    let pseudonym = expected_pseudonym(&SEED, CLIENT_ID);
+    let presentation = prepared
+        .assemble(&ProofOutput {
+            zk_proof: ZkProof::new(vec![7; 1024]),
+            pseudonym: PseudonymValue::new(pseudonym),
+        })
+        .unwrap()
+        .encode();
     let vp_token = zkp_req_vp_token_json(vec![FfiVpTokenEntry {
         query_id: "nym".into(),
         presentations: vec![presentation.clone()],
@@ -90,11 +67,11 @@ fn a_presentation_round_trips_through_the_ffi() {
     .unwrap();
     assert!(vp_token.starts_with("{\"nym\":[\""));
 
-    let verifier = Arc::new(Expecting(job.statement.clone()));
+    let verifier = Arc::new(Expecting(FfiStatement::from(job.statement())));
     let verify = |nonce: &str| {
         zkp_req_verify(
-            q.clone(),
-            cm.clone(),
+            q.to_string(),
+            client_metadata().to_string(),
             session(nonce),
             presentation.clone(),
             NOW + 5,

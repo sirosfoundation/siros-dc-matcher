@@ -3,54 +3,7 @@
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-
-/// An absolute `https` URL with a non-empty authority.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct HttpsUrl(String);
-
-impl HttpsUrl {
-    /// The URL `text`, when its scheme is `https` (any case), an authority follows `//`, and it
-    /// holds no ASCII whitespace or control character.
-    #[must_use]
-    pub fn parse(text: &str) -> Option<Self> {
-        let scheme = text.get(..8)?;
-        if !scheme.eq_ignore_ascii_case("https://") {
-            return None;
-        }
-        if text
-            .bytes()
-            .any(|b| b.is_ascii_whitespace() || b.is_ascii_control())
-        {
-            return None;
-        }
-        let authority = text.get(8..)?.split(['/', '?', '#']).next()?;
-        if authority.is_empty() {
-            return None;
-        }
-        Some(Self(text.to_owned()))
-    }
-
-    /// The host of the authority: without user information, port or IPv6 brackets.
-    #[must_use]
-    pub fn host(&self) -> &str {
-        let authority = self
-            .0
-            .get(8..)
-            .and_then(|rest| rest.split(['/', '?', '#']).next())
-            .unwrap_or_default();
-        let host_port = authority.rsplit('@').next().unwrap_or(authority);
-        match host_port.strip_prefix('[') {
-            Some(bracketed) => bracketed.split(']').next().unwrap_or_default(),
-            None => host_port.split(':').next().unwrap_or_default(),
-        }
-    }
-
-    /// The URL.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
+pub use siros_codec::url::HttpsUrl;
 
 /// A media type a fetch accepts or a body has, `type/subtype`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -63,8 +16,6 @@ impl MediaType {
     pub const REQUEST_OBJECT: Self = Self("application/oauth-authz-req+jwt");
     /// `application/x-www-form-urlencoded`.
     pub const FORM: Self = Self("application/x-www-form-urlencoded");
-    /// `application/cwt`, the body of `direct_post.cwt` (`zkp_req.md`, Section 6.2).
-    pub const CWT: Self = Self("application/cwt");
 
     /// `type/subtype`.
     #[must_use]
@@ -111,30 +62,43 @@ pub enum Method {
     },
 }
 
-/// An HTTPS request the host performs under H1: HTTPS only, public addresses only, no
-/// redirects, at most [`Fetch::limit`] of response body, within [`Fetch::timeout`].
+/// The most redirects a fetch follows. Each hop is a request held to H1's rules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Redirects(u8);
+
+impl Redirects {
+    /// None: the response to the first request is the response.
+    pub const NONE: Self = Self(0);
+
+    /// The number of redirects.
+    #[must_use]
+    pub fn get(self) -> u8 {
+        self.0
+    }
+}
+
+/// An HTTPS request the host performs under H1: HTTPS only, public addresses only, no cookies,
+/// credentials or wallet-identifying headers, at most [`Fetch::redirects`] redirects, at most
+/// [`Fetch::limit`] of response body, within [`Fetch::timeout`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fetch {
     url: HttpsUrl,
     method: Method,
     accept: MediaType,
+    redirects: Redirects,
     limit: BodyLimit,
 }
 
 impl Fetch {
+    #[cfg(feature = "crypto")]
     pub(crate) fn new(url: HttpsUrl, method: Method, accept: MediaType, limit: BodyLimit) -> Self {
         Self {
             url,
             method,
             accept,
+            redirects: Redirects::NONE,
             limit,
         }
-    }
-
-    /// A `GET` of `url` that accepts `accept` and reads at most `limit`.
-    #[must_use]
-    pub fn get(url: HttpsUrl, accept: MediaType, limit: BodyLimit) -> Self {
-        Self::new(url, Method::Get, accept, limit)
     }
 
     /// The URL to request.
@@ -153,6 +117,12 @@ impl Fetch {
     #[must_use]
     pub fn accept(&self) -> MediaType {
         self.accept
+    }
+
+    /// The most redirects the host follows; each hop is held to H1's rules.
+    #[must_use]
+    pub fn redirects(&self) -> Redirects {
+        self.redirects
     }
 
     /// The largest response body the host may read.
@@ -218,6 +188,7 @@ impl FetchResponse {
         self.status
     }
 
+    #[cfg(feature = "crypto")]
     /// Whether the media type of `Content-Type`, parameters aside, is `media_type` (any
     /// case).
     pub(crate) fn has_media_type(&self, media_type: MediaType) -> bool {

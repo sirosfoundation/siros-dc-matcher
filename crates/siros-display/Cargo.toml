@@ -11,21 +11,24 @@ rust-version.workspace = true
 
 [features]
 default = ["credential"]
-# Display metadata, credential cards and claim rows. The matcher links the purpose lines and the
-# proof statement rows only, and builds without it.
-credential = ["dep:siros-codec", "dep:siros-credential"]
+# Display metadata, credential cards and the claim labels of a stored credential. The credential
+# picker builds without it: it links the claim rows over a registration's labels, the purpose
+# lines and the proof statement rows.
+credential = ["dep:siros-wallet-state"]
 
 [dependencies]
 rustc-hash = { workspace = true }
 serde_json = { workspace = true }
-siros-codec = { workspace = true, optional = true }
-siros-credential = { workspace = true, optional = true }
+siros-codec = { workspace = true }
+siros-credential = { workspace = true }
 siros-dcql = { workspace = true }
+siros-wallet-state = { workspace = true, optional = true }
 siros-zkp-req = { workspace = true }
 thiserror = { workspace = true }
-unicode-general-category = "1.1.0"
 
 [dev-dependencies]
+# The oracle of the characters display text refuses.
+unicode-general-category = "1.1.0"
 serde_json = { workspace = true }
 siros-codec = { workspace = true }
 siros-credential = { workspace = true }

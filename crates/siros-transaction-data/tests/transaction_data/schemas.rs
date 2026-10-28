@@ -1,14 +1,12 @@
 //! The payload parsers against the TS12 schemas of `tests/ts12-schemas` (see
 //! `tests/ts12-schemas/SOURCE`). On every payload fixture, a payload the parser accepts is one
 //! its schema accepts. A payload the schema accepts and the parser refuses breaks a rule of
-//! TS12's prose, which the fixture names.
+//! TS12's prose, which the fixture names. The refusals are those the fixtures expect.
 
+use crate::common::{ts12_payload, ACCESS, LOGIN, MANDATE, PAYMENT};
+use crate::fixtures::payloads;
 use jsonschema::{Resource, Validator};
 use serde_json::Value;
-use siros_transaction_data::Entry;
-
-use crate::common::{encode_payload, item, now, query, ACCESS, LOGIN, MANDATE, PAYMENT};
-use crate::fixtures::payloads;
 
 const PAYMENT_SCHEMA: &str =
     include_str!("../ts12-schemas/ts12-urn-eudi-sca-payment-1-data-model.json");
@@ -58,9 +56,13 @@ fn the_parsers_accept_only_what_the_schemas_accept() {
             .unwrap();
         let payload: Value = serde_json::from_str(&fixture.payload).unwrap();
         let schema_accepts = schema.is_valid(&payload);
-        let raw = encode_payload(fixture.transaction_type, &fixture.payload);
-        let parser_accepts = Entry::parse(&item(&raw), &query(), now()).is_ok();
+        let parser_accepts = ts12_payload(fixture.transaction_type, &fixture.payload).is_ok();
         let case = fixture.case;
+        assert_eq!(
+            ts12_payload(fixture.transaction_type, &fixture.payload),
+            fixture.expected,
+            "{case}"
+        );
         assert!(
             schema_accepts || !parser_accepts,
             "{case}: accepted, schema refuses"

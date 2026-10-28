@@ -12,41 +12,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "aead"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d122413f284cf2d62fb1b7db97e02edb8cda96d769b16e443a4f6195e35662b0"
-dependencies = [
- "crypto-common",
- "generic-array",
-]
-
-[[package]]
-name = "aes"
-version = "0.8.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b169f7a6d4742236a0a00c541b845991d0ac43e546831af1249753ab4c3aa3a0"
-dependencies = [
- "cfg-if",
- "cipher",
- "cpufeatures",
-]
-
-[[package]]
-name = "aes-gcm"
-version = "0.10.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "831010a0f742e1209b3bcea8fab6a8e149051ba6099432c8cb2cc117dec3ead1"
-dependencies = [
- "aead",
- "aes",
- "cipher",
- "ctr",
- "ghash",
- "subtle",
-]
-
-[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -87,6 +52,8 @@ version = "0.1.0"
 dependencies = [
  "android-credman-sys",
  "c8str",
+ "serde_json",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -492,16 +459,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cipher"
-version = "0.4.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "773f3b9af64447d2ce9850330c473515014aa235e6a783b02db81ff39e4a3dad"
-dependencies = [
- "crypto-common",
- "inout",
-]
-
-[[package]]
 name = "clap"
 version = "4.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -775,15 +732,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ctr"
-version = "0.9.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0369ee1ad671834580515889b80f2ea915f23b8be8d0daa4bbaf2ac5c7590835"
-dependencies = [
- "cipher",
-]
-
-[[package]]
 name = "data-encoding"
 version = "2.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -918,7 +866,6 @@ dependencies = [
  "ff",
  "generic-array",
  "group",
- "hkdf",
  "pem-rfc7468",
  "pkcs8",
  "rand_core",
@@ -1216,16 +1163,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ghash"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f0d8a4362ccb29cb0b265253fb0a2728f592895ee6854fd9bc13f2ffda266ff1"
-dependencies = [
- "opaque-debug",
- "polyval",
-]
-
-[[package]]
 name = "gimli"
 version = "0.31.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1307,15 +1244,6 @@ name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
-
-[[package]]
-name = "hkdf"
-version = "0.12.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b5f8eb2ad728638ea2c7d47a21db23b7b58a72ed6a38256b8a1849f15fbbdf7"
-dependencies = [
- "hmac",
-]
 
 [[package]]
 name = "hmac"
@@ -1470,15 +1398,6 @@ dependencies = [
  "hashbrown 0.17.1",
  "serde",
  "serde_core",
-]
-
-[[package]]
-name = "inout"
-version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "879f10e63c20629ecabbb64a8010319738c66a5cd0c29b02d63d272b03751d01"
-dependencies = [
- "generic-array",
 ]
 
 [[package]]
@@ -1849,12 +1768,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
-name = "opaque-debug"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
-
-[[package]]
 name = "outref"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1865,6 +1778,18 @@ name = "p256"
 version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c9863ad85fa8f4460f9c48cb909d38a0d689dba1f6f6988a5e3e0d31071bcd4b"
+dependencies = [
+ "ecdsa",
+ "elliptic-curve",
+ "primeorder",
+ "sha2",
+]
+
+[[package]]
+name = "p384"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe42f1670a52a47d448f14b6a5c61dd78fce51856e68edaa38f7ae3a46b8d6b6"
 dependencies = [
  "ecdsa",
  "elliptic-curve",
@@ -1943,18 +1868,6 @@ name = "plain"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
-
-[[package]]
-name = "polyval"
-version = "0.6.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d1fe60d06143b2430aa532c94cfe9e29783047f06c0d7fd359a9a51b729fa25"
-dependencies = [
- "cfg-if",
- "cpufeatures",
- "opaque-debug",
- "universal-hash",
-]
 
 [[package]]
 name = "postcard"
@@ -2427,6 +2340,9 @@ checksum = "38b58827f4464d87d377d175e90bf58eb00fd8716ff0a62f80356b5e61555d0d"
 name = "siros-codec"
 version = "0.11.0"
 dependencies = [
+ "rustc-hash",
+ "serde",
+ "serde_json",
  "thiserror 2.0.20",
 ]
 
@@ -2438,9 +2354,11 @@ dependencies = [
  "serde_json",
  "sha2",
  "siros-codec",
+ "siros-credential",
  "siros-dcql",
  "siros-mdoc",
  "siros-sdjwt",
+ "siros-trust",
  "siros-wallet-state",
  "thiserror 2.0.20",
 ]
@@ -2474,33 +2392,11 @@ dependencies = [
  "siros-dcql",
  "siros-display",
  "siros-oid4vp",
+ "siros-trust",
  "siros-zkp-req",
  "siros-zkp-req-nym-auth",
  "thiserror 2.0.20",
  "uniffi",
-]
-
-[[package]]
-name = "siros-dc-matcher-testhost"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "serde_json",
- "siros-dc-matcher-core",
- "wasmtime",
- "wasmtime-wasi",
-]
-
-[[package]]
-name = "siros-dc-matcher-wasm"
-version = "0.1.0"
-dependencies = [
- "android-credman",
- "serde_json",
- "siros-dc-matcher-core",
- "siros-dcql",
- "siros-display",
- "siros-oid4vp",
 ]
 
 [[package]]
@@ -2532,24 +2428,19 @@ dependencies = [
 name = "siros-mdoc"
 version = "0.11.0"
 dependencies = [
- "der",
  "p256",
  "rustc-hash",
  "sha2",
  "siros-codec",
+ "siros-dcql",
  "thiserror 2.0.20",
- "x509-cert",
 ]
 
 [[package]]
 name = "siros-oid4vp"
 version = "0.11.0"
 dependencies = [
- "aes-gcm",
- "ciborium",
  "der",
- "hkdf",
- "hmac",
  "p256",
  "rand_core",
  "rustc-hash",
@@ -2564,11 +2455,46 @@ dependencies = [
 ]
 
 [[package]]
+name = "siros-picker"
+version = "0.1.0"
+dependencies = [
+ "android-credman",
+ "siros-credential",
+ "siros-dcql",
+ "siros-display",
+ "siros-oid4vp",
+ "siros-presentation",
+ "siros-registration",
+ "siros-transaction-data",
+ "siros-wallet-state",
+ "siros-zkp-req-nym-auth",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "siros-picker-testhost"
+version = "0.1.0"
+dependencies = [
+ "android-credman",
+ "anyhow",
+ "serde_json",
+ "siros-codec",
+ "siros-display",
+ "siros-oid4vp",
+ "siros-presentation",
+ "siros-registration",
+ "siros-transaction-data",
+ "siros-trust",
+ "siros-wallet-state",
+ "siros-zkp-req-nym-auth",
+ "wasmtime",
+ "wasmtime-wasi",
+]
+
+[[package]]
 name = "siros-presentation"
 version = "0.11.0"
 dependencies = [
- "aes-gcm",
- "ciborium",
  "itertools",
  "p256",
  "rand_core",
@@ -2579,10 +2505,10 @@ dependencies = [
  "siros-credential",
  "siros-dcql",
  "siros-display",
- "siros-mdoc",
  "siros-oid4vp",
- "siros-sdjwt",
+ "siros-presentation",
  "siros-transaction-data",
+ "siros-trust",
  "siros-wallet-state",
  "siros-zkp-req",
  "siros-zkp-req-nym-auth",
@@ -2592,11 +2518,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "siros-registration"
+version = "0.11.0"
+dependencies = [
+ "serde_json",
+ "siros-codec",
+ "siros-credential",
+ "siros-dcql",
+ "siros-display",
+ "siros-oid4vp",
+ "siros-presentation",
+ "siros-transaction-data",
+ "siros-trust",
+ "siros-wallet-state",
+ "siros-zkp-req",
+ "siros-zkp-req-nym-auth",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "siros-sdjwt"
 version = "0.11.0"
 dependencies = [
  "rustc-hash",
- "serde",
  "serde_json",
  "sha2",
  "siros-codec",
@@ -2609,6 +2553,8 @@ name = "siros-transaction-data"
 version = "0.11.0"
 dependencies = [
  "jsonschema",
+ "p256",
+ "p384",
  "rustc-hash",
  "serde",
  "serde_json",
@@ -2618,8 +2564,27 @@ dependencies = [
  "siros-dcql",
  "siros-display",
  "siros-oid4vp",
+ "siros-trust",
  "siros-wallet-state",
  "thiserror 2.0.20",
+ "unicode-segmentation",
+ "x509-cert",
+]
+
+[[package]]
+name = "siros-trust"
+version = "0.11.0"
+dependencies = [
+ "der",
+ "p256",
+ "p384",
+ "serde_json",
+ "sha2",
+ "siros-codec",
+ "siros-dcql",
+ "siros-trust",
+ "thiserror 2.0.20",
+ "x509-cert",
 ]
 
 [[package]]
@@ -2637,9 +2602,9 @@ dependencies = [
 name = "siros-zkp-req"
 version = "0.11.0"
 dependencies = [
- "serde",
  "serde_json",
  "siros-codec",
+ "siros-dcql",
  "thiserror 2.0.20",
 ]
 
@@ -2650,12 +2615,14 @@ dependencies = [
  "ciborium",
  "der",
  "p256",
+ "rand_core",
  "serde_json",
  "sha2",
  "siros-codec",
+ "siros-dcql",
  "siros-mdoc",
  "siros-oid4vp",
- "siros-wallet-state",
+ "siros-trust",
  "siros-zkp-req",
  "siros-zkp-req-nym-auth",
  "thiserror 2.0.20",
@@ -3009,6 +2976,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
 
 [[package]]
+name = "unicode-segmentation"
+version = "1.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f6ccf251212114b54433ec949fd6a7841275f9ada20dddd2f29e9ceea4501493"
+
+[[package]]
 name = "unicode-width"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3148,16 +3121,6 @@ dependencies = [
  "uniffi_meta",
  "uniffi_testing",
  "weedle2",
-]
-
-[[package]]
-name = "universal-hash"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc1de2c688dc15305988b563c3854064043356019f97a4b46276fe734c4f07ea"
-dependencies = [
- "crypto-common",
- "subtle",
 ]
 
 [[package]]

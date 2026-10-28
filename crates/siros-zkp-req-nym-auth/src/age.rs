@@ -130,12 +130,30 @@ pub struct Bounds {
     pub cutoff: Option<Bound>,
 }
 
+/// A bound more than `u64::MAX` years before the proof date: no system encodes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Unencodable;
+
 impl Bounds {
     /// The bounds of an option without `age_check`: none.
     pub const WIDEST: Self = Self {
         earliest: None,
         cutoff: None,
     };
+
+    /// E and C as calendar dates; `None` for a range without that bound.
+    ///
+    /// # Errors
+    ///
+    /// [`Unencodable`] for a bound no system encodes.
+    pub fn dates(&self) -> Result<(Option<Date>, Option<Date>), Unencodable> {
+        let date = |bound: Option<Bound>| match bound {
+            None => Ok(None),
+            Some(Bound::Date(d)) => Ok(Some(d)),
+            Some(Bound::Unencodable) => Err(Unencodable),
+        };
+        Ok((date(self.earliest)?, date(self.cutoff)?))
+    }
 
     /// Whether `birth_date` lies in `[E, C]`.
     pub fn holds(&self, birth_date: Date) -> bool {

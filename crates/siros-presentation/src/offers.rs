@@ -2,19 +2,15 @@
 //! additions to each.
 
 mod choices;
-mod entries;
-mod joining;
 
 use itertools::{Either, Itertools};
 use serde_json::Value;
-use siros_dcql::{CredentialSetQuery, Dropped};
+use siros_dcql::{CredentialSetQuery, Dropped, SetRequirement};
 
+use crate::credential::MatchCredential;
 use crate::ids::{CandidateIndex, QueryIndex, SetIndex};
 use crate::matching::Answered;
 use choices::{product, sum, Capped, Choices, Examining, Space};
-use joining::{Agreed, Joining, Proposal};
-
-pub use entries::{EntryCarriers, EntryQueries};
 
 /// The most offers of a request.
 pub const MAX_OFFERS: usize = 32;
@@ -22,8 +18,8 @@ pub const MAX_OFFERS: usize = 32;
 /// The most additions of an offer.
 pub const MAX_ADDITIONS: usize = 32;
 
-/// The most combinations and joins examined for the offers of a request, and the most
-/// combinations examined for the additions of an offer.
+/// The most combinations examined for the offers of a request, and for the additions of an
+/// offer.
 pub const MAX_EXAMINED: usize = 1024;
 
 /// What an offer presents for one Credential Query: one candidate, or every candidate of a
@@ -44,20 +40,6 @@ impl Member {
     /// of a `multiple` query, of which the selection chooses a subset.
     pub fn candidates(&self) -> &[CandidateIndex] {
         &self.candidates
-    }
-
-    /// The member of the candidates `keep` accepts, in the member's order.
-    #[cfg(feature = "wallet")]
-    pub(crate) fn keeping(&self, mut keep: impl FnMut(CandidateIndex) -> bool) -> Self {
-        Self {
-            query: self.query,
-            candidates: self
-                .candidates
-                .iter()
-                .copied()
-                .filter(|&c| keep(c))
-                .collect(),
-        }
     }
 }
 
@@ -86,19 +68,8 @@ pub struct Offers {
     unexamined: Dropped,
 }
 
-/// Why a combination the enumeration examined is no offer.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum Refusal<E> {
-    /// No join lets it carry every transaction entry (A3).
-    #[error("no join lets it carry every transaction entry (A3)")]
-    Uncarried,
-    /// The acceptance refused it.
-    #[error("the acceptance refused it")]
-    Refused(#[source] E),
-}
-
 impl Offer {
-    /// The `purpose` of each credential set the offer satisfies, in set order (Section 6.2).
+    /// The `purpose` of each credential set the offer satisfies, in set order.
     pub fn purposes(&self) -> &[Value] {
         &self.purposes
     }
@@ -142,31 +113,25 @@ impl Addition {
 }
 
 impl Offers {
-    /// The offers of `answered` that `accept` accepts, and the first refusal. `entries` holds
-    /// each `transaction_data` entry with the candidates that can carry it.
+    /// The offers of `answered` over the candidates `eligible` accepts: those the first match of
+    /// transaction data leaves (PaSO Core, Section 7.4.2).
     ///
     /// - Without `credential_sets`, an offer answers every query (Section 6.4.2).
     /// - Each combination of an option of every required credential set is an offer.
     /// - When every set is optional, each option of each set is an offer.
-    /// - When no member of an offer can carry an entry, each option of an optional set whose
-    ///   credentials can carry it joins the offer as members, in an offer of its own (Section
-    ///   8.4). Joining repeats until every entry is carried, at most one option per set. An offer
-    ///   that cannot carry every entry is dropped.
     /// - An option holds a member per query: a candidate, or all candidates of a query that
     ///   sets `multiple`.
     /// - Two offers with the same members are one offer: the first.
     ///
     /// The options of the other optional sets are each offer's additions, except those that
-    /// answer a query of the offer or a query an entry names. Combinations are examined in
-    /// order, the last set varying fastest, each followed by its joins; up to [`MAX_EXAMINED`]
-    /// combinations and joins are examined, and at most [`MAX_OFFERS`] offers and
-    /// [`MAX_ADDITIONS`] additions per offer are kept.
-    pub fn of<C, R, E>(
+    /// answer a query of the offer. Combinations are examined in order, the last set varying
+    /// fastest; up to [`MAX_EXAMINED`] combinations are examined, and at most [`MAX_OFFERS`]
+    /// offers and [`MAX_ADDITIONS`] additions per offer are kept.
+    pub fn of<C: MatchCredential, R>(
         answered: &Answered<'_, C, R>,
-        entries: &[EntryCarriers],
-        mut accept: impl FnMut(&[Member]) -> Result<(), E>,
-    ) -> (Self, Option<Refusal<E>>) {
-        let space = Space::of(answered);
+        eligible: impl Fn(QueryIndex, CandidateIndex) -> bool,
+    ) -> Self {
+        let space = Space::of(answered, &eligible);
         let (required, optional) = sets(&space, answered.credential_sets());
         let (bases, total): (Box<dyn Iterator<Item = Proposal<'_>> + '_>, _) =
             if required.is_empty() {
@@ -176,34 +141,23 @@ impl Offers {
                 let total = product(required.iter().map(Choices::count));
                 (Box::new(each_combination(&required, &optional)), total)
             };
-        let mut proposals = Joining::new(bases, total, entries);
+        let mut examining = Examining::new(bases);
         let mut offers: Vec<Offer> = Vec::new();
-        let mut refusal = None;
         while offers.len() < MAX_OFFERS {
-            let proposal = proposals.next();
-            if refusal.is_none() && proposals.dropped() {
-                refusal = Some(Refusal::Uncarried);
-            }
-            let Some(proposal) = proposal else {
+            let Some(proposal) = examining.next() else {
                 break;
             };
-            if offers.iter().any(|offer| offer.has(&proposal.members)) {
+            let Some(agreed) = proposal.agreed() else {
                 continue;
-            }
-            match accept(&proposal.members) {
-                Ok(()) => offers.push(offer(proposal, entries)),
-                Err(error) => {
-                    if refusal.is_none() {
-                        refusal = Some(Refusal::Refused(error));
-                    }
-                }
+            };
+            if !offers.iter().any(|offer| offer.has(&agreed.members)) {
+                offers.push(offer(agreed));
             }
         }
-        let offers = Self {
+        Self {
             offers: offers.into_iter().collect(),
-            unexamined: proposals.unexamined(),
-        };
-        (offers, refusal)
+            unexamined: examining.examined().unexamined(total),
+        }
     }
 
     /// The offers, in the order of the combinations.
@@ -237,10 +191,10 @@ fn sets(
         .enumerate()
         .partition_map(|(index, set)| {
             let choices = Choices::of_set(space, set);
-            if set.required {
+            if set.requirement() == SetRequirement::Required {
                 Either::Left(choices)
             } else {
-                let index = SetIndex::at(index);
+                let index = SetIndex::new(index);
                 Either::Right(OptionalSet { index, choices })
             }
         })
@@ -281,15 +235,41 @@ impl Combination {
     }
 }
 
+/// A combination the enumeration proposes as an offer.
+struct Proposal<'s> {
+    purposes: Vec<Value>,
+    members: Combination,
+    /// The optional sets left for additions.
+    others: Vec<&'s OptionalSet>,
+}
+
+/// A proposal whose choices answer each query once.
+struct Agreed<'s> {
+    purposes: Vec<Value>,
+    members: Vec<Member>,
+    /// The optional sets left for additions.
+    others: Vec<&'s OptionalSet>,
+}
+
+impl<'s> Proposal<'s> {
+    /// The proposal when its choices agree.
+    fn agreed(self) -> Option<Agreed<'s>> {
+        Some(Agreed {
+            purposes: self.purposes,
+            members: self.members.agreed()?,
+            others: self.others,
+        })
+    }
+}
+
 /// The offer of `proposal`, with its additions from the optional sets it leaves: those that
-/// answer no query of the offer and no query an entry names.
-fn offer(proposal: Agreed<'_>, entries: &[EntryCarriers]) -> Offer {
+/// answer no query of the offer.
+fn offer(proposal: Agreed<'_>) -> Offer {
     let Agreed {
         purposes,
         members,
         others,
     } = proposal;
-    let named = |query: QueryIndex| entries.iter().any(|entry| entry.names(query));
     let candidates = others
         .iter()
         .flat_map(|&set| set.choices.iter().map(move |added| (set, added)));
@@ -299,7 +279,7 @@ fn offer(proposal: Agreed<'_>, entries: &[EntryCarriers]) -> Offer {
         .filter(|(_, added)| {
             added
                 .iter()
-                .all(|m| !named(m.query) && members.iter().all(|o| o.query != m.query))
+                .all(|m| members.iter().all(|o| o.query != m.query))
         })
         .map(|(set, added)| Addition {
             set: set.index,

@@ -4,6 +4,7 @@
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::value::RawValue;
 use siros_codec::date::DateTime;
+use siros_codec::json::JsonTextError;
 
 use crate::error::{PresentationsFault, WalletStateError};
 use crate::ids::{CredentialId, PresentationId, TransactionId};
@@ -26,26 +27,6 @@ pub struct PresentationRecord {
 }
 
 impl PresentationRecord {
-    /// The record of the presentation `data`, sent to `audience` at `timestamp`, which used the
-    /// credential entries `used_credential_ids`.
-    pub fn new(
-        presentation_id: PresentationId,
-        transaction_id: TransactionId,
-        data: String,
-        used_credential_ids: Vec<CredentialId>,
-        timestamp: DateTime,
-        audience: String,
-    ) -> Self {
-        Self {
-            presentation_id,
-            transaction_id,
-            data,
-            used_credential_ids,
-            timestamp,
-            audience,
-        }
-    }
-
     /// `usedCredentialIds`: the credential entries the presentation used.
     pub fn used_credential_ids(&self) -> &[CredentialId] {
         &self.used_credential_ids
@@ -54,8 +35,8 @@ impl PresentationRecord {
     /// The entry of `S.presentations` that `raw` holds.
     pub(crate) fn parse(raw: &RawValue) -> Result<Self, WalletStateError> {
         let fault = WalletStateError::Presentations;
-        let stored: Stored =
-            serde_json::from_str(raw.get()).map_err(|_| fault(PresentationsFault::Record))?;
+        let stored: Stored = serde_json::from_str(raw.get())
+            .map_err(|error| fault(PresentationsFault::Record(JsonTextError::of(&error))))?;
         Ok(Self {
             presentation_id: PresentationId::new(stored.presentation_id),
             transaction_id: TransactionId::new(stored.transaction_id),

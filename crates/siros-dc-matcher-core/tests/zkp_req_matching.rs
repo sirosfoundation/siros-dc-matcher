@@ -48,7 +48,8 @@ fn accepting() -> Option<Value> {
 }
 
 fn envelope(query: Value, client_metadata: Option<Value>) -> Vec<u8> {
-    let mut data = json!({"dcql_query": {"credentials": [query]}});
+    let mut data = json!({"response_type": "vp_token", "response_mode": "dc_api",
+        "nonce": "n-1", "dcql_query": {"credentials": [query]}});
     if let Some(cm) = client_metadata {
         data["client_metadata"] = cm;
     }
@@ -75,25 +76,22 @@ fn run(db: &CredentialDatabase, request: &[u8]) -> Outcome {
     let Some(context) = UnverifiedRequest::first_registered(request, &registered) else {
         return none;
     };
-    let Some(query) = context.query().matching_query() else {
-        return none;
-    };
+    let query = context.query();
     let held = credentials(db);
-    let policy =
-        ProfilePolicy::new(&db.profile).with_context(context.query(), context.client_metadata());
-    let result = execute(&query, &held, &policy);
+    let policy = ProfilePolicy::new(&db.profile).with_client_metadata(context.client_metadata());
+    let result = execute(query, &held, &policy);
     let Some(matched) = result.query("nym") else {
         return none;
     };
-    let first = matched.candidates.first().map(|candidate| {
+    let first = matched.candidates().first().map(|candidate| {
         let cq = query.credential("nym").expect("query");
         resolve(&policy, cq, candidate)
     });
     Outcome {
         ids: matched
-            .candidates
+            .candidates()
             .iter()
-            .map(|c| c.credential_id.clone())
+            .map(|c| c.credential_id().as_str().to_owned())
             .collect(),
         claims: first.as_ref().map(|r| r.claims.clone()).unwrap_or_default(),
         selection: first.and_then(|r| r.zkp_req.map(|z| z.to_json())),

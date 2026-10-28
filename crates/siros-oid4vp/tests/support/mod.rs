@@ -37,11 +37,6 @@ use x509_cert::time::{Time, Validity};
 /// 2026-10-26T00:00:00Z.
 pub const NOW: u64 = 1_792_972_800;
 
-/// The Credential Query id `text`.
-pub fn query_id(text: &str) -> siros_dcql::QueryId {
-    siros_dcql::QueryId::parse(text).unwrap()
-}
-
 /// [`NOW`] as a time.
 pub fn now() -> DateTime {
     DateTime::from_unix(NOW as i64).unwrap()

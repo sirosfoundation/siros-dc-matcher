@@ -4,9 +4,9 @@ use rustc_hash::FxHashSet;
 use serde_json::{Map, Value};
 
 use crate::colour::Colour;
-use crate::error::{DisplayError, EntryFault};
+use crate::error::{ColourFault, DisplayError, EntryFault};
 use crate::locale::Locale;
-use crate::text::DisplayText;
+use crate::text::{LabelText, TextError};
 
 /// How many entries an array member holds.
 #[derive(Clone, Copy)]
@@ -35,14 +35,27 @@ pub(crate) fn string<'a>(
     }
 }
 
+/// The OPTIONAL string member `name` as a label; `None` when absent or blank, which the host's
+/// wording or the claim key then stands for.
+pub(crate) fn optional_label(
+    object: &Map<String, Value>,
+    name: &str,
+    malformed: DisplayError,
+) -> Result<Option<LabelText>, DisplayError> {
+    match label(object, name, malformed) {
+        Err(DisplayError::Text(TextError::Empty)) => Ok(None),
+        read => read,
+    }
+}
+
 /// The string member `name` as a label; `None` when absent.
 pub(crate) fn label(
     object: &Map<String, Value>,
     name: &str,
     malformed: DisplayError,
-) -> Result<Option<DisplayText>, DisplayError> {
+) -> Result<Option<LabelText>, DisplayError> {
     string(object, name, malformed)?
-        .map(|text| DisplayText::label(text).map_err(DisplayError::Text))
+        .map(|text| LabelText::new(text).map_err(DisplayError::Text))
         .transpose()
 }
 
@@ -61,7 +74,7 @@ pub(crate) fn colour(
     object: &Map<String, Value>,
     name: &str,
 ) -> Result<Option<Colour>, DisplayError> {
-    string(object, name, DisplayError::Colour)?
+    string(object, name, DisplayError::Colour(ColourFault::NotString))?
         .map(Colour::parse)
         .transpose()
 }

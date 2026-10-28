@@ -1,7 +1,7 @@
-//! The parts of the matcher outside the DCQL engine and the WASM binary: the
-//! credential blob a wallet registers with the platform ([`db`]), the match
-//! profile and its evaluator ([`profile`], [`evaluator`]), and the
-//! capabilities of a registered circuit ([`circuit_capabilities`]).
+//! The FFI's matching: the v1 credential blob ([`db`]), the match profile that configures its
+//! rules and their evaluator ([`profile`], [`evaluator`]), and the capabilities of a registered
+//! circuit ([`circuit_capabilities`]). The credential picker, `matcher.wasm`, reads the
+//! registration of siros-registration and runs the presentation component's matching.
 
 #![deny(missing_docs)]
 #![deny(unsafe_code)]

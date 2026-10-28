@@ -3,14 +3,13 @@
 
 use siros_codec::date::DateTime;
 
-use crate::error::{MemberPath, TransactionDataError};
-use crate::json::{self, optional, Fields};
-use crate::kind::SupportedType;
-use crate::ts12::display::Leaves;
+use crate::definition::Prominence;
+use crate::ts12::leaves::Leaves;
 use crate::ts12::payment::{Party, PartyPaths, Payment};
+use crate::ts12::read::{self as json, optional, Fields};
+use crate::ts12::read::{MemberPath, Members, Ts12PayloadFault};
 use crate::ts12::rules::{self, DateOrDateTime, DateTimeText, Text};
 use crate::ts12::{member, transaction_id, Payload, TransactionId};
-use crate::view::Level;
 
 /// Login and risk-based authentication (Section 4.3.2).
 pub(crate) struct LoginRisk {
@@ -47,10 +46,8 @@ const AISP: PartyPaths = PartyPaths {
 };
 
 impl Payload for LoginRisk {
-    const TYPE: SupportedType = SupportedType::LoginRisk;
-
     /// Besides its schema, Section 4.3.2 requires `date_time` in ISO 8601.
-    fn parse(mut fields: Fields, _now: DateTime) -> Result<Self, TransactionDataError> {
+    fn parse(mut fields: Fields, _now: DateTime) -> Result<Self, Ts12PayloadFault> {
         let login = Self {
             transaction_id: transaction_id(&mut fields)?,
             date_time: optional(
@@ -61,7 +58,7 @@ impl Payload for LoginRisk {
             )?,
             service: optional(&mut fields, "service", member("service"), Text::parse)?,
             action: Text::parse(
-                fields.require("action", member("action"))?,
+                fields.require_member("action", member("action"))?,
                 member("action"),
             )?,
         };
@@ -70,19 +67,21 @@ impl Payload for LoginRisk {
     }
 
     fn leaves(&self, leaves: &mut Leaves) {
-        leaves.text("transaction_id", &self.transaction_id, Some(Level::Main));
-        leaves.optional_text("date_time", self.date_time.as_ref());
+        leaves.text(
+            "transaction_id",
+            &self.transaction_id,
+            Some(Prominence::Main),
+        );
+        leaves.optional_date_time("date_time", self.date_time.as_ref());
         leaves.optional_text("service", self.service.as_ref());
-        leaves.text("action", &self.action, Some(Level::Prominent));
+        leaves.text("action", &self.action, Some(Prominence::Prominent));
     }
 }
 
 impl Payload for AccountAccess {
-    const TYPE: SupportedType = SupportedType::AccountAccess;
-
     /// Besides its schema, Section 4.3.3 requires `date_time` in ISO 8601 and
     /// `aisp.domain_name` a domain name.
-    fn parse(mut fields: Fields, _now: DateTime) -> Result<Self, TransactionDataError> {
+    fn parse(mut fields: Fields, _now: DateTime) -> Result<Self, Ts12PayloadFault> {
         let access = Self {
             transaction_id: transaction_id(&mut fields)?,
             date_time: optional(
@@ -106,8 +105,12 @@ impl Payload for AccountAccess {
     }
 
     fn leaves(&self, leaves: &mut Leaves) {
-        leaves.text("transaction_id", &self.transaction_id, Some(Level::Main));
-        leaves.optional_text("date_time", self.date_time.as_ref());
+        leaves.text(
+            "transaction_id",
+            &self.transaction_id,
+            Some(Prominence::Main),
+        );
+        leaves.optional_date_time("date_time", self.date_time.as_ref());
         if let Some(aisp) = &self.aisp {
             leaves.object("aisp", |leaves| aisp.leaves(leaves));
         }
@@ -116,12 +119,10 @@ impl Payload for AccountAccess {
 }
 
 impl Payload for Emandate {
-    const TYPE: SupportedType = SupportedType::Emandate;
-
     /// Besides its schema, Section 4.3.4 requires `date_time` in ISO 8601, `start_date` and
     /// `end_date` an ISO 8601 date or date and time, `purpose` when there is no
     /// `payment_payload`, and `payment_payload` a payment of Section 4.3.1 at the time `now`.
-    fn parse(mut fields: Fields, now: DateTime) -> Result<Self, TransactionDataError> {
+    fn parse(mut fields: Fields, now: DateTime) -> Result<Self, Ts12PayloadFault> {
         let mandate = Self {
             transaction_id: transaction_id(&mut fields)?,
             date_time: optional(
@@ -167,16 +168,23 @@ impl Payload for Emandate {
         // `purpose` is "REQUIRED when `payment` is not present": the payment is
         // `payment_payload`, the only payment member.
         if mandate.purpose.is_none() && mandate.payment_payload.is_none() {
-            return Err(TransactionDataError::MissingMember(member("purpose")));
+            return Err(Ts12PayloadFault::Member(
+                member("purpose"),
+                siros_codec::member::MemberFault::Absent,
+            ));
         }
         Ok(mandate)
     }
 
     fn leaves(&self, leaves: &mut Leaves) {
-        leaves.text("transaction_id", &self.transaction_id, Some(Level::Main));
-        leaves.optional_text("date_time", self.date_time.as_ref());
-        leaves.optional_text("start_date", self.start_date.as_ref());
-        leaves.optional_text("end_date", self.end_date.as_ref());
+        leaves.text(
+            "transaction_id",
+            &self.transaction_id,
+            Some(Prominence::Main),
+        );
+        leaves.optional_date_time("date_time", self.date_time.as_ref());
+        leaves.optional_date_or_time("start_date", self.start_date.as_ref());
+        leaves.optional_date_or_time("end_date", self.end_date.as_ref());
         leaves.optional_text("reference_number", self.reference_number.as_ref());
         leaves.optional_text("creditor_id", self.creditor_id.as_ref());
         leaves.optional_text("purpose", self.purpose.as_ref());

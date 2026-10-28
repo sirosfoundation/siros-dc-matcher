@@ -1,81 +1,82 @@
 //! The ways to satisfy a credential set or a request, enumerated lazily, and the limits of what
 //! an enumeration examines.
 
-use std::cmp::Ordering;
-use std::num::NonZeroUsize;
 use std::ops::Deref;
 
 use itertools::Itertools;
 use serde_json::Value;
-use siros_dcql::{CredentialSetQuery, Dropped};
+use siros_dcql::{CredentialSetQuery, Dropped, Multiplicity};
 
 use super::{Member, MAX_EXAMINED};
+use crate::credential::MatchCredential;
 use crate::ids::{CandidateIndex, QueryIndex};
 use crate::matching::Answered;
 
-/// How a query is answered in one combination.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Multiplicity {
-    /// By one of its candidates.
-    One,
-    /// By every candidate: the query sets `multiple`.
-    Every,
-}
-
-/// A Credential Query of an option, and its candidates.
-#[derive(Debug, Clone, Copy)]
+/// A Credential Query of an option, and its eligible candidates, at least one. A query of
+/// [`Multiplicity::One`] is answered by one of them in one combination, one of
+/// [`Multiplicity::Several`] by every one.
+#[derive(Debug, Clone)]
 struct Slot {
     query: QueryIndex,
     multiplicity: Multiplicity,
-    candidates: NonZeroUsize,
+    candidates: Vec<CandidateIndex>,
 }
 
 impl Slot {
+    /// The slot of `query`'s eligible `candidates`; `None` without one.
+    fn of(
+        query: QueryIndex,
+        multiplicity: Multiplicity,
+        candidates: Vec<CandidateIndex>,
+    ) -> Option<Self> {
+        (!candidates.is_empty()).then_some(Self {
+            query,
+            multiplicity,
+            candidates,
+        })
+    }
+
     /// The number of ways to answer the query in one combination.
-    fn width(self) -> usize {
+    fn width(&self) -> usize {
         match self.multiplicity {
-            Multiplicity::One => self.candidates.get(),
-            Multiplicity::Every => 1,
+            Multiplicity::One => self.candidates.len(),
+            Multiplicity::Several => 1,
         }
     }
 
     /// The member of each way, in the order of the candidates.
-    fn ways(self) -> impl Iterator<Item = Member> + Clone {
-        (0..self.width()).map(move |way| self.member(way))
-    }
-
-    fn member(self, way: usize) -> Member {
-        let candidates = match self.multiplicity {
-            Multiplicity::One => vec![CandidateIndex::at(way)],
-            Multiplicity::Every => (0..self.candidates.get()).map(CandidateIndex::at).collect(),
+    fn ways(&self) -> impl Iterator<Item = Member> + Clone + '_ {
+        let ways: Vec<Vec<CandidateIndex>> = match self.multiplicity {
+            Multiplicity::One => self.candidates.iter().map(|&c| vec![c]).collect(),
+            Multiplicity::Several => vec![self.candidates.clone()],
         };
-        Member {
+        ways.into_iter().map(move |candidates| Member {
             query: self.query,
             candidates,
-        }
+        })
     }
 }
 
-/// The Credential Queries of a request, each with its slot, or none without a candidate.
+/// The Credential Queries of a request, each with its slot, or none without an eligible
+/// candidate.
 pub(super) struct Space<'a> {
     queries: Vec<(&'a str, Option<Slot>)>,
 }
 
 impl<'a> Space<'a> {
-    pub(super) fn of<C, R>(answered: &'a Answered<'_, C, R>) -> Self {
+    /// The queries of `answered`, each with the candidates `eligible` accepts.
+    pub(super) fn of<C: MatchCredential, R>(
+        answered: &'a Answered<'_, C, R>,
+        eligible: &impl Fn(QueryIndex, CandidateIndex) -> bool,
+    ) -> Self {
         let queries = answered
             .indexed()
             .map(|(query, answers)| {
-                let multiplicity = if answers.query().multiple {
-                    Multiplicity::Every
-                } else {
-                    Multiplicity::One
-                };
-                let slot = NonZeroUsize::new(answers.candidates().len()).map(|candidates| Slot {
-                    query,
-                    multiplicity,
-                    candidates,
-                });
+                let candidates = (0..answers.candidates().len())
+                    .map(CandidateIndex::new)
+                    .filter(|&candidate| eligible(query, candidate))
+                    .collect();
+                let slot = Slot::of(query, answers.query().multiplicity(), candidates);
                 (answers.id().as_str(), slot)
             })
             .collect();
@@ -83,12 +84,12 @@ impl<'a> Space<'a> {
     }
 
     /// The slot of the Credential Query `id`; `None` when no query has the id or the query has
-    /// no candidate.
+    /// no eligible candidate.
     fn slot(&self, id: &str) -> Option<Slot> {
         self.queries
             .iter()
             .find(|(query, _)| *query == id)
-            .and_then(|(_, slot)| *slot)
+            .and_then(|(_, slot)| slot.clone())
     }
 }
 
@@ -104,7 +105,7 @@ pub(super) struct Choices {
 impl Choices {
     /// Every query at once: the request without `credential_sets`.
     pub(super) fn all(space: &Space<'_>) -> Self {
-        let option = space.queries.iter().map(|(_, slot)| *slot).collect();
+        let option = space.queries.iter().map(|(_, slot)| slot.clone()).collect();
         Self::of_options(None, [option])
     }
 
@@ -112,10 +113,10 @@ impl Choices {
     /// the request lacks is one no credential satisfies (Section 6.4).
     pub(super) fn of_set(space: &Space<'_>, set: &CredentialSetQuery) -> Self {
         let options = set
-            .options
+            .options()
             .iter()
             .map(|ids| ids.iter().map(|id| space.slot(id)).collect());
-        Self::of_options(set.purpose.clone(), options)
+        Self::of_options(set.purpose().cloned(), options)
     }
 
     /// The choices of the `options` that have a slot for each query.
@@ -158,70 +159,6 @@ impl Choices {
                 .multi_cartesian_product()
         })
     }
-
-    /// The choices with a member `carries` accepts, and their number; `None` when it
-    /// overflows. Each option's choices come grouped by the first of its queries whose member
-    /// `carries` accepts, the last query varying fastest. No other choice is formed.
-    pub(super) fn carrying(&self, carries: impl Fn(&Member) -> bool) -> Carrying {
-        let options: Vec<Vec<Vec<(Member, bool)>>> = self
-            .options
-            .iter()
-            .map(|slots| {
-                slots
-                    .iter()
-                    .map(|slot| {
-                        slot.ways()
-                            .map(|way| (way.clone(), carries(&way)))
-                            .collect()
-                    })
-                    .collect()
-            })
-            .collect();
-        let count = sum(options.iter().map(|slots| {
-            let all = product(slots.iter().map(|ways| Some(ways.len())));
-            let missing = product(
-                slots
-                    .iter()
-                    .map(|ways| Some(ways.iter().filter(|(_, hit)| !hit).count())),
-            );
-            all.zip(missing)
-                .map(|(all, missing)| all.saturating_sub(missing))
-        }));
-        let choices = options.into_iter().flat_map(|slots| {
-            (0..slots.len())
-                .map(|first| {
-                    slots
-                        .iter()
-                        .enumerate()
-                        .map(|(at, ways)| {
-                            ways.iter()
-                                .filter(|&&(_, hit)| match at.cmp(&first) {
-                                    Ordering::Less => !hit,
-                                    Ordering::Equal => hit,
-                                    Ordering::Greater => true,
-                                })
-                                .map(|(way, _)| way.clone())
-                                .collect::<Vec<Member>>()
-                        })
-                        .multi_cartesian_product()
-                })
-                .collect::<Vec<_>>()
-                .into_iter()
-                .flatten()
-        });
-        Carrying {
-            count,
-            choices: Box::new(choices),
-        }
-    }
-}
-
-/// The choices of a credential set that carry a transaction entry.
-pub(super) struct Carrying {
-    /// Their number; `None` when it overflows.
-    pub(super) count: Option<usize>,
-    /// The choices, formed as they are taken.
-    pub(super) choices: Box<dyn Iterator<Item = Vec<Member>>>,
 }
 
 /// The product of `factors`: zero with a zero factor, else `None` on overflow or for an

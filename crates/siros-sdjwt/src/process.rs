@@ -2,10 +2,11 @@
 //! steps 3 to 5) into its claim tree.
 
 use rustc_hash::{FxHashMap, FxHashSet};
+use siros_codec::json::Json;
 
-use crate::error::ParseError;
-use crate::json::Json;
-use crate::tree::{Claim, ClaimValue, Disclosure, Element, Object};
+use crate::alg::Digest;
+use crate::error::{ParseError, Placement, ReservedFault};
+use crate::tree::{Claim, ClaimValue, Disclosure, DisclosureId, Element, Object};
 
 /// The deepest nesting of claims, the payload's root object at depth 0, disclosures included.
 pub const MAX_DEPTH: usize = 32;
@@ -16,18 +17,17 @@ const SD_ALG: &str = "_sd_alg";
 
 /// A disclosure not yet referenced by a digest.
 pub(crate) struct Pending {
-    position: usize,
-    encoded: String,
+    id: DisclosureId,
     content: Content,
 }
 
 impl Pending {
-    pub(crate) fn new(position: usize, encoded: String, content: Content) -> Self {
-        Self {
-            position,
-            encoded,
-            content,
-        }
+    pub(crate) fn new(id: DisclosureId, content: Content) -> Self {
+        Self { id, content }
+    }
+
+    fn disclosure(self) -> (Disclosure, Content) {
+        (Disclosure::new(self.id), self.content)
     }
 }
 
@@ -49,36 +49,33 @@ enum Level {
 /// digest.
 pub(crate) fn claims(
     root: Vec<(String, Json)>,
-    pending: FxHashMap<String, Pending>,
+    pending: FxHashMap<Digest, Pending>,
 ) -> Result<Object, ParseError> {
     let mut processor = Processor {
         pending,
         seen: FxHashSet::default(),
     };
     let claims = processor.object(root, 0, Level::Root)?;
-    if processor.pending.is_empty() {
-        Ok(claims)
-    } else {
-        Err(ParseError::UnreferencedDisclosure)
+    match processor.pending.values().map(|pending| pending.id).min() {
+        None => Ok(claims),
+        Some(id) => Err(ParseError::UnreferencedDisclosure(id)),
     }
 }
 
 struct Processor {
     /// The disclosures no digest has referenced yet.
-    pending: FxHashMap<String, Pending>,
+    pending: FxHashMap<Digest, Pending>,
     /// Every digest met so far, decoys included.
-    seen: FxHashSet<String>,
+    seen: FxHashSet<Digest>,
 }
 
 impl Processor {
     /// The disclosure `digest` references, if the credential holds it (Section 7.1, step 3.c.i).
-    fn reference(&mut self, digest: String) -> Result<Option<Pending>, ParseError> {
-        let pending = self.pending.remove(&digest);
-        if self.seen.insert(digest) {
-            Ok(pending)
-        } else {
-            Err(ParseError::RepeatedDigest)
+    fn reference(&mut self, digest: Digest) -> Result<Option<Pending>, ParseError> {
+        if !self.seen.insert(digest.clone()) {
+            return Err(ParseError::RepeatedDigest(digest));
         }
+        Ok(self.pending.remove(&digest))
     }
 
     fn value(&mut self, json: Json, depth: usize) -> Result<ClaimValue, ParseError> {
@@ -88,7 +85,7 @@ impl Processor {
         Ok(match json {
             Json::Null => ClaimValue::Null,
             Json::Bool(b) => ClaimValue::Bool(b),
-            Json::Number(n) => ClaimValue::Number(n),
+            Json::Number(n) => ClaimValue::Number(n.into_number()),
             Json::String(s) => ClaimValue::String(s),
             Json::Array(items) => ClaimValue::Array(
                 items
@@ -115,7 +112,8 @@ impl Processor {
             match name.as_str() {
                 SD => digests = digest_strings(value)?,
                 SD_ALG if level == Level::Root => {}
-                ELLIPSIS | SD_ALG => return Err(ParseError::ReservedClaimName),
+                SD_ALG => return Err(reserved(ReservedFault::NestedSdAlg)),
+                ELLIPSIS => return Err(reserved(ReservedFault::Ellipsis)),
                 _ => plain.push((name, value)),
             }
         }
@@ -126,28 +124,24 @@ impl Processor {
             object.push(name, Claim::new(value, None));
         }
         for digest in digests {
-            let Some(Pending {
-                position,
-                encoded,
-                content,
-            }) = self.reference(digest)?
-            else {
+            let Some(pending) = self.reference(digest)? else {
                 continue;
             };
+            let (disclosure, content) = pending.disclosure();
             let Content::Property { name, value } = content else {
-                return Err(ParseError::MisplacedDisclosure);
+                return Err(ParseError::MisplacedDisclosure {
+                    disclosure: disclosure.id(),
+                    placement: Placement::ElementInObject,
+                });
             };
             if matches!(name.as_str(), SD | ELLIPSIS | SD_ALG) {
-                return Err(ParseError::ReservedClaimName);
+                return Err(reserved(ReservedFault::Disclosed(name)));
             }
             if !names.insert(name.clone()) {
-                return Err(ParseError::ClaimNameExists);
+                return Err(ParseError::ClaimNameExists(name));
             }
             let value = self.value(value, depth + 1)?;
-            object.push(
-                name,
-                Claim::new(value, Some(Disclosure::new(position, encoded))),
-            );
+            object.push(name, Claim::new(value, Some(disclosure)));
         }
         Ok(object)
     }
@@ -166,44 +160,47 @@ impl Processor {
                 )))
             }
         };
-        match self.reference(digest)? {
-            None => Ok(Element::Withheld),
-            Some(Pending {
-                position,
-                encoded,
-                content: Content::Element(value),
-            }) => {
+        let Some(pending) = self.reference(digest)? else {
+            return Ok(Element::Withheld);
+        };
+        match pending.disclosure() {
+            (disclosure, Content::Element(value)) => {
                 let value = self.value(value, depth)?;
-                Ok(Element::Present(Claim::new(
-                    value,
-                    Some(Disclosure::new(position, encoded)),
-                )))
+                Ok(Element::Present(Claim::new(value, Some(disclosure))))
             }
-            Some(_) => Err(ParseError::MisplacedDisclosure),
+            (disclosure, Content::Property { .. }) => Err(ParseError::MisplacedDisclosure {
+                disclosure: disclosure.id(),
+                placement: Placement::PropertyInArray,
+            }),
         }
     }
 }
 
+fn reserved(fault: ReservedFault) -> ParseError {
+    ParseError::ReservedClaimName(fault)
+}
+
 /// The digests of an `_sd` member, which holds an array of strings (Section 4.2.4.1).
-fn digest_strings(value: Json) -> Result<Vec<String>, ParseError> {
+fn digest_strings(value: Json) -> Result<Vec<Digest>, ParseError> {
     let Json::Array(items) = value else {
-        return Err(ParseError::ReservedClaimName);
+        return Err(reserved(ReservedFault::SdNotArray));
     };
     items
         .into_iter()
         .map(|item| match item {
-            Json::String(digest) => Ok(digest),
-            _ => Err(ParseError::ReservedClaimName),
+            Json::String(digest) => Ok(Digest::listed(digest)),
+            _ => Err(reserved(ReservedFault::SdDigest)),
         })
         .collect()
 }
 
 /// The digest of an array element `{"...": digest}`, whose only member is `...` (Section
 /// 4.2.4.2).
-fn array_digest(members: Vec<(String, Json)>) -> Result<String, ParseError> {
+fn array_digest(members: Vec<(String, Json)>) -> Result<Digest, ParseError> {
     let mut members = members.into_iter();
     match (members.next(), members.next()) {
-        (Some((_, Json::String(digest))), None) => Ok(digest),
-        _ => Err(ParseError::ReservedClaimName),
+        (Some((_, Json::String(digest))), None) => Ok(Digest::listed(digest)),
+        (Some(_), None) => Err(reserved(ReservedFault::ElementDigest)),
+        _ => Err(reserved(ReservedFault::ElementMembers)),
     }
 }

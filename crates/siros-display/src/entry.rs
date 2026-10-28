@@ -7,14 +7,14 @@ use crate::error::DisplayError;
 use crate::json;
 use crate::locale::{Locale, Localized};
 use crate::logo::{self, Logo};
-use crate::text::DisplayText;
+use crate::text::LabelText;
 
 /// A `display` entry of OpenID4VCI `credential_metadata` (OpenID4VCI 1.0, Section 12.2.4) or of
 /// Type Metadata with its `simple` rendering (SD-JWT VC, Sections 5.5 and 5.5.1.1).
 #[derive(Debug, Clone)]
 pub(crate) struct DisplayEntry {
     pub(crate) locale: Option<Locale>,
-    pub(crate) name: DisplayText,
+    pub(crate) name: LabelText,
     pub(crate) logo: Option<Logo>,
     pub(crate) background: Option<Colour>,
     pub(crate) text: Option<Colour>,
@@ -25,7 +25,7 @@ impl DisplayEntry {
     /// of `rendering`.
     pub(crate) fn read(
         locale: Option<Locale>,
-        name: DisplayText,
+        name: LabelText,
         rendering: &Map<String, Value>,
     ) -> Result<Self, DisplayError> {
         Ok(Self {

@@ -1,5 +1,5 @@
 {
-  "description": "claims that is neither array nor object.",
+  "description": "claims that is neither array nor object: DCQL refuses it (OpenID4VP 1.0, Section 6.1).",
   "query": {
     "id": "nym_attestation",
     "format": "zkp_req",
@@ -31,6 +31,7 @@
     }
   },
   "expect": {
-    "error": "claims_present"
-  }
+    "error": "dcql_malformed"
+  },
+  "v0_4": "DCQL refuses claims that is no array first, with its code (v0.4: claims_present)."
 }

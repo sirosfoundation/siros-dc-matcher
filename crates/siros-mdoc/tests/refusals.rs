@@ -1,10 +1,16 @@
-//! One refusal per construction rule of `Mdoc::parse` and `Mdoc::disclose`. The honest inputs
-//! each fixture edits are accepted: each fixture breaks only its rule.
+//! One refusal per construction rule of `Mdoc::parse`. The honest input each fixture edits is
+//! accepted: each fixture breaks only its rule.
 
 use sha2::{Digest, Sha256};
 use siros_codec::base64url;
 use siros_codec::cbor::{CborError, Unsupported, Value};
-use siros_mdoc::{DeviceSignedElement, DisclosureError, ElementId, Mdoc, MdocError};
+use siros_codec::member::MemberFault;
+use siros_codec::Base64Error;
+use siros_mdoc::{
+    AlgorithmFault, DeviceKeyFault, DigestId, DocTypeFault, EnvelopeFault, IssuerAuthFault,
+    ItemFault, ItemMember, KeyAuthorizationsFault, Mdoc, MdocError, NameFault, NameSpace,
+    NameSpacesFault, PayloadFault, ValidityFault, ValueDigestsFault,
+};
 
 const DOC_TYPE: &str = "org.example.doc.1";
 const NAME_SPACE: &str = "org.example.1";
@@ -159,7 +165,6 @@ fn assemble(parts: &Parts) -> String {
 enum Got {
     Accepted,
     Mdoc(MdocError),
-    Disclosure(DisclosureError),
 }
 
 fn read(data: &str) -> Got {
@@ -172,37 +177,13 @@ fn edited(edit: impl FnOnce(&mut Parts)) -> Got {
     read(&assemble(&parts))
 }
 
-fn disclosed(elements: &[(&str, &str)], device_signed: &[(&str, &str)]) -> Got {
-    let mdoc = Mdoc::parse(&assemble(&honest())).unwrap();
-    let elements: Vec<ElementId> = elements
-        .iter()
-        .map(|&(name_space, identifier)| ElementId {
-            name_space,
-            identifier,
-        })
-        .collect();
-    let device_signed = device_signed
-        .iter()
-        .map(|&(name_space, identifier)| DeviceSignedElement {
-            name_space: name_space.to_owned(),
-            identifier: identifier.to_owned(),
-            value: Value::Bytes(vec![0x7e; 32]),
-        })
-        .collect();
-    mdoc.disclose(&elements, device_signed)
-        .map_or_else(Got::Disclosure, |_| Got::Accepted)
-}
-
-const HONEST_SELECTION: [(&str, &str); 1] = [(NAME_SPACE, "given_name")];
-const HONEST_DEVICE_SIGNED: [(&str, &str); 2] = [(SIGNED, "payment_hash"), (PARTLY, "tx_hash")];
-
 #[test]
 fn each_rule_refuses_its_fixture() {
     let cases: Vec<(&str, Got, Got)> = vec![
         (
             "encoding",
             read("not base64url!"),
-            Got::Mdoc(MdocError::Encoding),
+            Got::Mdoc(MdocError::Encoding(Base64Error::Alphabet(3))),
         ),
         (
             "cbor",
@@ -214,47 +195,51 @@ fn each_rule_refuses_its_fixture() {
         (
             "envelope",
             edited(|p| p.documents = 2),
-            Got::Mdoc(MdocError::Envelope),
+            Got::Mdoc(MdocError::Envelope(EnvelopeFault::Documents(2))),
         ),
         (
             "issuer_auth",
             edited(|p| p.signature = text("r and s")),
-            Got::Mdoc(MdocError::IssuerAuth),
+            Got::Mdoc(MdocError::IssuerAuth(IssuerAuthFault::Signature)),
         ),
         (
             "algorithm",
             edited(|p| p.protected = Value::Bytes(vec![0xa0])),
-            Got::Mdoc(MdocError::Algorithm),
+            Got::Mdoc(MdocError::Algorithm(AlgorithmFault::Absent)),
         ),
         (
             "x5chain",
             edited(|p| p.unprotected = Value::Map(Vec::new())),
-            Got::Mdoc(MdocError::X5chain),
+            Got::Mdoc(MdocError::X5chain(MemberFault::Absent)),
         ),
         (
             "payload",
             edited(|p| p.payload = Some(map(vec![("docType", text(DOC_TYPE))]))),
-            Got::Mdoc(MdocError::Payload),
+            Got::Mdoc(MdocError::Payload(PayloadFault::NotTagged)),
         ),
         (
             "doc_type",
             edited(|p| p.document_doc_type = "org.example.other.1"),
-            Got::Mdoc(MdocError::DocType),
+            Got::Mdoc(MdocError::DocType(DocTypeFault::Mismatch)),
         ),
         (
             "digest_algorithm",
             edited(|p| p.digest_algorithm = "MD5"),
-            Got::Mdoc(MdocError::DigestAlgorithm),
+            Got::Mdoc(MdocError::DigestAlgorithm(NameFault::Unknown)),
         ),
         (
             "value_digests",
             edited(|p| p.digests[0].1 = Value::Bytes(vec![0; 31])),
-            Got::Mdoc(MdocError::ValueDigests),
+            Got::Mdoc(MdocError::ValueDigests(ValueDigestsFault::DigestLength(
+                NameSpace::new(NAME_SPACE),
+                DigestId::new(0),
+                31,
+            ))),
         ),
         (
             "device_key",
             edited(|p| p.device_key[1].1 = Value::Unsigned(2)),
-            Got::Mdoc(MdocError::DeviceKey),
+            Got::Mdoc(MdocError::DeviceKey(DeviceKeyFault::Curve)),
         ),
         (
             "key_authorizations",
@@ -267,17 +252,22 @@ fn each_rule_refuses_its_fixture() {
                     ),
                 ])
             }),
-            Got::Mdoc(MdocError::KeyAuthorizations),
+            Got::Mdoc(MdocError::KeyAuthorizations(
+                KeyAuthorizationsFault::Overlap(NameSpace::new(SIGNED)),
+            )),
         ),
         (
             "validity",
             edited(|p| p.validity[2] = p.validity[1]),
-            Got::Mdoc(MdocError::Validity),
+            Got::Mdoc(MdocError::Validity(ValidityFault::Order)),
         ),
         (
             "name_spaces",
             edited(|p| p.items.clear()),
-            Got::Mdoc(MdocError::NameSpaces),
+            Got::Mdoc(MdocError::NameSpaces(NameSpacesFault::Items(
+                NameSpace::new(NAME_SPACE),
+                MemberFault::Empty,
+            ))),
         ),
         (
             "item",
@@ -288,7 +278,7 @@ fn each_rule_refuses_its_fixture() {
                     ("elementValue", text("Ada")),
                 ]))
             }),
-            Got::Mdoc(MdocError::Item),
+            Got::Mdoc(MdocError::Item(ItemFault::Member(ItemMember::Random))),
         ),
         (
             "repeated_element",
@@ -304,35 +294,8 @@ fn each_rule_refuses_its_fixture() {
             edited(|p| p.digests[1].1 = Value::Bytes(vec![0; 32])),
             Got::Mdoc(MdocError::ItemDigest),
         ),
-        (
-            "unknown_element",
-            disclosed(&[(NAME_SPACE, "birth_date")], &[]),
-            Got::Disclosure(DisclosureError::UnknownElement),
-        ),
-        (
-            "repeated_selection",
-            disclosed(&[HONEST_SELECTION[0], HONEST_SELECTION[0]], &[]),
-            Got::Disclosure(DisclosureError::RepeatedSelection),
-        ),
-        (
-            "unauthorized_device_element",
-            disclosed(&HONEST_SELECTION, &[(PARTLY, "amount")]),
-            Got::Disclosure(DisclosureError::Unauthorized),
-        ),
-        (
-            "repeated_device_element",
-            disclosed(
-                &HONEST_SELECTION,
-                &[HONEST_DEVICE_SIGNED[0], HONEST_DEVICE_SIGNED[0]],
-            ),
-            Got::Disclosure(DisclosureError::RepeatedDeviceElement),
-        ),
     ];
     assert_eq!(edited(|_| {}), Got::Accepted);
-    assert_eq!(
-        disclosed(&HONEST_SELECTION, &HONEST_DEVICE_SIGNED),
-        Got::Accepted
-    );
     let failures: Vec<String> = cases
         .into_iter()
         .filter(|(_, got, want)| got != want)

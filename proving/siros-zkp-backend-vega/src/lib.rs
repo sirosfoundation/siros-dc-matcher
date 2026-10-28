@@ -23,11 +23,13 @@
 )]
 
 use siros_codec::date::Date;
+use siros_zkp_req::ZkProof;
 use siros_zkp_req_nym_auth::prover::{
     NymAuthProofVerifier, NymAuthProver, ProofFailure, ProofJob, ProofOutput, ProverFailure,
     Statement,
 };
 use siros_zkp_req_nym_auth::system::{ArtifactPin, NymAuthSystem};
+use siros_zkp_req_nym_auth::verifier_id::PseudonymValue;
 use zk_cred_vega::nymauth_vega::engine::statement::{
     self as vega, Error, Holder, Keys, Statement as VegaStatement,
 };
@@ -72,10 +74,7 @@ impl VegaNymAuth {
 
 /// Whether the statement is one of this system on this backend.
 fn serves(statement: &Statement) -> bool {
-    statement.system == SYSTEM
-        && SYSTEM
-            .backends()
-            .contains(&statement.proof_backend.as_str())
+    statement.system == SYSTEM && SYSTEM.runs_on(&statement.proof_backend)
 }
 
 /// The text values zk-cred-vega reads: T, and E and C with its values for no bound.
@@ -101,13 +100,13 @@ impl Dates {
 
     fn statement<'a>(&'a self, statement: &'a Statement) -> VegaStatement<'a> {
         VegaStatement {
-            issuer_key_x: statement.issuer_key.x(),
-            issuer_key_y: statement.issuer_key.y(),
+            issuer_key_x: statement.issuer.key().x(),
+            issuer_key_y: statement.issuer.key().y(),
             time: &self.time,
             earliest: &self.earliest,
             cutoff: &self.cutoff,
-            challenge_digest: &statement.challenge_digest,
-            verifier_input: &statement.verifier_input,
+            challenge_digest: statement.challenge_digest.as_bytes(),
+            verifier_input: statement.verifier_input.as_bytes(),
         }
     }
 }
@@ -122,7 +121,7 @@ impl NymAuthProver for VegaNymAuth {
         let holder = Holder {
             issuer_signed: job.issuer_signed(),
             secret_seed: job.secret_seed(),
-            device_signature: job.device_signature(),
+            device_signature: job.device_signature().as_bytes(),
         };
         // `Input` and `Refused(Credential)` hold a credential outside the system's form together
         // with other causes, so neither is `credential_form`.
@@ -139,8 +138,8 @@ impl NymAuthProver for VegaNymAuth {
                 | Error::Internal(_) => ProverFailure::Failed,
             })?;
         Ok(ProofOutput {
-            zk_proof: proved.proof,
-            pseudonym: proved.pseudonym,
+            zk_proof: ZkProof::new(proved.proof),
+            pseudonym: PseudonymValue::new(proved.pseudonym),
         })
     }
 }
@@ -151,15 +150,15 @@ impl NymAuthProofVerifier for VegaNymAuth {
     fn verify(
         &self,
         statement: &Statement,
-        pseudonym: &[u8; 32],
-        zk_proof: &[u8],
+        pseudonym: &PseudonymValue,
+        zk_proof: &ZkProof,
     ) -> Result<(), ProofFailure> {
         if !serves(statement) {
             return Err(ProofFailure::Internal);
         }
         let dates = Dates::of(statement).ok_or(ProofFailure::Internal)?;
-        let reported =
-            vega::verify(&self.0, &dates.statement(statement), zk_proof).map_err(|e| match e {
+        let reported = vega::verify(&self.0, &dates.statement(statement), zk_proof.as_bytes())
+            .map_err(|e| match e {
                 Error::ProofEncoding(_) => ProofFailure::Encoding,
                 Error::ProofInvalid(_) => ProofFailure::Invalid,
                 Error::Mismatch(_) => ProofFailure::PublicInput,
@@ -170,7 +169,7 @@ impl NymAuthProofVerifier for VegaNymAuth {
                 | Error::Prover(_)
                 | Error::Internal(_) => ProofFailure::Internal,
             })?;
-        if reported == *pseudonym {
+        if reported == *pseudonym.as_bytes() {
             Ok(())
         } else {
             Err(ProofFailure::PublicInput)

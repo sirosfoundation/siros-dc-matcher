@@ -3,6 +3,9 @@
 
 use siros_codec::base64url;
 use siros_codec::cbor::{self, CborError, Item, Kind, Value};
+use siros_dcql::QueryId;
+
+use crate::ids::{InputName, ProofBackend, ReqSetIndex, ResultKey, SystemId};
 
 /// A member of a CBOR map this module reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,42 +59,86 @@ pub enum EncodingError {
     /// A member has the wrong CBOR type.
     #[error("{} has the wrong type", .0.name())]
     WrongType(Member),
+    /// An unsigned member exceeds the indexes this platform holds.
+    #[error("{} is out of range", .0.name())]
+    OutOfRange(Member),
 }
+
+/// Declares bytes whose meaning a specification other than `zkp_req` defines.
+macro_rules! opaque_bytes {
+    ($(#[$doc:meta])* $name:ident) => {
+        $(#[$doc])*
+        #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+        pub struct $name(Vec<u8>);
+
+        impl $name {
+            /// The bytes `bytes`.
+            #[must_use]
+            pub fn new(bytes: Vec<u8>) -> Self {
+                Self(bytes)
+            }
+
+            /// The bytes.
+            #[must_use]
+            pub fn as_bytes(&self) -> &[u8] {
+                &self.0
+            }
+        }
+    };
+}
+
+opaque_bytes!(
+    /// The content of a presentation's `proof`, which the proof backend specification defines.
+    ProofContent
+);
+
+opaque_bytes!(
+    /// `zk_proof` of `Proof`: the proof the proof backend verifies.
+    ZkProof
+);
 
 /// `ZkpPresentation` (Section 4).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ZkpPresentation {
     /// `system_id`.
-    pub system_id: String,
+    pub system_id: SystemId,
     /// `proof_backend`.
-    pub proof_backend: String,
+    pub proof_backend: ProofBackend,
     /// `req_set`: present exactly when the query has `_req_sets` (Section 2.1).
-    pub req_set: Option<u64>,
+    pub req_set: Option<ReqSetIndex>,
     /// `proof`, defined by the proof backend specification.
-    pub proof: Vec<u8>,
+    pub proof: ProofContent,
     /// `results`: each `return` handle of the answered option and its result (Section 3).
-    pub results: Vec<(String, Value)>,
+    pub results: Vec<(ResultKey, Value)>,
 }
 
 impl ZkpPresentation {
     /// The presentation as a CBOR value.
+    #[must_use]
     pub fn to_value(&self) -> Value {
         let mut members = vec![
-            (Value::text("system_id"), Value::text(&self.system_id)),
+            (
+                Value::text("system_id"),
+                Value::text(self.system_id.as_str()),
+            ),
             (
                 Value::text("proof_backend"),
-                Value::text(&self.proof_backend),
+                Value::text(self.proof_backend.as_str()),
             ),
-            (Value::text("proof"), Value::Bytes(self.proof.clone())),
-            (Value::text("results"), text_map(&self.results)),
+            (Value::text("proof"), Value::Bytes(self.proof.0.clone())),
+            (
+                Value::text("results"),
+                text_map(&self.results, ResultKey::as_str),
+            ),
         ];
         if let Some(req_set) = self.req_set {
-            members.push((Value::text("req_set"), Value::Unsigned(req_set)));
+            members.push((Value::text("req_set"), Value::Unsigned(req_set.as_u64())));
         }
         Value::Map(members)
     }
 
     /// The deterministic CBOR encoding.
+    #[must_use]
     pub fn encode(&self) -> Vec<u8> {
         self.to_value().encode()
     }
@@ -115,28 +162,32 @@ impl ZkpPresentation {
 
 #[derive(Default)]
 struct Partial {
-    system_id: Option<String>,
-    proof_backend: Option<String>,
-    req_set: Option<u64>,
-    proof: Option<Vec<u8>>,
-    results: Option<Vec<(String, Value)>>,
+    system_id: Option<SystemId>,
+    proof_backend: Option<ProofBackend>,
+    req_set: Option<ReqSetIndex>,
+    proof: Option<ProofContent>,
+    results: Option<Vec<(ResultKey, Value)>>,
 }
 
 impl Partial {
     fn read(&mut self, key: &Item<'_>, value: &Item<'_>) -> Result<(), EncodingError> {
-        let wrong = EncodingError::WrongType;
         match key.as_text() {
-            Some("system_id") => self.system_id = Some(text(value, Member::SystemId)?),
-            Some("proof_backend") => self.proof_backend = Some(text(value, Member::ProofBackend)?),
-            Some("req_set") => match value.kind() {
-                Kind::Unsigned(n) => self.req_set = Some(*n),
-                _ => return Err(wrong(Member::ReqSet)),
-            },
-            Some("proof") => {
-                let bytes = value.as_bytes().ok_or(wrong(Member::Proof))?;
-                self.proof = Some(bytes.to_vec());
+            Some("system_id") => {
+                self.system_id = Some(SystemId::new(text(value, Member::SystemId)?));
             }
-            Some("results") => self.results = Some(read_text_map(value, Member::Results)?),
+            Some("proof_backend") => {
+                self.proof_backend = Some(ProofBackend::new(text(value, Member::ProofBackend)?));
+            }
+            Some("req_set") => self.req_set = Some(req_set(value)?),
+            Some("proof") => {
+                let bytes = value
+                    .as_bytes()
+                    .ok_or(EncodingError::WrongType(Member::Proof))?;
+                self.proof = Some(ProofContent(bytes.to_vec()));
+            }
+            Some("results") => {
+                self.results = Some(read_text_map(value, Member::Results, ResultKey::new)?);
+            }
             _ => return Err(EncodingError::UnknownMember),
         }
         Ok(())
@@ -154,29 +205,40 @@ impl Partial {
     }
 }
 
-fn text(item: &Item<'_>, member: Member) -> Result<String, EncodingError> {
-    item.as_text()
-        .map(str::to_owned)
-        .ok_or(EncodingError::WrongType(member))
+fn req_set(item: &Item<'_>) -> Result<ReqSetIndex, EncodingError> {
+    let Kind::Unsigned(n) = item.kind() else {
+        return Err(EncodingError::WrongType(Member::ReqSet));
+    };
+    usize::try_from(*n)
+        .map(ReqSetIndex::new)
+        .map_err(|_| EncodingError::OutOfRange(Member::ReqSet))
 }
 
-/// A map from text keys to any values.
-fn read_text_map(item: &Item<'_>, member: Member) -> Result<Vec<(String, Value)>, EncodingError> {
+fn text<'i>(item: &'i Item<'_>, member: Member) -> Result<&'i str, EncodingError> {
+    item.as_text().ok_or(EncodingError::WrongType(member))
+}
+
+/// A map from text keys, each read by `key`, to any values.
+fn read_text_map<K>(
+    item: &Item<'_>,
+    member: Member,
+    key: fn(&str) -> K,
+) -> Result<Vec<(K, Value)>, EncodingError> {
     let entries = item.as_map().ok_or(EncodingError::WrongType(member))?;
     entries
         .iter()
         .map(|(k, v)| {
-            let key = k.as_text().ok_or(EncodingError::WrongType(member))?;
-            Ok((key.to_owned(), Value::from_item(v)))
+            let text = k.as_text().ok_or(EncodingError::WrongType(member))?;
+            Ok((key(text), Value::from_item(v)))
         })
         .collect()
 }
 
-fn text_map(entries: &[(String, Value)]) -> Value {
+fn text_map<K>(entries: &[(K, Value)], text: fn(&K) -> &str) -> Value {
     Value::Map(
         entries
             .iter()
-            .map(|(k, v)| (Value::text(k), v.clone()))
+            .map(|(k, v)| (Value::text(text(k)), v.clone()))
             .collect(),
     )
 }
@@ -186,39 +248,50 @@ fn text_map(entries: &[(String, Value)]) -> Value {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProofEnvelope {
     /// `inputs`: the prover-supplied values the system rulebook names.
-    pub inputs: Vec<(String, Value)>,
+    pub inputs: Vec<(InputName, Value)>,
     /// `zk_proof`.
-    pub zk_proof: Vec<u8>,
+    pub zk_proof: ZkProof,
 }
 
 impl ProofEnvelope {
-    /// The deterministic CBOR encoding: the bytes of `proof`.
-    pub fn encode(&self) -> Vec<u8> {
-        Value::Map(vec![
-            (Value::text("inputs"), text_map(&self.inputs)),
-            (Value::text("zk_proof"), Value::Bytes(self.zk_proof.clone())),
-        ])
-        .encode()
+    /// The deterministic CBOR encoding: the content of `proof`.
+    #[must_use]
+    pub fn encode(&self) -> ProofContent {
+        ProofContent(
+            Value::Map(vec![
+                (
+                    Value::text("inputs"),
+                    text_map(&self.inputs, InputName::as_str),
+                ),
+                (
+                    Value::text("zk_proof"),
+                    Value::Bytes(self.zk_proof.0.clone()),
+                ),
+            ])
+            .encode(),
+        )
     }
 
-    /// Reads `Proof` from the bytes of `proof`.
+    /// Reads `Proof` from the content of `proof`.
     ///
     /// # Errors
     ///
     /// [`EncodingError`]: a member of `Proof` is missing, repeated, unknown or of the wrong
     /// type, or bytes follow the map. The system checks the members of `inputs`.
-    pub fn decode(bytes: &[u8]) -> Result<Self, EncodingError> {
-        let item = cbor::decode(bytes)?;
+    pub fn decode(proof: &ProofContent) -> Result<Self, EncodingError> {
+        let item = cbor::decode(proof.as_bytes())?;
         let entries = item.as_map().ok_or(EncodingError::NotMap)?;
         let (mut inputs, mut zk_proof) = (None, None);
         for (key, value) in entries {
             match key.as_text() {
-                Some("inputs") => inputs = Some(read_text_map(value, Member::Inputs)?),
+                Some("inputs") => {
+                    inputs = Some(read_text_map(value, Member::Inputs, InputName::new)?);
+                }
                 Some("zk_proof") => {
                     let bytes = value
                         .as_bytes()
                         .ok_or(EncodingError::WrongType(Member::ZkProof))?;
-                    zk_proof = Some(bytes.to_vec());
+                    zk_proof = Some(ZkProof(bytes.to_vec()));
                 }
                 _ => return Err(EncodingError::UnknownMember),
             }
@@ -232,7 +305,8 @@ impl ProofEnvelope {
 
 /// The `vp_token` of the answered queries, as JSON Response Modes carry it (Section 6.1): each
 /// presentation is the base64url, without padding, of its CBOR encoding.
-pub fn vp_token_json(answers: &[(String, Vec<ZkpPresentation>)]) -> serde_json::Value {
+#[must_use]
+pub fn vp_token_json(answers: &[(QueryId, Vec<ZkpPresentation>)]) -> serde_json::Value {
     let map = answers
         .iter()
         .map(|(query_id, presentations)| {
@@ -240,7 +314,7 @@ pub fn vp_token_json(answers: &[(String, Vec<ZkpPresentation>)]) -> serde_json::
                 .iter()
                 .map(|p| serde_json::Value::String(base64url::encode(&p.encode()).into()))
                 .collect();
-            (query_id.clone(), serde_json::Value::Array(list))
+            (query_id.as_str().to_owned(), serde_json::Value::Array(list))
         })
         .collect();
     serde_json::Value::Object(map)
@@ -248,7 +322,8 @@ pub fn vp_token_json(answers: &[(String, Vec<ZkpPresentation>)]) -> serde_json::
 
 /// The `vp_token` as `direct_post.cwt` carries it (Section 6.1): each presentation is the map
 /// itself.
-pub fn vp_token_cbor(answers: &[(String, Vec<ZkpPresentation>)]) -> Value {
+#[must_use]
+pub fn vp_token_cbor(answers: &[(QueryId, Vec<ZkpPresentation>)]) -> Value {
     Value::Map(
         answers
             .iter()
@@ -257,7 +332,7 @@ pub fn vp_token_cbor(answers: &[(String, Vec<ZkpPresentation>)]) -> Value {
                     .iter()
                     .map(ZkpPresentation::to_value)
                     .collect();
-                (Value::text(query_id), Value::Array(list))
+                (Value::text(query_id.as_str()), Value::Array(list))
             })
             .collect(),
     )
