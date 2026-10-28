@@ -20,11 +20,11 @@
 // std's HashMap and HashSet are safe outside matcher.wasm, and UniFFI's records
 // expose std's HashMap to Kotlin and Swift.
 #![allow(clippy::disallowed_types)]
-// Nothing panics outside the tests. scripts/check_panic_sites.py finds the
-// panics these lints cannot see.
+// Nothing panics outside the tests. scripts/check_panic_sites.py refuses an
+// allow of these lints there and finds the panics they cannot see.
 #![cfg_attr(
     not(test),
-    forbid(
+    deny(
         clippy::panic,
         clippy::unwrap_used,
         clippy::expect_used,
