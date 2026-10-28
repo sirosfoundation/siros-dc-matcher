@@ -8,15 +8,20 @@ use serde_json::json;
 use siros_codec::cbor::{self, Value as Cbor};
 use siros_codec::date::DateTime;
 use siros_credential::Format;
+use siros_presentation::testing::host::holding_absent;
 use siros_presentation::testing::verifier::NOW;
 use siros_presentation::testing::wallet::{card_wording, mdoc, sd_jwt, Held, Wallet, MDL, MDL_NS};
 use siros_registration::{
-    write, CredentialFault, Diagnostics, IndexFault, OutOfBounds, RasterIcon, RegisteredType,
-    Registration, RegistrationError, RegistrationInput, TileFault, TypeName, Within,
+    write, CredentialFault, Diagnostics, FactsFault, IndexFault, Member, OutOfBounds, RasterIcon,
+    RegisteredType, Registration, RegistrationError, RegistrationInput, SectionKind, TableFault,
+    TileFault, TypeName, Unlisted, Within,
 };
+use siros_transaction_data::Configuration;
 
 const PID: &str = "https://credentials.example/pid";
 const LOYALTY: &str = "https://shop.example/loyalty";
+/// A transaction data type the configuration defines for the PIDs.
+const POINTS: &str = "urn:example:loyalty-points:1";
 
 /// A PNG of 64 by 64 pixels, as far as its header reads.
 fn icon() -> RasterIcon {
@@ -28,10 +33,11 @@ fn icon() -> RasterIcon {
 }
 
 /// The registration of a wallet of three types: two PIDs and a loyalty card, SD-JWT VCs, which
-/// the index lists first, and an mDL.
+/// the index lists first, and an mDL. The configuration defines a transaction data type for the
+/// PIDs: the definitions table holds its definition.
 fn registration() -> Vec<u8> {
     let name = [("given_name", json!("Erika"))];
-    let wallet = Wallet::new(vec![
+    let mut wallet = Wallet::new(vec![
         Held::new(1, "dc+sd-jwt", sd_jwt(PID, &name)),
         Held::new(2, "dc+sd-jwt", sd_jwt(LOYALTY, &name)),
         Held::new(
@@ -41,6 +47,10 @@ fn registration() -> Vec<u8> {
         ),
         Held::new(4, "dc+sd-jwt", sd_jwt(PID, &name)),
     ]);
+    let points = json!([{"type": POINTS, "vct_values": [PID], "definition": {"claims": [
+        {"path": ["points"], "display": [{"locale": "en", "name": "Points"}]}]}}]);
+    wallet.configuration = Configuration::parse(&points.to_string()).unwrap();
+    wallet.metadata = holding_absent(&[PID, LOYALTY]);
     write(&RegistrationInput {
         credentials: &wallet.credentials,
         records: wallet.records(),
@@ -148,12 +158,26 @@ impl Layout {
     }
 
     /// The layout with `change` added to word `word` (0 to 4) of the index entry at `entry`.
-    fn shifted(mut self, entry: usize, word: usize, change: i64) -> Self {
-        let at = 20 * entry + 4 * word;
-        let value = i64::from(number(&self.0[1], at)) + change;
-        self.0[1][at..at + 4].copy_from_slice(&(value as u32).to_le_bytes());
+    fn shifted(self, entry: usize, word: usize, change: i64) -> Self {
+        self.shifted_word(1, 5 * entry + word, change)
+    }
+
+    /// The layout with `change` added to the word at `word` of the section at `section` (0
+    /// to 5).
+    fn shifted_word(mut self, section: usize, word: usize, change: i64) -> Self {
+        let at = 4 * word;
+        let value = i64::from(number(&self.0[section], at)) + change;
+        self.0[section][at..at + 4].copy_from_slice(&(value as u32).to_le_bytes());
         self
     }
+}
+
+/// Where `needle` first starts in `haystack`.
+fn find(haystack: &[u8], needle: &[u8]) -> usize {
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
+        .unwrap()
 }
 
 /// The refusal of `blob`: when it opens, of reading the credentials of `types`.
@@ -248,6 +272,70 @@ fn each_rule_refuses_with_its_cause() {
         matches!(fault, (1, IndexFault::Records(TileFault::Overlap { end, offset }))
             if end.value() == pid_records && offset.value() == pid_records - 1),
         "{fault:?}"
+    );
+
+    // The default icon, the icons table's one entry, starts a byte after the table ends.
+    let layout = Layout::of(&honest)
+        .shifted_word(5, 1, 1)
+        .shifted_word(5, 2, -1);
+    let error = refusal(&layout.blob(), &[]);
+    assert!(
+        matches!(error, RegistrationError::Table(SectionKind::Icons,
+            TableFault::Entry(at, TileFault::Gap { end, offset }))
+            if at.value() == 0 && end.value() == 12 && offset.value() == 13),
+        "{error:?}"
+    );
+
+    // The definitions table counts 2^28 entries.
+    let mut layout = Layout::of(&honest);
+    let definitions = layout.0[4].len() as u64;
+    layout.0[4][..4].copy_from_slice(&(1u32 << 28).to_le_bytes());
+    let error = refusal(&layout.blob(), &[]);
+    assert!(
+        matches!(error, RegistrationError::Table(SectionKind::Definitions,
+            TableFault::Past(OutOfBounds { within: Within::Section(SectionKind::Definitions),
+                offset, length, limit }))
+            if offset.value() == 4 && length.value() == 1 << 31 && limit.value() == definitions),
+        "{error:?}"
+    );
+
+    // The facts name the wallet's icon 1 of the one-entry icons table.
+    let mut layout = Layout::of(&honest);
+    let at = find(&layout.0[0], b"\x6cdefault_icon\x00") + 13;
+    layout.0[0][at] = 0x01;
+    let error = refusal(&layout.blob(), &[]);
+    assert!(
+        matches!(
+            error,
+            RegistrationError::Facts(FactsFault::DefaultIcon(Unlisted {
+                index: 1,
+                entries: 1
+            }))
+        ),
+        "{error:?}"
+    );
+
+    // PID's first record names definition 1 of the one-entry definitions table.
+    let mut layout = Layout::of(&honest);
+    let served = [&[0x78, POINTS.len() as u8][..], POINTS.as_bytes(), &[0x00]].concat();
+    let at = find(&layout.0[3], &served) + served.len() - 1;
+    layout.0[3][at] = 0x01;
+    let error = refusal(&layout.blob(), std::slice::from_ref(&pid));
+    assert!(
+        matches!(
+            error,
+            RegistrationError::Credential {
+                fault: CredentialFault::Unlisted(
+                    Member::ServedTypes,
+                    Unlisted {
+                        index: 1,
+                        entries: 1
+                    }
+                ),
+                ..
+            }
+        ),
+        "{error:?}"
     );
 
     // The PID's record with its member `position` renamed.

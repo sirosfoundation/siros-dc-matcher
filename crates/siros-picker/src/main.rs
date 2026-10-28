@@ -102,8 +102,9 @@ struct Input<'a> {
 /// One matcher invocation, from the host's inputs to emitted entry sets: the request, and of
 /// the registration `registration` reads, the parts the request needs.
 ///
-/// A registration whose header, directory or facts do not read gives nothing: the debug flag is
-/// one of the facts, and the wallet registers the projection together with this binary.
+/// A registration whose header, directory, index, names, tables or facts do not read gives
+/// nothing: the debug flag is one of the facts, and the wallet registers the projection together
+/// with this binary.
 fn run(input: &Input<'_>, registration: impl Read + Seek, sets: &mut impl SetSink) {
     let Ok(mut registration) = Registration::open(registration) else {
         return;

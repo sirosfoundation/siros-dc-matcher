@@ -82,43 +82,42 @@ impl Icon {
         &self.0
     }
 
-    /// The icon of `bytes`, which a raster icon or an [`IconRef`]'s span gives: at least one.
+    /// The icon of `bytes`, which a raster icon or an entry of the icons table gives: at least
+    /// one.
     pub(crate) fn of_held(bytes: Vec<u8>) -> Self {
         Self(bytes)
     }
 }
 
-/// Where an icon lies in the registration's icons section: at least one byte.
+/// An icon of the registration: an entry of the table of its icons section, which holds a byte
+/// at least.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct IconRef(Span<IconsPart>);
 
 impl IconRef {
-    /// The icon of `span`.
-    ///
-    /// # Errors
-    ///
-    /// [`IconEmpty`] for a span of no byte.
-    pub(crate) fn of(span: Span<IconsPart>) -> Result<Self, IconEmpty> {
-        if span.length() == 0 {
-            return Err(IconEmpty);
-        }
-        Ok(Self(span))
+    /// The icon `entry` locates.
+    pub(crate) fn of(entry: Span<IconsPart>) -> Self {
+        Self(entry)
     }
 
+    /// Where the icon lies in its section.
     pub(crate) fn span(self) -> Span<IconsPart> {
         self.0
     }
 }
 
-/// Where a projected definition lies in the registration's definitions section.
+/// A projected definition of the registration: an entry of the table of its definitions
+/// section.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DefinitionRef(Span<DefinitionsPart>);
 
 impl DefinitionRef {
-    pub(crate) fn of(span: Span<DefinitionsPart>) -> Self {
-        Self(span)
+    /// The definition `entry` locates.
+    pub(crate) fn of(entry: Span<DefinitionsPart>) -> Self {
+        Self(entry)
     }
 
+    /// Where the definition lies in its section.
     pub(crate) fn span(self) -> Span<DefinitionsPart> {
         self.0
     }

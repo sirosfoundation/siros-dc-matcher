@@ -11,7 +11,7 @@ use siros_display::{LocaleError, TextError};
 use siros_transaction_data::{EmptyTypeId, ProjectionError, TypeRepeated};
 use siros_trust::KeyIdentifierError;
 
-use crate::ids::{CredentialIndex, KeyIndex, RecordIndex};
+use crate::ids::{CredentialIndex, KeyIndex, RecordIndex, TableIndex};
 use crate::layout::SectionKind;
 use crate::registration::{DefinitionRef, RegisteredType};
 
@@ -28,8 +28,8 @@ pub enum Member {
     Systems,
     /// `verifier_id`: the form of the nym_auth `verifier_id` the wallet's trust framework fixes.
     VerifierId,
-    /// `default_icon`: the span of the wallet's icon, which a picker entry without a credential
-    /// shows.
+    /// `default_icon`: the number of the wallet's icon in the icons table, which a picker entry
+    /// without a credential shows.
     DefaultIcon,
     /// A record's `position`: the credential's position in the wallet's order.
     Position,
@@ -45,7 +45,7 @@ pub enum Member {
     Title,
     /// A card's `issuer`.
     Issuer,
-    /// A card's `icon`: the span of its icon.
+    /// A card's `icon`: the number of its icon in the icons table.
     Icon,
     /// A record's `labels`.
     Labels,
@@ -120,6 +120,45 @@ impl OutOfBounds {
     }
 }
 
+/// A number that names no entry of its table: a table of `entries` entries numbers them from 0.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("registration_unlisted")]
+pub struct Unlisted {
+    /// The number.
+    pub index: u64,
+    /// The entries of the table.
+    pub entries: u32,
+}
+
+impl Unlisted {
+    /// A stable identifier.
+    #[must_use]
+    pub fn code(self) -> &'static str {
+        "registration_unlisted"
+    }
+}
+
+/// Why the table of the icons or of the definitions section is refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
+pub enum TableFault {
+    /// The count of entries, or the entries it counts, end past the section.
+    Past(#[source] OutOfBounds),
+    /// The entry at this position is no tile of the section after the table.
+    Entry(TableIndex, #[source] TileFault),
+}
+
+impl TableFault {
+    /// A stable identifier.
+    #[must_use]
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Past(_) => "registration_out_of_bounds",
+            Self::Entry(_, fault) => fault.code(),
+        }
+    }
+}
+
 /// Why a directory is no directory of [`crate::Version::CURRENT`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("registration_directory")]
@@ -165,10 +204,8 @@ pub enum FactsFault {
     System(String),
     /// `verifier_id` names this form, which the picker does not know.
     VerifierIdForm(String),
-    /// `default_icon` ends past the icons section.
-    DefaultIcon(#[source] OutOfBounds),
-    /// `default_icon` spans no byte.
-    DefaultIconEmpty,
+    /// `default_icon` names no entry of the icons table.
+    DefaultIcon(#[source] Unlisted),
 }
 
 /// Why a span is no tile of its section: the tiles start where the ones before them end, from
@@ -240,10 +277,8 @@ pub enum CredentialFault {
     TypeId(EmptyTypeId),
     /// A served type is named twice.
     TypeRepeated(#[source] TypeRepeated),
-    /// A span of this member ends past its section.
-    Span(Member, #[source] OutOfBounds),
-    /// The card's icon spans no byte.
-    IconEmpty,
+    /// This member names no entry of its table.
+    Unlisted(Member, #[source] Unlisted),
     /// A served type's reason is none a registration records.
     UnservedUnknown(String),
 }
@@ -280,6 +315,8 @@ pub enum RegistrationError {
     IndexLength(ByteCount),
     /// The index entry at this position breaks a rule.
     Index(KeyIndex, #[source] IndexFault),
+    /// The table of this section breaks a rule.
+    Table(SectionKind, #[source] TableFault),
     /// The tiles of this section end at `end`, before the section's end: the bytes after
     /// belong to no tile.
     Uncovered {
@@ -313,7 +350,7 @@ pub enum RegistrationError {
     /// The credential at this position has the `credentialId` or the batch of a credential read
     /// with it.
     EntryRepeated(CredentialIndex),
-    /// The definition of this span breaks a rule.
+    /// The definition of this entry of the definitions table breaks a rule.
     Definition(DefinitionRef, #[source] DefinitionFault),
     /// A part of this many bytes, more than the reader holds: an icon past `isize::MAX`, the
     /// most a buffer of the platform holds, the facts or the records of a type past
@@ -335,6 +372,7 @@ impl RegistrationError {
             Self::Facts(fault) => fault.code(),
             Self::IndexLength(_) => "registration_index_length",
             Self::Index(_, fault) => fault.code(),
+            Self::Table(_, fault) => fault.code(),
             Self::Uncovered { .. } => "registration_uncovered",
             Self::Records(_, error) => error.code(),
             Self::RecordOrder { .. } => "registration_record_order",
@@ -359,8 +397,7 @@ impl FactsFault {
             Self::Language(error) => error.code(),
             Self::System(_) => "registration_system_unknown",
             Self::VerifierIdForm(_) => "registration_verifier_id_form_unknown",
-            Self::DefaultIcon(_) => "registration_out_of_bounds",
-            Self::DefaultIconEmpty => "registration_icon_empty",
+            Self::DefaultIcon(error) => error.code(),
         }
     }
 }
@@ -407,8 +444,7 @@ impl CredentialFault {
             Self::StoreType(_) => "registration_store_type_unknown",
             Self::TypeId(_) => "registration_type_empty",
             Self::TypeRepeated(error) => error.code(),
-            Self::Span(..) => "registration_out_of_bounds",
-            Self::IconEmpty => "registration_icon_empty",
+            Self::Unlisted(_, error) => error.code(),
         }
     }
 }

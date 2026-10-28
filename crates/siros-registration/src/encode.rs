@@ -12,8 +12,8 @@ use crate::layout::{format_code, SectionKind, MAGIC, SECTIONS_START};
 use crate::registration::{
     Diagnostics, Facts, Icon, Projection, RegisteredCredential, RegisteredType, Version,
 };
+use crate::wire::verifier_id_form_name;
 use crate::wire::write::{self as wire, map};
-use crate::wire::{verifier_id_form_name, WireSpan};
 use crate::write::WriteError;
 
 /// The bytes of `projection`: the header of [`Version::CURRENT`], the directory, and the
@@ -45,8 +45,8 @@ pub fn encode(projection: &Projection) -> Result<Vec<u8>, WriteError> {
         index.entries,
         index.names,
         index.records,
-        definitions.bytes,
-        icons.bytes,
+        definitions.section(SectionKind::Definitions)?,
+        icons.section(SectionKind::Icons)?,
     ])
 }
 
@@ -64,26 +64,48 @@ struct Index {
     records: Vec<u8>,
 }
 
-/// The bytes of a section that holds each distinct part once, in the order of first use, and
-/// where each part lies.
+/// The parts of a table section, each distinct part once in the order of first use, and the
+/// number of each.
 #[derive(Default)]
 struct Pool {
-    bytes: Vec<u8>,
-    placed: FxHashMap<Vec<u8>, WireSpan>,
+    parts: Vec<Vec<u8>>,
+    numbers: FxHashMap<Vec<u8>, usize>,
 }
 
 impl Pool {
-    /// The span of `part`, added at the end when the section lacks it.
-    fn place(&mut self, part: &[u8]) -> WireSpan {
-        let bytes = &mut self.bytes;
-        *self.placed.entry(part.to_vec()).or_insert_with(|| {
-            let span = WireSpan {
-                offset: bytes.len() as u64,
-                length: part.len() as u64,
-            };
-            bytes.extend_from_slice(part);
-            span
+    /// The number of `part`, added last when the pool lacks it.
+    fn place(&mut self, part: &[u8]) -> usize {
+        let parts = &mut self.parts;
+        *self.numbers.entry(part.to_vec()).or_insert_with(|| {
+            let number = parts.len();
+            parts.push(part.to_vec());
+            number
         })
+    }
+
+    /// The section of `kind`: the count of the parts, the offset and the length of each, then
+    /// the parts, each where the one before it ends.
+    ///
+    /// # Errors
+    ///
+    /// [`WriteError::TooLarge`] of `kind` for a number past a u32.
+    fn section(self, kind: SectionKind) -> Result<Vec<u8>, WriteError> {
+        let count = self.parts.len();
+        let table = count
+            .checked_mul(8)
+            .and_then(|entries| entries.checked_add(4))
+            .ok_or(WriteError::TooLarge(kind))?;
+        let mut section = word(count, kind)?.to_le_bytes().to_vec();
+        let mut end = table;
+        for part in &self.parts {
+            section.extend(word(end, kind)?.to_le_bytes());
+            section.extend(word(part.len(), kind)?.to_le_bytes());
+            end = end
+                .checked_add(part.len())
+                .ok_or(WriteError::TooLarge(kind))?;
+        }
+        section.extend(self.parts.concat());
+        Ok(section)
     }
 }
 
@@ -195,7 +217,7 @@ fn facts(facts: &Facts<Icon>, icons: &mut Pool) -> Cbor {
         ),
         (
             Member::DefaultIcon,
-            wire::span(icons.place(facts.default_icon.as_bytes())),
+            wire::number(icons.place(facts.default_icon.as_bytes())),
         ),
     ])
 }
@@ -220,7 +242,10 @@ fn record(
             map([
                 (Member::Title, Cbor::text(card.title.as_str())),
                 (Member::Issuer, Cbor::text(card.issuer.as_str())),
-                (Member::Icon, wire::span(icons.place(card.icon.as_bytes()))),
+                (
+                    Member::Icon,
+                    wire::number(icons.place(card.icon.as_bytes())),
+                ),
             ]),
         ),
         (
@@ -285,7 +310,7 @@ fn transactions(served: &ServedTypes<Projected>, definitions: &mut Pool) -> Cbor
         .iter()
         .map(|(type_id, served)| {
             let served = match served {
-                Ok(definition) => wire::span(definitions.place(definition.to_json().as_bytes())),
+                Ok(definition) => wire::number(definitions.place(definition.to_json().as_bytes())),
                 Err(unserved) => wire::unserved(*unserved),
             };
             Cbor::Array(vec![Cbor::text(type_id.as_str()), served])

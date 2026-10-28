@@ -5,8 +5,8 @@ The registration is the blob the wallet registers with Credential Manager beside
 it through `std::io::Read + Seek`. The picker reads the parts a request needs through
 `android_credman::CredentialReader`, each at its offset with `ReadCredentialsBuffer`:
 
-1. the header, the directory, the index, the types' names and the facts, when it opens the
-   registration;
+1. the header, the directory, the index, the types' names, the tables of the definitions and
+   the icons, and the facts, when it opens the registration;
 2. the records of the credential types the request's queries ask for;
 3. the definitions the request's transaction data entries name for those credentials;
 4. the icons of the entries it emits.
@@ -33,8 +33,8 @@ else.
 | 2 | Index | One entry of 20 bytes per credential type |
 | 3 | Names | The types' names, UTF-8 |
 | 4 | Records | The credential records, those of a type together as one CBOR sequence (RFC 8742) |
-| 5 | Definitions | The projected transaction data definitions, each a JSON text |
-| 6 | Icons | The icons' bytes |
+| 5 | Definitions | A table, then the projected transaction data definitions, each a JSON text |
+| 6 | Icons | A table, then the icons' bytes |
 
 The directory lists the six kinds in this order. The first section starts at 84, each next one
 where the one before it ends, and the last one ends at the end of the blob. A later version
@@ -59,12 +59,23 @@ holds a byte at least, and the last ends at the section's end. The reader reads 
 the names whole when it opens the registration and checks these rules there. It then finds a
 type by binary search in memory.
 
-### Spans
+### Tables
 
-A record names its icon and its definitions by span: the CBOR array `[offset, length]`, offset
-from the start of the icons or the definitions section. A span ends within its section, and an
-icon's span holds at least one byte. Records name a definition or an icon they share by one
-span: each distinct definition and icon is stored once.
+The definitions and the icons sections each start with a table: the count of its entries, then
+the offset and the length of each entry, eight bytes per entry.
+
+| Bytes | Field |
+|---|---|
+| 0–3 | The count of entries, `n` |
+| 4 + 8k – 7 + 8k | The offset of entry `k`, from the section's start |
+| 8 + 8k – 11 + 8k | The length of entry `k`: at least one byte |
+
+The entries tile the section after the table, in the table's order: the first starts at
+`4 + 8n`, each next one where the one before it ends, each holds a byte at least, and the last
+ends at the section's end. The facts and the records name an icon or a definition by its
+number `k` in the table: a whole entry. Each distinct definition and icon is stored once, and
+the records that share one name it by one number. The reader reads both tables when it opens
+the registration and checks these rules there.
 
 ### Facts
 
@@ -75,7 +86,7 @@ span: each distinct definition and icon is stored once.
 | `diagnostics` | Whether the picker shows an entry that names why a request has no offer |
 | `systems` | The ids of the nym_auth systems the wallet proves, in its order of preference |
 | `verifier_id` | The form of the nym_auth `verifier_id`: `x509_san_dns` or `semantic` |
-| `default_icon` | The span of the wallet's icon, which an entry without an icon of its own shows |
+| `default_icon` | The number of the wallet's icon, which an entry without an icon of its own shows |
 
 ### Records
 
@@ -88,11 +99,11 @@ gives the type and its format.
 | `entry` | `[credentialId, batchId, instanceId]`: each `credentialId` and each batch once |
 | `key` | Whether the wallet holds the key the credential is bound to |
 | `claims` | The claim tree (`siros_credential::ClaimTree::to_cbor`) |
-| `card` | `{title, issuer, icon}`: the title and issuer line in the wallet's language, and the icon's span |
+| `card` | `{title, issuer, icon}`: the title and issuer line in the wallet's language, and the icon's number |
 | `labels` | `{types, configuration}`: claim descriptions, each `[path]` or `[path, label]` |
 | `background` | Whether the wallet presents the credential without its UI (A9) |
 | `trust` | `{aki, admitting}`: the issuer facts at registration (TR5) |
-| `transactions` | `{served, otherwise}`: each transaction data type with the span of its definition or the reason none serves it, and the reason for every other type |
+| `transactions` | `{served, otherwise}`: each transaction data type with the number of its definition or the reason none serves it, and the reason for every other type |
 
 A definition is the JSON text of `siros_transaction_data::Projected`, in the facts' language.
 
@@ -103,14 +114,15 @@ The reader refuses, with a `RegistrationError` that names the part and the cause
 - a blob that does not start with the magic number;
 - every version but 1;
 - a header, directory or section that ends past the blob, a directory that breaks its order or
-  leaves bytes after the last section, a span that ends past its section, and a read that ends
-  past the blob;
+  leaves bytes after the last section, and a read that ends past the blob;
 - an index whose length is no multiple of 20, an unknown format code, a name of no UTF-8, an
   entry whose type does not sort after the type of the entry before it, and names or records
   that do not tile their section: a span that starts after or before the end of the span before
   it, holds no byte, or ends past its section, and spans that end before the section's end;
+- a table whose count or entries end past its section, and entries that do not tile the
+  section after the table, by the rules of the index's names and records;
 - facts or a record that do not parse: no CBOR map, an absent or unknown member, a value of
-  the wrong type;
+  the wrong type, a number that names no entry of its table;
 - records of a type out of the wallet's order, and two records read with one position,
   `credentialId` or batch;
 - a definition of no UTF-8, no projection, or another language than the facts';
@@ -135,14 +147,14 @@ definition takes the place of its first use, the facts' icon first.
 
 ## Prior art
 
-The layout is a header and directory container with a sorted fixed-width index and
-length-delimited records.
+The layout is a header and directory container with a sorted fixed-width index,
+length-delimited records, and tables of the definitions and the icons.
 
 - **SQLite** puts a magic string and its version numbers at offset 0 of a fixed header, and
   refuses a file whose read version is above the one it knows. The registration does the same
   with an exact version. For files from untrusted sources SQLite turns on checks of each page's
   cell offsets as it reads the page (`PRAGMA cell_size_check`); here every offset becomes a span
-  only through the check against its part.
+  only through the check against its section, and the spans of a section tile it.
 - **SSTable** (LevelDB) reads a table's index block whole when it opens the table, and finds a
   key by binary search over it in memory; the block's entries hold the handles of the data
   blocks. The registration's index is that block, with fixed-width entries and the handles of the
@@ -151,14 +163,17 @@ length-delimited records.
   registration, that the entries sort strictly and that the handles tile their sections.
 - **zip** keeps a central directory of offsets beside the local headers. Readers that trust
   different copies read different files, and overlapping entries make zip bombs. The
-  registration states each fact once, and its sections tile the blob.
+  registration's sections tile the blob, and the spans of the index and of each table tile
+  their section: the reader checks that each byte belongs to one part.
 - **FlatBuffers and Cap'n Proto** address data by offsets inside one buffer. Their verifiers
   check every offset against the buffer, and cap nesting and traversal against amplification.
-  Here the items of a CBOR part take at most `cbor::HEAP_PER_BYTE` bytes per byte of it, and
-  CBOR nesting stops at the codec's depth.
+  Here the items of a CBOR part take at most `cbor::HEAP_PER_BYTE` bytes per byte of it, the
+  values of a definition at most `json::HEAP_PER_BYTE`, and nesting stops at each reader's
+  depth.
 - **CBOR sequences** (RFC 8742) frame only their items: a sequence cut between two items reads
-  as a whole one. The index gives each sequence its exact length, and the reader decodes it to
-  the last byte.
+  as a whole one. The index gives each sequence its exact length, the reader decodes it to the
+  last byte, and the tiling refuses a sequence cut short: the bytes it leaves belong to no
+  span.
 - A **hash index** (FxHash buckets, a constant database) needs a hash function every writer and
   reader compute alike. FxHash gives one result on 32-bit `wasm32` and another on a 64-bit
   wallet, so the index is sorted.

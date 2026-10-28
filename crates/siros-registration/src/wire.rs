@@ -1,6 +1,6 @@
-//! The CBOR form of a registration's facts and records: maps with text keys, and the spans,
-//! claims path pointers, entry references, trust store authorities and served-type reasons they
-//! carry.
+//! The CBOR form of a registration's facts and records: maps with text keys, and the numbers of
+//! table entries, claims path pointers, entry references, trust store authorities and
+//! served-type reasons they carry.
 
 #[cfg(feature = "wallet")]
 use siros_codec::cbor::Value as Cbor;
@@ -128,24 +128,6 @@ pub(crate) fn boolean(item: &Item<'_>) -> Option<bool> {
     }
 }
 
-/// A span as a record writes it, `[offset, length]`: bytes of a section, from its start.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct WireSpan {
-    pub(crate) offset: u64,
-    pub(crate) length: u64,
-}
-
-/// The span `[offset, length]`.
-pub(crate) fn span(item: &Item<'_>) -> Option<WireSpan> {
-    match item.as_array()? {
-        [offset, length] => Some(WireSpan {
-            offset: unsigned(offset)?,
-            length: unsigned(length)?,
-        }),
-        _ => None,
-    }
-}
-
 /// The entry `[credentialId, batchId, instanceId]`.
 pub(crate) fn entry(item: &Item<'_>) -> Option<EntryRef> {
     match item.as_array()? {
@@ -261,12 +243,10 @@ pub(crate) mod write {
         )
     }
 
-    /// `[offset, length]`.
-    pub(crate) fn span(span: WireSpan) -> Cbor {
-        Cbor::Array(vec![
-            Cbor::Unsigned(span.offset),
-            Cbor::Unsigned(span.length),
-        ])
+    /// The number of an entry of a table.
+    pub(crate) fn number(number: usize) -> Cbor {
+        // A usize is at most 64 bits on every target Rust supports.
+        Cbor::Unsigned(number as u64)
     }
 
     /// `[credentialId, batchId, instanceId]`.

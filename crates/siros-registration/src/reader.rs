@@ -1,5 +1,6 @@
-//! The reader of a registration: the header, the directory, the index, the names and the facts
-//! when it opens, then each part a caller asks for, read through `Read + Seek` when asked.
+//! The reader of a registration: the header, the directory, the index, the names, the tables
+//! of the definitions and the icons, and the facts when it opens, then each part a caller asks
+//! for, read through `Read + Seek` when asked.
 
 use std::io::{Read, Seek, SeekFrom};
 
@@ -19,16 +20,18 @@ use crate::record::{self, Positioned};
 use crate::registration::{
     DefinitionRef, Facts, Icon, IconRef, Projection, RegisteredCredential, RegisteredType, Version,
 };
+use crate::table::{CountWords, Table, TableEntryWords, Tables};
 
 /// A registration the wallet wrote, open for reading. Opening reads its header, its directory,
-/// its index, its names and its facts; each other part is read when a caller asks for it, and a
-/// definition or an icon once.
+/// its index, its names, the tables of its definitions and its icons, and its facts; each other
+/// part is read when a caller asks for it, and a definition or an icon once.
 #[derive(Debug)]
 pub struct Registration<R> {
     blob: Blob<R>,
     version: Version,
     directory: Directory,
     index: Index,
+    tables: Tables,
     facts: Facts,
     definitions: Vec<Cached<DefinitionRef, Projected>>,
     icons: Vec<Cached<IconRef, Icon>>,
@@ -50,8 +53,8 @@ struct Blob<R> {
 
 impl<R: Read + Seek> Registration<R> {
     /// The registration of `source`: [`Version::CURRENT`] of the layout of
-    /// `docs/registration.md`. Reads the header, the directory, the index, the names and the
-    /// facts.
+    /// `docs/registration.md`. Reads the header, the directory, the index, the names, the
+    /// tables of the definitions and the icons, and the facts.
     ///
     /// # Errors
     ///
@@ -71,16 +74,21 @@ impl<R: Read + Seek> Registration<R> {
             DirectoryRefusal::OutOfBlob(error) => RegistrationError::OutOfBlob(error),
         })?;
         let index = blob.index(&directory)?;
+        let tables = Tables {
+            definitions: blob.table(&directory.definitions)?,
+            icons: blob.table(&directory.icons)?,
+        };
         let bytes =
             blob.read_at_most(&directory.facts, directory.facts.whole(), cbor::MAX_INPUT)?;
         let item = cbor::decode(&bytes)
             .map_err(|error| RegistrationError::Facts(FactsFault::Cbor(error)))?;
-        let facts = record::facts(&item, &directory.icons).map_err(RegistrationError::Facts)?;
+        let facts = record::facts(&item, &tables.icons).map_err(RegistrationError::Facts)?;
         Ok(Self {
             blob,
             version,
             directory,
             index,
+            tables,
             facts,
             definitions: Vec::new(),
             icons: Vec::new(),
@@ -114,19 +122,20 @@ impl<R: Read + Seek> Registration<R> {
                 continue;
             }
             if let Some(records) = self.index.find(key) {
-                runs.push(records_of(&mut self.blob, &self.directory, key, records)?);
+                runs.push(self.records_of(key, records)?);
             }
         }
         in_wallet_order(runs)
     }
 
-    /// The definition `at` spans, projected to the wallet's language. `at` is a span a credential
-    /// of this registration gave.
+    /// The definition `at` names, projected to the wallet's language: an entry of the
+    /// definitions table, which a credential of this registration gave.
     ///
     /// # Errors
     ///
-    /// [`RegistrationError::Definition`]: no UTF-8, no projection, or another language; or a
-    /// span past the blob.
+    /// [`RegistrationError::Definition`]: no UTF-8, no projection, or another language;
+    /// [`RegistrationError::TooLong`]: a definition longer than the JSON reader reads; or an
+    /// entry past the blob.
     pub fn definition(&mut self, at: DefinitionRef) -> Result<Projected, RegistrationError> {
         if let Some(read) = self.definitions.iter().find(|read| read.at == at) {
             return Ok(read.part.clone());
@@ -148,11 +157,13 @@ impl<R: Read + Seek> Registration<R> {
         Ok(definition)
     }
 
-    /// The icon `at` spans. `at` is a span the facts or a credential of this registration gave.
+    /// The icon `at` names: an entry of the icons table, which the facts or a credential of this
+    /// registration gave.
     ///
     /// # Errors
     ///
-    /// [`RegistrationError`]: a span past the blob, or a source that fails.
+    /// [`RegistrationError`]: an entry past the blob, an icon longer than a buffer holds, or a
+    /// source that fails.
     pub fn icon(&mut self, at: IconRef) -> Result<Icon, RegistrationError> {
         if let Some(read) = self.icons.iter().find(|read| read.at == at) {
             return Ok(read.part.clone());
@@ -165,6 +176,15 @@ impl<R: Read + Seek> Registration<R> {
         Ok(icon)
     }
 
+    /// The credentials the records of `key` at `span` hold.
+    fn records_of(
+        &mut self,
+        key: &RegisteredType,
+        span: Span<RecordsPart>,
+    ) -> Result<Vec<Positioned>, RegistrationError> {
+        records_of(&mut self.blob, &self.directory, &self.tables, key, span)
+    }
+
     /// The whole registration: the records of every type of the index, in its order, and every
     /// definition and icon they name.
     ///
@@ -172,11 +192,17 @@ impl<R: Read + Seek> Registration<R> {
     ///
     /// [`RegistrationError`]: the first part that breaks a rule.
     pub fn projection(&mut self) -> Result<Projection, RegistrationError> {
-        let runs = self
-            .index
+        let Self {
+            blob,
+            directory,
+            index,
+            tables,
+            ..
+        } = self;
+        let runs = index
             .entries()
             .iter()
-            .map(|entry| records_of(&mut self.blob, &self.directory, &entry.key, entry.records))
+            .map(|entry| records_of(blob, directory, tables, &entry.key, entry.records))
             .collect::<Result<Vec<_>, _>>()?;
         let credentials = in_wallet_order(runs)?
             .into_iter()
@@ -192,10 +218,12 @@ impl<R: Read + Seek> Registration<R> {
 }
 
 /// The credentials the records of `key` at `span` in `blob` hold, in the sections of
-/// `directory`: a CBOR sequence of records, in the wallet's order.
+/// `directory`, their icons and definitions numbered in `tables`: a CBOR sequence of records,
+/// in the wallet's order.
 fn records_of<R: Read + Seek>(
     blob: &mut Blob<R>,
     directory: &Directory,
+    tables: &Tables,
     key: &RegisteredType,
     span: Span<RecordsPart>,
 ) -> Result<Vec<Positioned>, RegistrationError> {
@@ -205,7 +233,7 @@ fn records_of<R: Read + Seek>(
     let mut records: Vec<Positioned> = Vec::new();
     for (at, item) in items.iter().enumerate() {
         let record = RecordIndex::new(at);
-        let read = record::credential(item, key, directory).map_err(|fault| {
+        let read = record::credential(item, key, tables).map_err(|fault| {
             RegistrationError::Credential {
                 credential_type: key.clone(),
                 record,
@@ -249,6 +277,22 @@ impl<R: Read + Seek> Blob<R> {
         )?;
         let names = self.read(&directory.names, directory.names.whole())?;
         Index::parse(&words, &names, directory)
+    }
+
+    /// The table of the section `bounds` locates, read whole.
+    fn table<S: Part>(&mut self, bounds: &Bounds<S>) -> Result<Table<S>, RegistrationError> {
+        let [count]: CountWords = self.words(bounds.start_of(Table::count(bounds)?))?;
+        let count = u32::from_le_bytes(count);
+        let table = Table::words(count, bounds)?;
+        // The words take the table's bytes: a buffer holds them when it holds the table. A u32
+        // fits the usize of every target the crate builds for.
+        self.buffer(table.length()).map(drop)?;
+        let mut words = vec![TableEntryWords::default(); count as usize];
+        self.fill(
+            bounds.start_of(table),
+            words.as_flattened_mut().as_flattened_mut(),
+        )?;
+        Table::parse(&words, table, bounds)
     }
 
     /// The words of `W` at `at` from the blob's start.

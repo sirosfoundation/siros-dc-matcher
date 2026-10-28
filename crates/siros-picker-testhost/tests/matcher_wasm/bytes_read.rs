@@ -1,7 +1,7 @@
 //! The picker reads of the registration only what a request needs (`docs/registration.md`):
-//! the header, the directory, the index, the types' names and the facts; the records of the
-//! type the request asks for; the definitions the request's entry names for them; and the icons
-//! of the entries it emits. The count of bytes the host copies is the sum of those parts, which
+//! the header, the directory, the index, the types' names, the tables of the definitions and the
+//! icons, and the facts; the records of the type the request asks for; the definitions the
+//! request's entry names for them; and the icons of the entries it emits. The count of bytes the host copies is the sum of those parts, which
 //! the layout's lengths and the writer's projection give.
 
 use serde_json::{json, Value};
@@ -21,6 +21,12 @@ const HEADER_AND_DIRECTORY: usize = 84;
 
 /// An index entry.
 const INDEX_ENTRY: usize = 20;
+
+/// The count of a table's entries.
+const TABLE_COUNT: usize = 4;
+
+/// A table entry.
+const TABLE_ENTRY: usize = 8;
 
 /// A type the configuration defines for the PIDs, which a request for cards names nothing of.
 const POINTS: &str = "urn:example:loyalty-points:1";
@@ -124,6 +130,25 @@ fn the_picker_reads_what_the_request_needs() {
     .iter()
     .map(|credential_type| INDEX_ENTRY + credential_type.as_str().len())
     .sum();
+    // The tables number each distinct icon and definition once.
+    let icon_entries = distinct(
+        std::iter::once(projection.facts().default_icon()).chain(
+            projection
+                .credentials()
+                .iter()
+                .map(|credential| credential.card().icon()),
+        ),
+    )
+    .len();
+    let definition_entries = distinct(projection.credentials().iter().flat_map(|credential| {
+        credential
+            .transactions()
+            .types()
+            .iter()
+            .filter_map(|(_, served)| served.as_ref().ok().map(Projected::to_json))
+    }))
+    .len();
+    let tables = 2 * TABLE_COUNT + TABLE_ENTRY * (icon_entries + definition_entries);
     let cards: Vec<&RegisteredCredential<Projected, _>> = projection
         .credentials()
         .iter()
@@ -146,6 +171,7 @@ fn the_picker_reads_what_the_request_needs() {
     let expected = HEADER_AND_DIRECTORY
         + facts
         + index_and_names
+        + tables
         + records_of(&blob, CARD)
         + definitions
         + icons_emitted;

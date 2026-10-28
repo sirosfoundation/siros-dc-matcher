@@ -11,13 +11,13 @@
 //!
 //! The format is binary, laid out for reading at offsets (`docs/registration.md`): a header
 //! with a magic number and the version, a directory of sections, an index of the credential
-//! types sorted for binary search, the records of each type as one CBOR sequence, and the
-//! definitions and icons the records name by span. [`Registration`] reads it through
-//! `Read + Seek`: the header, the directory, the index, the names and the facts when it opens,
-//! then each part a request needs when asked. It refuses every version but
+//! types sorted for binary search, the records of each type as one CBOR sequence, and tables of
+//! the definitions and icons, which the records name by number. [`Registration`] reads it
+//! through `Read + Seek`: the header, the directory, the index, the names, the tables and the
+//! facts when it opens, then each part a request needs when asked. It refuses every version but
 //! [`Version::CURRENT`], every offset or length past its part, every member a record does not
-//! define, and an index whose types do not sort strictly or whose names and records do not tile
-//! their sections. The wallet registers the projection with the matcher it ships, so the two
+//! define, an index whose types do not sort strictly, and names, records, definitions or icons
+//! that do not tile their sections. The wallet registers the projection with the matcher it ships, so the two
 //! versions are one.
 //!
 //! Without the feature `wallet` the crate holds the reader the credential picker links. It builds
@@ -71,6 +71,7 @@ mod registration;
 #[cfg(all(test, feature = "wallet"))]
 mod round_trip;
 mod selection;
+mod table;
 mod wire;
 #[cfg(feature = "wallet")]
 mod write;
@@ -79,11 +80,11 @@ mod write;
 pub use encode::encode;
 pub use error::{
     ByteCount, CredentialFault, DefinitionFault, DirectoryFault, FactsFault, IndexFault, Member,
-    OutOfBounds, RegistrationError, TileFault, Within,
+    OutOfBounds, RegistrationError, TableFault, TileFault, Unlisted, Within,
 };
 #[cfg(feature = "wallet")]
 pub use icon::{Dimensions, IconFault, RasterIcon, MAX_ICON_PIXELS, MIN_ICON_PIXELS};
-pub use ids::{CredentialIndex, KeyIndex, RecordIndex};
+pub use ids::{CredentialIndex, KeyIndex, RecordIndex, TableIndex};
 pub use layout::SectionKind;
 pub use reader::Registration;
 pub use registration::{

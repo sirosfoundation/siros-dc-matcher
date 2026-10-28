@@ -161,6 +161,12 @@ impl<S> Span<S> {
     pub(crate) fn length(self) -> u32 {
         self.length
     }
+
+    /// Where the span ends, from the section's start.
+    pub(crate) fn end(self) -> u32 {
+        // The span ends within its section, whose length is a u32.
+        wide::sum(self.offset, self.length) as u32
+    }
 }
 
 /// Where the section `S` lies in the blob, checked against the blob's length.
@@ -324,8 +330,8 @@ impl Directory {
 }
 
 /// Spans that tile the section `S`, read in order: each starts where the one before it ends,
-/// the first at the section's start, each holds a byte at least, and the last ends at the
-/// section's end.
+/// the first at the section's start or after its table, each holds a byte at least, and the
+/// last ends at the section's end.
 #[derive(Debug)]
 pub(crate) struct Tiles<S> {
     limit: u32,
@@ -334,11 +340,20 @@ pub(crate) struct Tiles<S> {
 }
 
 impl<S: Part> Tiles<S> {
-    /// The tiles of the section `bounds` locates, none read yet.
+    /// The tiles of the section `bounds` locates, from its start, none read yet.
     pub(crate) fn of(bounds: &Bounds<S>) -> Self {
         Self {
             limit: bounds.length,
             end: 0,
+            part: PhantomData,
+        }
+    }
+
+    /// The tiles of the section `bounds` locates, after `table`, none read yet.
+    pub(crate) fn after(bounds: &Bounds<S>, table: Span<S>) -> Self {
+        Self {
+            limit: bounds.length,
+            end: table.end(),
             part: PhantomData,
         }
     }
@@ -456,15 +471,20 @@ pub(crate) fn format_of(code: u32) -> Option<Format> {
         .find(|format| format_code(*format) == code)
 }
 
-/// Arithmetic on u32 values widened to u64: no sum of two of them overflows a u64.
-mod wide {
+/// Arithmetic on u32 values widened to u64: no sum or product of two of them overflows a u64.
+pub(crate) mod wide {
     #![expect(
         clippy::arithmetic_side_effects,
-        reason = "two u32 values widened to u64 sum within u64::MAX"
+        reason = "two u32 values widened to u64 neither sum nor multiply past u64::MAX"
     )]
 
     /// `a + b`.
     pub(crate) fn sum(a: u32, b: u32) -> u64 {
         u64::from(a) + u64::from(b)
+    }
+
+    /// `a × b`.
+    pub(crate) fn product(a: u32, b: u32) -> u64 {
+        u64::from(a) * u64::from(b)
     }
 }

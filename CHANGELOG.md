@@ -131,12 +131,13 @@ binaryen version_116.
   first. Release and debug builds trap alike.
 - The matcher reads the registration through `android-credman`'s `CredentialReader`, at the offsets
   of the parts a request needs (`docs/registration.md`): the header, the directory, the index, the
-  types' names and the facts, then the records of the types the request's queries ask for, the
-  definitions its transaction data entries name, and the icons of the entries it emits. Each read
-  runs until complete; a short `ReadCredentialsBuffer` read used to leave the blob's tail zeroed. A
-  header, directory or facts that break a rule give no entry. A part the request reads after them
-  that breaks a rule gives no offer, and a registration with its diagnostics shown names the error's
-  code in one entry (`registration: <code>`).
+  types' names, the tables of the definitions and icons, and the facts, then the records of the
+  types the request's queries ask for, the definitions its transaction data entries name, and the
+  icons of the entries it emits. Each read runs until complete; a short `ReadCredentialsBuffer` read
+  used to leave the blob's tail zeroed. A header, directory, index, names, tables or facts that
+  break a rule give no entry. A part the request reads after them that breaks a rule gives no offer,
+  and a registration with its diagnostics shown names the error's code in one entry (`registration:
+  <code>`).
 - `siros-dc-matcher-core`'s unused `sink` module is removed.
 - Entry metadata is the standard object
   `{"display_skipped":bool,"host_level":n,"data":{…}}`. The matcher's own
@@ -688,31 +689,32 @@ binaryen version_116.
 - `siros-registration`, the registration the wallet writes for the picker (K1, TR5): a binary layout
   of version 1 for reads at offsets (`docs/registration.md`). A header with a magic number and the
   version, a directory of six sections, an index of the credential types sorted for binary search,
-  the records of each type as one CBOR sequence, and the definitions and icons the records name by
-  span, each stored once. Per credential a record holds the entry reference, holder-key presence,
-  the typed claim tree without nym_auth's undisclosable attributes, the card's title, issuer line
-  and icon, the claim labels in the wallet's language, whether the wallet presents it without its
-  UI, the TR5 facts, and for each transaction data type the projected definition that serves it or
-  why none does. The facts hold the time of registration, the language, the diagnostics flag, the
-  system ids the wallet proves, the form of the nym_auth `verifier_id` and the wallet's default
-  icon. `Registration<R: Read + Seek>` reads the header, the directory, the index, the names and the
-  facts when it opens, then `credentials` of the types asked, `definition` and `icon` by span, each
-  definition and icon once, and `projection` the whole. It refuses every version but
-  `Version::CURRENT` (1), every offset or length past its part, an index whose types do not sort
-  strictly or whose names and records do not tile their sections, the records of a type out of the
-  wallet's order, an icon longer than a buffer of the platform holds, facts or records of a type
-  longer than `cbor::MAX_INPUT`, a definition longer than `json::MAX_TEXT`, and every unexpected
-  member, with a `RegistrationError` that names the part and its cause. The reader and the writer
-  give an error for every input. The writer (feature `wallet`): `project` takes the parsed
-  credentials, the presentation records, the display cache and language, the held transaction
-  metadata and the configuration, the trust store, the systems, the `verifier_id` form, the
-  credentials presented without the wallet's UI, the card wording, the icons, the default icon and
-  the time, and gives the `Projection`, or `WriteError::TypeEmpty` for a credential of an empty
-  `vct` or `docType`: a registered type's name is a `TypeName` of at least one byte. `encode` lays
-  the projection out, equal projections in equal bytes; `write` does both. An icon is a
-  `RasterIcon`: a PNG or JPEG of 64 to 256 pixels in each direction, read from its header
-  (`IconFault` otherwise). The host rasterises an SVG and resizes an image before it passes it; a
-  credential without an icon of its own gets the default icon. `Unverified` is the picker's
+  the records of each type as one CBOR sequence, and tables of the definitions and icons, each
+  stored once, which the facts and the records name by number. Per credential a record holds the
+  entry reference, holder-key presence, the typed claim tree without nym_auth's undisclosable
+  attributes, the card's title, issuer line and icon, the claim labels in the wallet's language,
+  whether the wallet presents it without its UI, the TR5 facts, and for each transaction data type
+  the projected definition that serves it or why none does. The facts hold the time of registration,
+  the language, the diagnostics flag, the system ids the wallet proves, the form of the nym_auth
+  `verifier_id` and the wallet's default icon. `Registration<R: Read + Seek>` reads the header, the
+  directory, the index, the names, the tables and the facts when it opens, then `credentials` of the
+  types asked, `definition` and `icon` of a table entry, each definition and icon once, and
+  `projection` the whole. It refuses every version but `Version::CURRENT` (1), every offset or
+  length past its part, an index whose types do not sort strictly or whose names and records do not
+  tile their sections, a table whose entries do not tile its section, a number that names no entry
+  of its table, the records of a type out of the wallet's order, an icon longer than a buffer of the
+  platform holds, facts or records of a type longer than `cbor::MAX_INPUT`, a definition longer than
+  `json::MAX_TEXT`, and every unexpected member, with a `RegistrationError` that names the part and
+  its cause. The reader and the writer give an error for every input. The writer (feature `wallet`):
+  `project` takes the parsed credentials, the presentation records, the display cache and language,
+  the held transaction metadata and the configuration, the trust store, the systems, the
+  `verifier_id` form, the credentials presented without the wallet's UI, the card wording, the
+  icons, the default icon and the time, and gives the `Projection`, or `WriteError::TypeEmpty` for a
+  credential of an empty `vct` or `docType`: a registered type's name is a `TypeName` of at least
+  one byte. `encode` lays the projection out, equal projections in equal bytes; `write` does both.
+  An icon is a `RasterIcon`: a PNG or JPEG of 64 to 256 pixels in each direction, read from its
+  header (`IconFault` otherwise). The host rasterises an SVG and resizes an image before it passes
+  it; a credential without an icon of its own gets the default icon. `Unverified` is the picker's
   transaction data source. It builds with Rust 1.82.
 - `scripts/gen_unicode_tables.py` writes the refused-character ranges of siros-display and the
   grapheme break runs of siros-transaction-data from their oracles' tables.

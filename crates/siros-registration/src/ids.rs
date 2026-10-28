@@ -14,3 +14,8 @@ siros_codec::position!(
     /// The position of a record among the records of its type.
     pub RecordIndex
 );
+
+siros_codec::position!(
+    /// The position of an entry in the table of the icons or of the definitions section.
+    pub TableIndex
+);
