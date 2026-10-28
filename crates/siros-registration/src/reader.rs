@@ -322,12 +322,13 @@ impl<R: Read + Seek> Blob<R> {
         let at = bounds.start_of(span);
         let length = span.length();
         self.within(at, length.into())?;
-        let mut bytes = Vec::new();
-        let size = usize::try_from(length)
+        // A buffer holds at most isize::MAX bytes. Below that, `vec!` aborts when the platform
+        // has no memory for the part, and allocates it otherwise.
+        let size = isize::try_from(length)
             .ok()
-            .filter(|size| bytes.try_reserve_exact(*size).is_ok())
-            .ok_or(RegistrationError::Allocation(ByteCount::new(length.into())))?;
-        bytes.resize(size, 0);
+            .and_then(|size| usize::try_from(size).ok())
+            .ok_or(RegistrationError::TooLong(ByteCount::new(length.into())))?;
+        let mut bytes = vec![0; size];
         self.fill(at, &mut bytes)?;
         Ok(bytes)
     }

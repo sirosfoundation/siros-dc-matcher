@@ -279,8 +279,8 @@ pub enum RegistrationError {
     EntryRepeated(CredentialIndex),
     /// The definition of this span breaks a rule.
     Definition(DefinitionRef, #[source] DefinitionFault),
-    /// A part of this many bytes, which the platform cannot allocate.
-    Allocation(ByteCount),
+    /// A part of this many bytes, more than a buffer of the platform holds (`isize::MAX`).
+    TooLong(ByteCount),
 }
 
 impl RegistrationError {
@@ -302,7 +302,7 @@ impl RegistrationError {
             Self::PositionRepeated(_) => "registration_position_repeated",
             Self::EntryRepeated(_) => "registration_entry_repeated",
             Self::Definition(_, fault) => fault.code(),
-            Self::Allocation(_) => "registration_allocation",
+            Self::TooLong(_) => "registration_too_long",
         }
     }
 }

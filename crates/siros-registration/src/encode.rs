@@ -24,8 +24,8 @@ use crate::write::WriteError;
 ///
 /// # Errors
 ///
-/// [`WriteError::TooLarge`] for a section that ends past 4 GiB, [`WriteError::Allocation`] for
-/// a registration the platform cannot allocate.
+/// [`WriteError::TooLarge`] for a section that ends past 4 GiB, or past the longest buffer of
+/// the platform.
 pub fn encode(projection: &Projection) -> Result<Vec<u8>, WriteError> {
     let mut icons = Pool::default();
     let mut definitions = Pool::default();
@@ -147,15 +147,16 @@ fn lay_out(sections: [Vec<u8>; 6]) -> Result<Vec<u8>, WriteError> {
         let length = word(section.len(), *kind)?;
         end = start
             .checked_add(length)
+            .filter(|end| isize::try_from(*end).is_ok())
             .ok_or(WriteError::TooLarge(*kind))?;
         for value in [kind.code(), start, length] {
             directory.extend(value.to_le_bytes());
         }
     }
-    let mut blob = Vec::new();
-    // A u32 fits the usize of every target the crate builds for.
-    blob.try_reserve_exact(end as usize)
-        .map_err(WriteError::Allocation)?;
+    // `end` is at most isize::MAX, the most a buffer holds, and a u32, which the usize of every
+    // target the crate builds for holds. Below that, the allocation aborts when the platform
+    // has no memory for the blob.
+    let mut blob = Vec::with_capacity(end as usize);
     blob.extend_from_slice(MAGIC.as_flattened());
     blob.extend(Version::CURRENT.number().to_le_bytes());
     blob.extend(directory);

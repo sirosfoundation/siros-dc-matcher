@@ -1,7 +1,5 @@
 //! The wallet's projection of its state to a registration (K1, TR5).
 
-use std::collections::TryReserveError;
-
 use siros_codec::date::DateTime;
 use siros_credential::{least_used, ClaimTree, Credential, TreeError, UsableCredential};
 use siros_display::{CardWording, DisplayCache, Locale};
@@ -78,10 +76,8 @@ pub enum WriteError {
     /// The claims of this credential make no claim tree.
     Claims(CredentialId, #[source] TreeError),
     /// This section, or the sections up to its end, holds more bytes than a 32-bit offset
-    /// reaches.
+    /// reaches, or than a buffer of the platform holds (`isize::MAX`).
     TooLarge(SectionKind),
-    /// The platform cannot allocate the registration's bytes.
-    Allocation(#[source] TryReserveError),
 }
 
 impl WriteError {
@@ -91,7 +87,6 @@ impl WriteError {
         match self {
             Self::Claims(_, error) => error.code(),
             Self::TooLarge(_) => "registration_too_large",
-            Self::Allocation(_) => "registration_allocation",
         }
     }
 }
@@ -100,8 +95,8 @@ impl WriteError {
 ///
 /// # Errors
 ///
-/// [`WriteError`]: a claim tree out of CBOR's integers, a registration past 4 GiB, or one the
-/// platform cannot allocate.
+/// [`WriteError`]: a claim tree out of CBOR's integers, or a registration past 4 GiB or past
+/// the longest buffer of the platform.
 pub fn write(input: &RegistrationInput<'_>) -> Result<Vec<u8>, WriteError> {
     encode(&project(input)?)
 }

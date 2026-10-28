@@ -112,7 +112,7 @@ The reader refuses, with a `RegistrationError` that names the part and the cause
 - records of a type out of the wallet's order, and two records read with one position,
   `credentialId` or batch;
 - a definition of no UTF-8, no projection, or another language than the facts';
-- a part the platform cannot allocate.
+- a part longer than a buffer of the platform holds (`isize::MAX` bytes).
 
 The buffer the reader allocates for a part is the length of its span, which lies within the
 blob.

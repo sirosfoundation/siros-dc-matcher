@@ -598,10 +598,9 @@ binaryen version_116.
   then `credentials` of the types asked, `definition` and `icon` by span, each definition and
   icon once, and `projection` the whole. It refuses every version but `Version::CURRENT` (1),
   every offset or length past its part, an index entry out of order on a search's path, the
-  records of a type out of the wallet's order, a part the platform cannot allocate, and every
-  unexpected member, with a `RegistrationError` that names the part and its cause. Neither the
-  reader nor the writer panics. The
-  writer (feature `wallet`): `project` takes the parsed credentials, the presentation records,
+  records of a type out of the wallet's order, a part longer than a buffer of the platform
+  holds, and every unexpected member, with a `RegistrationError` that names the part and its
+  cause. Neither the reader nor the writer panics. The writer (feature `wallet`): `project` takes the parsed credentials, the presentation records,
   the display cache and language, the held transaction metadata and the configuration, the
   trust store, the systems, the `verifier_id` form, the credentials presented without the
   wallet's UI, the card wording, the icons, the default icon and the time, and gives the
