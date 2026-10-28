@@ -18,7 +18,7 @@ env:
   # ships inside every wallet APK. Google's own matcher is ~139 KB and
   # Multipaz's ~277 KB. 400 KiB is the ceiling we hold ourselves to: the picker
   # runs the wallet's matching and transaction data selection over the
-  # registration (K2), and measures 366,587 bytes with images passed through and
+  # registration (K2), and measures 366,632 bytes with images passed through and
   # `wasm-opt -Oz`. Raise this deliberately, in the same PR as the change that
   # needs it.
   WASM_SIZE_BUDGET: 409600
