@@ -48,7 +48,8 @@ fn accepting() -> Option<Value> {
 }
 
 fn envelope(query: Value, client_metadata: Option<Value>) -> Vec<u8> {
-    let mut data = json!({"dcql_query": {"credentials": [query]}});
+    let mut data = json!({"response_type": "vp_token", "response_mode": "dc_api",
+        "nonce": "n-1", "dcql_query": {"credentials": [query]}});
     if let Some(cm) = client_metadata {
         data["client_metadata"] = cm;
     }

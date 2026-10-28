@@ -37,11 +37,7 @@ fn wallet(records: Vec<Vec<u64>>) -> Wallet {
 fn a_selection_parses_against_its_own_plan_only() {
     let first = wallet(Vec::new());
     let original = request(NONCE);
-    let fetches = first.fetches(&original);
-    let digest = *ready(&first.input(&original, &fetches))
-        .unwrap()
-        .view()
-        .digest();
+    let digest = *ready(&first.input(&original)).unwrap().view().digest();
     let selection = Selection::new(digest, OfferIndex::new(0), Vec::new(), Vec::new());
 
     // (case, wallet, request, refusal)
@@ -63,8 +59,7 @@ fn a_selection_parses_against_its_own_plan_only() {
         ),
     ];
     for (case, wallet, request, refusal) in cases {
-        let fetches = wallet.fetches(request);
-        let planned = ready(&wallet.input(request, &fetches)).unwrap();
+        let planned = ready(&wallet.input(request)).unwrap();
         let chosen = planned.choose(&selection, Fulfilment::WalletUi);
         assert_eq!(chosen.err(), refusal, "{case}");
     }

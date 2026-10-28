@@ -3,19 +3,24 @@
 
 use siros_credential::EntryRef;
 use siros_dcql::Dropped;
-use siros_display::proof::{verified_rows, ProofRow};
-use siros_display::{purpose, Card, ClaimRow, DisplayCache, Locale};
+use siros_display::proof::{self, verified_rows, ProofRow};
+use siros_display::{purpose, Card, CardWording, ClaimRow, DisplayCache, Field, Locale};
 use siros_oid4vp::VerifierView;
 use siros_transaction_data::{EntryPosition, TransactionView};
 use siros_wallet_state::CredentialId;
 
 use super::digest::PlanDigest;
-use super::transactions::{offered, Bound, BoundEntry, Offered, Transactions, Wallet};
-use crate::display_rule::{Choice, DisplayFacts, Presentability, TransactionData, WalletDisplay};
-use crate::error::{Inconsistency, PresentationError};
+use super::transactions::{Offered, Wallet};
+use crate::display_rule::{
+    Choice, DisplayFacts, HostDisplay, Presentability, Rows, TransactionData, WalletDisplay,
+};
+use crate::error::PresentationError;
 use crate::ids::SetIndex;
+use crate::inconsistency::Inconsistency;
 use crate::matching::{Answer, Candidate};
 use crate::offers::{Addition, Member, Offer, Offers};
+use crate::transactions::Transactions;
+use crate::transactions::{offered, Bound, BoundEntry};
 use siros_dcql::QueryId;
 
 /// What the user consents to. It holds no delivered secret and no undisclosable attribute.
@@ -33,7 +38,7 @@ pub struct OfferView {
     members: Vec<MemberView>,
     additions: Vec<AdditionView>,
     unexamined: Dropped,
-    wallet_display: WalletDisplay,
+    facts: DisplayFacts,
 }
 
 /// An addition as the user sees it.
@@ -56,6 +61,7 @@ pub struct CredentialView {
     answer: Answer,
     card: Card,
     shown: Shown,
+    fields: Vec<Field>,
     transaction: Option<BoundTransaction>,
 }
 
@@ -150,9 +156,15 @@ impl OfferView {
         self.unexamined
     }
 
-    /// Whether the offer needs the wallet's display (A9).
+    /// Whether the offer needs the wallet's display (A9), the host showing everything its
+    /// entries carry.
     pub fn wallet_display(&self) -> WalletDisplay {
-        self.wallet_display
+        WalletDisplay::of(&self.facts)
+    }
+
+    /// What A9 judges the offer by, the host showing everything its entries carry.
+    pub(crate) fn facts(&self) -> DisplayFacts {
+        self.facts
     }
 }
 
@@ -208,6 +220,12 @@ impl CredentialView {
         &self.shown
     }
 
+    /// The fields the credential picker shows of the claims or the proof statements, whose
+    /// extents give A9's rows.
+    pub fn fields(&self) -> &[Field] {
+        &self.fields
+    }
+
     /// The transaction the credential authorizes: the entry bound to it (T4).
     pub fn transaction(&self) -> Option<&BoundTransaction> {
         self.transaction.as_ref()
@@ -217,23 +235,43 @@ impl CredentialView {
 /// What the view is built from.
 pub(crate) struct Sources<'s, 'a> {
     pub(crate) answered: &'s Wallet<'a>,
-    pub(crate) transactions: &'s Transactions<'a>,
+    pub(crate) transactions: &'s Transactions,
     pub(crate) display: &'s DisplayCache,
     pub(crate) language: &'s Locale,
+    pub(crate) card_wording: &'s CardWording,
     pub(crate) background: &'s [CredentialId],
     pub(crate) transaction_data: TransactionData,
 }
 
-/// The view of each of `offers`.
+/// The view of each of `offers` that shows, in order. An offer whose members' or additions'
+/// claims or proof statements do not show is left out, as the credential picker leaves it out:
+/// the user consents only to what the wallet shows, and the other offers stay.
+///
+/// # Errors
+///
+/// [`PresentationError::Display`] with the first offer's display error when no offer shows,
+/// and any other error of an offer.
 pub(crate) fn offer_views(
     offers: &Offers,
     sources: &Sources<'_, '_>,
 ) -> Result<Vec<OfferView>, PresentationError> {
-    offers
-        .offers()
-        .iter()
-        .map(|offer| offer_view(offer, sources))
-        .collect()
+    let mut views = Vec::new();
+    let mut unshown = None;
+    for offer in offers.offers() {
+        match offer_view(offer, sources) {
+            Ok(view) => views.push(view),
+            Err(PresentationError::Display(error)) => {
+                if unshown.is_none() {
+                    unshown = Some(error);
+                }
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    match unshown {
+        Some(error) if views.is_empty() => Err(PresentationError::Display(error)),
+        Some(_) | None => Ok(views),
+    }
 }
 
 fn offer_view(offer: &Offer, sources: &Sources<'_, '_>) -> Result<OfferView, PresentationError> {
@@ -243,19 +281,17 @@ fn offer_view(offer: &Offer, sources: &Sources<'_, '_>) -> Result<OfferView, Pre
         .iter()
         .map(|addition| addition_view(addition, sources))
         .collect::<Result<Vec<_>, _>>()?;
+    let fields = members
+        .iter()
+        .flat_map(MemberView::credentials)
+        .flat_map(CredentialView::fields);
     let facts = DisplayFacts {
         presentability: presentability(&members, sources.background),
         transaction_data: sources.transaction_data,
-        additions: if additions.is_empty() {
-            Choice::Settled
-        } else {
-            Choice::Open
-        },
-        subsets: if offer.members().iter().any(|m| m.candidates().len() > 1) {
-            Choice::Open
-        } else {
-            Choice::Settled
-        },
+        additions: Choice::of_additions(offer),
+        subsets: Choice::of_subsets(offer),
+        rows: Rows::of(fields),
+        host: HostDisplay::Full,
     };
     Ok(OfferView {
         offer: offer.clone(),
@@ -263,7 +299,7 @@ fn offer_view(offer: &Offer, sources: &Sources<'_, '_>) -> Result<OfferView, Pre
         members,
         additions,
         unexamined: offer.unexamined(),
-        wallet_display: WalletDisplay::of(&facts),
+        facts,
     })
 }
 
@@ -340,34 +376,46 @@ fn credential_view(
     sources: &Sources<'_, '_>,
 ) -> Result<CredentialView, PresentationError> {
     let credential = candidate.credential().credential();
+    let (shown, fields) = shown(member, candidate, sources)?;
     Ok(CredentialView {
         entry: credential.entry(),
         answer: candidate.answer().clone(),
-        card: sources.display.card(credential, sources.language)?,
-        shown: shown(member, candidate, sources)?,
+        card: sources
+            .display
+            .card(credential, sources.language, sources.card_wording),
+        shown,
+        fields,
         transaction,
     })
 }
 
 /// What `candidate`, a candidate of `member`, shows: its claim rows or its proof statement
-/// rows.
+/// rows, and the credential picker's fields of them.
 fn shown(
     member: &Offered<'_, '_>,
     candidate: &Candidate<siros_credential::UsableCredential<'_>>,
     sources: &Sources<'_, '_>,
-) -> Result<Shown, PresentationError> {
+) -> Result<(Shown, Vec<Field>), PresentationError> {
     Ok(match candidate.answer() {
-        Answer::Claims(claims) => Shown::Claims(sources.display.claim_rows(
-            candidate.credential().credential(),
-            claims.pointers(),
-            sources.language,
-        )?),
+        Answer::Claims(claims) => {
+            let rows = sources.display.claim_rows(
+                candidate.credential().credential(),
+                claims.pointers(),
+                sources.language,
+            )?;
+            let fields = rows.iter().map(Field::of_claim).collect();
+            (Shown::Claims(rows), fields)
+        }
         Answer::Proof(choice) => {
             let zkp = member
                 .answers
                 .zkp()
                 .ok_or(Inconsistency::ZkpQuery(member.query))?;
-            Shown::Proof(verified_rows(zkp.query().query(), zkp.option(choice)?)?)
+            let (query, option) = (zkp.query().query(), zkp.option(choice)?);
+            (
+                Shown::Proof(verified_rows(query, option)?),
+                proof::rows(query, option)?,
+            )
         }
     })
 }

@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use siros_codec::base64url;
 use siros_dcql::QueryId;
-use siros_presentation::{plan, OfferIndex, Pick, PlanStep, PresentationError, WalletDisplay};
+use siros_presentation::{OfferIndex, Pick, PresentationError, WalletDisplay};
 use siros_transaction_data::{RowValue, UnsignedWarning};
 use siros_wallet_state::CredentialId;
 
@@ -103,12 +103,7 @@ fn sd_jwt_over_redirect_direct_post_jwt() {
         "dcql_query": {"credentials": [{"id": "pid", "format": "dc+sd-jwt",
             "meta": {"vct_values": [VCT]}, "claims": [{"path": ["given_name"]}]}]}
     }));
-    // The type metadata is the host's input: the plan fetches nothing (PaSO Proof Metadata,
-    // Sections 6 and 8).
-    let empty = siros_presentation::Fetches::new();
-    let input = wallet.input(&request, &empty);
-    assert!(matches!(plan(&input), Ok(PlanStep::Ready(_))));
-
+    let input = wallet.input(&request);
     let planned = ready(&input).unwrap();
     let offer = &planned.view().offers()[0];
     let card = &offer.members()[0].credentials()[0];
@@ -210,8 +205,7 @@ fn kb_jwt_aud_over_the_dc_api() {
         "dcql_query": {"credentials": [{"id": "pid", "format": "dc+sd-jwt",
             "meta": {"vct_values": [VCT]}, "claims": [{"path": ["given_name"]}]}]}
     }));
-    let fetches = wallet.fetches(&request);
-    let response = respond(&wallet.input(&request, &fetches));
+    let response = respond(&wallet.input(&request));
     let payload = decrypt_jwe(response.submission());
     let sent = payload["vp_token"]["pid"][0].as_str().unwrap();
     let body = sent.rsplit('~').next().unwrap().split('.').nth(1).unwrap();
@@ -239,8 +233,7 @@ fn a_subset_keeps_the_plans_binding() {
         "dcql_query": {"credentials": [{"id": "pid", "format": "dc+sd-jwt", "multiple": true,
             "meta": {"vct_values": [VCT]}, "claims": [{"path": ["given_name"]}]}]}
     }));
-    let fetches = wallet.fetches(&request);
-    let input = wallet.input(&request, &fetches);
+    let input = wallet.input(&request);
     let planned = ready(&input).unwrap();
     let credentials = planned.view().offers()[0].members()[0].credentials();
     let shown: Vec<(CredentialId, Option<usize>)> = credentials

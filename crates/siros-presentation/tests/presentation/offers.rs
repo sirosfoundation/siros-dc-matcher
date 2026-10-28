@@ -50,8 +50,7 @@ fn all_optional_sets_offer_each_option() {
             {"options": [["mdl"]], "required": false, "purpose": "Drive"}
         ]
     }));
-    let fetches = wallet.fetches(&request);
-    let planned = ready(&wallet.input(&request, &fetches)).unwrap();
+    let planned = ready(&wallet.input(&request)).unwrap();
     // (purpose, the queries of the members, the queries of each addition)
     type Shape<'v> = (Option<&'v str>, Vec<&'v str>, Vec<Vec<&'v str>>);
     let offers: Vec<Shape<'_>> = planned
@@ -99,8 +98,7 @@ fn no_query_but_zkp_req_reaches_a_nym_auth_attestation() {
     ];
     for query in queries {
         let request = request(json!({"credentials": [query.clone()]}));
-        let fetches = wallet.fetches(&request);
-        let refused = ready(&wallet.input(&request, &fetches)).err().unwrap();
+        let refused = ready(&wallet.input(&request)).err().unwrap();
         assert_eq!(
             refused,
             PresentationError::NoOffer(Failure::Unsatisfied),
@@ -189,8 +187,7 @@ fn picks_select_against_the_plan() {
             {"options": [["mdl"], ["mdl", "photo"]], "required": false}
         ]
     }));
-    let fetches = wallet.fetches(&request);
-    let planned = ready(&wallet.input(&request, &fetches)).unwrap();
+    let planned = ready(&wallet.input(&request)).unwrap();
     let digest = *planned.view().digest();
     let id = |query: &str| QueryId::parse(query).unwrap();
     let pick = |offer, query: &str, credential| {
@@ -210,6 +207,7 @@ fn picks_select_against_the_plan() {
         ))
     };
     let refused = |error| Err(PresentationError::Pick(error));
+    let unheld = |why| refused(PickError::Unmatched(vec![(OfferIndex::new(0), why)]));
     // (case, picks, outcome)
     let cases: [(&str, Vec<Pick>, Result<Selection, PresentationError>); 11] = [
         ("the offer", vec![pick(0, "pid", 1)], selection(vec![])),
@@ -238,9 +236,9 @@ fn picks_select_against_the_plan() {
             }),
         ),
         (
-            "an unknown offer",
+            "an offer the picker numbers apart from the plan",
             vec![pick(1, "pid", 1)],
-            Err(PresentationError::OfferUnknown(OfferIndex::new(1))),
+            selection(vec![]),
         ),
         (
             "a query the request lacks",
@@ -250,7 +248,7 @@ fn picks_select_against_the_plan() {
         (
             "a credential the offer does not hold",
             vec![pick(0, "pid", 2)],
-            refused(PickError::Credential {
+            unheld(PickError::Credential {
                 query: id("pid"),
                 credential: CredentialId::new(2),
             }),
@@ -258,17 +256,51 @@ fn picks_select_against_the_plan() {
         (
             "an offer member without a pick",
             vec![pick(0, "mdl", 2)],
-            refused(PickError::Missing(id("pid"))),
+            unheld(PickError::Missing(id("pid"))),
         ),
         (
             "a part of an addition",
             vec![pick(0, "pid", 1), pick(0, "photo", 3)],
-            refused(PickError::Additions),
+            unheld(PickError::Additions),
         ),
     ];
     for (case, picks, outcome) in cases {
         assert_eq!(planned.picked(&picks), outcome, "{case}");
     }
+}
+
+/// K3: of two offers that hold the picks, one through an addition, the one whose members alone
+/// hold them is selected: the offer the picker shows.
+#[test]
+fn picks_select_the_offer_whose_members_hold_them() {
+    let pid = Held::new(
+        1,
+        "dc+sd-jwt",
+        sd_jwt(VCT, &[("given_name", json!("Erika"))]),
+    );
+    let wallet = Wallet::new(vec![pid, mdl(2)]);
+    // The offers {pid} with the addition {mdl}, and {pid, mdl}.
+    let request = asked(json!({
+        "credentials": [pid_query(), mdl_query(false)],
+        "credential_sets": [
+            {"options": [["pid"], ["pid", "mdl"]]},
+            {"options": [["mdl"]], "required": false}
+        ]
+    }));
+    let planned = ready(&wallet.input(&request)).unwrap();
+    let pick = |query: &str, credential| {
+        Pick::new(
+            OfferIndex::new(0),
+            QueryId::parse(query).unwrap(),
+            CredentialId::new(credential),
+        )
+    };
+    let selection = planned
+        .picked(&[pick("pid", 1), pick("mdl", 2)])
+        .expect("a selection");
+    let offer = &planned.view().offers()[selection.offer().value()];
+    let members = vec![("pid".to_owned(), 1), ("mdl".to_owned(), 1)];
+    assert_eq!(shape(offer), (members, vec![]));
 }
 
 /// A3: required and optional sets, additions, `multiple` members, and the limits.
@@ -292,8 +324,7 @@ fn offers_of_credential_sets() {
             {"options": [["mdl"]], "required": false}
         ]
     }));
-    let fetches = wallet.fetches(&request);
-    let planned = ready(&wallet.input(&request, &fetches)).unwrap();
+    let planned = ready(&wallet.input(&request)).unwrap();
     let offers: Vec<Shape> = planned.view().offers().iter().map(shape).collect();
     let addition = vec![vec!["mdl".to_owned()]];
     assert_eq!(offers, [(vec![("pid".to_owned(), 1)], addition)]);
@@ -304,8 +335,7 @@ fn offers_of_credential_sets() {
         "response_type": "vp_token", "response_mode": "dc_api", "nonce": NONCE,
         "dcql_query": {"credentials": [mdl_query(true)]}
     }));
-    let fetches = wallet.fetches(&request);
-    let input = wallet.input(&request, &fetches);
+    let input = wallet.input(&request);
     let planned = ready(&input).unwrap();
     let [offer] = planned.view().offers() else {
         panic!("one offer")
@@ -357,8 +387,7 @@ fn offers_of_credential_sets() {
             {"options": [["mdl"], ["photo"]], "required": false}
         ]
     }));
-    let fetches = wallet.fetches(&request);
-    let input = wallet.input(&request, &fetches);
+    let input = wallet.input(&request);
     let planned = ready(&input).unwrap();
     let additions = planned.view().offers()[0].additions();
     assert_eq!(additions.len(), 2);
@@ -402,8 +431,7 @@ fn offers_of_credential_sets() {
         limits.into_iter().zip(unexamined)
     {
         let request = asked(dcql.clone());
-        let fetches = wallet.fetches(&request);
-        let planned = ready(&wallet.input(&request, &fetches)).unwrap();
+        let planned = ready(&wallet.input(&request)).unwrap();
         let view = planned.view();
         assert_eq!(view.offers().len(), offers, "{dcql}");
         assert_eq!(view.unexamined(), unexamined, "{dcql}");

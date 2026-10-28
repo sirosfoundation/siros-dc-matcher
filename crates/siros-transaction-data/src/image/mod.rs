@@ -1,74 +1,50 @@
-//! Images of a payload (PaSO View, Section 3, `image`): a Data URL of a PNG, JPEG or SVG image,
-//! or an `https` URL whose content a `#integrity` sibling pins. The wallet fetches the content
-//! through the host, following at most 3 redirects, verifies it, and the view carries the
-//! verified bytes. A TS12 logo may be a URL without `#integrity` (EC TS12 v1.0.1, Section
-//! 4.3.1): it cannot be verified.
-
-mod css;
-mod font;
-mod raster;
-mod svg;
+//! Images of a payload (PaSO View, Section 3, `image`; EC TS12 v1.0.1, Section 4.3.1, for a
+//! TS12 logo): a Data URL, or an `https` URL with the integrity values of its `#integrity`
+//! sibling. The core checks an image's form, and carries it to the consent view for the UI. It
+//! never fetches or verifies image content.
 
 use siros_codec::json::Json;
 use siros_codec::{base64, Base64Error};
-use siros_oid4vp::{BodyLimit, Fetch, HttpsUrl, MediaType, Redirects};
+use siros_oid4vp::HttpsUrl;
 
-use crate::fetched;
-use crate::fetched::{FetchFault, Fetched, Step};
 use crate::integrity::{Integrity, IntegrityFault};
 
-pub use css::CssFault;
-pub use font::{FontFault, FontFormat};
-pub use raster::RasterFault;
-pub use svg::{DataFault, SvgFault, MAX_DEPTH, MAX_RESOURCES};
-
-/// The most bytes of an image: of a Data URL's payload, or of the fetched content.
+/// The most bytes of a Data URL's encoded payload, and of an image the UI shows.
 pub const MAX_IMAGE_BYTES: usize = 512 * 1024;
 
-/// The most pixels of an image in either direction.
+/// The most pixels of an image the UI shows, in either direction.
 pub const MAX_IMAGE_PIXELS: u32 = 2048;
 
-/// The limit of an image fetch.
-const IMAGE_LIMIT: BodyLimit = BodyLimit::bytes(MAX_IMAGE_BYTES);
-
-/// The most redirects an image fetch follows (PaSO View, Section 3, `image`).
-const IMAGE_REDIRECTS: Redirects = Redirects::at_most(3);
-
-/// The fetch of the image or resource at `url`: the types `accept` lists, at most 512 KiB, at
-/// most 3 redirects.
-pub(crate) fn image_fetch(url: HttpsUrl, accept: MediaType) -> Fetch {
-    Fetch::get(url, accept, IMAGE_LIMIT).following(IMAGE_REDIRECTS)
-}
-
-/// The pixels of an image in each direction.
+/// How a request reached the wallet, which sets the images it admits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Dimensions {
-    /// The width.
-    pub width: u32,
-    /// The height.
-    pub height: u32,
+pub enum Channel {
+    /// The Digital Credentials API. The verifier chose it, and its images are Data URLs of a
+    /// format Credential Manager shows: [`ImageFormat::DC_API`] (the owner's ruling).
+    DcApi,
+    /// A redirect flow: every image of PaSO View, Section 3.
+    Redirect,
 }
 
-impl Dimensions {
-    /// Whether the image is over [`MAX_IMAGE_PIXELS`] in a direction.
-    pub(crate) fn over(self) -> bool {
-        self.width > MAX_IMAGE_PIXELS || self.height > MAX_IMAGE_PIXELS
-    }
-}
-
-/// An image format the wallet shows.
+/// An image format a Data URL may name (PaSO View, Section 3, `image`: PNG, JPEG and SVG).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ImageFormat {
     /// `image/png`.
     Png,
     /// `image/jpeg`.
     Jpeg,
-    /// `image/svg+xml`, rendered statically.
+    /// `image/svg+xml`.
     Svg,
 }
 
 impl ImageFormat {
     const ALL: [Self; 3] = [Self::Png, Self::Jpeg, Self::Svg];
+
+    /// The formats of an image over the Digital Credentials API: those Credential Manager
+    /// decodes that PaSO View requires. Credential Manager takes an entry's image as an Android
+    /// `Bitmap` (androidx `VerificationEntryDisplayProperties.icon`, `2b7ce630`), which androidx
+    /// registers as a PNG (`OpenId4VpRegistry.getIconBytes`); Android decodes PNG and JPEG into
+    /// a `Bitmap`, and no SVG.
+    pub const DC_API: [Self; 2] = [Self::Png, Self::Jpeg];
 
     /// The media type.
     #[must_use]
@@ -80,146 +56,79 @@ impl ImageFormat {
         }
     }
 
-    pub(crate) fn of_media_type(media_type: &str) -> Option<Self> {
+    fn of_media_type(media_type: &str) -> Option<Self> {
         Self::ALL
             .into_iter()
             .find(|format| format.media_type().eq_ignore_ascii_case(media_type))
     }
-
-    /// The format of `bytes` by their signature: PNG and JPEG by their magic numbers, else an
-    /// SVG document.
-    fn sniff(bytes: &[u8]) -> Self {
-        if bytes.starts_with(&raster::PNG_SIGNATURE) {
-            Self::Png
-        } else if bytes.starts_with(&raster::JPEG_SOI) {
-            Self::Jpeg
-        } else {
-            Self::Svg
-        }
-    }
 }
 
-/// Where an image is: a Data URL's bytes, an `https` URL with the integrity metadata its
-/// content must match, or, for a TS12 logo, a reference that cannot be verified.
+/// An image of the consent view, as information for the UI. The core checked its form alone.
+///
+/// The UI, before it shows the image: takes the bytes of a Data URL, or resolves the URL and
+/// verifies its content against each integrity value ([`Integrity::check`]); holds the content
+/// to [`MAX_IMAGE_BYTES`] and [`MAX_IMAGE_PIXELS`]; renders an SVG document statically, with no
+/// script, animation or resource outside those the document pins (PaSO Proof SD-JWT-VC and SVG,
+/// Section 3); and leaves out an image it cannot verify, since an image carries no consent
+/// information (PaSO View, Section 3).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ImageRef {
-    /// A Data URL (RFC 2397) of a PNG, JPEG or SVG image in base64.
+pub enum Image {
+    /// The image of a Data URL (RFC 2397) in base64.
     Data {
-        /// The declared format.
+        /// The format its media type names.
         format: ImageFormat,
         /// The decoded bytes.
         bytes: Vec<u8>,
     },
-    /// An `https` URL and its `#integrity` sibling.
+    /// An `https` URL.
     Remote {
         /// The URL.
         url: HttpsUrl,
-        /// The integrity metadata (W3C SRI).
-        integrity: Integrity,
+        /// The integrity values (W3C SRI) of its `#integrity` sibling; `None` for a TS12 logo
+        /// without one.
+        integrity: Option<Integrity>,
     },
-    /// A TS12 logo that cannot be verified, and why: the view leaves it out (PaSO Proof
+}
+
+/// An image value of a payload, as its form reads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ImageRef {
+    /// An image of a well-formed value.
+    Image(Image),
+    /// A TS12 logo whose value is not well-formed, and why: the view leaves it out (PaSO Proof
     /// SD-JWT-VC and SVG, Section 2: "considered absent").
-    Unverifiable {
-        /// The reference, as the payload writes it.
+    Malformed {
+        /// The value, as the payload writes it.
         reference: String,
-        /// Why it cannot be verified.
+        /// Why it is not well-formed.
         cause: ImageFault,
     },
 }
 
-/// An image whose bytes the wallet verified: within the limits, of its format, and with each
-/// resource an SVG document references fetched and verified.
-///
-/// The host renders it statically: it runs no script and no animation, and it loads nothing
-/// outside [`VerifiedImage::resources`] (PaSO View, Section 3, `image`). The host answers the
-/// renderer's request for a URL, without its fragment, with the resource of that
-/// [`Resource::url`], as its [`Resource::kind`]; any other request fails.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct VerifiedImage {
-    format: ImageFormat,
-    bytes: Vec<u8>,
-    resources: Vec<Resource>,
-}
-
-/// A resource an SVG document references, verified against the integrity value of each
-/// fragment its URL carries in the document (PaSO Proof SD-JWT-VC and SVG, Section 3).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Resource {
-    url: HttpsUrl,
-    kind: ResourceKind,
-    bytes: Vec<u8>,
-}
-
-impl Resource {
-    /// The URL a renderer requests: the `https` URL of the references, without the fragment.
-    #[must_use]
-    pub fn url(&self) -> &HttpsUrl {
-        &self.url
-    }
-
-    /// The kind of the content.
-    #[must_use]
-    pub fn kind(&self) -> ResourceKind {
-        self.kind
-    }
-
-    /// The verified bytes.
-    #[must_use]
-    pub fn bytes(&self) -> &[u8] {
-        &self.bytes
-    }
-}
-
-/// The kind of a resource's content, by its signature and header.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ResourceKind {
-    /// A PNG image within the image limits.
-    Png,
-    /// A JPEG image within the image limits.
-    Jpeg,
-    /// A font whose header and table directory read.
-    Font(FontFormat),
-}
-
-impl ResourceKind {
-    /// The media type the host serves the resource as.
-    #[must_use]
-    pub fn media_type(self) -> &'static str {
-        match self {
-            Self::Png => ImageFormat::Png.media_type(),
-            Self::Jpeg => ImageFormat::Jpeg.media_type(),
-            Self::Font(format) => format.media_type(),
-        }
-    }
-}
-
-/// Why an image is refused. The entry is then not compatible (PaSO View, Section 3).
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Why an image is refused: a PaSO entry is then not compatible (PaSO View, Section 3), and a
+/// TS12 logo is left out.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum ImageFault {
-    /// The URL is neither a Data URL nor an `https` URL.
+    /// The value is neither a Data URL nor an `https` URL.
     NotHttps,
     /// The `https` URL has no `#integrity` sibling.
     IntegrityAbsent,
     /// The `#integrity` sibling is no string.
     IntegrityNotString,
-    /// The integrity metadata does not read, or the content does not match it.
-    Integrity(IntegrityFault),
+    /// The `#integrity` sibling is no integrity metadata.
+    Integrity(#[source] IntegrityFault),
     /// The Data URL has no comma, no `;base64`, or a media type other than PNG, JPEG and SVG.
     DataUrl,
     /// The Data URL's payload is no base64.
-    Base64(Base64Error),
-    /// The image has this many bytes, more than 512 KiB.
+    Base64(#[source] Base64Error),
+    /// The Data URL's payload has this many bytes, more than 512 KiB.
     TooLarge(usize),
-    /// The fetch gave no content.
-    Fetch(FetchFault),
-    /// The bytes are not of the declared format.
-    FormatMismatch(ImageFormat),
-    /// The PNG or JPEG does not read.
-    Raster(RasterFault),
-    /// The SVG document does not read, or a resource it references is refused.
-    Svg(SvgFault),
-    /// The image is over 2048 pixels in a direction.
-    TooManyPixels(Dimensions),
+    /// An `https` URL in a request over the Digital Credentials API, whose images are Data URLs.
+    RemoteOverDcApi,
+    /// A Data URL of this format in a request over the Digital Credentials API, which shows
+    /// [`ImageFormat::DC_API`] alone.
+    FormatOverDcApi(ImageFormat),
 }
 
 impl ImageFault {
@@ -234,110 +143,94 @@ impl ImageFault {
             Self::DataUrl => "image_data_url",
             Self::Base64(_) => "image_base64",
             Self::TooLarge(_) => "image_too_large",
-            Self::Fetch(fault) => fault.code(),
-            Self::FormatMismatch(_) => "image_format_mismatch",
-            Self::Raster(fault) => fault.code(),
-            Self::Svg(fault) => fault.code(),
-            Self::TooManyPixels(_) => "image_too_many_pixels",
+            Self::RemoteOverDcApi => "image_remote_over_dc_api",
+            Self::FormatOverDcApi(_) => "image_format_over_dc_api",
         }
     }
 }
 
-siros_codec::display_code!(ImageFault);
-
-impl std::error::Error for ImageFault {}
-
 impl ImageRef {
-    /// The image of a TS12 logo `text`, `integrity` the value of its `#integrity` sibling: a
-    /// reference [`ImageRef::parse`] refuses cannot be verified.
+    /// The image of a TS12 logo `text`, `integrity` the value of its `#integrity` sibling, which
+    /// a logo may lack: a value that is not well-formed is left out.
     pub(crate) fn logo(text: &str, integrity: Option<&Json>) -> Self {
-        Self::parse(text, integrity).unwrap_or_else(|cause| Self::Unverifiable {
-            reference: text.to_owned(),
-            cause,
-        })
+        let image = match integrity {
+            None => Image::parse(text, Sibling::Absent),
+            Some(json) => Image::parse(text, Sibling::Given(json)),
+        };
+        image.map_or_else(
+            |cause| Self::Malformed {
+                reference: text.to_owned(),
+                cause,
+            },
+            Self::Image,
+        )
     }
 
     /// The image of the payload string `text`, `integrity` the value of its `#integrity`
-    /// sibling.
+    /// sibling, which an `https` URL needs.
     pub(crate) fn parse(text: &str, integrity: Option<&Json>) -> Result<Self, ImageFault> {
+        let integrity = integrity.ok_or(ImageFault::IntegrityAbsent);
+        Image::parse(text, Sibling::Required(integrity)).map(Self::Image)
+    }
+
+    /// The image the view shows for a request that came over `channel`.
+    ///
+    /// # Errors
+    ///
+    /// [`ImageFault`]: why the value is not well-formed, or not admitted over the channel.
+    pub(crate) fn admit(&self, channel: Channel) -> Result<Image, ImageFault> {
+        let image = match self {
+            Self::Image(image) => image,
+            Self::Malformed { cause, .. } => return Err(cause.clone()),
+        };
+        match (channel, image) {
+            (Channel::DcApi, Image::Remote { .. }) => Err(ImageFault::RemoteOverDcApi),
+            (Channel::DcApi, Image::Data { format, .. })
+                if !ImageFormat::DC_API.contains(format) =>
+            {
+                Err(ImageFault::FormatOverDcApi(*format))
+            }
+            (Channel::DcApi | Channel::Redirect, image) => Ok(image.clone()),
+        }
+    }
+}
+
+/// What an `https` image takes of its `#integrity` sibling.
+enum Sibling<'j> {
+    /// A PaSO image: the sibling's value, or why there is none.
+    Required(Result<&'j Json, ImageFault>),
+    /// A TS12 logo with a sibling.
+    Given(&'j Json),
+    /// A TS12 logo without one.
+    Absent,
+}
+
+impl Image {
+    /// The image of `text`: a Data URL, or an `https` URL with the integrity values `sibling`
+    /// gives.
+    fn parse(text: &str, sibling: Sibling<'_>) -> Result<Self, ImageFault> {
         if let Some(rest) = strip_prefix_ignore_case(text, "data:") {
             return data_url(rest);
         }
         let url = HttpsUrl::parse(text).ok_or(ImageFault::NotHttps)?;
-        let integrity = match integrity {
-            None => return Err(ImageFault::IntegrityAbsent),
-            Some(Json::String(value)) => Integrity::parse(value).map_err(ImageFault::Integrity)?,
-            Some(_) => return Err(ImageFault::IntegrityNotString),
+        let sibling = match sibling {
+            Sibling::Required(sibling) => Some(sibling?),
+            Sibling::Given(sibling) => Some(sibling),
+            Sibling::Absent => None,
         };
+        let integrity = sibling
+            .map(|sibling| match sibling {
+                Json::String(value) => Integrity::parse(value).map_err(ImageFault::Integrity),
+                _ => Err(ImageFault::IntegrityNotString),
+            })
+            .transpose()?;
         Ok(Self::Remote { url, integrity })
-    }
-
-    /// The image, verified; the fetch of its content or of a resource it references while the
-    /// host has not given it.
-    ///
-    /// # Errors
-    ///
-    /// [`ImageFault`]: the first rule the image breaks.
-    pub(crate) fn verify(&self, fetched: &Fetched) -> Result<Step<VerifiedImage>, ImageFault> {
-        let (format, bytes) = match self {
-            Self::Data { format, bytes } => (*format, bytes.clone()),
-            Self::Remote { url, integrity } => {
-                let body = fetched!(fetched
-                    .body(image_fetch(url.clone(), MediaType::IMAGES))
-                    .map_err(ImageFault::Fetch)?);
-                integrity.check(body).map_err(ImageFault::Integrity)?;
-                (ImageFormat::sniff(body), body.to_vec())
-            }
-            Self::Unverifiable { cause, .. } => return Err(cause.clone()),
-        };
-        if ImageFormat::sniff(&bytes) != format {
-            return Err(ImageFault::FormatMismatch(format));
-        }
-        let (dimensions, resources) = match format {
-            ImageFormat::Png => (raster::png(&bytes).map_err(ImageFault::Raster)?, Vec::new()),
-            ImageFormat::Jpeg => (
-                raster::jpeg(&bytes).map_err(ImageFault::Raster)?,
-                Vec::new(),
-            ),
-            ImageFormat::Svg => {
-                let document = fetched!(svg::read(&bytes, fetched).map_err(ImageFault::Svg)?);
-                (document.size, document.resources)
-            }
-        };
-        if let Some(dimensions) = dimensions.filter(|d| d.over()) {
-            return Err(ImageFault::TooManyPixels(dimensions));
-        }
-        Ok(Step::Done(VerifiedImage {
-            format,
-            bytes,
-            resources,
-        }))
-    }
-}
-
-impl VerifiedImage {
-    /// The format.
-    #[must_use]
-    pub fn format(&self) -> ImageFormat {
-        self.format
-    }
-
-    /// The verified bytes.
-    #[must_use]
-    pub fn bytes(&self) -> &[u8] {
-        &self.bytes
-    }
-
-    /// The resources an SVG document references, each verified.
-    #[must_use]
-    pub fn resources(&self) -> &[Resource] {
-        &self.resources
     }
 }
 
 /// The image of a Data URL's text after `data:`: `<media type>[;<parameter>]*;base64,<data>`,
 /// the payload at most 512 KiB.
-fn data_url(rest: &str) -> Result<ImageRef, ImageFault> {
+fn data_url(rest: &str) -> Result<Image, ImageFault> {
     let (header, payload) = rest.split_once(',').ok_or(ImageFault::DataUrl)?;
     let mut parts = header.split(';');
     let format = parts
@@ -354,7 +247,7 @@ fn data_url(rest: &str) -> Result<ImageRef, ImageFault> {
         return Err(ImageFault::TooLarge(payload.len()));
     }
     let bytes = base64::decode(payload).map_err(ImageFault::Base64)?;
-    Ok(ImageRef::Data { format, bytes })
+    Ok(Image::Data { format, bytes })
 }
 
 /// `text` after `prefix`, compared without regard to ASCII case.

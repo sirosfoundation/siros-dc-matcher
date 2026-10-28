@@ -2,7 +2,6 @@
 //! view.
 
 mod digest;
-mod fetches;
 mod proof;
 mod seed;
 mod transactions;
@@ -11,11 +10,9 @@ mod view;
 use rand_core::CryptoRngCore;
 use siros_codec::date::DateTime;
 use siros_credential::{Credential, UsableCredential};
-use siros_display::{DisplayCache, Locale};
-use siros_oid4vp::{ErrorCode, Fetch, Submission, VerifiedRequest};
-use siros_transaction_data::{
-    fetched, Amr, Configuration, HeldMetadata, Step, TransactionDataError,
-};
+use siros_display::{CardWording, DisplayCache, Locale};
+use siros_oid4vp::{ErrorCode, Submission, VerifiedRequest};
+use siros_transaction_data::{Amr, Configuration, HeldMetadata, TransactionDataError};
 use siros_trust::TrustStore;
 use siros_wallet_state::{CredentialId, KeyId, PresentationRecord};
 use siros_zkp_req_nym_auth::policy::RequestRefusal;
@@ -27,15 +24,15 @@ use crate::display_rule::TransactionData;
 use crate::error::PresentationError;
 use crate::matching::{Asked, Matching};
 use crate::offers::Offers;
-use transactions::{Transactions, Wallet};
+use crate::transactions::{NoOffer, Transactions};
+use transactions::{context, Wallet};
 use view::Sources;
 
 pub use digest::{DigestError, PlanDigest};
-pub use fetches::Fetches;
 pub(crate) use proof::nym_answer;
 pub use proof::{OptionRefusal, Unproven};
 pub use seed::NoSeed;
-pub(crate) use transactions::{offered, BoundEntry, Offered};
+pub(crate) use transactions::Offered;
 pub use view::{
     AdditionView, BoundTransaction, ConsentView, CredentialView, MemberView, OfferView, Shown,
 };
@@ -55,6 +52,9 @@ pub struct PlanInput<'a> {
     pub display: &'a DisplayCache,
     /// The wallet's language, which every display array is shown in (PaSO View, Section 4).
     pub language: &'a Locale,
+    /// The texts the host gives cards in the wallet's language: the title and issuer line of a
+    /// credential whose display metadata names none, and the template of a named issuer's line.
+    pub card_wording: &'a CardWording,
     /// The transaction data types the host configures.
     pub configuration: &'a Configuration,
     /// The transaction metadata the host holds: signed credential metadata, Type Metadata and
@@ -69,19 +69,8 @@ pub struct PlanInput<'a> {
     pub background: &'a [CredentialId],
     /// The authentication factors of each signing key the host reported (H3).
     pub key_factors: &'a [(KeyId, Amr)],
-    /// The host's responses to the fetches the plan asked for.
-    pub fetches: &'a Fetches,
     /// The time: the proof time of a nym_auth proof and the `iat` of a KB-JWT.
     pub now: DateTime,
-}
-
-/// What a step of planning gives.
-pub enum PlanStep<'a> {
-    /// An image for the host to fetch (PaSO View, Section 3, `image`). Its response goes to
-    /// [`Fetches::answer`], and the plan is made again.
-    Fetch(Fetch),
-    /// The plan.
-    Ready(Box<Planned<'a>>),
 }
 
 /// The plan of a request: its offers, and their consent view with its digest.
@@ -89,7 +78,7 @@ pub struct Planned<'a> {
     pub(crate) input: PlanInput<'a>,
     pub(crate) nym_auth: Result<NymAuthRequest<'a>, RequestRefusal>,
     pub(crate) answered: Wallet<'a>,
-    pub(crate) transactions: Transactions<'a>,
+    pub(crate) transactions: Transactions,
     pub(crate) view: ConsentView<'a>,
 }
 
@@ -107,31 +96,21 @@ pub struct Planned<'a> {
 ///
 /// [`PresentationError::NoOffer`] with the reason when no offer remains, and the first rule
 /// the request, its transaction data or the display breaks.
-pub fn plan<'a>(input: &PlanInput<'a>) -> Result<PlanStep<'a>, PresentationError> {
-    Ok(match planned(input)? {
-        Step::Fetch(fetch) => PlanStep::Fetch(fetch),
-        Step::Done(planned) => PlanStep::Ready(Box::new(planned)),
-    })
-}
-
-fn planned<'a>(input: &PlanInput<'a>) -> Result<Step<Planned<'a>>, PresentationError> {
+pub fn plan<'a>(input: &PlanInput<'a>) -> Result<Planned<'a>, PresentationError> {
     let request = input.request;
     let nym_auth = NymAuthRequest::new(request, input.verifier_id);
     let policy = nym_auth.as_ref().map(drop).map_err(|refusal| *refusal);
     let answered = answered(input, policy)?;
-    let transactions = fetched!(Transactions::read(input, &answered)?);
+    let transactions = Transactions::read(request, &answered, &context(input))?;
     let offers = offers(&answered, &transactions)?;
     let sources = Sources {
         answered: &answered,
         transactions: &transactions,
         display: input.display,
         language: input.language,
+        card_wording: input.card_wording,
         background: input.background,
-        transaction_data: if request.transaction_data().is_empty() {
-            TransactionData::Absent
-        } else {
-            TransactionData::Carried
-        },
+        transaction_data: TransactionData::of(&transactions),
     };
     let views = view::offer_views(&offers, &sources)?;
     // A request that is no nym_auth request has no `verifier_id`.
@@ -141,13 +120,13 @@ fn planned<'a>(input: &PlanInput<'a>) -> Result<Step<Planned<'a>>, PresentationE
         .map(|nym_auth| &nym_auth.session().verifier_id);
     let digest = PlanDigest::of(request, verifier_id, &views);
     let view = ConsentView::new(request.verifier(), digest, views, offers.unexamined());
-    Ok(Step::Done(Planned {
+    Ok(Planned {
         input: *input,
         nym_auth,
         answered,
         transactions,
         view,
-    }))
+    })
 }
 
 /// The candidates of each Credential Query of `input`'s request, over the credentials usable at
@@ -163,7 +142,7 @@ fn answered<'a>(
     policy: Result<(), RequestRefusal>,
 ) -> Result<Wallet<'a>, PresentationError> {
     let request = input.request;
-    let asked = Asked::new(request.dcql_query(), request.client_metadata());
+    let asked = Asked::of(request);
     let usable: Vec<UsableCredential<'a>> = input
         .credentials
         .iter()
@@ -194,20 +173,13 @@ fn answered<'a>(
 /// [`PresentationError`] when no offer remains:
 /// [`TransactionDataError::CredentialUnavailable`] when the queries the entries target have no
 /// candidate, else why the request has no offer.
-fn offers(
-    answered: &Wallet<'_>,
-    transactions: &Transactions<'_>,
-) -> Result<Offers, PresentationError> {
-    let offers = Offers::of(answered, |query, candidate| {
-        transactions.eligible(query, candidate)
-    });
-    if !offers.offers().is_empty() {
-        return Ok(offers);
-    }
-    if transactions.unavailable() {
-        return Err(TransactionDataError::CredentialUnavailable.into());
-    }
-    Err(answered.failure().into())
+fn offers(answered: &Wallet<'_>, transactions: &Transactions) -> Result<Offers, PresentationError> {
+    transactions
+        .offers(answered)
+        .map_err(|no_offer| match no_offer {
+            NoOffer::CredentialUnavailable => TransactionDataError::CredentialUnavailable.into(),
+            NoOffer::Unmatched(failure) => failure.into(),
+        })
 }
 
 impl<'a> Planned<'a> {

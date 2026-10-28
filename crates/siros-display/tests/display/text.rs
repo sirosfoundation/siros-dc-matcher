@@ -1,16 +1,23 @@
 //! The display text rule, as one table of refusals and the text it accepts.
 
-use siros_display::DisplayText;
+use siros_display::{DisplayText, LabelText};
 
 #[test]
 fn unsafe_or_over_long_text_is_refused() {
-    let label = |text: &str| DisplayText::label(text).map(|t| t.as_str().to_owned());
+    let label = |text: &str| LabelText::new(text).map(|t| t.as_str().to_owned());
     let value = |text: &str| DisplayText::value(text).map(|t| t.as_str().to_owned());
     let long = |n: usize, c: char| c.to_string().repeat(n);
     // (case, text, kind, the error code; `None` when the text is shown as given)
     type Kind = fn(&str) -> Result<String, siros_display::TextError>;
     let table: &[(&str, String, Kind, Option<&str>)] = &[
         ("letters and spaces", "Given Name".into(), label, None),
+        (
+            "a label of white space alone",
+            " \u{3000}".into(),
+            label,
+            Some("text_empty"),
+        ),
+        ("a value of white space alone", " ".into(), value, None),
         (
             "non-ASCII letters",
             "Straße 7, Zürich, 名前".into(),
@@ -134,4 +141,29 @@ fn unsafe_or_over_long_text_is_refused() {
             Some(code) => assert_eq!(got.map_err(|e| e.code()), Err(*code), "{case}"),
         }
     }
+}
+
+/// Display text refuses exactly the characters of the general categories Cc, Cf, Zl, Zp, Co and
+/// Cn, as `unicode-general-category` gives them, for every `char`.
+#[test]
+fn the_refused_characters_are_those_of_the_unsafe_categories() {
+    use unicode_general_category::{get_general_category, GeneralCategory};
+
+    let differing: Vec<char> = (0..=u32::from(char::MAX))
+        .filter_map(char::from_u32)
+        .filter(|&c| {
+            let category = matches!(
+                get_general_category(c),
+                GeneralCategory::Control
+                    | GeneralCategory::Format
+                    | GeneralCategory::LineSeparator
+                    | GeneralCategory::ParagraphSeparator
+                    | GeneralCategory::PrivateUse
+                    | GeneralCategory::Unassigned
+            );
+            let refused = DisplayText::value(c.encode_utf8(&mut [0; 4])).is_err();
+            category != refused
+        })
+        .collect();
+    assert!(differing.is_empty(), "{differing:?}");
 }

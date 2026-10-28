@@ -12,6 +12,7 @@ use siros_mdoc::{IssuerSignedItem, Mdoc};
 use siros_sdjwt::{Node, NodeValue};
 
 use crate::credential::{Body, Credential};
+use crate::tree::ClaimTree;
 use crate::usable::UsableCredential;
 use crate::value::{self, TypedValue};
 
@@ -71,6 +72,28 @@ fn element<'a>(mdoc: &'a Mdoc, path: &ClaimPath) -> Result<&'a Cbor, PathError> 
         .ok_or(PathError::Empty)
 }
 
+/// What claims path pointers select claims in: a stored credential, or its claim tree.
+pub trait ClaimSource {
+    /// The values of the claims `path` selects, in the order of their selection.
+    ///
+    /// # Errors
+    ///
+    /// [`PathError`] when the path does not fit the claims or selects nothing.
+    fn claims(&self, path: &ClaimPath) -> Result<Vec<TypedValue<'_>>, PathError>;
+}
+
+impl ClaimSource for Credential {
+    fn claims(&self, path: &ClaimPath) -> Result<Vec<TypedValue<'_>>, PathError> {
+        Credential::claims(self, path)
+    }
+}
+
+impl ClaimSource for ClaimTree {
+    fn claims(&self, path: &ClaimPath) -> Result<Vec<TypedValue<'_>>, PathError> {
+        ClaimTree::claims(self, path)
+    }
+}
+
 /// DCQL evaluation (OpenID4VP 1.0, Section 6.4) over the credential.
 ///
 /// [`claim`](siros_dcql::Credential::claim) gives each selected value as JSON for the
@@ -92,7 +115,7 @@ impl siros_dcql::Credential for Credential {
         Ok(self
             .select(path)?
             .into_iter()
-            .map(|found| json(found.typed()))
+            .map(|found| found.typed().to_json())
             .collect())
     }
 
@@ -124,23 +147,33 @@ impl siros_dcql::Credential for UsableCredential<'_> {
     }
 }
 
-/// `value` as JSON.
-fn json(value: TypedValue<'_>) -> Json {
-    match value {
-        TypedValue::Null => Json::Null,
-        TypedValue::Bool(b) => Json::Bool(b),
-        TypedValue::Integer(i) => integer(i),
-        TypedValue::Number(n) => Json::Number(n.clone()),
-        TypedValue::Text(t) => Json::String(t.to_owned()),
-        TypedValue::Bytes(b) => Json::String(base64url::encode(b).into()),
-        TypedValue::FullDate(d) => Json::String(d.to_string()),
-        TypedValue::DateTime(t) => Json::String(t.to_string()),
-        TypedValue::Array(a) => Json::Array(a.elements().map(json).collect()),
-        TypedValue::Object(o) => Json::Object(
-            o.members()
-                .map(|(name, value)| (name.to_owned(), json(value)))
-                .collect::<Map<String, Json>>(),
-        ),
+impl TypedValue<'_> {
+    /// The value as JSON, for the comparison with a claims query's `values` (OpenID4VP 1.0,
+    /// Section 6.3): a `full-date` as `"YYYY-MM-DD"`, a `tdate` as `"YYYY-MM-DDThh:mm:ssZ"`, a
+    /// byte string as its base64url text, as RFC 8949, Section 6.1 converts CBOR to JSON.
+    #[must_use]
+    pub fn to_json(self) -> Json {
+        match self {
+            TypedValue::Null => Json::Null,
+            TypedValue::Bool(b) => Json::Bool(b),
+            TypedValue::Integer(i) => integer(i),
+            TypedValue::Number(n) => Json::Number(n.clone()),
+            TypedValue::Text(t) => Json::String(t.to_owned()),
+            TypedValue::Bytes(b) => Json::String(base64url::encode(b).into()),
+            TypedValue::FullDate(d) => Json::String(d.to_string()),
+            TypedValue::DateTime(t) => Json::String(t.to_string()),
+            TypedValue::Array(a) => Json::Array(a.elements().map(TypedValue::to_json).collect()),
+            TypedValue::Object(o) => {
+                // Extended member by member: a map collected at once sorts first, which links a
+                // slice sort into the picker.
+                let mut members = Map::new();
+                members.extend(
+                    o.members()
+                        .map(|(name, value)| (name.to_owned(), value.to_json())),
+                );
+                Json::Object(members)
+            }
+        }
     }
 }
 

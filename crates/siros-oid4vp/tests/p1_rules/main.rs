@@ -17,7 +17,7 @@ use sha2::{Digest, Sha256};
 use siros_codec::member::MemberFault;
 use siros_oid4vp::{
     AttestationClaim, AttestationFault, ClaimsFault, Coordinate, EffectResult, FetchResponse,
-    IntakeError, IntakeState, JwkFault,
+    IntakeError, IntakeState, JwkFault, ParameterFault,
 };
 
 use requests::*;
@@ -234,7 +234,18 @@ fn fixtures() -> Vec<Fixture> {
                 x509_san_dns(DNS, &a, &a, payload)
             },
             answer: honest(Host::trusting()),
-            expect: Expect::Refused(IntakeError::NonceInvalid),
+            expect: Expect::Refused(IntakeError::Parameter(ParameterFault::NonceInvalid)),
+        },
+        // A redirect's state is of ASCII URL-safe characters.
+        Fixture {
+            rule: "a redirect's state is ASCII URL-safe",
+            state: {
+                let mut payload = redirect_payload(&x509);
+                payload["state"] = "a b".into();
+                x509_san_dns(DNS, &a, &a, payload)
+            },
+            answer: honest(Host::trusting()),
+            expect: Expect::Refused(IntakeError::Parameter(ParameterFault::StateInvalid)),
         },
         // The response mode belongs to the channel.
         Fixture {
@@ -245,13 +256,17 @@ fn fixtures() -> Vec<Fixture> {
                 x509_san_dns(DNS, &a, &a, payload)
             },
             answer: honest(Host::trusting()),
-            expect: Expect::Refused(IntakeError::ResponseModeUnsupported),
+            expect: Expect::Refused(IntakeError::Parameter(
+                ParameterFault::ResponseModeUnsupported,
+            )),
         },
         Fixture {
             rule: "the DC API uses dc_api or dc_api.jwt",
             state: unsigned_dc_api(|data| data["response_mode"] = "direct_post".into()),
             answer: honest(Host::trusting()),
-            expect: Expect::Refused(IntakeError::ResponseModeUnsupported),
+            expect: Expect::Refused(IntakeError::Parameter(
+                ParameterFault::ResponseModeUnsupported,
+            )),
         },
         // A redirect response has a response_uri.
         Fixture {
@@ -279,7 +294,9 @@ fn fixtures() -> Vec<Fixture> {
                 signed_dc_api(payload, ORIGIN)
             },
             answer: honest(Host::trusting()),
-            expect: Expect::Refused(IntakeError::ExpectedOriginsMissing),
+            expect: Expect::Refused(IntakeError::Parameter(
+                ParameterFault::ExpectedOriginsMissing,
+            )),
         },
         // An encrypted mode has a chosen key and enc.
         Fixture {

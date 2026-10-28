@@ -179,6 +179,7 @@ fn match_dc_api_request_reads_client_metadata_from_the_request() {
     let blob = nym_blob(&[("longfellow-libzk-v1", "urn:circuit:1", None)]);
     let request = |backends: &[&str]| {
         json!({"requests": [{"protocol": "openid4vp-v1-unsigned", "data": {
+            "response_type": "vp_token", "response_mode": "dc_api", "nonce": "n-1",
             "dcql_query": {"credentials": [zkp_req_query(age_req())]},
             "client_metadata": {"vp_formats_supported": {"zkp_req": {
                 "proof_backend_values": backends, "system_id_values": ["urn:circuit:1"]}}}

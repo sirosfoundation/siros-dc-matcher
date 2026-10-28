@@ -17,6 +17,11 @@ impl CredentialId {
     pub fn new(id: u64) -> Self {
         Self(id)
     }
+
+    /// The number.
+    pub fn value(self) -> u64 {
+        self.0
+    }
 }
 
 /// The decimal form, as JSON writes the number.
@@ -31,8 +36,14 @@ impl fmt::Display for CredentialId {
 pub struct BatchId(u64);
 
 impl BatchId {
-    pub(crate) fn new(id: u64) -> Self {
+    /// The identifier `id`, as the wallet state and a registration projection write it.
+    pub fn new(id: u64) -> Self {
         Self(id)
+    }
+
+    /// The number.
+    pub fn value(self) -> u64 {
+        self.0
     }
 }
 
@@ -41,8 +52,14 @@ impl BatchId {
 pub struct InstanceId(u64);
 
 impl InstanceId {
-    pub(crate) fn new(id: u64) -> Self {
+    /// The identifier `id`, as the wallet state and a registration projection write it.
+    pub fn new(id: u64) -> Self {
         Self(id)
+    }
+
+    /// The number.
+    pub fn value(self) -> u64 {
+        self.0
     }
 }
 

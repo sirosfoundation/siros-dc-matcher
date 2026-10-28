@@ -211,6 +211,14 @@ impl TypeMetadata {
         Ok(urls)
     }
 
+    /// The types the metadata lists, in its order. A member with an empty name lists no type an
+    /// entry names: an entry's `type` is never empty.
+    pub(crate) fn types(&self) -> impl Iterator<Item = TypeId> + '_ {
+        self.0
+            .iter()
+            .filter_map(|(name, _)| TypeId::parse(name).ok())
+    }
+
     /// The definition of `type_id` and the built-in schema its payloads follow, when the
     /// metadata lists the type.
     pub(crate) fn definition(

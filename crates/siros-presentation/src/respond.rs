@@ -8,7 +8,7 @@ mod selection;
 mod sign;
 
 pub use finish::Response;
-pub use picks::{Pick, PickError};
+pub use picks::PickError;
 pub use prepare::Prepared;
 pub use selection::{Chosen, Fulfilment, Selection, Subset, SubsetError};
 pub use sign::{Sign, SignId, SignatureError};

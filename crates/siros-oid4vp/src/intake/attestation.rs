@@ -7,11 +7,12 @@ use siros_codec::date::DateTime;
 use siros_codec::json::JsonTextError;
 use siros_codec::member::MemberFault;
 
-use super::signature::{by_request, strings, UriRule, Verifier};
+use super::signature::{by_request, UriRule, Verifier};
 use super::trust::{self, KeyMaterial, MetadataAnswer, TrustSubject};
 use super::{Answers, AttestationClaim, AttestationFault, ClaimsFault, Halt, IntakeError};
 use crate::client_id::ClientId;
 use crate::jose::{self, Signed};
+use crate::parameters::strings;
 use crate::values::AttestationIssuer;
 use crate::x509::Chain;
 

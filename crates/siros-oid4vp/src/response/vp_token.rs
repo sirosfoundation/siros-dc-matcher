@@ -9,7 +9,7 @@ use siros_dcql::{Multiplicity, QueryId};
 
 use super::ResponseError;
 use crate::error_code::ErrorCode;
-use crate::values::State;
+use crate::parameters::State;
 use crate::verified::VerifiedRequest;
 
 /// One presentation of a `vp_token`.

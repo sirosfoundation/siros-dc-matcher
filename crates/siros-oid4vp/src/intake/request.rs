@@ -4,19 +4,18 @@
 use serde_json::{Map, Value};
 use siros_dcql::DcqlQuery;
 
-use super::signature::{strings, Metadata, UriRule, Verifier};
+use super::signature::{UriRule, Verifier};
 use super::trust::Verdict;
-use super::{IntakeError, JwkFault, VerifierInfoRule};
+use super::{IntakeError, JwkFault};
 use crate::client_id::ClientId;
 use crate::fetch::HttpsUrl;
 use crate::handover::ec_jwk_thumbprint;
 use crate::jose;
+use crate::parameters::{self, Carrier, DcApiEncoding, Encoding, Metadata};
 use crate::protocol::Protocol;
-use crate::request::TransactionDataItem;
-use crate::values::{Kid, Nonce, Origin, State};
-use crate::verified::{
-    AttestationFormat, Channel, ContentEncryption, Encryption, PostEncoding, VerifiedRequest,
-};
+use crate::request::{TransactionDataInvalid, TransactionDataItem};
+use crate::values::{Kid, Origin};
+use crate::verified::{Channel, ContentEncryption, Encryption, PostEncoding, VerifiedRequest};
 
 /// The channel a request arrived on, and who sent it.
 pub(super) enum Arrival<'a> {
@@ -41,25 +40,12 @@ pub(super) fn verified(
     arrival: Arrival<'_>,
 ) -> Result<VerifiedRequest, IntakeError> {
     let text = |name: &str| params.get(name).and_then(Value::as_str);
-    // RFC 9101, Section 4: no Request Object nested in a Request Object.
-    if params.contains_key("request") || params.contains_key("request_uri") {
-        return Err(IntakeError::NestedRequest);
-    }
-    if text("response_type") != Some("vp_token") {
-        return Err(IntakeError::ResponseTypeUnsupported);
-    }
-    let nonce = text("nonce")
-        .and_then(Nonce::parse)
-        .ok_or(IntakeError::NonceInvalid)?;
-    let state = params
-        .get("state")
-        .map(|state| {
-            state
-                .as_str()
-                .and_then(State::parse)
-                .ok_or(IntakeError::StateInvalid)
-        })
-        .transpose()?;
+    let (carrier, state) = match &arrival {
+        Arrival::Redirect(_) => (Carrier::Redirect, parameters::state(params)?),
+        Arrival::DcApiSigned { .. } => (Carrier::SignedObject, None),
+        Arrival::DcApiUnsigned { .. } => (Carrier::UnsignedData, None),
+    };
+    let nonce = parameters::nonce(params, carrier)?;
     let mode = text("response_mode");
     let (target, trusted, certificate, metadata) = match arrival {
         Arrival::Redirect(verifier) => {
@@ -82,11 +68,7 @@ pub(super) fn verified(
             verifier,
         } => {
             let encoding = DcApiEncoding::of(mode)?;
-            let expected = params
-                .get("expected_origins")
-                .and_then(strings)
-                .filter(|origins| !origins.is_empty())
-                .ok_or(IntakeError::ExpectedOriginsMissing)?;
+            let expected = parameters::expected_origins(params)?;
             if !expected.iter().any(|o| o == origin.as_str()) {
                 return Err(IntakeError::OriginNotExpected);
             }
@@ -115,23 +97,12 @@ pub(super) fn verified(
         }
     };
     let (dcql_query, dcql_query_json) = dcql_query(params)?;
-    let verifier_info = verifier_info(params.get("verifier_info"), &dcql_query)?;
-    let client_metadata = match metadata {
-        Metadata::Request => match params.get("client_metadata") {
-            None => None,
-            Some(metadata @ Value::Object(_)) => Some(metadata.clone()),
-            Some(_) => return Err(IntakeError::ClientMetadataInvalid),
-        },
-        Metadata::TrustChain(metadata) => metadata,
-    };
+    let verifier_info = parameters::verifier_info(params.get("verifier_info"), &dcql_query)?;
+    let client_metadata = parameters::client_metadata(params, metadata)?;
     let transaction_data = match params.get("transaction_data") {
         None => Vec::new(),
-        Some(entries) => strings(entries)
-            .filter(|e| !e.is_empty())
-            .ok_or(IntakeError::TransactionDataInvalid)?
-            .into_iter()
-            .map(TransactionDataItem::new)
-            .collect(),
+        Some(entries) => TransactionDataItem::list(entries)
+            .map_err(|TransactionDataInvalid| IntakeError::TransactionDataInvalid)?,
     };
     let metadata = client_metadata.as_ref();
     let channel = match target {
@@ -194,45 +165,6 @@ enum Target<'a> {
     },
 }
 
-/// The body a redirect Response Mode names.
-enum Encoding {
-    Form,
-    Jwe,
-    Cose,
-}
-
-impl Encoding {
-    /// The body of the Response Mode `mode`: `direct_post`, `direct_post.jwt` or
-    /// `direct_post.cwt` (Section 8.2; `zkp_req.md`, Section 6.2).
-    fn of(mode: Option<&str>) -> Result<Self, IntakeError> {
-        match mode {
-            Some("direct_post") => Ok(Self::Form),
-            Some("direct_post.jwt") => Ok(Self::Jwe),
-            Some("direct_post.cwt") => Ok(Self::Cose),
-            _ => Err(IntakeError::ResponseModeUnsupported),
-        }
-    }
-}
-
-/// The `data` a DC API Response Mode names (A.2).
-enum DcApiEncoding {
-    /// `dc_api`: the response parameters.
-    Json,
-    /// `dc_api.jwt`: their JWE.
-    Jwe,
-}
-
-impl DcApiEncoding {
-    /// The `data` of the Response Mode `mode`: `dc_api` or `dc_api.jwt`.
-    fn of(mode: Option<&str>) -> Result<Self, IntakeError> {
-        match mode {
-            Some("dc_api") => Ok(Self::Json),
-            Some("dc_api.jwt") => Ok(Self::Jwe),
-            _ => Err(IntakeError::ResponseModeUnsupported),
-        }
-    }
-}
-
 /// The `response_uri` of a redirect request of `verifier` (Section 8.2).
 fn response_uri(params: &Map<String, Value>, verifier: &Verifier) -> Result<HttpsUrl, IntakeError> {
     if params.contains_key("redirect_uri") {
@@ -270,53 +202,6 @@ fn dcql_query(params: &Map<String, Value>) -> Result<(DcqlQuery, Value), IntakeE
             Ok((query, raw.clone()))
         }
     }
-}
-
-/// The `format` of each attestation of `verifier_info` (Section 5.1): a non-empty array of
-/// objects, each with a string `format`, a `data` object or string, and `credential_ids`, when
-/// present, a non-empty array of the ids of Credential Queries of `query`.
-fn verifier_info(
-    value: Option<&Value>,
-    query: &DcqlQuery,
-) -> Result<Vec<AttestationFormat>, IntakeError> {
-    let Some(value) = value else {
-        return Ok(Vec::new());
-    };
-    let attestations = value.as_array().ok_or(VerifierInfoRule::NotArray)?;
-    if attestations.is_empty() {
-        return Err(VerifierInfoRule::Empty.into());
-    }
-    attestations
-        .iter()
-        .map(|attestation| attestation_format(attestation, query).map_err(IntakeError::from))
-        .collect()
-}
-
-/// The `format` of the `verifier_info` attestation `attestation`.
-fn attestation_format(
-    attestation: &Value,
-    query: &DcqlQuery,
-) -> Result<AttestationFormat, VerifierInfoRule> {
-    let attestation = attestation.as_object().ok_or(VerifierInfoRule::NotObject)?;
-    let format = attestation
-        .get("format")
-        .and_then(Value::as_str)
-        .ok_or(VerifierInfoRule::Format)?;
-    if !attestation
-        .get("data")
-        .is_some_and(|data| data.is_object() || data.is_string())
-    {
-        return Err(VerifierInfoRule::Data);
-    }
-    if let Some(ids) = attestation.get("credential_ids") {
-        let ids = strings(ids)
-            .filter(|ids| !ids.is_empty())
-            .ok_or(VerifierInfoRule::CredentialIds)?;
-        if !ids.iter().all(|id| query.credential(id).is_some()) {
-            return Err(VerifierInfoRule::CredentialIdUnknown);
-        }
-    }
-    Ok(AttestationFormat(format.to_owned()))
 }
 
 /// The key and `enc` of an encrypted response, for a JWE and for a `COSE_Encrypt` alike

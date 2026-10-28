@@ -50,8 +50,7 @@ fn the_plan_offers_only_the_credentials_whose_issuer_the_query_admits() {
                 "claims": [{"path": [MDL_NS, "family_name"]}]}
         ]}
     }));
-    let fetches = wallet.fetches(&request);
-    let planned = ready(&wallet.input(&request, &fetches)).unwrap();
+    let planned = ready(&wallet.input(&request)).unwrap();
 
     let offers: Vec<Vec<(String, Vec<CredentialId>)>> = planned
         .view()
@@ -101,8 +100,7 @@ fn a_malformed_aki_value_refuses_the_request() {
             "credential_sets": [{"options": [["bad"], ["good"]]}]
         }
     }));
-    let fetches = wallet.fetches(&request);
-    let error = ready(&wallet.input(&request, &fetches))
+    let error = ready(&wallet.input(&request))
         .map(drop)
         .expect_err("an invalid Credential Query refuses the request");
     assert!(

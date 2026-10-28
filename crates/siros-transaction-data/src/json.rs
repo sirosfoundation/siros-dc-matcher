@@ -144,11 +144,17 @@ pub(crate) fn canonical(value: &Json) -> Json {
 
 /// `members` in the order of RFC 8785, Section 3.2.3, the members of their values too.
 pub(crate) fn canonical_members(members: &[(String, Json)]) -> Vec<(String, Json)> {
-    let mut sorted: Vec<(String, Json)> = members
-        .iter()
-        .map(|(name, value)| (name.clone(), canonical(value)))
-        .collect();
-    sorted.sort_by(|(a, _), (b, _)| a.encode_utf16().cmp(b.encode_utf16()));
+    // An allocation that fails aborts: the members already fit in memory, and a wallet that
+    // cannot hold their copy has nothing to fall back to.
+    let mut sorted: Vec<(String, Json)> = Vec::with_capacity(members.len());
+    for (name, value) in members {
+        // After the members that sort before or equal to it: equal names keep their order.
+        let at = sorted.partition_point(|(other, _)| {
+            other.encode_utf16().cmp(name.encode_utf16()) != std::cmp::Ordering::Greater
+        });
+        // `Vec::insert` panics past the end; `partition_point` gives a position up to it.
+        sorted.insert(at, (name.clone(), canonical(value)));
+    }
     sorted
 }
 

@@ -27,8 +27,6 @@ wallet = [
 [dependencies]
 p256 = { version = "0.13.2", default-features = false, features = ["ecdsa", "alloc"], optional = true }
 p384 = { version = "0.13.1", default-features = false, features = ["ecdsa", "alloc"], optional = true }
-# SVG documents, read for their size and the URLs they reference.
-roxmltree = "0.20.0"
 rustc-hash = { workspace = true }
 serde = { workspace = true }
 # `raw_value` gives each JSON value as its text, which keeps numbers as the verifier wrote them.
@@ -41,10 +39,11 @@ siros-display = { workspace = true }
 siros-oid4vp = { workspace = true }
 siros-trust = { workspace = true, features = ["chain"], optional = true }
 siros-wallet-state = { workspace = true, optional = true }
-# Label lengths in extended grapheme clusters (UAX #29). 1.13 needs Rust 1.85.
-unicode-segmentation = "~1.12.0"
+thiserror = { workspace = true }
 
 [dev-dependencies]
+# The oracle of the grapheme cluster count, of the same Unicode version as its table.
+unicode-segmentation = "~1.12.0"
 # The TS12 schemas as the oracle of the payload parsers. Only the validator: no remote
 # references, no TLS.
 jsonschema = { version = "0.42.0", default-features = false }

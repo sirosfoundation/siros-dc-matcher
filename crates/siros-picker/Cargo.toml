@@ -1,0 +1,26 @@
+[package]
+name = "siros-picker"
+version = "0.1.0"
+description = "The SIROS credential picker: the matcher Android Credential Manager runs over the wallet's registration"
+publish = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "matcher"
+path = "src/main.rs"
+
+[dependencies]
+android-credman = { workspace = true }
+siros-credential = { workspace = true }
+siros-dcql = { workspace = true }
+siros-display = { workspace = true }
+siros-oid4vp = { workspace = true }
+siros-presentation = { workspace = true }
+siros-registration = { workspace = true }
+siros-transaction-data = { workspace = true }
+siros-wallet-state = { workspace = true }
+siros-zkp-req-nym-auth = { workspace = true }

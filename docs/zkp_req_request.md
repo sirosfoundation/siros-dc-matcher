@@ -67,9 +67,10 @@ the Longfellow and Vega systems need a `pseudonym` item with `known-offender-mat
 `sha-256`, and E and C from 0000-01-01 to 9999-12-31. When no option has a usable pair, the Wallet
 sends `vp_formats_not_supported`.
 
-The matcher reads a registered circuit as a system: its `system_id` param is the system, its
-`system` the proof backend, and its `capabilities` (or `functions` and `credential_type`) say what
-it supports.
+The picker reads the systems the registration names, the nym_auth systems whose circuits the
+wallet loaded, in its order of preference. The FFI matching reads a registered circuit as a
+system: its `system_id` param is the system, its `system` the proof backend, and its
+`capabilities` (or `functions` and `credential_type`) say what it supports.
 
 ## Non-disclosure
 

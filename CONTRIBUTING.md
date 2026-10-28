@@ -11,9 +11,9 @@ language and of the Android Credential Manager matcher ABI. It is licensed
 BSD-2-Clause, except `crates/android-credman-sys` and `crates/android-credman`:
 MIT OR Apache-2.0, used here under MIT.
 
-The OpenWallet Foundation's [Multipaz](https://github.com/openwallet-foundation-labs/multipaz)
+The OpenWallet Foundation's [Multipaz](https://github.com/openwallet-foundation/multipaz)
 project ships an Apache-2.0 credential matcher that solves the same problem
-(`multipaz-dcapi/src/androidMain/matcher/`). We use it as a **conformance
+(`multipaz-dcapi-credman/src/androidMain/matcher/`). We use it as a **conformance
 oracle** and nothing else.
 
 This is not a formal clean-room procedure. Clean-room exists for
@@ -55,15 +55,14 @@ carried over line by line, or comments.
 Every non-obvious matching rule carries a doc comment naming the section it
 comes from — `OpenID4VP 1.0 §6.4.2`, `ISO/IEC 18013-7`, `W3C Digital
 Credentials API`. A rule you cannot cite is a rule you should not be writing
-yet: either it belongs to the configurable match profile rather than the engine,
-or you have not finished reading.
+yet: you have not finished reading.
 
 Reviewers: treat an uncited behavioural rule as a review comment, and a
 structural resemblance to the oracle as a blocker.
 
 ## Development
 
-[README.md](README.md#build-and-test) gives the commands CI runs.
+The [README's build section](README.md#build-and-test) lists what CI checks, in both workspaces.
 
 `proving/` is a second workspace: the proof backends, which depend on edition-2024 crates that
 Cargo 1.82 cannot read, and the browser presenter that links them. Run its commands from there.
@@ -73,11 +72,11 @@ crate in this workspace. CI enforces this with `cargo publish --dry-run`; please
 do not work around it.
 
 Rust 1.82 is the floor of every crate in the root workspace except `siros-dc-matcher-ffi` and
-`-testhost`. The MSRV job checks them on 1.82: `siros-presentation` without its `wallet` feature,
-`siros-transaction-data` and `siros-trust` with and without their `wallet` and `chain` features,
-and the matcher and the host ABI crates for `wasm32-wasip1` as well.
+`siros-picker-testhost`. The MSRV job checks them on 1.82: `siros-presentation` without its
+`wallet` feature, `siros-transaction-data` and `siros-trust` with and without their `wallet` and
+`chain` features, and the picker and the host ABI crates for `wasm32-wasip1` as well.
 
-`siros-dc-matcher-ffi` and `-testhost` declare 1.88 in their own manifests —
+`siros-dc-matcher-ffi` and `siros-picker-testhost` declare 1.88 in their own manifests —
 uniffi's bindgen chain and wasmtime need it — and neither ships in the picker.
 The `proving/` workspace holds 1.95. If you raise a floor, raise it in the manifest that owns it and say
 why there.

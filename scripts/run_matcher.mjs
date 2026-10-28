@@ -4,8 +4,12 @@
 //   node scripts/run_matcher.mjs                       # built-in signed request
 //   node scripts/run_matcher.mjs path/to/request.json  # one you captured
 //
+// The registration is a sample wallet's, which siros-registration's example
+// `sample_registration` writes to target/sample-registration.cbor on the first
+// run: one mDL holding `age_over_18` and `family_name`, diagnostics shown.
+//
 // Why this exists: the Rust integration tests in
-// crates/siros-dc-matcher-testhost cover the same ground and are what CI runs.
+// crates/siros-picker-testhost cover the same ground and are what CI runs.
 // This is for the other situation — a request captured off a real verifier that
 // produces no picker entry, where the question is "what does the binary
 // actually do with these bytes", and the answer needs to arrive in seconds
@@ -16,13 +20,15 @@
 // behaviours that have cost the most time — a null icon dropping the entry, and
 // a duplicate set id discarding the whole output — so it reports both instead.
 
+import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, extname, join, resolve } from 'node:path';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const WASM = join(root, 'target/wasm32-wasip1/wasm-release/matcher.wasm');
-const BLOB = join(root, 'crates/siros-dc-matcher-core/tests/golden/credential_database_v1.cbor');
+const REGISTRATION = join(root, 'target/sample-registration.cbor');
 
 const b64url = (s) => Buffer.from(s, 'utf8').toString('base64url');
 
@@ -89,7 +95,15 @@ if (requestArgument) {
 }
 const requestText = requestPath ? await readFile(requestPath, 'utf8') : defaultRequest();
 const request = Buffer.from(requestText, 'utf8');
-const credentials = await readFile(BLOB);
+if (!existsSync(REGISTRATION)) {
+  const cargo = spawnSync('cargo', ['run', '--locked', '-q', '-p', 'siros-registration', '--features', 'wallet',
+    '--example', 'sample_registration', '--', REGISTRATION], { cwd: root, stdio: 'inherit' });
+  if (cargo.status !== 0) {
+    console.error('run_matcher: the sample registration could not be written');
+    process.exit(1);
+  }
+}
+const credentials = await readFile(REGISTRATION);
 
 let memory;
 const str = (ptr) => {
@@ -116,6 +130,7 @@ const u32 = (ptr, value) => new DataView(memory.buffer).setUint32(ptr, value, tr
 const sets = [];
 const entries = [];
 const fields = [];
+const payments = [];
 let nullIcons = 0;
 
 const credman = {
@@ -155,6 +170,17 @@ const credman_v2 = {
   },
   AddFieldToEntrySet: (credId, name, value, setId, index) =>
     fields.push({ setId: str(setId), index, credentialId: str(credId), name: str(name), value: str(value) }),
+  // A payment entry: payee, amount and, from level 3, `additional_info` (ABI.md).
+  AddPaymentEntryToSet(...args) {
+    const [credId, merchant, , , , , amount, , , , , metadata, setId, index] = args;
+    payments.push({ setId: str(setId), index, credentialId: str(credId), merchant: str(merchant),
+      amount: str(amount), info: null, metadata: str(metadata) });
+  },
+  AddPaymentEntryToSetV2(...args) {
+    const [credId, merchant, , , , , amount, , , , , info, metadata, setId, index] = args;
+    payments.push({ setId: str(setId), index, credentialId: str(credId), merchant: str(merchant),
+      amount: str(amount), info: str(info), metadata: str(metadata) });
+  },
 };
 
 // The host's WASI is a subset, and the shipped binary imports two of it:
@@ -247,11 +273,10 @@ if (imports.wasi_snapshot_preview1?.some((n) => n.startsWith('environ_'))) {
   console.log('\nNote: environ_* present — this is a plain `cargo build` output.');
   console.log('      Run `make matcher` for the stripped artifact that ships.');
 }
-console.log(`blob:    ${credentials.length} bytes\n`);
+console.log(`registration: ${credentials.length} bytes\n`);
 
 if (sets.length === 0) {
-  console.log('No entries. That is what an unsatisfiable request looks like too — turn');
-  console.log('profile.debug on in the registered blob to get the reason as an entry.');
+  console.log('No entries: the registration could not be read, or the host level is below 2.');
 } else {
   for (const set of sets) {
     console.log(`set ${set.id} (declared length ${set.length})`);
@@ -262,6 +287,11 @@ if (sets.length === 0) {
       for (const f of fields.filter((f) => f.setId === set.id && f.index === e.index)) {
         console.log(`       field: ${f.name} = ${f.value}`);
       }
+    }
+    for (const p of payments.filter((p) => p.setId === set.id)) {
+      console.log(`  [${p.index}] ${p.credentialId} — payment to ${p.merchant}: ${p.amount}`);
+      if (p.info !== null) console.log(`       additional info: ${p.info}`);
+      console.log(`       metadata: ${p.metadata}`);
     }
   }
 }

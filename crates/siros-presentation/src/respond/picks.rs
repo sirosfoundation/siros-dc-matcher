@@ -5,33 +5,16 @@ use siros_dcql::{Multiplicity, QueryId};
 use siros_wallet_state::CredentialId;
 
 use super::selection::{Selection, Subset};
-use crate::error::{Inconsistency, PresentationError};
+use crate::error::PresentationError;
 use crate::ids::{AdditionIndex, OfferIndex, QueryIndex};
-use crate::offers::{Addition, Member};
+use crate::inconsistency::Inconsistency;
+use crate::offers::{Addition, Member, Offer};
+use crate::pick::Pick;
 use crate::plan::Planned;
 
-/// A credential picker entry the user picked, by the ids its metadata carries (K3).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Pick {
-    offer: OfferIndex,
-    query: QueryId,
-    credential: CredentialId,
-}
-
-impl Pick {
-    /// The entry of the credential `credential` answering the Credential Query `query` in the
-    /// offer `offer`.
-    pub fn new(offer: OfferIndex, query: QueryId, credential: CredentialId) -> Self {
-        Self {
-            offer,
-            query,
-            credential,
-        }
-    }
-}
-
 /// Why the picked entries make no selection (K3).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum PickError {
     /// The user picked no entry.
     Empty,
@@ -59,6 +42,12 @@ pub enum PickError {
     /// No additions of the offer, at most one per optional set, answer exactly the picked
     /// queries the offer's members leave.
     Additions,
+    /// No offer of the plan holds the picks: each of its members picked, each pick a credential
+    /// of a member or of its additions. Each offer, with why it does not.
+    Unmatched(Vec<(OfferIndex, PickError)>),
+    /// These offers of the plan each hold the picks: by their members alone, or, when no
+    /// offer's members alone hold them, through their additions.
+    Ambiguous(Vec<OfferIndex>),
 }
 
 impl PickError {
@@ -72,13 +61,11 @@ impl PickError {
             Self::Credential { .. } => "pick_credential_unknown",
             Self::Missing(_) => "pick_member_missing",
             Self::Additions => "pick_additions",
+            Self::Unmatched(_) => "pick_unmatched",
+            Self::Ambiguous(_) => "pick_ambiguous",
         }
     }
 }
-
-siros_codec::display_code!(PickError);
-
-impl std::error::Error for PickError {}
 
 /// The credentials the picks name for one Credential Query, in the order of the picks.
 struct Picked {
@@ -101,19 +88,22 @@ impl Picked {
 }
 
 impl Planned<'_> {
-    /// The selection the user made by picking `picks` (K3): the offer they name, with the
-    /// additions whose members they name, and for each `multiple` member the picked
-    /// credentials.
+    /// The selection the user made by picking `picks` (K3): the one offer of the plan that
+    /// holds them, with the additions whose members they name, and for each `multiple` member
+    /// the picked credentials. The picks hold their Credential Queries and `credentialId`s;
+    /// the offer they name is the picker's, which numbers offers the wallet leaves out under a
+    /// K2 exception, so the plan's offer is the one that holds them. The picker shows an
+    /// offer's members, and the plan holds one offer per set of members: the offer whose
+    /// members alone hold the picks is selected first, and an offer through its additions
+    /// only when no offer's members alone hold them.
     ///
     /// When several combinations of additions answer the picked queries, the first in the
     /// offer's order is chosen: each presents the picked credentials.
     ///
     /// # Errors
     ///
-    /// [`PresentationError::Pick`]: no pick; picks of two offers; a pick repeated; a pick no
-    /// member of the offer or of its additions holds; an offer member without a pick; or picked
-    /// queries no combination of additions answers. [`PresentationError::OfferUnknown`] for an
-    /// offer the plan lacks.
+    /// [`PresentationError::Pick`]: no pick; picks of two of the picker's offers; a pick
+    /// repeated or of a query the request lacks; no offer that holds the picks, or several.
     pub fn picked(&self, picks: &[Pick]) -> Result<Selection, PresentationError> {
         let first = picks.first().ok_or(PickError::Empty)?;
         if let Some(other) = picks.iter().find(|pick| pick.offer != first.offer) {
@@ -130,13 +120,43 @@ impl Planned<'_> {
             }
             .into());
         }
-        let offer = self
-            .view
-            .offers()
-            .get(first.offer.value())
-            .ok_or(PresentationError::OfferUnknown(first.offer))?
-            .offer();
         let picked = self.by_query(picks)?;
+        let (mut alone, mut through, mut unheld) = (Vec::new(), Vec::new(), Vec::new());
+        for (at, view) in self.view.offers().iter().enumerate() {
+            let at = OfferIndex::new(at);
+            let members = view.offer().members();
+            let by_members = picked
+                .iter()
+                .all(|picked| members.iter().any(|member| member.query() == picked.query));
+            match self.held_by(at, view.offer(), &picked) {
+                Ok(selection) if by_members => alone.push(selection),
+                Ok(selection) => through.push(selection),
+                Err(PresentationError::Pick(why)) => unheld.push((at, why)),
+                Err(error) => return Err(error),
+            }
+        }
+        let held = if alone.is_empty() { through } else { alone };
+        match <[Selection; 1]>::try_from(held) {
+            Ok([selection]) => Ok(selection),
+            Err(held) if held.is_empty() => Err(PickError::Unmatched(unheld).into()),
+            Err(held) => {
+                Err(PickError::Ambiguous(held.iter().map(Selection::offer).collect()).into())
+            }
+        }
+    }
+
+    /// The selection of `offer`, the plan's offer at `at`, that `picked` makes.
+    ///
+    /// # Errors
+    ///
+    /// [`PresentationError::Pick`]: a pick no member of the offer or of its additions holds;
+    /// an offer member without a pick; or picked queries no combination of additions answers.
+    fn held_by(
+        &self,
+        at: OfferIndex,
+        offer: &Offer,
+        picked: &[Picked],
+    ) -> Result<Selection, PresentationError> {
         let mut subsets = Vec::new();
         for member in offer.members() {
             let named = match picked.iter().find(|picked| picked.query == member.query()) {
@@ -170,12 +190,7 @@ impl Planned<'_> {
         queries.sort_unstable();
         let mut chosen = cover(&fitting, &queries).ok_or(PickError::Additions)?;
         chosen.sort_unstable();
-        Ok(Selection::new(
-            *self.view.digest(),
-            first.offer,
-            chosen,
-            subsets,
-        ))
+        Ok(Selection::new(*self.view.digest(), at, chosen, subsets))
     }
 
     /// The picks of `picks` grouped by Credential Query, in the order of their first pick.

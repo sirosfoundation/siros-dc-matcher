@@ -10,10 +10,13 @@ use siros_dcql::QueryError;
 
 use crate::client_id::ClientIdError;
 use crate::error_code::ErrorCode;
+use crate::jws_rules::JwsRule;
+use crate::parameters::ParameterFault;
 
 /// A rule of OpenID4VP 1.0 (or of RFC 9101, RFC 7515, RFC 5280) that a request breaks, or a
 /// host answer that does not fit the effect it answers.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum IntakeError {
     /// The authorization request URI has no query of form-encoded parameters, each once.
     NotAnAuthorizationRequest(FormFault),
@@ -46,14 +49,12 @@ pub enum IntakeError {
     SignatureInvalid,
     /// The Request Object is not a JSON object.
     RequestObjectNotObject,
-    /// The Request Object holds `request` or `request_uri` (RFC 9101, Section 4).
-    NestedRequest,
     /// The `client_id` parameter and the Request Object's `client_id` differ (Section 5.10.1).
     ClientIdMismatch,
     /// The Request Object does not echo the `wallet_nonce` the wallet posted (Section 5.10.1).
     WalletNonceMismatch,
     /// The `client_id` is not one this wallet supports (Section 5.9).
-    ClientId(ClientIdError),
+    ClientId(#[source] ClientIdError),
     /// A signed request uses the `redirect_uri` prefix (Section 5.9.3).
     SignedRedirectUri,
     /// An unsigned request uses a prefix other than `redirect_uri` (Section 5.9.3).
@@ -82,27 +83,17 @@ pub enum IntakeError {
     RedirectUriNotAttested,
     /// An `openid4vp-v1-multisigned` payload holds `client_id` (A.3.2.2).
     ClientIdInPayload,
+    /// An `openid4vp-v1-multisigned` payload holds `verifier_info`, which travels in each
+    /// signature's protected header (A.3.2.2).
+    VerifierInfoInPayload,
     /// No signature of an `openid4vp-v1-multisigned` request verifies.
     NoVerifiableSignature,
     /// The DC API request has no entry this wallet reads.
     EnvelopeUnreadable,
     /// The DC API request is no JSON text.
-    EnvelopeNotJson(JsonTextError),
-    /// A signed DC API request has no non-empty `expected_origins` of strings (A.2).
-    ExpectedOriginsMissing,
+    EnvelopeNotJson(#[source] JsonTextError),
     /// The calling origin is not in `expected_origins` (A.2).
     OriginNotExpected,
-    /// `response_type` is not `vp_token` (Section 5.6).
-    ResponseTypeUnsupported,
-    /// `nonce` is missing, empty, or holds a character other than ASCII URL-safe ones
-    /// (Section 5.2).
-    NonceInvalid,
-    /// `state` holds a character other than ASCII URL-safe ones (Section 5.2).
-    StateInvalid,
-    /// `response_mode` is missing, unknown, or of the other channel: `direct_post`,
-    /// `direct_post.jwt` and `direct_post.cwt` over redirects, `dc_api` and `dc_api.jwt` over
-    /// the DC API.
-    ResponseModeUnsupported,
     /// A `direct_post` request has no `response_uri` (Section 8.2).
     ResponseUriMissing,
     /// `response_uri` is not an `https` URL (H1).
@@ -121,15 +112,13 @@ pub enum IntakeError {
     /// The request has no `dcql_query` (Section 5.1).
     DcqlQueryMissing,
     /// A parameter of a form-encoded request is no JSON text (Section 5.1).
-    ParameterNotJson(JsonParameter, JsonTextError),
+    ParameterNotJson(JsonParameter, #[source] JsonTextError),
     /// `dcql_query` is no DCQL query `siros-dcql` accepts.
-    DcqlQueryInvalid(QueryError),
-    /// `client_metadata` is not a JSON object.
-    ClientMetadataInvalid,
+    DcqlQueryInvalid(#[source] QueryError),
     /// `transaction_data` is not a non-empty array of strings (Section 5.1).
     TransactionDataInvalid,
-    /// `verifier_info` breaks a rule of Section 5.1.
-    VerifierInfo(VerifierInfoRule),
+    /// A parameter breaks a rule that needs no key: the rule.
+    Parameter(#[source] ParameterFault),
     /// An encrypted Response Mode, and no key of `jwks` is a P-256 `ECDH-ES` encryption key.
     EncryptionKeyMissing,
     /// No key of `jwks` is a usable P-256 `ECDH-ES` encryption key, and the first that names
@@ -312,41 +301,6 @@ impl JsonParameter {
     }
 }
 
-/// A rule of `verifier_info` (Section 5.1) that a request breaks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum VerifierInfoRule {
-    /// `verifier_info` is not an array.
-    NotArray,
-    /// The array is empty.
-    Empty,
-    /// An attestation is not a JSON object.
-    NotObject,
-    /// An attestation has no string `format`.
-    Format,
-    /// An attestation's `data` is neither an object nor a string.
-    Data,
-    /// An attestation's `credential_ids` is not a non-empty array of strings.
-    CredentialIds,
-    /// An attestation's `credential_ids` names no Credential Query of `dcql_query`.
-    CredentialIdUnknown,
-}
-
-impl VerifierInfoRule {
-    /// A stable identifier.
-    #[must_use]
-    pub fn code(self) -> &'static str {
-        match self {
-            Self::NotArray => "verifier_info_not_array",
-            Self::Empty => "verifier_info_empty",
-            Self::NotObject => "verifier_info_not_object",
-            Self::Format => "verifier_info_format",
-            Self::Data => "verifier_info_data",
-            Self::CredentialIds => "verifier_info_credential_ids",
-            Self::CredentialIdUnknown => "verifier_info_credential_id_unknown",
-        }
-    }
-}
-
 impl IntakeError {
     /// A stable identifier.
     #[must_use]
@@ -367,7 +321,6 @@ impl IntakeError {
             Self::TypMismatch => "typ_mismatch",
             Self::SignatureInvalid => "signature_invalid",
             Self::RequestObjectNotObject => "request_object_not_object",
-            Self::NestedRequest => "nested_request",
             Self::ClientIdMismatch => "client_id_mismatch",
             Self::WalletNonceMismatch => "wallet_nonce_mismatch",
             Self::ClientId(e) => e.code(),
@@ -385,14 +338,10 @@ impl IntakeError {
             Self::AttestationSignatureInvalid => "attestation_signature_invalid",
             Self::RedirectUriNotAttested => "redirect_uri_not_attested",
             Self::ClientIdInPayload => "client_id_in_payload",
+            Self::VerifierInfoInPayload => "verifier_info_in_payload",
             Self::NoVerifiableSignature => "no_verifiable_signature",
             Self::EnvelopeUnreadable | Self::EnvelopeNotJson(_) => "envelope_unreadable",
-            Self::ExpectedOriginsMissing => "expected_origins_missing",
             Self::OriginNotExpected => "origin_not_expected",
-            Self::ResponseTypeUnsupported => "response_type_unsupported",
-            Self::NonceInvalid => "nonce_invalid",
-            Self::StateInvalid => "state_invalid",
-            Self::ResponseModeUnsupported => "response_mode_unsupported",
             Self::ResponseUriMissing => "response_uri_missing",
             Self::ResponseUriNotHttps => "response_uri_not_https",
             Self::RedirectUriWithDirectPost => "redirect_uri_with_direct_post",
@@ -403,9 +352,8 @@ impl IntakeError {
             Self::DcqlQueryMissing => "dcql_query_missing",
             Self::ParameterNotJson(parameter, _) => parameter.code(),
             Self::DcqlQueryInvalid(_) => "dcql_query_invalid",
-            Self::ClientMetadataInvalid => "client_metadata_invalid",
             Self::TransactionDataInvalid => "transaction_data_invalid",
-            Self::VerifierInfo(rule) => rule.code(),
+            Self::Parameter(fault) => fault.code(),
             Self::EncryptionKeyMissing => "encryption_key_missing",
             Self::EncryptionKeyInvalid(_) => "encryption_key_invalid",
             Self::EncryptionUnsupported => "encryption_unsupported",
@@ -435,7 +383,6 @@ impl IntakeError {
             | Self::TypMismatch
             | Self::SignatureInvalid
             | Self::RequestObjectNotObject
-            | Self::NestedRequest
             | Self::ClientIdMismatch
             | Self::WalletNonceMismatch
             | Self::ClientId(_)
@@ -453,15 +400,11 @@ impl IntakeError {
             | Self::AttestationSignatureInvalid
             | Self::RedirectUriNotAttested
             | Self::ClientIdInPayload
+            | Self::VerifierInfoInPayload
             | Self::NoVerifiableSignature
             | Self::EnvelopeUnreadable
             | Self::EnvelopeNotJson(_)
-            | Self::ExpectedOriginsMissing
             | Self::OriginNotExpected
-            | Self::ResponseTypeUnsupported
-            | Self::NonceInvalid
-            | Self::StateInvalid
-            | Self::ResponseModeUnsupported
             | Self::ResponseUriMissing
             | Self::ResponseUriNotHttps
             | Self::RedirectUriWithDirectPost
@@ -471,9 +414,8 @@ impl IntakeError {
             | Self::DcqlQueryMissing
             | Self::ParameterNotJson(..)
             | Self::DcqlQueryInvalid(_)
-            | Self::ClientMetadataInvalid
             | Self::TransactionDataInvalid
-            | Self::VerifierInfo(_)
+            | Self::Parameter(_)
             | Self::EncryptionKeyMissing
             | Self::EncryptionKeyInvalid(_)
             | Self::EncryptionUnsupported
@@ -500,20 +442,26 @@ impl From<JwsError> for IntakeError {
     }
 }
 
-impl From<VerifierInfoRule> for IntakeError {
-    fn from(rule: VerifierInfoRule) -> Self {
-        Self::VerifierInfo(rule)
+impl From<JwsRule> for JwsError {
+    fn from(rule: JwsRule) -> Self {
+        match rule {
+            JwsRule::Serialization => Self::Malformed(JwsFault::Serialization),
+            JwsRule::Header => Self::Malformed(JwsFault::Header),
+            JwsRule::Signature => Self::Malformed(JwsFault::Signature),
+            JwsRule::Algorithm => Self::AlgorithmUnsupported,
+            JwsRule::Critical => Self::CriticalHeader,
+        }
     }
 }
 
-siros_codec::display_code!(IntakeError);
+impl From<JwsRule> for IntakeError {
+    fn from(rule: JwsRule) -> Self {
+        JwsError::from(rule).into()
+    }
+}
 
-impl std::error::Error for IntakeError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::ParameterNotJson(_, error) => Some(error),
-            Self::DcqlQueryInvalid(error) => Some(error),
-            _ => None,
-        }
+impl From<ParameterFault> for IntakeError {
+    fn from(fault: ParameterFault) -> Self {
+        Self::Parameter(fault)
     }
 }

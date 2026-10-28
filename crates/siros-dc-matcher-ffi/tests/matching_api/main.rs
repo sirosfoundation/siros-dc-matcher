@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 
 use serde_json::json;
+use siros_codec::base64url;
 use siros_dc_matcher_core::fixtures;
 use siros_dc_matcher_core::profile::Capability;
 use siros_dc_matcher_ffi::matching::{match_dc_api_request, match_dcql, MatchError};
@@ -133,7 +134,9 @@ fn the_envelope_selects_a_supported_protocol() {
     let blob = wallet(None);
     let request = json!({"requests": [
         {"protocol": "some-future-thing", "data": {}},
-        {"protocol": "openid4vp-v1-unsigned", "data": {"dcql_query":
+        {"protocol": "openid4vp-v1-unsigned", "data": {
+            "response_type": "vp_token", "response_mode": "dc_api", "nonce": "n-1",
+            "dcql_query":
             serde_json::from_str::<serde_json::Value>(
                 &dcql("mso_mdoc", age_claim(), json!({"doctype_value": "org.iso.18013.5.1.mDL"}))
             ).expect("query")}}
@@ -154,8 +157,11 @@ fn the_envelope_selects_a_supported_protocol() {
 #[test]
 fn a_malformed_request_under_a_supported_protocol_is_a_request_error() {
     let blob = wallet(None);
+    // A header and a signature the picker reads, around a payload that is no base64url.
+    let header = base64url::encode(br#"{"alg":"ES256","typ":"oauth-authz-req+jwt"}"#);
+    let jws = format!("{header}.@@@@.{}", base64url::encode(&[7; 64]));
     let request = json!({"requests": [
-        {"protocol": "openid4vp-v1-signed", "data": {"request": "aGVhZGVy.@@@@.c2ln"}}
+        {"protocol": "openid4vp-v1-signed", "data": {"request": jws}}
     ]})
     .to_string();
 

@@ -10,7 +10,8 @@
 //!   calls.
 //! - [`Host::entry_sets`] sends [`EntrySet`]s from level 2. Each entry
 //!   option is sent when the host reaches its level, and the standard
-//!   metadata object tells the wallet whether text was left out.
+//!   metadata object tells the wallet whether text was left out; the wallet
+//!   reads it back with [`Picked::parse`].
 //! - `None` reaches the host as NULL and hides the element; `Some` of an
 //!   empty string shows it blank.
 //! - The caller keeps two set rules: declare a set id once per invocation,
@@ -30,6 +31,7 @@ mod entry;
 mod host;
 #[cfg(target_arch = "wasm32")]
 mod levels;
+mod picked;
 #[cfg(target_arch = "wasm32")]
 mod reader;
 mod set;
@@ -51,6 +53,7 @@ pub use levels::{
     Credman, Credman2, Credman3, Credman4, Credman5, Credman6, Credman7, EntryKey, Level, V1, V2,
     V3, V4, V5, V6, V7,
 };
+pub use picked::{Picked, PickedError, PickedMember, Shown};
 #[cfg(target_arch = "wasm32")]
 pub use reader::CredentialReader;
 pub use set::{AnyEntry, EntryKind, EntrySet, Payment, SetEntry, SetSink, Slot};

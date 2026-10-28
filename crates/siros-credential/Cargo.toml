@@ -23,6 +23,7 @@ siros-mdoc = { workspace = true }
 siros-sdjwt = { workspace = true }
 siros-trust = { workspace = true, optional = true }
 siros-wallet-state = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 siros-credential = { path = ".", features = ["chain"] }

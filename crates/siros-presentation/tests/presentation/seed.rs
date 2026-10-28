@@ -33,8 +33,7 @@ fn refusal(value: Value) -> PresentationError {
         "client_metadata": client_metadata(),
         "dcql_query": {"credentials": [query(Some("18+"), true)]}
     }));
-    let fetches = wallet.fetches(&request);
-    match ready(&wallet.input(&request, &fetches)) {
+    match ready(&wallet.input(&request)) {
         Ok(_) => panic!("an offer for {value}"),
         Err(refusal) => refusal,
     }

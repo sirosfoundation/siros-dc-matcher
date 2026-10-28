@@ -1,7 +1,7 @@
 [package]
 name = "siros-dc-matcher-core"
 version = "0.11.0"
-description = "The credential blob, match profile and circuit capabilities of the SIROS DC API matcher"
+description = "The v1 credential blob, match profile, evaluator and circuit capabilities of the SIROS FFI"
 publish = false
 edition.workspace = true
 license.workspace = true

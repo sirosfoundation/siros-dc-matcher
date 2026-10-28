@@ -10,8 +10,9 @@ use super::trust::{self, KeyMaterial, TrustSubject, Verdict};
 use super::{Answers, Halt, IntakeError, JwsFault};
 use crate::client_id::ClientId;
 use crate::jose::{self, Signed};
+use crate::jws_rules;
 use crate::protocol::Protocol;
-use crate::unverified::UnverifiedRequest;
+use crate::unverified::{NoQuery, UnverifiedRequest};
 use crate::values::Origin;
 use crate::verified::VerifiedRequest;
 
@@ -24,7 +25,7 @@ pub(super) fn intake(
 ) -> Result<VerifiedRequest, Halt> {
     let envelope: Value = serde_json::from_slice(request)
         .map_err(|error| IntakeError::EnvelopeNotJson(JsonTextError::of(&error)))?;
-    let (protocol, data) = entry(&envelope).ok_or(IntakeError::EnvelopeUnreadable)?;
+    let (protocol, data) = entry(&envelope)?;
     match protocol {
         Protocol::Unsigned => {
             let params = data.as_object().ok_or(IntakeError::EnvelopeUnreadable)?;
@@ -72,16 +73,24 @@ pub(super) fn intake(
                 .and_then(Value::as_str)
                 .ok_or_else(malformed)?;
             let payload = jose::segment(payload_b64).map_err(IntakeError::from)?;
-            let params = request_object(&payload)?;
-            // A.3.2.2: `client_id` travels in each signature's protected header only.
+            let mut params = request_object(&payload)?;
+            // A.3.2.2: `client_id` and `verifier_info` travel in each signature's protected
+            // header only.
             if params.contains_key("client_id") {
                 return Err(IntakeError::ClientIdInPayload.into());
             }
-            let signatures = jws
-                .get("signatures")
-                .and_then(Value::as_array)
-                .ok_or_else(malformed)?;
-            let verifier = first_qualifying(signatures, payload_b64, now, answers)?;
+            if params.contains_key("verifier_info") {
+                return Err(IntakeError::VerifierInfoInPayload.into());
+            }
+            let signatures = jws_rules::signatures(jws).map_err(IntakeError::from)?;
+            let Qualified {
+                verifier,
+                verifier_info,
+            } = first_qualifying(signatures, payload_b64, now, answers)?;
+            // The request's `verifier_info` is the qualifying signature's.
+            if let Some(verifier_info) = verifier_info {
+                drop(params.insert("verifier_info".to_owned(), verifier_info));
+            }
             Ok(request::verified(
                 &params,
                 Arrival::DcApiSigned {
@@ -96,17 +105,60 @@ pub(super) fn intake(
 
 /// The entry the credential picker answers: the first that reads as an
 /// [`UnverifiedRequest`].
-fn entry(envelope: &Value) -> Option<(Protocol, &Value)> {
-    envelope
-        .get("requests")?
-        .as_array()?
-        .iter()
-        .find_map(|entry| {
-            let label = entry.get("protocol")?.as_str()?;
-            let data = entry.get("data")?;
-            let read = UnverifiedRequest::read(label, data).ok()?;
-            Some((read.protocol(), data))
-        })
+///
+/// # Errors
+///
+/// The rule the first entry of a known shape breaks of the request parameters or the Client
+/// Identifier when no entry reads, else [`IntakeError::EnvelopeUnreadable`].
+fn entry(envelope: &Value) -> Result<(Protocol, &Value), IntakeError> {
+    let entries = envelope
+        .get("requests")
+        .and_then(Value::as_array)
+        .ok_or(IntakeError::EnvelopeUnreadable)?;
+    let mut refused = None;
+    for entry in entries {
+        let label = entry.get("protocol").and_then(Value::as_str);
+        let (Some(label), Some(data)) = (label, entry.get("data")) else {
+            continue;
+        };
+        match UnverifiedRequest::read(label, data) {
+            Ok(read) => return Ok((read.protocol(), data)),
+            Err(refusal) => {
+                if refused.is_none() {
+                    refused = rule(&refusal);
+                }
+            }
+        }
+    }
+    Err(refused.unwrap_or(IntakeError::EnvelopeUnreadable))
+}
+
+/// The intake rule the request data of `refusal` breaks: a parameter's, or the Client
+/// Identifier's; `None` for an envelope intake does not read.
+fn rule(refusal: &NoQuery) -> Option<IntakeError> {
+    Some(match refusal {
+        NoQuery::Parameter(fault) => IntakeError::Parameter(*fault),
+        NoQuery::ClientIdMissing => IntakeError::ClientIdMissing,
+        NoQuery::ClientId(error) => IntakeError::ClientId(*error),
+        NoQuery::SignedRedirectUri => IntakeError::SignedRedirectUri,
+        NoQuery::ClientIdInPayload => IntakeError::ClientIdInPayload,
+        NoQuery::VerifierInfoInPayload => IntakeError::VerifierInfoInPayload,
+        NoQuery::NoSignatureQualifies => IntakeError::NoVerifiableSignature,
+        NoQuery::Jws(rule) => IntakeError::from(*rule),
+        NoQuery::TypMismatch => IntakeError::TypMismatch,
+        NoQuery::NoData
+        | NoQuery::NoQueryAndNoRequest
+        | NoQuery::RequestNotAJwsOrObject
+        | NoQuery::JwsObjectHasNoPayload
+        | NoQuery::ShapeDoesNotMatchProtocol
+        | NoQuery::NotACompactJws(_)
+        | NoQuery::PayloadNotBase64url(_)
+        | NoQuery::PayloadNotJson(_)
+        | NoQuery::PayloadHasNoDcqlQuery
+        | NoQuery::Malformed(_)
+        | NoQuery::TransactionData(_)
+        | NoQuery::NoParser => return None,
+    })
 }
 
 fn request_object(payload: &[u8]) -> Result<Map<String, Value>, IntakeError> {
@@ -126,13 +178,15 @@ fn first_qualifying(
     payload_b64: &str,
     now: DateTime,
     answers: &mut Answers<'_>,
-) -> Result<Verifier, Halt> {
+) -> Result<Qualified, Halt> {
     let mut first_untrusted = None;
     for entry in signatures {
         match qualify(entry, payload_b64, now, answers) {
-            Ok(verifier) if verifier.trusted == Verdict::Trusted => return Ok(verifier),
-            Ok(verifier) => {
-                first_untrusted.get_or_insert(verifier);
+            Ok(qualified) if qualified.verifier.trusted == Verdict::Trusted => {
+                return Ok(qualified)
+            }
+            Ok(qualified) => {
+                first_untrusted.get_or_insert(qualified);
             }
             Err(Halt::Failed(_)) => {}
             Err(halt) => return Err(halt),
@@ -141,13 +195,20 @@ fn first_qualifying(
     first_untrusted.ok_or_else(|| IntakeError::NoVerifiableSignature.into())
 }
 
+/// A signature of a multisigned request that qualifies: its Verifier, and the `verifier_info`
+/// of its protected header.
+struct Qualified {
+    verifier: Verifier,
+    verifier_info: Option<Value>,
+}
+
 /// One signature object `{"protected", "signature"}` of the JWS JSON Serialization.
 fn qualify(
     entry: &Value,
     payload_b64: &str,
     now: DateTime,
     answers: &mut Answers<'_>,
-) -> Result<Verifier, Halt> {
+) -> Result<Qualified, Halt> {
     let text = |name: &str| entry.get(name).and_then(Value::as_str);
     let (Some(protected), Some(signature)) = (text("protected"), text("signature")) else {
         return Err(IntakeError::JwsMalformed(JwsFault::Serialization).into());
@@ -156,5 +217,9 @@ fn qualify(
     let client_id = signed
         .text("client_id")
         .ok_or(IntakeError::ClientIdMissing)?;
-    signature::authenticate(&signed, ClientId::parse(client_id)?, now, answers)
+    let verifier = signature::authenticate(&signed, ClientId::parse(client_id)?, now, answers)?;
+    Ok(Qualified {
+        verifier,
+        verifier_info: signed.header().get("verifier_info").cloned(),
+    })
 }

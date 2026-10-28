@@ -5,12 +5,15 @@ use serde_json::{json, Value};
 use siros_codec::member::{ArrayIndex, MemberFault};
 use siros_oid4vp::HttpsUrl;
 use siros_transaction_data::{
-    ClaimFault, ClaimIndex, DefinitionError, DefinitionMember, EntryFault, ImageFault,
-    Incompatibility, IntegrityFault, LabelsFault, Location, LocationStep, Prominence, RenderFault,
-    Selection, SourceKind, TextFault, Ts12Fault, Ts12Member, Ts12Type, UiElementKey, Wanted,
+    Channel, ClaimFault, ClaimIndex, DefinitionError, DefinitionMember, EntryFault, ImageFault,
+    ImageFormat, Incompatibility, IntegrityFault, LabelsFault, Location, LocationStep, Prominence,
+    RenderFault, Selection, SourceKind, TextFault, Ts12Fault, Ts12Member, Ts12Type, UiElementKey,
+    Wanted, MAX_IMAGE_BYTES,
 };
 
-use crate::common::{configured, credential_with, entries, now, query, sri, text, Host, PAYMENT};
+use crate::common::{
+    b64, configured, credential_with, entries, now, query, sri, text, Host, PAYMENT,
+};
 
 /// The documents the host holds, by URL.
 type Held = Vec<(String, Vec<u8>)>;
@@ -344,11 +347,11 @@ fn every_leaf_shows_unless_level_4() {
     );
 }
 
-/// A TS12 logo is a resolvable URL or a Data URL with no integrity value (Section 4.3.1): one that
-/// cannot be verified is left out of the view without a fetch, and the payment stays compatible
-/// (PaSO Proof SD-JWT-VC and SVG, Section 2).
+/// A TS12 logo is a resolvable URL or a Data URL, with no integrity value required (Section
+/// 4.3.1). A logo the request's channel does not admit is left out of the view, and the payment
+/// stays compatible (PaSO Proof SD-JWT-VC and SVG, Section 2).
 #[test]
-fn an_unverifiable_ts12_logo_is_left_out() {
+fn a_ts12_logo_is_shown_or_left_out() {
     let mut claims = claims();
     claims
         .as_array_mut()
@@ -360,27 +363,60 @@ fn an_unverifiable_ts12_logo_is_left_out() {
         LocationStep::Key("payee".to_owned()),
         LocationStep::Key("logo".to_owned()),
     ]);
-    for (url, cause) in [
-        ("https://shop.example/logo.png", ImageFault::IntegrityAbsent),
-        ("http://shop.example/logo.png", ImageFault::NotHttps),
-    ] {
+    let large = format!("data:image/png;base64,{}", "A".repeat(MAX_IMAGE_BYTES + 4));
+    let svg = format!("data:image/svg+xml;base64,{}", b64(b"<svg/>"));
+    let url = "https://shop.example/logo.png";
+    // (case, channel, logo, the fault that leaves it out; `None` when it is shown)
+    let rows: Vec<(&str, Channel, &str, Option<ImageFault>)> = vec![
+        (
+            "an https URL without #integrity",
+            Channel::Redirect,
+            url,
+            None,
+        ),
+        (
+            "an http URL",
+            Channel::Redirect,
+            "http://shop.example/logo.png",
+            Some(ImageFault::NotHttps),
+        ),
+        (
+            "an https URL over the DC API",
+            Channel::DcApi,
+            url,
+            Some(ImageFault::RemoteOverDcApi),
+        ),
+        (
+            "an SVG Data URL over the DC API",
+            Channel::DcApi,
+            &svg,
+            Some(ImageFault::FormatOverDcApi(ImageFormat::Svg)),
+        ),
+        (
+            "a Data URL over 512 KiB over the DC API",
+            Channel::DcApi,
+            &large,
+            Some(ImageFault::TooLarge(MAX_IMAGE_BYTES + 4)),
+        ),
+    ];
+    for (case, channel, value, left_out) in rows {
+        host.channel = channel;
         let mut payload = payment();
-        payload["payee"]["logo"] = json!(url);
+        payload["payee"]["logo"] = json!(value);
         let entry = json!({"type": PAYMENT, "credential_ids": ["pay"],
                            "transaction_data_hashes_alg": ["sha-256"], "payload": payload});
         let entries = entries(&[entry.to_string()], &query(&["pay"], VCT));
-        let (selection, fetches) =
-            host.select_fetching(&[&entries[0]], &credential_with(VCT, &[], &json!({})));
-        assert_eq!(fetches, [], "{url}");
+        let selection = host.select(&[&entries[0]], &credential_with(VCT, &[], &json!({})));
         let Ok(Selection::Takes(taken)) = selection else {
-            panic!("{url}: {selection:?}")
+            panic!("{case}: {selection:?}")
         };
-        assert_eq!(taken.view().rows().len(), 5, "{url}");
-        assert_eq!(
-            taken.view().absent_images(),
-            [(logo.clone(), cause)],
-            "{url}"
-        );
+        let absent: Vec<(Location, ImageFault)> = left_out
+            .iter()
+            .map(|fault| (logo.clone(), fault.clone()))
+            .collect();
+        assert_eq!(taken.view().absent_images(), absent, "{case}");
+        let shown = if left_out.is_some() { 5 } else { 6 };
+        assert_eq!(taken.view().rows().len(), shown, "{case}");
     }
 }
 

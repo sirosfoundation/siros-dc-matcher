@@ -22,8 +22,7 @@ fn credentials_usable_at_the_plan_time() {
         "dcql_query": {"credentials": [{"id": "pid", "format": "dc+sd-jwt",
             "meta": {"vct_values": [VCT]}, "claims": [{"path": ["given_name"]}]}]}
     }));
-    let fetches = wallet.fetches(&request);
-    let before = wallet.input(&request, &fetches);
+    let before = wallet.input(&request);
     let after = siros_presentation::PlanInput {
         now: DateTime::from_unix(NOW + 120).unwrap(),
         ..before

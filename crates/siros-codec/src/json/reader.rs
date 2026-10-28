@@ -157,13 +157,15 @@ fn text(error: serde_json::Error) -> JsonFault {
 }
 
 /// The value `raw` holds, `depth` levels below the document. The document's syntax is read
-/// already: serde_json reads each part again only for its value.
+/// already: serde_json reads each part again only for its value, from its bytes, through the
+/// one reader the document took.
 fn value(raw: &RawValue, depth: usize) -> Result<Json, JsonFault> {
     let text_of = raw.get();
-    match text_of.as_bytes().first() {
+    let bytes = text_of.as_bytes();
+    match bytes.first() {
         Some(b'{') => {
             let depth = nested(depth)?;
-            let Members(members) = serde_json::from_str(text_of).map_err(text)?;
+            let Members(members) = serde_json::from_slice(bytes).map_err(text)?;
             let mut names = FxHashSet::default();
             let members = members
                 .iter()
@@ -178,20 +180,20 @@ fn value(raw: &RawValue, depth: usize) -> Result<Json, JsonFault> {
         }
         Some(b'[') => {
             let depth = nested(depth)?;
-            let items: Vec<&RawValue> = serde_json::from_str(text_of).map_err(text)?;
+            let items: Vec<&RawValue> = serde_json::from_slice(bytes).map_err(text)?;
             let items = items
                 .into_iter()
                 .map(|raw| value(raw, depth))
                 .collect::<Result<_, JsonFault>>()?;
             Ok(Json::Array(items))
         }
-        Some(b'"') => Ok(Json::String(serde_json::from_str(text_of).map_err(text)?)),
+        Some(b'"') => Ok(Json::String(serde_json::from_slice(bytes).map_err(text)?)),
         Some(b't') => Ok(Json::Bool(true)),
         Some(b'f') => Ok(Json::Bool(false)),
         Some(b'n') => Ok(Json::Null),
         // serde_json read the text as a number of RFC 8259, Section 6; its value may lie beyond
         // binary64.
-        _ => match serde_json::from_str::<Number>(text_of) {
+        _ => match serde_json::from_slice::<Number>(bytes) {
             Ok(number) => Ok(Json::Number(JsonNumber {
                 text: text_of.to_owned(),
                 number,

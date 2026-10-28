@@ -6,13 +6,13 @@ use siros_dcql::{ClaimPath, PathComponent};
 use crate::error::{DisplayError, EntryFault};
 use crate::json::{self, Entries};
 use crate::locale::{Locale, Localized};
-use crate::text::DisplayText;
+use crate::text::LabelText;
 
 /// A label in one locale, or in an unstated one.
 #[derive(Debug, Clone)]
 pub(crate) struct Label {
     pub(crate) locale: Option<Locale>,
-    pub(crate) text: DisplayText,
+    pub(crate) text: LabelText,
 }
 
 impl Localized for Label {
@@ -23,7 +23,8 @@ impl Localized for Label {
 
 /// The labels of the `display` member of an OpenID4VCI metadata object (OpenID4VCI 1.0, Section
 /// 12.2.4 and Appendix B.2): a non-empty array of objects with an optional `name` and an
-/// optional `locale`, one object per locale. An entry without a `name` gives no label.
+/// optional `locale`, one object per locale. An entry without a `name`, or with a blank one,
+/// gives no label.
 pub(crate) fn named_labels(
     object: &Map<String, Value>,
     malformed: fn(EntryFault) -> DisplayError,
@@ -35,7 +36,7 @@ pub(crate) fn named_labels(
         .map(|entry| {
             let entry = json::entry(entry, malformed)?;
             let locale = json::locale(entry, malformed(EntryFault::MemberType))?;
-            let name = json::label(entry, "name", malformed(EntryFault::MemberType))?;
+            let name = json::optional_label(entry, "name", malformed(EntryFault::MemberType))?;
             Ok((locale, name))
         })
         .collect::<Result<Vec<_>, DisplayError>>()?;
@@ -112,15 +113,4 @@ fn agree(first: &[PathComponent], second: &[PathComponent]) -> Result<(), Displa
 pub(crate) fn path(value: Option<&Value>) -> Result<ClaimPath, DisplayError> {
     let value = value.ok_or(DisplayError::Claims(EntryFault::MemberMissing))?;
     ClaimPath::parse(value).map_err(DisplayError::ClaimPath)
-}
-
-/// Whether the description path `described` addresses the claim at `path`: the same length,
-/// equal keys and indexes, and `null` addressing any index or `null` of `path`.
-pub(crate) fn describes(described: &ClaimPath, path: &[PathComponent]) -> bool {
-    let described = described.components();
-    described.len() == path.len()
-        && described.iter().zip(path).all(|(d, p)| match (d, p) {
-            (PathComponent::Null, PathComponent::Index(_) | PathComponent::Null) => true,
-            (d, p) => d == p,
-        })
 }

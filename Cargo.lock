@@ -87,6 +87,7 @@ version = "0.1.0"
 dependencies = [
  "android-credman-sys",
  "c8str",
+ "serde_json",
  "thiserror 2.0.20",
 ]
 
@@ -2218,12 +2219,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "roxmltree"
-version = "0.20.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
-
-[[package]]
 name = "rustc-demangle"
 version = "0.1.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2465,6 +2460,7 @@ dependencies = [
  "siros-sdjwt",
  "siros-trust",
  "siros-wallet-state",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -2503,29 +2499,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "siros-dc-matcher-testhost"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "serde_json",
- "siros-dc-matcher-core",
- "wasmtime",
- "wasmtime-wasi",
-]
-
-[[package]]
-name = "siros-dc-matcher-wasm"
-version = "0.1.0"
-dependencies = [
- "android-credman",
- "serde_json",
- "siros-dc-matcher-core",
- "siros-dcql",
- "siros-display",
- "siros-oid4vp",
-]
-
-[[package]]
 name = "siros-dcql"
 version = "0.12.0"
 dependencies = [
@@ -2545,6 +2518,7 @@ dependencies = [
  "siros-dcql",
  "siros-wallet-state",
  "siros-zkp-req",
+ "thiserror 2.0.20",
  "unicode-general-category",
 ]
 
@@ -2577,7 +2551,44 @@ dependencies = [
  "siros-codec",
  "siros-dcql",
  "siros-oid4vp",
+ "thiserror 2.0.20",
  "x509-cert",
+]
+
+[[package]]
+name = "siros-picker"
+version = "0.1.0"
+dependencies = [
+ "android-credman",
+ "siros-credential",
+ "siros-dcql",
+ "siros-display",
+ "siros-oid4vp",
+ "siros-presentation",
+ "siros-registration",
+ "siros-transaction-data",
+ "siros-wallet-state",
+ "siros-zkp-req-nym-auth",
+]
+
+[[package]]
+name = "siros-picker-testhost"
+version = "0.1.0"
+dependencies = [
+ "android-credman",
+ "anyhow",
+ "serde_json",
+ "siros-codec",
+ "siros-display",
+ "siros-oid4vp",
+ "siros-presentation",
+ "siros-registration",
+ "siros-transaction-data",
+ "siros-trust",
+ "siros-wallet-state",
+ "siros-zkp-req-nym-auth",
+ "wasmtime",
+ "wasmtime-wasi",
 ]
 
 [[package]]
@@ -2598,14 +2609,35 @@ dependencies = [
  "siros-display",
  "siros-mdoc",
  "siros-oid4vp",
+ "siros-presentation",
  "siros-sdjwt",
  "siros-transaction-data",
  "siros-trust",
  "siros-wallet-state",
  "siros-zkp-req",
  "siros-zkp-req-nym-auth",
+ "thiserror 2.0.20",
  "x509-cert",
  "zeroize",
+]
+
+[[package]]
+name = "siros-registration"
+version = "0.11.0"
+dependencies = [
+ "serde_json",
+ "siros-codec",
+ "siros-credential",
+ "siros-dcql",
+ "siros-display",
+ "siros-oid4vp",
+ "siros-presentation",
+ "siros-transaction-data",
+ "siros-trust",
+ "siros-wallet-state",
+ "siros-zkp-req",
+ "siros-zkp-req-nym-auth",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -2626,7 +2658,6 @@ dependencies = [
  "jsonschema",
  "p256",
  "p384",
- "roxmltree",
  "rustc-hash",
  "serde",
  "serde_json",
@@ -2638,6 +2669,7 @@ dependencies = [
  "siros-oid4vp",
  "siros-trust",
  "siros-wallet-state",
+ "thiserror 2.0.20",
  "unicode-segmentation",
  "x509-cert",
 ]

@@ -83,9 +83,7 @@ impl KnownAuthorityType {
     pub(crate) fn of(kind: &AuthorityType) -> Option<Self> {
         match kind.as_str() {
             "aki" => Some(Self::Aki),
-            "etsi_tl" => Some(Self::Store(StoreType::EtsiTl)),
-            "openid_federation" => Some(Self::Store(StoreType::OpenidFederation)),
-            _ => None,
+            other => StoreType::named(other).map(Self::Store),
         }
     }
 }
@@ -98,6 +96,14 @@ impl StoreType {
             Self::EtsiTl => "etsi_tl",
             Self::OpenidFederation => "openid_federation",
         }
+    }
+
+    /// The store type the `type` `name` names.
+    #[must_use]
+    pub fn named(name: &str) -> Option<Self> {
+        [Self::EtsiTl, Self::OpenidFederation]
+            .into_iter()
+            .find(|kind| kind.as_str() == name)
     }
 }
 
