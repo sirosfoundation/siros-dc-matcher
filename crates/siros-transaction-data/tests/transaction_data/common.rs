@@ -242,10 +242,8 @@ pub fn display(uri: Option<&str>) -> DisplayCache {
     DisplayCache::new(vec![metadata], Vec::new()).unwrap()
 }
 
-/// A `200` response holding `body`.
 /// What the host gives the selection: trust, display metadata, configuration, the metadata it
-/// holds, the images it answers fetches with, the wallet's language and whether the request is
-/// signed.
+/// holds, the wallet's language and whether the request is signed.
 pub struct Host {
     pub trust: TrustStore,
     pub display: DisplayCache,

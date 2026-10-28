@@ -1,7 +1,7 @@
 //! The signed credential metadata JWT of a PaSO Credential (PaSO Proof Metadata, Sections 4, 7
 //! and 8): the one the host holds for the credential's configuration, verified each time it is
 //! loaded (Section 6), and read into a definition per transaction data type. The host admits a
-//! JWT it fetched with [`HeldJwt::verify_fetched`].
+//! JWT with [`HeldJwt::admit`].
 
 use siros_codec::date::DateTime;
 use siros_codec::member::MemberFault;
@@ -30,7 +30,7 @@ pub enum CredentialMetadataFault {
     /// `transaction_data_types` has a member with an empty name.
     TypeEmpty,
     /// The JWT's `credential_metadata_uri` claim holds this text, which differs from the URL
-    /// the host fetched the JWT from (Section 8).
+    /// that served the JWT (Section 8).
     UriMismatch(String),
 }
 
@@ -54,7 +54,7 @@ pub(crate) struct CredentialMetadata(Vec<(TypeId, Result<Definition, DefinitionE
 
 impl CredentialMetadata {
     /// The signed credential metadata the host holds for `credential`, verified: Section 7, and
-    /// its `credential_metadata_uri` the URL it answered from (Section 8).
+    /// its `credential_metadata_uri` the URL that served it (Section 8).
     pub(crate) fn load(
         credential: &Credential,
         verifier: Verifier<'_>,
@@ -84,15 +84,14 @@ impl CredentialMetadata {
 }
 
 impl HeldJwt {
-    /// The JWT `jwt` the host fetched for `credential`'s configuration, `served_from` the URL
-    /// it answered from after redirects: verified (Section 7), its `credential_metadata_uri`
-    /// `served_from` (Section 8). `held` holds the issuer's key set when the credential carries
-    /// no `x5c` chain.
+    /// The JWT `jwt` that `served_from` served for `credential`'s configuration: verified
+    /// (Section 7), its `credential_metadata_uri` `served_from` (Section 8). `held` holds the
+    /// issuer's key set when the credential carries no `x5c` chain.
     ///
     /// # Errors
     ///
     /// [`CredentialMetadataFault`]: why the JWT is invalid. The host keeps the JWT it held.
-    pub fn verify_fetched(
+    pub fn admit(
         jwt: String,
         served_from: &HttpsUrl,
         credential: &Credential,
@@ -119,8 +118,8 @@ impl HeldJwt {
     }
 }
 
-/// The metadata of the JWT `jwt` for `credential`, served from `served_from` after redirects:
-/// verified (Section 7), its `credential_metadata_uri` `served_from` (Section 8).
+/// The metadata of the JWT `jwt` for `credential`, served by `served_from`: verified (Section
+/// 7), its `credential_metadata_uri` `served_from` (Section 8).
 fn served(
     jwt: &str,
     served_from: &HttpsUrl,

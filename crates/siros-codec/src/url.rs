@@ -1,4 +1,4 @@
-//! The `https` URL of a fetch the host performs (host effect H1).
+//! The `https` URL of a resource the host resolves.
 
 /// An absolute `https` URL with a non-empty authority.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

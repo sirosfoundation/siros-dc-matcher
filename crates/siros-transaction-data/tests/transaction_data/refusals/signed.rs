@@ -359,8 +359,8 @@ fn signed_credential_metadata_serves_or_excludes() {
     );
 }
 
-/// The host learns to fetch the signed credential metadata it lacks, and a new one where the
-/// JWT it holds no longer verifies (Section 6), from the URL that JWT answered from.
+/// The host learns to resolve the signed credential metadata it lacks, and a new one where the
+/// JWT it holds no longer verifies (Section 6), from the URL that served that JWT.
 #[test]
 fn the_host_renews_credential_metadata_that_fails() {
     let pki = pki();
@@ -389,12 +389,12 @@ fn the_host_renews_credential_metadata_that_fails() {
     assert!(!wants_metadata(&host), "valid");
 }
 
-/// The host admits a JWT it fetched: verified, and naming the URL it was served from (Section
-/// 8), with when it expires and where it renews.
+/// The host admits a JWT: verified, and naming the URL that served it (Section 8), with when it
+/// expires and where it renews.
 #[test]
-fn the_host_admits_a_fetched_jwt_served_from_the_url_it_names() {
+fn the_host_admits_a_jwt_served_from_the_url_it_names() {
     let pki = pki();
-    let fetched = |uri: &str| {
+    let served = |uri: &str| {
         jwt(
             &header("credential-metadata+jwt", &[&pki.signer]),
             &metadata_claims(1_820_000_000, uri),
@@ -404,7 +404,7 @@ fn the_host_admits_a_fetched_jwt_served_from_the_url_it_names() {
     let served_from = HttpsUrl::parse(METADATA_URI).unwrap();
     let card = credential(CARD, &[&pki.issuer]);
     let verify = |jwt: String| {
-        HeldJwt::verify_fetched(
+        HeldJwt::admit(
             jwt,
             &served_from,
             &card,
@@ -413,13 +413,13 @@ fn the_host_admits_a_fetched_jwt_served_from_the_url_it_names() {
             now(),
         )
     };
-    let (held, renewal) = verify(fetched(METADATA_URI)).unwrap();
-    assert_eq!(held.jwt(), fetched(METADATA_URI));
+    let (held, renewal) = verify(served(METADATA_URI)).unwrap();
+    assert_eq!(held.jwt(), served(METADATA_URI));
     assert_eq!(renewal.from(), &served_from);
     assert_eq!(renewal.expires().unix(), 1_820_000_000);
     let elsewhere = "https://issuer.bank.example/metadata/moved";
     assert_eq!(
-        verify(fetched(elsewhere)).map(drop),
+        verify(served(elsewhere)).map(drop),
         Err(CredentialMetadataFault::UriMismatch(elsewhere.to_owned()))
     );
 }

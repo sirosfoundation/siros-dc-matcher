@@ -346,7 +346,7 @@ fn offers_of_credential_sets() {
     let Submission::DcApi(data) = response.submission() else {
         panic!("a DC API response")
     };
-    assert_eq!(data["vp_token"]["mdl"].as_array().unwrap().len(), 2);
+    assert_eq!(data.json()["vp_token"]["mdl"].as_array().unwrap().len(), 2);
     let record = serde_json::to_value(response.record()).unwrap();
     assert_eq!(record["usedCredentialIds"], json!([1, 3]));
     let subset = |query: &str, ids: Vec<u64>| (query.to_owned(), ids);

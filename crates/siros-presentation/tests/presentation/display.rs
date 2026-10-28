@@ -4,7 +4,7 @@
 
 use serde_json::{json, Value};
 use siros_codec::cbor::Value as Cbor;
-use siros_oid4vp::{Method, Submission, VerifiedRequest};
+use siros_oid4vp::{Outcome, PostParameters, Submission, VerifiedRequest};
 use siros_presentation::{
     Fulfilment, HostDisplay, OfferIndex, PresentationError, Selection, WalletDisplay,
 };
@@ -87,14 +87,13 @@ fn error_of(request: &VerifiedRequest, refusal: &Submission) -> String {
     let Submission::Post(post) = refusal else {
         panic!("a POST")
     };
-    let Method::Post { body, .. } = post.method() else {
-        panic!("a POST")
+    let PostParameters::Form(parameters) = post.parameters() else {
+        panic!("direct_post, got {post:?}")
     };
-    let body = std::str::from_utf8(body).unwrap();
-    body.split('&')
-        .find_map(|pair| pair.strip_prefix("error="))
-        .unwrap()
-        .to_owned()
+    let Outcome::Error(code) = parameters.outcome() else {
+        panic!("an error, got {parameters:?}")
+    };
+    code.as_str().to_owned()
 }
 
 #[test]

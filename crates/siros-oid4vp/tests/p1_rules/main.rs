@@ -16,8 +16,8 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use siros_codec::member::MemberFault;
 use siros_oid4vp::{
-    AttestationClaim, AttestationFault, ClaimsFault, Coordinate, EffectResult, FetchResponse,
-    IntakeError, IntakeState, JwkFault, ParameterFault,
+    AttestationClaim, AttestationFault, ClaimsFault, Coordinate, EffectResult, IntakeError,
+    IntakeState, JwkFault, ParameterFault,
 };
 
 use requests::*;
@@ -42,6 +42,28 @@ struct Fixture {
 fn fixtures() -> Vec<Fixture> {
     let (a, b) = (key(1), key(2));
     let x509 = x509_client();
+    let reference = |rule: &'static str,
+                     request_uri: &str,
+                     method: Option<&str>,
+                     echo: Echo,
+                     expect: Expect| {
+        let (state, answer) = by_reference(request_uri, method, echo);
+        Fixture {
+            rule,
+            state,
+            answer,
+            expect,
+        }
+    };
+    let by_value_with = |extra: (&str, &str)| {
+        let jws = sign(
+            &x5c_header(&certificate(&a, &[DNS])),
+            &redirect_payload(&x509),
+            &a,
+        );
+        let uri = authorization_uri(&[("client_id", &x509), ("request", &jws), extra]);
+        IntakeState::redirect(&uri, formats(), now(), &mut Rng(1))
+    };
     let mut fixtures = vec![
         // The signature verifies under the rule of the Client Identifier Prefix.
         Fixture {
@@ -204,13 +226,52 @@ fn fixtures() -> Vec<Fixture> {
             answer: honest(Host::trusting()),
             expect: Expect::Refused(IntakeError::ClientIdMismatch),
         },
+        // A request by reference (RFC 9101, Section 5.2; Section 5.10).
+        reference(
+            "request_uri is an https URI",
+            "http://verifier.example/request",
+            Some("post"),
+            Echo::Sent,
+            Expect::Refused(IntakeError::RequestUriNotHttps),
+        ),
+        reference(
+            "request_uri_method is get or post",
+            REQUEST_URI,
+            Some("put"),
+            Echo::Sent,
+            Expect::Refused(IntakeError::RequestUriMethodInvalid),
+        ),
+        reference(
+            "post: the Request Object holds wallet_nonce",
+            REQUEST_URI,
+            Some("post"),
+            Echo::Omitted,
+            Expect::Refused(IntakeError::WalletNonceMismatch),
+        ),
+        reference(
+            "post: the Request Object's wallet_nonce is the one sent",
+            REQUEST_URI,
+            Some("post"),
+            Echo::Altered,
+            Expect::Refused(IntakeError::WalletNonceMismatch),
+        ),
+        Fixture {
+            rule: "request_uri_method comes with request_uri",
+            state: by_value_with(("request_uri_method", "get")),
+            answer: honest(Host::trusting()),
+            expect: Expect::Refused(IntakeError::RequestUriMethodWithoutRequestUri),
+        },
+        Fixture {
+            rule: "request and request_uri exclude each other",
+            state: by_value_with(("request_uri", REQUEST_URI)),
+            answer: honest(Host::trusting()),
+            expect: Expect::Refused(IntakeError::RequestAndRequestUri),
+        },
         // A trust verdict was obtained.
         Fixture {
             rule: "the trust effect is answered by a trust verdict",
             state: x509_san_dns(DNS, &a, &a, redirect_payload(&x509)),
-            answer: Box::new(|_| {
-                EffectResult::Fetched(FetchResponse::new(HttpStatus::OK, None, Vec::new()))
-            }),
+            answer: Box::new(|_| EffectResult::RequestObject(request_object("eyJ.e.s"))),
             expect: Expect::Refused(IntakeError::AnswerMismatch),
         },
         Fixture {
@@ -419,6 +480,26 @@ fn fixtures() -> Vec<Fixture> {
     ];
     // Each prefix's request verifies before it is broken.
     fixtures.extend([
+        reference(
+            "honest: request_uri get",
+            REQUEST_URI,
+            None,
+            Echo::Sent,
+            Expect::Verified {
+                client_id: "x509_san_dns:verifier.example",
+                trusted: true,
+            },
+        ),
+        reference(
+            "honest: request_uri post",
+            REQUEST_URI,
+            Some("post"),
+            Echo::Sent,
+            Expect::Verified {
+                client_id: "x509_san_dns:verifier.example",
+                trusted: true,
+            },
+        ),
         Fixture {
             rule: "honest: x509_hash",
             state: {

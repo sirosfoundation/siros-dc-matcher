@@ -1,12 +1,15 @@
 //! The `vp_token` (OpenID4VP 1.0, Section 8.1) and the Authorization Response that carries it,
 //! in JSON and in CBOR (`zkp_req.md`, Section 6.1).
 
+use std::fmt;
+
 use rustc_hash::FxHashSet;
 use serde_json::{Map, Value};
 use siros_codec::base64url;
 use siros_codec::cbor::{self, Value as Cbor};
 use siros_dcql::{Multiplicity, QueryId};
 
+use super::submission::{Outcome, ResponseParameters};
 use super::ResponseError;
 use crate::error_code::ErrorCode;
 use crate::parameters::State;
@@ -115,11 +118,10 @@ impl VerifiedRequest {
 }
 
 impl VpToken<'_> {
-    /// The `vp_token` in JSON (Section 8.1): each presentation a string, a CBOR map as the
-    /// base64url of its encoding.
+    /// The `vp_token` in JSON (Section 8.1).
     #[must_use]
-    pub fn json(&self) -> Value {
-        Value::Object(
+    pub fn json(&self) -> VpTokenJson {
+        VpTokenJson(
             self.entries
                 .iter()
                 .map(|(id, presentations)| {
@@ -131,6 +133,26 @@ impl VpToken<'_> {
     }
 }
 
+/// A `vp_token` in JSON (Section 8.1): each Credential Query's `id` with its presentations,
+/// each a string, a CBOR map as the base64url of its encoding.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VpTokenJson(Map<String, Value>);
+
+impl VpTokenJson {
+    /// The object.
+    #[must_use]
+    pub fn as_map(&self) -> &Map<String, Value> {
+        &self.0
+    }
+}
+
+/// The JSON text of the object.
+impl fmt::Display for VpTokenJson {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&serde_json::to_string(&self.0).map_err(|_| fmt::Error)?)
+    }
+}
+
 /// What an Authorization Response answers (Section 8.1, 8.5): a `vp_token` or an error.
 pub(super) enum Answer<'a> {
     VpToken(&'a VpToken<'a>),
@@ -138,21 +160,17 @@ pub(super) enum Answer<'a> {
 }
 
 impl Answer<'_> {
-    /// The response parameters in JSON, with `state` when given.
-    pub(super) fn json(&self, state: Option<&State>) -> Map<String, Value> {
-        let mut parameters = Map::new();
+    /// The response parameters, with `state` when given.
+    pub(super) fn parameters(&self, state: Option<&State>) -> ResponseParameters {
+        ResponseParameters::new(self.outcome(), state.cloned())
+    }
+
+    /// The outcome, the `vp_token` in JSON.
+    pub(super) fn outcome(&self) -> Outcome {
         match self {
-            Self::VpToken(token) => {
-                parameters.insert("vp_token".into(), token.json());
-            }
-            Self::Error(code) => {
-                parameters.insert("error".into(), code.as_str().into());
-            }
+            Self::VpToken(token) => Outcome::VpToken(token.json()),
+            Self::Error(code) => Outcome::Error(*code),
         }
-        if let Some(state) = state {
-            parameters.insert("state".into(), state.as_str().into());
-        }
-        parameters
     }
 
     /// The Authorization Response in CBOR (`zkp_req.md`, Section 6.1), with `state` when given.

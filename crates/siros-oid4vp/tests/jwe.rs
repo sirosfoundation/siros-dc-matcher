@@ -18,7 +18,8 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use siros_codec::base64url;
 use siros_oid4vp::{
-    ErrorCode, IntakeState, Method, Origin, Presentation, Submission, VerifiedRequest,
+    Effect, EffectResult, ErrorCode, IntakeState, Origin, PostBody, PostParameters, Presentation,
+    RedirectUri, Reply, RequestUriMethod, ResponseMode, Submission, VerifiedRequest,
 };
 use support::*;
 
@@ -142,18 +143,86 @@ fn direct_post_request() -> VerifiedRequest {
 /// The JWE a submission carries: `data.response`, or the form parameter `response`.
 fn jwe_of(submission: Submission) -> String {
     match submission {
-        Submission::DcApi(data) => data["response"].as_str().unwrap().to_owned(),
+        Submission::DcApi(_) => dc_api_jwe(&submission),
         Submission::Post(post) => {
-            let Method::Post { content_type, body } = post.method() else {
-                panic!("a POST")
+            let PostParameters::Jwt(jwe) = post.parameters() else {
+                panic!("direct_post.jwt, got {post:?}")
             };
-            assert_eq!(content_type.as_str(), "application/x-www-form-urlencoded");
-            let fields = form(std::str::from_utf8(body).unwrap());
-            assert_eq!(fields.len(), 1);
-            assert_eq!(fields[0].0, "response");
-            fields[0].1.clone()
+            let PostBody::Form(body) = post.body() else {
+                panic!("form parameters")
+            };
+            assert_eq!(
+                form(body.as_str()),
+                [("response".to_owned(), jwe.as_str().to_owned())]
+            );
+            jwe.as_str().to_owned()
         }
     }
+}
+
+/// One honest redirect flow: a request by reference with `request_uri_method=post`, its
+/// `direct_post.jwt` response, and the Verifier's reply (Sections 5.10, 8.2 and 8.3.1).
+#[test]
+fn a_request_by_reference_answered_by_direct_post_jwt() {
+    let signer = key(3);
+    let client_id = "x509_san_dns:verifier.example";
+    let uri = authorization_uri(&[
+        ("client_id", client_id),
+        ("request_uri", "https://verifier.example/request/1"),
+        ("request_uri_method", "post"),
+    ]);
+    let host = Host::trusting();
+    let answer = |effect: &Effect| match effect {
+        Effect::RequestObject(request) => {
+            let RequestUriMethod::Post(parameters) = request.method() else {
+                panic!("post, got {request:?}")
+            };
+            let payload = json!({
+                "client_id": client_id,
+                "response_type": "vp_token",
+                "response_mode": "direct_post.jwt",
+                "response_uri": "https://verifier.example/post",
+                "nonce": "n-0S6_WzA2Mj",
+                "state": "s-1",
+                "wallet_nonce": parameters.wallet_nonce().as_str(),
+                "dcql_query": query(),
+                "client_metadata": {"jwks": {"keys": [recipient_jwk(Some("k1"))]}},
+            });
+            let header = x5c_header(&certificate(&signer, &["verifier.example"]));
+            EffectResult::RequestObject(request_object(&sign(&header, &payload, &signer)))
+        }
+        Effect::Trust(_) => host.answer(effect),
+    };
+    let state = IntakeState::redirect(&uri, formats(), now(), &mut Rng(32));
+    let (request, _) = run(state, answer).unwrap();
+
+    let token = request
+        .vp_token(vec![(
+            query_id("pid"),
+            vec![Presentation::text("eyJ...~WyJ...~".into())],
+        )])
+        .unwrap();
+    let submission = token.submission(&mut Rng(33)).unwrap();
+    assert_eq!(submission.mode(), ResponseMode::DirectPostJwt);
+    let Submission::Post(post) = &submission else {
+        panic!("a POST")
+    };
+    assert_eq!(
+        post.response_uri().as_str(),
+        "https://verifier.example/post"
+    );
+    let (_, plaintext) = decrypt(&jwe_of(submission), &recipient());
+    assert_eq!(
+        serde_json::from_slice::<Value>(&plaintext).unwrap(),
+        json!({"vp_token": {"pid": ["eyJ...~WyJ...~"]}, "state": "s-1"})
+    );
+
+    let reply = Reply::parse(br#"{"redirect_uri": "https://verifier.example/cb#response_code=1"}"#)
+        .unwrap();
+    assert_eq!(
+        reply.redirect_uri().map(RedirectUri::as_str),
+        Some("https://verifier.example/cb#response_code=1")
+    );
 }
 
 #[test]

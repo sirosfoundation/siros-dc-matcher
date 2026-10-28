@@ -15,9 +15,9 @@ mod support;
 
 use serde_json::{json, Value};
 use siros_oid4vp::{
-    read_reply, ClientIdPrefix, ContentEncryption, Effect, ErrorCode, FetchResponse, IntakeError,
-    IntakeState, KeyMaterial, Kid, Method, Origin, Presentation, RedirectUri, ResponseMode, State,
-    Submission, TrustSubject,
+    ClientIdPrefix, ContentEncryption, Effect, EffectResult, ErrorCode, IntakeError, IntakeState,
+    KeyMaterial, Kid, Origin, PostBody, Presentation, RedirectUri, Reply, RequestUriMethod,
+    ResponseMode, State, Submission, TrustSubject,
 };
 use support::*;
 
@@ -74,12 +74,15 @@ fn direct_post_by_value() {
     let Submission::Post(post) = token.submission(&mut Rng(2)).unwrap() else {
         panic!("a POST")
     };
-    assert_eq!(post.url().as_str(), "https://client.example.org/post");
-    let Method::Post { content_type, body } = post.method() else {
-        panic!("a POST")
+    assert_eq!(
+        post.response_uri().as_str(),
+        "https://client.example.org/post"
+    );
+    assert_eq!(post.mode(), ResponseMode::DirectPost);
+    let PostBody::Form(body) = post.body() else {
+        panic!("form parameters")
     };
-    assert_eq!(content_type.as_str(), "application/x-www-form-urlencoded");
-    let fields = form(std::str::from_utf8(body).unwrap());
+    let fields = form(body.as_str());
     let field = |name: &str| fields.iter().find(|(n, _)| n == name).unwrap().1.clone();
     assert_eq!(field("state"), "eyJhb...6-sVA");
     assert_eq!(
@@ -89,17 +92,12 @@ fn direct_post_by_value() {
     assert_eq!(fields.len(), 2);
 
     // SOURCE: Section 8.2, the response of the Response URI to the wallet.
-    let reply = FetchResponse::new(
-        HttpStatus::OK,
-        Some("application/json".into()),
-        br#"{"redirect_uri": "https://client.example.org/cb#response_code=091535f699ea575c7937fa5f0f454aee"}"#
-            .to_vec(),
-    );
+    let reply = Reply::parse(
+        br#"{"redirect_uri": "https://client.example.org/cb#response_code=091535f699ea575c7937fa5f0f454aee"}"#,
+    )
+    .unwrap();
     assert_eq!(
-        read_reply(&reply)
-            .unwrap()
-            .as_ref()
-            .map(RedirectUri::as_str),
+        reply.redirect_uri().map(RedirectUri::as_str),
         Some("https://client.example.org/cb#response_code=091535f699ea575c7937fa5f0f454aee")
     );
 }
@@ -108,8 +106,8 @@ fn direct_post_by_value() {
 /// 5.10.1, the payload of its Request Object, signed with ES256 under a certificate for
 /// `client.example.org`. `dcql_query` is that of Section 5.4.
 ///
-/// Stated: the wallet POSTs `wallet_metadata` and `wallet_nonce` (Section 5.10); the Request
-/// Object must hold the `wallet_nonce` sent, or processing terminates (Section 5.10.1).
+/// Stated: the wallet sends `wallet_metadata` and `wallet_nonce` as form parameters (Section
+/// 5.10), and the Request Object holding the `wallet_nonce` sent verifies (Section 5.10.1).
 #[test]
 fn request_uri_post() {
     let key = key(7);
@@ -123,6 +121,7 @@ fn request_uri_post() {
         ("request_uri_method", "post"),
     ]);
     let document = |wallet_nonce: &str| {
+        // SOURCE: Section 5.10.1, the payload of the Request Object.
         let payload = json!({
             "client_id": "x509_san_dns:client.example.org",
             "response_uri": "https://client.example.org/post",
@@ -135,33 +134,33 @@ fn request_uri_post() {
         });
         request_object(&sign(&x5c_header(&certificate), &payload, &key))
     };
-    let host = &Host::trusting();
-    let document = &document;
-    let answer = |echo: bool| {
-        move |effect: &Effect| match effect {
-            Effect::Fetch(fetch) => {
-                let Method::Post { body, .. } = fetch.method() else {
-                    panic!("a POST")
-                };
-                let body = std::str::from_utf8(body).unwrap();
-                assert_eq!(fetch.accept().as_str(), "application/oauth-authz-req+jwt");
-                let fields = form(body);
-                let field = |name: &str| fields.iter().find(|(n, _)| n == name).unwrap().1.clone();
-                let metadata: Value = serde_json::from_str(&field("wallet_metadata")).unwrap();
-                assert_eq!(metadata["vp_formats_supported"], Value::Object(formats()));
-                let nonce = if echo {
-                    field("wallet_nonce")
-                } else {
-                    "qPmxiNFCR3QTm19POc8u".into()
-                };
-                siros_oid4vp::EffectResult::Fetched(document(&nonce))
-            }
-            Effect::Trust(_) => host.answer(effect),
+    let host = Host::trusting();
+    let answer = |effect: &Effect| match effect {
+        Effect::RequestObject(request) => {
+            assert_eq!(
+                request.uri().as_str(),
+                "https://client.example.org/request/vapof4ql2i7m41m68uep"
+            );
+            let RequestUriMethod::Post(parameters) = request.method() else {
+                panic!("post, got {request:?}")
+            };
+            let fields = form(parameters.form().as_str());
+            let field = |name: &str| fields.iter().find(|(n, _)| n == name).unwrap().1.clone();
+            assert_eq!(fields.len(), 2);
+            let metadata: Value = serde_json::from_str(&field("wallet_metadata")).unwrap();
+            assert_eq!(metadata["vp_formats_supported"], Value::Object(formats()));
+            assert_eq!(
+                &metadata,
+                &Value::Object(parameters.wallet_metadata().as_map().clone())
+            );
+            assert_eq!(field("wallet_nonce"), parameters.wallet_nonce().as_str());
+            EffectResult::RequestObject(document(parameters.wallet_nonce().as_str()))
         }
+        Effect::Trust(_) => host.answer(effect),
     };
 
     let state = IntakeState::redirect(&uri, formats(), now(), &mut Rng(3));
-    let (request, _) = run(state.clone(), answer(true)).unwrap();
+    let (request, effects) = run(state, answer).unwrap();
     assert_eq!(
         request.verifier().client_id().unwrap().as_str(),
         "x509_san_dns:client.example.org"
@@ -170,10 +169,10 @@ fn request_uri_post() {
         request.response_uri().unwrap().as_str(),
         "https://client.example.org/post"
     );
-    assert_eq!(
-        run(state, answer(false)).unwrap_err(),
-        IntakeError::WalletNonceMismatch
-    );
+    assert!(matches!(
+        effects.as_slice(),
+        [Effect::RequestObject(_), Effect::Trust(_)]
+    ));
 }
 
 /// SOURCE: Section 8.3, the request asking for an encrypted response with four keys in
@@ -231,10 +230,7 @@ fn encrypted_response_key_choice() {
             vec![Presentation::text("eyJhb...YMetA".into())],
         )])
         .unwrap();
-    let Submission::DcApi(data) = token.submission(&mut Rng(4)).unwrap() else {
-        panic!("a DC API response")
-    };
-    let jwe = data["response"].as_str().unwrap();
+    let jwe = dc_api_jwe(&token.submission(&mut Rng(4)).unwrap());
     let header: Value = serde_json::from_slice(
         &siros_codec::base64url::decode(jwe.split('.').next().unwrap()).unwrap(),
     )
@@ -282,9 +278,11 @@ fn unsigned_dc_api() {
             vec![Presentation::text("a~b~".into())],
         )])
         .unwrap();
+    let submission = token.submission(&mut Rng(5)).unwrap();
+    assert_eq!(submission.mode(), ResponseMode::DcApi);
     assert_eq!(
-        token.submission(&mut Rng(5)).unwrap(),
-        Submission::DcApi(json!({"vp_token": {"some_identity_credential": ["a~b~"]}}))
+        dc_api_data(&submission),
+        json!({"vp_token": {"some_identity_credential": ["a~b~"]}})
     );
 }
 
@@ -331,8 +329,8 @@ fn signed_dc_api() {
     assert_eq!(error, IntakeError::OriginNotExpected);
     assert_eq!(error.error_code(), ErrorCode::InvalidRequest);
     assert_eq!(
-        state.error_submission(error),
-        Some(Submission::DcApi(json!({"error": "invalid_request"})))
+        state.error_submission(error).as_ref().map(dc_api_data),
+        Some(json!({"error": "invalid_request"}))
     );
 }
 

@@ -18,10 +18,9 @@ use rand_core::{CryptoRng, RngCore};
 use serde_json::{json, Map, Value};
 use siros_codec::base64url;
 pub use siros_codec::date::DateTime;
-pub use siros_oid4vp::HttpStatus;
 use siros_oid4vp::{
-    Effect, EffectResult, FetchResponse, IntakeError, IntakeState, KeyMaterial, Kid, Step,
-    TrustAnswer, VerifiedRequest,
+    DcApiData, Effect, EffectResult, IntakeError, IntakeState, KeyMaterial, Kid, RequestObjectText,
+    Step, Submission, TrustAnswer, VerifiedRequest,
 };
 use x509_cert::builder::{Builder, CertificateBuilder, Profile};
 use x509_cert::der::asn1::{Ia5String, UtcTime};
@@ -247,7 +246,7 @@ pub fn formats() -> Map<String, Value> {
         .clone()
 }
 
-/// What the host's trust evaluation and its fetches give.
+/// What the host's trust evaluation gives, and the Request Objects it obtains.
 pub struct Host {
     /// The AuthZEN decision on every subject.
     pub trusted: bool,
@@ -255,8 +254,8 @@ pub struct Host {
     pub keys: Vec<(String, Value)>,
     /// The Verifier metadata of an OpenID Federation Trust Chain.
     pub metadata: Option<Value>,
-    /// The documents the host fetches, by URL.
-    pub documents: Vec<(String, FetchResponse)>,
+    /// The Request Objects the host obtains, by `request_uri`.
+    pub request_objects: Vec<(String, String)>,
 }
 
 impl Host {
@@ -265,19 +264,21 @@ impl Host {
             trusted: true,
             keys: Vec::new(),
             metadata: None,
-            documents: Vec::new(),
+            request_objects: Vec::new(),
         }
     }
 
     pub fn answer(&self, effect: &Effect) -> EffectResult {
         match effect {
-            Effect::Fetch(fetch) => EffectResult::Fetched(
-                self.documents
+            Effect::RequestObject(request) => {
+                let uri = request.uri().as_str();
+                let (_, jws) = self
+                    .request_objects
                     .iter()
-                    .find(|(url, _)| url == fetch.url().as_str())
-                    .map(|(_, response)| response.clone())
-                    .unwrap_or_else(|| FetchResponse::new(HttpStatus::new(404), None, Vec::new())),
-            ),
+                    .find(|(listed, _)| listed == uri)
+                    .unwrap_or_else(|| panic!("no Request Object at {uri}"));
+                EffectResult::RequestObject(request_object(jws))
+            }
             Effect::Trust(trust) => match trust.key() {
                 KeyMaterial::Resolve { kid, trust_chain } => {
                     let key = self
@@ -294,13 +295,25 @@ impl Host {
     }
 }
 
-/// A Request Object response from a Request URI.
-pub fn request_object(jws: &str) -> FetchResponse {
-    FetchResponse::new(
-        HttpStatus::OK,
-        Some("application/oauth-authz-req+jwt".into()),
-        jws.as_bytes().to_vec(),
-    )
+/// The Request Object `jws`, as the host obtained it.
+pub fn request_object(jws: &str) -> RequestObjectText {
+    RequestObjectText::new(jws.to_owned()).unwrap()
+}
+
+/// The `data` of a DC API submission.
+pub fn dc_api_data(submission: &Submission) -> Value {
+    let Submission::DcApi(data) = submission else {
+        panic!("a DC API response, got {submission:?}")
+    };
+    data.json()
+}
+
+/// The JWE of a `dc_api.jwt` submission.
+pub fn dc_api_jwe(submission: &Submission) -> String {
+    let Submission::DcApi(DcApiData::Jwt(jwe)) = submission else {
+        panic!("a dc_api.jwt response, got {submission:?}")
+    };
+    jwe.as_str().to_owned()
 }
 
 /// Intake to its end, each effect answered by `host`; the verified request and the effects.
@@ -347,7 +360,7 @@ pub fn authorization_uri(params: &[(&str, &str)]) -> String {
     uri
 }
 
-/// The parameters of a form-encoded body.
+/// The parameters of form-encoded text.
 pub fn form(body: &str) -> Vec<(String, String)> {
     let decode = |text: &str| {
         let mut out = Vec::new();
