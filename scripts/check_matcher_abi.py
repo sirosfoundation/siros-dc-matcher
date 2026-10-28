@@ -20,210 +20,238 @@ and traps when the matcher calls it: releases v0.8.0 to v0.11.0 imported
 reached the planner. Any import outside these tables, the `environ_*` pair
 included, fails the check.
 
-Prints the imports, the host level the binary needs, and exits 1 on any
-violation.
+The matcher is a regular `.wasm` file inside this repository. Prints the
+imports and the host level the binary needs. Exits 1 on any violation and on
+a module that breaks the binary format, and 2 on a refused argument.
 """
+from __future__ import annotations
+
+import argparse
 import sys
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 
-I32, I64 = "i32", "i64"
+from repo_paths import PathRefused, existing_file
+from wasm_binary import (
+    Export, ExternKind, FunctionImport, Import, OtherImport, SectionId, Signature, ValType,
+    WasmFormatError, read_export, read_import, read_sections, read_signature, section_items,
+)
+
+I32, I64 = ValType.I32, ValType.I64
+HEADER = "the header"
+WASI_PREVIEW_1 = "WASI preview 1"
 
 
-def fn(*params, result=()):
-    return (tuple(params), tuple(result))
+def fn(*params: ValType, results: tuple[ValType, ...] = ()) -> Signature:
+    return Signature(params, results)
 
 
-# (module, name) -> (minimum host level, (params, results))
-CREDMAN = {
-    ("credman", "AddEntry"): (1, fn(I64, *[I32] * 6)),
-    ("credman", "AddField"): (1, fn(I64, I32, I32)),
-    ("credman", "AddStringIdEntry"): (1, fn(*[I32] * 7)),
-    ("credman", "AddFieldForStringIdEntry"): (1, fn(*[I32] * 3)),
-    ("credman", "GetRequestBuffer"): (1, fn(I32)),
-    ("credman", "GetRequestSize"): (1, fn(I32)),
-    ("credman", "ReadCredentialsBuffer"): (1, fn(I32, I32, I32, result=[I32])),
-    ("credman", "GetCredentialsSize"): (1, fn(I32)),
-    ("credman", "GetWasmVersion"): (1, fn(I32)),
-    ("credman", "AddPaymentEntry"): (1, fn(*[I32] * 11)),
-    ("credman", "AddInlineIssuanceEntry"): (1, fn(*[I32] * 5)),
-    ("credman", "SetAdditionalDisclaimerAndUrlForVerificationEntry"): (1, fn(*[I32] * 4)),
-    ("credman", "GetCallingAppInfo"): (1, fn(I32)),
-    ("credman_v2", "AddEntrySet"): (2, fn(I32, I32)),
-    ("credman_v2", "AddEntryToSet"): (2, fn(*[I32] * 10)),
-    ("credman_v2", "AddFieldToEntrySet"): (2, fn(*[I32] * 5)),
-    ("credman_v2", "AddPaymentEntryToSet"): (2, fn(*[I32] * 14)),
-    ("credman_v2", "AddPaymentEntryToSetV2"): (3, fn(*[I32] * 15)),
-    ("credman_v4", "SelfDeclarePackageInfo"): (4, fn(*[I32] * 3)),
-    ("credman_v5", "AddMetadataDisplayTextToEntrySet"): (5, fn(*[I32] * 4)),
-    ("credman_v6", "SetAdditionalDisclaimerAndUrlForVerificationEntryInCredentialSet"): (
-        6,
-        fn(*[I32] * 6),
-    ),
-    ("credman_v7", "SetDelegationTypeForEntryInSet"): (7, fn(*[I32] * 4)),
-}
+@dataclass(frozen=True)
+class HostFunction:
+    """A function the host provides from host `level` on, with the signature
+    `source` gives it."""
 
-WASI = {
-    ("wasi_snapshot_preview1", "fd_write"): fn(I32, I32, I32, I32, result=[I32]),
-    ("wasi_snapshot_preview1", "fd_seek"): fn(I32, I64, I32, I32, result=[I32]),
-    ("wasi_snapshot_preview1", "fd_close"): fn(I32, result=[I32]),
-    ("wasi_snapshot_preview1", "fd_fdstat_get"): fn(I32, I32, result=[I32]),
-    ("wasi_snapshot_preview1", "proc_exit"): fn(I32),
-}
+    module: str
+    name: str
+    level: int
+    signature: Signature
+    source: str
+
+
+def credman(module: str, name: str, level: int, signature: Signature) -> HostFunction:
+    return HostFunction(module, name, level, signature, HEADER)
+
+
+def wasi(name: str, signature: Signature) -> HostFunction:
+    """A WASI function, which the host provides at every level."""
+    return HostFunction("wasi_snapshot_preview1", name, 1, signature, WASI_PREVIEW_1)
+
+
+def by_import_name(functions: Iterable[HostFunction]) -> dict[tuple[str, str], HostFunction]:
+    table: dict[tuple[str, str], HostFunction] = {}
+    for function in functions:
+        key = (function.module, function.name)
+        if key in table:
+            raise ValueError(f"{function.module}.{function.name} is in the table twice")
+        table[key] = function
+    return table
+
+
+HOST_FUNCTIONS = by_import_name([
+    credman("credman", "AddEntry", 1, fn(I64, *[I32] * 6)),
+    credman("credman", "AddField", 1, fn(I64, I32, I32)),
+    credman("credman", "AddStringIdEntry", 1, fn(*[I32] * 7)),
+    credman("credman", "AddFieldForStringIdEntry", 1, fn(*[I32] * 3)),
+    credman("credman", "GetRequestBuffer", 1, fn(I32)),
+    credman("credman", "GetRequestSize", 1, fn(I32)),
+    credman("credman", "ReadCredentialsBuffer", 1, fn(I32, I32, I32, results=(I32,))),
+    credman("credman", "GetCredentialsSize", 1, fn(I32)),
+    credman("credman", "GetWasmVersion", 1, fn(I32)),
+    credman("credman", "AddPaymentEntry", 1, fn(*[I32] * 11)),
+    credman("credman", "AddInlineIssuanceEntry", 1, fn(*[I32] * 5)),
+    credman("credman", "SetAdditionalDisclaimerAndUrlForVerificationEntry", 1, fn(*[I32] * 4)),
+    credman("credman", "GetCallingAppInfo", 1, fn(I32)),
+    credman("credman_v2", "AddEntrySet", 2, fn(I32, I32)),
+    credman("credman_v2", "AddEntryToSet", 2, fn(*[I32] * 10)),
+    credman("credman_v2", "AddFieldToEntrySet", 2, fn(*[I32] * 5)),
+    credman("credman_v2", "AddPaymentEntryToSet", 2, fn(*[I32] * 14)),
+    credman("credman_v2", "AddPaymentEntryToSetV2", 3, fn(*[I32] * 15)),
+    credman("credman_v4", "SelfDeclarePackageInfo", 4, fn(*[I32] * 3)),
+    credman("credman_v5", "AddMetadataDisplayTextToEntrySet", 5, fn(*[I32] * 4)),
+    credman("credman_v6", "SetAdditionalDisclaimerAndUrlForVerificationEntryInCredentialSet", 6,
+            fn(*[I32] * 6)),
+    credman("credman_v7", "SetDelegationTypeForEntryInSet", 7, fn(*[I32] * 4)),
+    wasi("fd_write", fn(I32, I32, I32, I32, results=(I32,))),
+    wasi("fd_seek", fn(I32, I64, I32, I32, results=(I32,))),
+    wasi("fd_close", fn(I32, results=(I32,))),
+    wasi("fd_fdstat_get", fn(I32, I32, results=(I32,))),
+    wasi("proc_exit", fn(I32)),
+])
+
+
+@dataclass(frozen=True)
+class CalledFunction:
+    """An export the host calls with `signature`."""
+
+    name: str
+    signature: Signature
+    kind = ExternKind.FUNC
+
+
+@dataclass(frozen=True)
+class AccessedMemory:
+    """An export the host reads and writes."""
+
+    name: str
+    kind = ExternKind.MEMORY
+
 
 # The host calls `_start` with no arguments and reads `memory`.
-REQUIRED_EXPORTS = {"_start": ("func", fn()), "memory": ("memory", None)}
-
-VALTYPES = {0x7F: I32, 0x7E: I64, 0x7D: "f32", 0x7C: "f64", 0x7B: "v128", 0x70: "funcref", 0x6F: "externref"}
-EXTERN_KINDS = {0: "func", 1: "table", 2: "memory", 3: "global", 4: "tag"}
-
-
-class Reader:
-    def __init__(self, data, pos=0, end=None):
-        self.data, self.pos, self.end = data, pos, len(data) if end is None else end
-
-    def byte(self):
-        if self.pos >= self.end:
-            raise ValueError("unexpected end of section")
-        b = self.data[self.pos]
-        self.pos += 1
-        return b
-
-    def uleb(self):
-        result = shift = 0
-        while True:
-            b = self.byte()
-            result |= (b & 0x7F) << shift
-            shift += 7
-            if not b & 0x80:
-                return result
-
-    def bytes(self, n):
-        if self.pos + n > self.end:
-            raise ValueError("unexpected end of section")
-        out = self.data[self.pos:self.pos + n]
-        self.pos += n
-        return out
-
-    def name(self):
-        return self.bytes(self.uleb()).decode("utf-8")
-
-    def valtypes(self):
-        out = []
-        for _ in range(self.uleb()):
-            b = self.byte()
-            if b not in VALTYPES:
-                raise ValueError(f"unknown value type 0x{b:02x}")
-            out.append(VALTYPES[b])
-        return tuple(out)
+REQUIRED_EXPORTS: tuple[CalledFunction | AccessedMemory, ...] = (
+    CalledFunction("_start", fn()),
+    AccessedMemory("memory"),
+)
 
 
-def sections(data):
-    if data[:8] != b"\0asm\x01\0\0\0":
-        raise ValueError("not a WebAssembly 1.0 module")
-    r = Reader(data, 8)
-    while r.pos < len(data):
-        section_id = r.byte()
-        size = r.uleb()
-        yield section_id, Reader(data, r.pos, r.pos + size)
-        r.pos += size
+@dataclass(frozen=True)
+class ModuleInterface:
+    """A module's function types, imports and exports, and the type index of
+    each function, imported ones first."""
+
+    types: tuple[Signature, ...]
+    imports: tuple[Import, ...]
+    exports: tuple[Export, ...]
+    function_types: tuple[int, ...]
+
+    def export(self, name: str) -> Export | None:
+        return next((export for export in self.exports if export.name == name), None)
+
+    def signature_of(self, item: FunctionImport) -> Signature:
+        return self.types[item.type_index]
+
+    def function_signature(self, index: int) -> Signature:
+        return self.types[self.function_types[index]]
 
 
-def skip_limits(r):
-    flags = r.byte()
-    r.uleb()
-    if flags & 1:
-        r.uleb()
+def read_interface(module: bytes) -> ModuleInterface:
+    sections = read_sections(module)
+    types = tuple(section_items(sections, SectionId.TYPE, read_signature))
+    imports = tuple(section_items(sections, SectionId.IMPORT, lambda r: read_import(r, len(types))))
+    defined = section_items(sections, SectionId.FUNCTION, lambda r: r.index(len(types), "type"))
+    function_types = tuple(i.type_index for i in imports if isinstance(i, FunctionImport))
+    function_types += tuple(defined)
+    exports = tuple(section_items(sections, SectionId.EXPORT,
+                                  lambda r: read_export(r, len(function_types))))
+    return ModuleInterface(types, imports, exports, function_types)
 
 
-def skip_descriptor(r, kind):
-    """Steps over the descriptor of a non-function import."""
-    if kind == 1:
-        r.byte()
-        skip_limits(r)
-    elif kind == 2:
-        skip_limits(r)
-    elif kind == 3:
-        r.byte()
-        r.byte()
-    elif kind == 4:
-        r.byte()
-        r.uleb()
-    else:
-        raise ValueError(f"unknown import kind {kind}")
+@dataclass(frozen=True)
+class Report:
+    """What the check prints: one line per import, the host level the imports
+    need, and every violation."""
+
+    imports: tuple[str, ...]
+    level: int
+    violations: tuple[str, ...]
+
+    def show(self) -> None:
+        for line in self.imports:
+            print(f"  import {line}")
+        print(f"  host level needed to resolve every import: {self.level}")
+        for violation in self.violations:
+            print(f"::error::{violation}")
 
 
-def parse(data):
-    """Function types, imports and exports of a module."""
-    types, imports, exports, functions = [], [], {}, []
-    imported_functions = 0
-    for section_id, r in sections(data):
-        if section_id == 1:
-            for _ in range(r.uleb()):
-                if r.byte() != 0x60:
-                    raise ValueError("unexpected type form")
-                types.append((r.valtypes(), r.valtypes()))
-        elif section_id == 2:
-            for _ in range(r.uleb()):
-                module, name, kind = r.name(), r.name(), r.byte()
-                if kind == 0:
-                    imports.append((module, name, "func", types[r.uleb()]))
-                    imported_functions += 1
-                else:
-                    skip_descriptor(r, kind)
-                    imports.append((module, name, EXTERN_KINDS.get(kind, str(kind)), None))
-        elif section_id == 3:
-            functions = [r.uleb() for _ in range(r.uleb())]
-        elif section_id == 7:
-            for _ in range(r.uleb()):
-                name, kind, index = r.name(), r.byte(), r.uleb()
-                exports[name] = (EXTERN_KINDS.get(kind, str(kind)), index)
-    return types, imports, exports, functions, imported_functions
+def import_violation(item: Import, interface: ModuleInterface) -> str | None:
+    shown = f"{item.module}.{item.name}"
+    if isinstance(item, OtherImport):
+        return f"{shown}: imports a {item.kind}; the host provides functions only"
+    host = HOST_FUNCTIONS.get((item.module, item.name))
+    if host is None:
+        return f"{shown}: not in the Credential Manager ABI or the known WASI subset"
+    signature = interface.signature_of(item)
+    if signature != host.signature:
+        return f"{shown}: signature {signature}, {host.source} gives {host.signature}"
+    return None
 
 
-def check(path):
-    data = open(path, "rb").read()
-    types, imports, exports, functions, imported_functions = parse(data)
-    errors, level = [], 1
-    for module, name, kind, signature in imports:
-        key = (module, name)
-        shown = f"{module}.{name}"
-        if kind != "func":
-            errors.append(f"{shown}: imports a {kind}; the host provides functions only")
-        elif key in CREDMAN:
-            needed, expected = CREDMAN[key]
-            if signature != expected:
-                errors.append(f"{shown}: signature {signature}, the header gives {expected}")
-            level = max(level, needed)
-        elif key in WASI:
-            if signature != WASI[key]:
-                errors.append(f"{shown}: signature {signature}, WASI preview 1 gives {WASI[key]}")
-        else:
-            errors.append(f"{shown}: not in the Credential Manager ABI or the known WASI subset")
-        print(f"  import {shown} {signature}")
-    for name, (kind, expected) in REQUIRED_EXPORTS.items():
-        if name not in exports:
-            errors.append(f"export {name} is missing")
-            continue
-        got_kind, index = exports[name]
-        if got_kind != kind:
-            errors.append(f"export {name} is a {got_kind}, the host needs a {kind}")
-        elif kind == "func":
-            local = index - imported_functions
-            signature = types[functions[local]] if 0 <= local < len(functions) else None
-            if signature != expected:
-                errors.append(f"export {name} has signature {signature}, the host calls {expected}")
-    print(f"  host level needed to resolve every import: {level}")
-    return errors
+def export_violation(required: CalledFunction | AccessedMemory, interface: ModuleInterface) -> str | None:
+    export = interface.export(required.name)
+    if export is None:
+        return f"export {required.name} is missing"
+    if export.kind is not required.kind:
+        return f"export {required.name} is a {export.kind}, the host needs a {required.kind}"
+    if isinstance(required, CalledFunction):
+        signature = interface.function_signature(export.index)
+        if signature != required.signature:
+            return f"export {required.name} has signature {signature}, the host calls {required.signature}"
+    return None
 
 
-def main(argv):
-    if len(argv) != 2:
-        sys.exit(f"usage: {argv[0]} MATCHER.wasm")
-    print(argv[1])
-    errors = check(argv[1])
-    for error in errors:
-        print(f"::error::{error}")
-    sys.exit(1 if errors else 0)
+def import_line(item: Import, interface: ModuleInterface) -> str:
+    """The import's name, then its signature, or the kind of a non-function."""
+    described = interface.signature_of(item) if isinstance(item, FunctionImport) else item.kind
+    return f"{item.module}.{item.name} {described}"
+
+
+def level_needed(imports: Sequence[Import]) -> int:
+    """The lowest host level that provides every import in the table."""
+    levels = (HOST_FUNCTIONS.get((item.module, item.name)) for item in imports)
+    return max((host.level for host in levels if host is not None), default=1)
+
+
+def check(module: bytes) -> Report:
+    interface = read_interface(module)
+    violations = [import_violation(item, interface) for item in interface.imports]
+    violations += [export_violation(required, interface) for required in REQUIRED_EXPORTS]
+    return Report(
+        imports=tuple(import_line(item, interface) for item in interface.imports),
+        level=level_needed(interface.imports),
+        violations=tuple(violation for violation in violations if violation is not None),
+    )
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Check a matcher's imports and exports against the Credential Manager ABI.")
+    parser.add_argument("matcher", metavar="MATCHER.wasm",
+                        help="the matcher binary, a .wasm file inside this repository")
+    arguments = parser.parse_args(argv)
+    try:
+        path = existing_file(arguments.matcher, ".wasm")
+    except PathRefused as refused:
+        parser.error(str(refused))
+    print(arguments.matcher)
+    with path.open("rb") as matcher:
+        module = matcher.read()
+    try:
+        report = check(module)
+    except WasmFormatError as error:
+        print(f"::error::{arguments.matcher}: {error}")
+        return 1
+    report.show()
+    return 1 if report.violations else 0
 
 
 if __name__ == "__main__":
-    main(sys.argv)
+    sys.exit(main())
