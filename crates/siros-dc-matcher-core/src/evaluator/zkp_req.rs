@@ -1,7 +1,7 @@
 //! The `zkp_req` half of the profile: the circuit and the option a `zkp_req` query is answered
 //! with (`zkp_req`, Sections 1.3 and 2.1).
 
-use serde_json::Value;
+use serde_json::{Map, Value};
 use siros_dcql::{CredentialQuery, Vct};
 use siros_zkp_req::{
     usable_backend, CredentialType, ProofBackend, QueryOption, SystemId, W3cType, ZkpFormats,
@@ -36,17 +36,37 @@ impl ZkpReqSelection<'_> {
     /// `_req_sets`. Everything comes from the unauthenticated request; the wallet checks it.
     #[must_use]
     pub fn to_json(&self) -> Value {
-        let items: Vec<usize> = self.option.items().iter().map(|i| i.value()).collect();
-        let mut out = serde_json::json!({
-            "circuit": self.capability,
-            "proof_backend": self.proof_backend.as_str(),
-            "items": items,
-        });
+        let items = self
+            .option
+            .items()
+            .iter()
+            .map(|i| Value::from(i.value()))
+            .collect();
+        let mut out = Map::new();
+        drop(out.insert("circuit".to_owned(), circuit(self.capability)));
+        drop(out.insert(
+            "proof_backend".to_owned(),
+            self.proof_backend.as_str().into(),
+        ));
+        drop(out.insert("items".to_owned(), Value::Array(items)));
         if let Some(req_set) = self.option.req_set() {
-            out["req_set"] = req_set.value().into();
+            drop(out.insert("req_set".to_owned(), req_set.value().into()));
         }
-        out
+        Value::Object(out)
     }
+}
+
+/// `{"system": …, "params": {…}}`: `capability` as the registration serializes it.
+fn circuit(capability: &Capability) -> Value {
+    let params = capability
+        .params
+        .iter()
+        .map(|(name, value)| (name.clone(), Value::from(value.as_str())))
+        .collect();
+    let mut out = Map::new();
+    drop(out.insert("system".to_owned(), capability.system.as_str().into()));
+    drop(out.insert("params".to_owned(), Value::Object(params)));
+    Value::Object(out)
 }
 
 /// A registered circuit as `zkp_req`, Section 1.3 judges a system.
