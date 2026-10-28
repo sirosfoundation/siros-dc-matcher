@@ -19,8 +19,8 @@ use crate::write::WriteError;
 /// The bytes of `projection`: the header of [`Version::CURRENT`], the directory, and the
 /// sections in its order. The facts come first; the index lists each credential type once,
 /// sorted by format code and name; the records of a type follow one another in the wallet's
-/// order; each distinct definition and icon is stored once, in the order the facts and the
-/// records first name it. Equal projections give equal bytes.
+/// order; the definitions and the icons sections each hold a table of each distinct part once,
+/// in the order the facts and the records first name it. Equal projections give equal bytes.
 ///
 /// # Errors
 ///
@@ -189,7 +189,7 @@ fn lay_out(sections: [Vec<u8>; 6]) -> Result<Vec<u8>, WriteError> {
 }
 
 /// The facts map: the time, the language, the diagnostics, the systems, the `verifier_id` form,
-/// and the span of the wallet's icon, placed in `icons`.
+/// and the number of the wallet's icon, placed in `icons`.
 fn facts(facts: &Facts<Icon>, icons: &mut Pool) -> Cbor {
     map([
         (
@@ -302,7 +302,7 @@ fn trust(facts: &IssuerFacts) -> Cbor {
     ])
 }
 
-/// What `served` gives each type: the span of the projected definition, placed in
+/// What `served` gives each type: the number of the projected definition, placed in
 /// `definitions`, or why there is none.
 fn transactions(served: &ServedTypes<Projected>, definitions: &mut Pool) -> Cbor {
     let types = served

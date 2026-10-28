@@ -114,10 +114,13 @@ pub(crate) fn unsigned(item: &Item<'_>) -> Option<u64> {
     }
 }
 
-/// A position in a table: an unsigned integer within the platform's addresses, the type of a
-/// table reference.
+/// A credential's position in the wallet's order: an unsigned integer below 2^32 on every
+/// target, as the records of a records section under 4 GiB number fewer.
 pub(crate) fn position(item: &Item<'_>) -> Option<usize> {
-    unsigned(item).and_then(|n| usize::try_from(n).ok())
+    // A u32 fits the usize of every target the crate builds for.
+    unsigned(item)
+        .and_then(|n| u32::try_from(n).ok())
+        .map(|n| n as usize)
 }
 
 /// A boolean.

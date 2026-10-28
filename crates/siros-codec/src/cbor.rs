@@ -21,8 +21,9 @@ pub const MAX_DEPTH: usize = 32;
 /// starts at its own byte and takes a slot of [`Item`] in the vector of its array, map or
 /// sequence, or in the box of its tag. A vector grows as its items decode: from four slots,
 /// doubling when full. It holds at most twice the slots it fills, or four for one item, and the
-/// vectors it outgrew hold as many again on an allocator that never frees: four slots per item. The duplicate check of a map adds
-/// [`KEY_SET_PER_KEY`] per key, and a key and its value take two bytes at least.
+/// vectors it outgrew hold as many again on an allocator that never frees: four slots per item.
+/// The duplicate check of a map adds [`KEY_SET_PER_KEY`] per key, and a key and its value take
+/// two bytes at least.
 ///
 /// 127 bytes on wasm32 (an `Item` of 24 bytes, a slice of 8) and 243 on a 64-bit target (48
 /// and 16).

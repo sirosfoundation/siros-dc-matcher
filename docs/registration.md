@@ -67,8 +67,8 @@ the offset and the length of each entry, eight bytes per entry.
 | Bytes | Field |
 |---|---|
 | 0–3 | The count of entries, `n` |
-| 4 + 8k – 7 + 8k | The offset of entry `k`, from the section's start |
-| 8 + 8k – 11 + 8k | The length of entry `k`: at least one byte |
+| `4 + 8k` to `7 + 8k` | The offset of entry `k`, from the section's start |
+| `8 + 8k` to `11 + 8k` | The length of entry `k`: at least one byte |
 
 The entries tile the section after the table, in the table's order: the first starts at
 `4 + 8n`, each next one where the one before it ends, each holds a byte at least, and the last
@@ -95,7 +95,7 @@ gives the type and its format.
 
 | Member | Value |
 |---|---|
-| `position` | The credential's position in the wallet's order, distinct for each record |
+| `position` | The credential's position in the wallet's order, below 2^32, distinct for each record |
 | `entry` | `[credentialId, batchId, instanceId]`: each `credentialId` and each batch once |
 | `key` | Whether the wallet holds the key the credential is bound to |
 | `claims` | The claim tree (`siros_credential::ClaimTree::to_cbor`) |
@@ -130,9 +130,10 @@ The reader refuses, with a `RegistrationError` that names the part and the cause
 - records of a type out of the wallet's order, and two records read with one position,
   `credentialId` or batch;
 - a definition of no UTF-8, no projection, or another language than the facts';
-- an icon longer than a buffer of the platform holds (`isize::MAX` bytes), facts or records of a
-  type longer than `cbor::MAX_INPUT` of siros-codec (16,909,320 bytes on wasm32), and a definition
-  longer than `json::MAX_TEXT` (10,275,041 bytes on wasm32).
+- an icon, an index, names or a table longer than a buffer of the platform holds (`isize::MAX`
+  bytes), an index of more entries than a buffer holds, facts or records of a type longer than
+  `cbor::MAX_INPUT` of siros-codec (16,909,320 bytes on wasm32), and a definition longer than
+  `json::MAX_TEXT` (10,275,041 bytes on wasm32).
 
 The reader reads a part into a buffer of the part's length, which lies within the blob.
 Decoding a CBOR part allocates at most `cbor::HEAP_PER_BYTE` bytes per byte of it: 127 on wasm32
@@ -145,9 +146,10 @@ per byte: 209 on wasm32 and 241 on a 64-bit target. The values of a part thus ta
 
 `siros_registration::encode` lays a `Projection` out; `write` projects the wallet's state, then
 encodes it. `project` refuses a credential whose `vct` or `docType` is empty
-(`WriteError::TypeEmpty`): a type's name in the index holds at least one byte. Equal projections give equal bytes: the CBOR is deterministic (RFC 8949, Section
-4.2.1), the index is sorted, the records of a type keep the wallet's order, and each icon and
-definition takes the place of its first use, the facts' icon first.
+(`WriteError::TypeEmpty`): a type's name in the index holds at least one byte. Equal projections
+give equal bytes: the CBOR is deterministic (RFC 8949, Section 4.2.1), the index is sorted, the
+records of a type keep the wallet's order, and each icon and definition takes the number of its
+first use, the facts' icon first.
 
 ## Prior art
 

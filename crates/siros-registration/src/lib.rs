@@ -17,8 +17,8 @@
 //! facts when it opens, then each part a request needs when asked. It refuses every version but
 //! [`Version::CURRENT`], every offset or length past its part, every member a record does not
 //! define, an index whose types do not sort strictly, and names, records, definitions or icons
-//! that do not tile their sections. The wallet registers the projection with the matcher it ships, so the two
-//! versions are one.
+//! that do not tile their sections. The wallet registers the projection with the matcher it
+//! ships, so the two versions are one.
 //!
 //! Without the feature `wallet` the crate holds the reader the credential picker links. It builds
 //! with Rust 1.82 and links no X.509, ECDSA or trust store code.

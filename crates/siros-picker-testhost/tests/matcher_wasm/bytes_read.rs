@@ -1,8 +1,9 @@
 //! The picker reads of the registration only what a request needs (`docs/registration.md`):
 //! the header, the directory, the index, the types' names, the tables of the definitions and the
 //! icons, and the facts; the records of the type the request asks for; the definitions the
-//! request's entry names for them; and the icons of the entries it emits. The count of bytes the host copies is the sum of those parts, which
-//! the layout's lengths and the writer's projection give.
+//! request's entry names for them; and the icons of the entries it emits. The count of bytes
+//! the host copies is the sum of those parts, which the layout's lengths and the writer's
+//! projection give.
 
 use serde_json::{json, Value};
 use siros_codec::cbor::Value as Cbor;

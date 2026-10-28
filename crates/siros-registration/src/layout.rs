@@ -125,7 +125,7 @@ part!(
 );
 
 /// Bytes inside the section `S`: an offset from the section's start and a length that end
-/// within it. [`Bounds::span`] makes one, after that check.
+/// within it. [`Bounds::span`] and [`Tiles`] make one, after that check.
 #[derive(Debug)]
 pub(crate) struct Span<S> {
     offset: u32,

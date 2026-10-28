@@ -7,6 +7,7 @@ use std::io::Cursor;
 use serde_json::json;
 use siros_codec::cbor::{self, Value as Cbor};
 use siros_codec::date::DateTime;
+use siros_codec::member::MemberFault;
 use siros_credential::Format;
 use siros_presentation::testing::host::holding_absent;
 use siros_presentation::testing::verifier::NOW;
@@ -333,6 +334,24 @@ fn each_rule_refuses_with_its_cause() {
                         entries: 1
                     }
                 ),
+                ..
+            }
+        ),
+        "{error:?}"
+    );
+
+    // PID's first record at position 2^32, past the positions a records section numbers.
+    let mut far = pid_entry.clone();
+    let at = find(&far.records, b"\x68position\x00") + 9;
+    far.records
+        .splice(at..at + 1, [0x1b, 0, 0, 0, 1, 0, 0, 0, 0]);
+    let layout = Layout::of(&honest).with_entries(&[far, loyalty.clone(), mdl_entry.clone()]);
+    let error = refusal(&layout.blob(), std::slice::from_ref(&pid));
+    assert!(
+        matches!(
+            error,
+            RegistrationError::Credential {
+                fault: CredentialFault::Member(Member::Position, MemberFault::WrongType),
                 ..
             }
         ),
