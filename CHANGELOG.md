@@ -39,13 +39,6 @@ against the 307,200-byte budget (303,418 at v0.11.0).
   (16 before).
 - **BREAKING (FFI):** `zkp_req_plan` and `ZkpReqPlanError` are removed. Bindings are
   regenerated.
-- **BREAKING (FFI):** the `zkp_req` functions panic on a host input that breaks their
-  contract, where they returned `ZkpReqError::Host`: no anchors for a query with
-  `trusted_authorities` (`anchors_missing`), a secret seed of other than 16 bytes
-  (`seed_length`), a credential other than the candidate's (`credential_mismatch`), a device
-  signature of other than 64 bytes (`signature_length`), and a JWK thumbprint of no key in the
-  request (`thumbprint_not_in_request`). Those codes are gone. UniFFI raises the panic as an
-  internal error; the browser presenter traps.
 - The matcher calls the host through the new `android-credman-sys` and
   `android-credman` crates (MIT OR Apache-2.0, from
   APTITUDE-Consortium/dcapi-matcher). `crates/android-credman-sys/ABI.md`

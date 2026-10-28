@@ -298,10 +298,6 @@ fn parse_systems(ids: &[String]) -> Result<Vec<NymAuthSystem>, ZkpReqError> {
 /// # Errors
 ///
 /// [`ZkpReqError::Host`] for an input the presenter cannot use.
-///
-/// # Panics
-///
-/// When the query has `trusted_authorities` and `anchors` is `None`.
 #[uniffi::export]
 pub fn zkp_req_match(
     query_json: String,
@@ -386,11 +382,7 @@ fn invalid(code: &str) -> ZkpReqError {
 /// # Errors
 ///
 /// [`ZkpReqError::InvalidRequest`] for a rule of the policy or of the verifier identity, and
-/// [`ZkpReqError::Host`] for a thumbprint that is not 32 bytes.
-///
-/// # Panics
-///
-/// When the thumbprint is of no key in the request.
+/// [`ZkpReqError::Host`] for a thumbprint that is not 32 bytes or of no key in the request.
 #[uniffi::export]
 pub fn zkp_req_session(
     request_object_json: String,
@@ -408,7 +400,9 @@ pub fn zkp_req_session(
     let thumbprint: [u8; 32] = jwk_thumbprint
         .try_into()
         .map_err(|_| host("thumbprint_length"))?;
-    let handover = checked.handover(&thumbprint);
+    let handover = checked
+        .handover(&thumbprint)
+        .map_err(|_| host("thumbprint_not_in_request"))?;
     let verifier_id = match verifier_id {
         FfiVerifierIdForm::Semantic {
             semantic_identifier,
@@ -547,11 +541,6 @@ pub struct FfiPrepared(Prepared);
 /// # Errors
 ///
 /// [`ZkpReqError`]: what fails, with the Section 9 codes.
-///
-/// # Panics
-///
-/// When `secret_seed` is not 16 bytes, `credential` is not the candidate's, or the query has
-/// `trusted_authorities` and `anchors` is `None`.
 #[uniffi::export]
 #[allow(clippy::too_many_arguments)]
 pub fn zkp_req_prepare(
@@ -602,11 +591,7 @@ impl FfiPrepared {
     ///
     /// # Errors
     ///
-    /// `device_binding` for a signature that does not verify.
-    ///
-    /// # Panics
-    ///
-    /// When `device_signature` is not 64 bytes.
+    /// `device_binding`, or [`ZkpReqError::Host`] for a signature that is not 64 bytes.
     pub fn job(&self, device_signature: Vec<u8>) -> Result<FfiProofJob, ZkpReqError> {
         let job = self.0.job(&device_signature).map_err(prove_error)?;
         Ok(FfiProofJob {

@@ -29,21 +29,22 @@
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
 #![deny(clippy::cognitive_complexity)]
-#![deny(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::panic
-)]
+// Nothing panics outside the tests. scripts/check_panic_sites.py refuses an
+// allow of these lints there and finds the panics they cannot see.
 #![cfg_attr(
-    test,
-    allow(
+    not(test),
+    deny(
+        clippy::panic,
         clippy::unwrap_used,
         clippy::expect_used,
+        clippy::unreachable,
+        clippy::todo,
+        clippy::unimplemented,
         clippy::indexing_slicing,
-        clippy::panic
+        clippy::disallowed_methods
     )
 )]
+#![cfg_attr(test, allow(clippy::disallowed_methods))]
 
 pub mod age;
 pub mod catalogue;
