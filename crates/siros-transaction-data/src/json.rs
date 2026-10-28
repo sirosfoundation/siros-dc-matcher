@@ -146,7 +146,7 @@ pub(crate) fn canonical(value: &Json) -> Json {
 pub(crate) fn canonical_members(members: &[(String, Json)]) -> Vec<(String, Json)> {
     // An allocation that fails aborts: the members already fit in memory, and a wallet that
     // cannot hold their copy has nothing to fall back to.
-    let mut sorted: Vec<(String, Json)> = Vec::with_capacity(members.len());
+    let mut sorted: Vec<(String, Json)> = Vec::new();
     for (name, value) in members {
         // After the members that sort before or equal to it: equal names keep their order.
         let (mut before, after): (Vec<_>, Vec<_>) = sorted.into_iter().partition(|(other, _)| {
