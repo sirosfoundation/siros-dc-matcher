@@ -22,7 +22,7 @@
 
 use std::collections::BTreeMap;
 
-use serde_json::Value;
+use serde_json::{json, Value};
 use siros_dcql::{Credential as _, CredentialQuery, PathComponent, PathError};
 
 use crate::circuit_capabilities::{Capabilities, RequestedItem};
@@ -182,18 +182,12 @@ impl ZkpReqSelection<'_> {
     /// `_req_sets`. Everything comes from the unauthenticated request; the wallet checks it.
     #[must_use]
     pub fn to_json(&self) -> Value {
+        let (circuit, backend, items) = (self.capability, &self.proof_backend, &self.option.items);
         match self.option.req_set {
-            Some(req_set) => serde_json::json!({
-                "circuit": self.capability,
-                "proof_backend": self.proof_backend,
-                "req_set": req_set,
-                "items": self.option.items,
-            }),
-            None => serde_json::json!({
-                "circuit": self.capability,
-                "proof_backend": self.proof_backend,
-                "items": self.option.items,
-            }),
+            Some(req_set) => {
+                json!({"circuit": circuit, "proof_backend": backend, "req_set": req_set, "items": items})
+            }
+            None => json!({"circuit": circuit, "proof_backend": backend, "items": items}),
         }
     }
 }
