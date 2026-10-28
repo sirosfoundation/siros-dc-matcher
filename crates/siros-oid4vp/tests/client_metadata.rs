@@ -19,13 +19,20 @@ fn request_object() -> String {
     .to_string()
 }
 
+/// A compact JWS of `payload` whose header and signature keep the rules the picker reads.
 fn compact_jws(payload: &str) -> String {
+    let header = br#"{"alg":"ES256","typ":"oauth-authz-req+jwt"}"#;
     format!(
         "{}.{}.{}",
-        b64(br#"{"alg":"ES256"}"#),
+        b64(header),
         b64(payload.as_bytes()),
-        b64(b"sig")
+        signature()
     )
+}
+
+/// 64 bytes in place of an ES256 signature, which the picker never verifies.
+fn signature() -> String {
+    b64(&[7; 64]).to_string()
 }
 
 /// The Verifier metadata of a request comes from its `client_metadata`, which is then a JSON
@@ -47,11 +54,12 @@ fn client_metadata_is_the_requests_except_for_a_federation_client() {
         UnverifiedRequest::read("openid4vp-v1-signed", &data)
     };
     let multisigned = |client_id: &str| {
-        let header = serde_json::json!({"alg": "ES256", "client_id": client_id});
+        let header = serde_json::json!({"alg": "ES256", "typ": "oauth-authz-req+jwt",
+            "client_id": client_id});
         let data = serde_json::json!({
             "payload": b64(object(None).as_bytes()).to_string(),
             "signatures": [{"protected": b64(header.to_string().as_bytes()).to_string(),
-                "signature": b64(b"sig").to_string()}]
+                "signature": signature()}]
         });
         UnverifiedRequest::read("openid4vp-v1-multisigned", &data)
     };

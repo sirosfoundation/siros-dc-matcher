@@ -28,6 +28,7 @@
 pub mod client_id;
 pub mod error_code;
 pub mod handover;
+mod jws_rules;
 mod parameters;
 pub mod protocol;
 mod request;
@@ -53,6 +54,7 @@ mod x509;
 pub use client_id::{ClientId, ClientIdError, ClientIdPrefix};
 pub use error_code::ErrorCode;
 pub use handover::{ec_jwk_thumbprint, Handover, HandoverInvalid, JwkThumbprint};
+pub use jws_rules::JwsRule;
 pub use parameters::{Nonce, ParameterFault, State, VerifierInfoRule};
 pub use protocol::Protocol;
 pub use semantic::{Person, SemanticIdError, SemanticIdentifier};

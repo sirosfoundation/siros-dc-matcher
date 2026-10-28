@@ -9,13 +9,11 @@ use super::trust::{self, KeyMaterial, MetadataAnswer, TrustSubject, Verdict};
 use super::{attestation, Answers, Halt, IntakeError, JwsFault};
 use crate::client_id::{ClientId, ClientIdPrefix};
 use crate::jose::Signed;
+use crate::jws_rules;
 use crate::parameters::{strings, Metadata};
 use crate::values::{Kid, TrustChain};
 use crate::verified::AccessCertificate;
 use crate::x509::Chain;
-
-/// The `typ` of a Request Object (RFC 9101, Section 10.8).
-const REQUEST_OBJECT_TYP: &str = "oauth-authz-req+jwt";
 
 /// Who sent a request, as intake established it.
 pub(super) struct Verifier {
@@ -49,7 +47,7 @@ pub(super) fn authenticate(
     now: DateTime,
     answers: &mut Answers<'_>,
 ) -> Result<Verifier, Halt> {
-    if signed.text("typ") != Some(REQUEST_OBJECT_TYP) {
+    if !jws_rules::is_request_object(signed.header()) {
         return Err(IntakeError::TypMismatch.into());
     }
     match client_id.prefix() {

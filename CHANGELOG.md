@@ -84,12 +84,17 @@ binaryen version_116.
     request's `client_metadata`, except for an `openid_federation` client, a signed request's
     or one named by a multisigned request's protected header that can qualify (Section
     5.9.3). A multisigned payload holds no `verifier_info` (`IntakeError::VerifierInfoInPayload`):
-    intake reads it from the qualifying signature's protected header (A.3.2.2). A multisigned
-    request reads when a protected header can qualify: it names a supported Client Identifier
-    that signs, and its `verifier_info` keeps the rules (`NoQuery::NoSignatureQualifies`,
-    which intake reports as `IntakeError::NoVerifiableSignature`). Which signature qualifies,
-    and so the Verifier metadata and `verifier_info` of a request of several signers, takes
-    the signatures' verification: the picker shows such an entry, and the wallet decides.
+    intake reads it from the qualifying signature's protected header (A.3.2.2). The JWS rules
+    that need no key (`typ`, `alg`, `crit`, the signature's length, a JSON Serialization's
+    `signatures`) apply to a compact JWS and to each signature of a multisigned request, through
+    the functions intake applies (`JwsRule`, `NoQuery::Jws`, `NoQuery::TypMismatch`). A
+    multisigned request reads when a signature can qualify: it keeps those rules, its protected
+    header names a supported Client Identifier that signs, and its `verifier_info` keeps the
+    rules (`NoQuery::NoSignatureQualifies`, which intake reports as
+    `IntakeError::NoVerifiableSignature`). The picker verifies no signature: which signature
+    qualifies, and so the Verifier metadata and `verifier_info` of a request of several
+    signers, and whether a signature verifies, takes the wallet, which decides after the
+    pick.
     `UnverifiedRequest` holds the values it reads typed.
   - K3: `Planned::picked` selects the one offer of the plan whose members alone hold the
     picks, the offer the picker shows; else the one whose members and additions hold them.
@@ -174,17 +179,21 @@ binaryen version_116.
   - no `nonce`, or one with a character other than ASCII URL-safe (`"a b"`);
   - no `response_type`, or one other than `vp_token` (`id_token`);
   - no `response_mode`, or one other than `dc_api` and `dc_api.jwt` (`direct_post`);
-  - a signed request without `client_id`; a signed or multisigned request without
-    `expected_origins`;
+  - a signed request without `client_id`; a signed or multisigned request without a non-empty
+    `expected_origins` array of strings (`[]`, a string and `[1]` included);
   - a `client_id` without a prefix (a pre-registered client), of an unsupported prefix, with
     an empty value (`x509_san_dns:`), a `decentralized_identifier` value that is no DID, or a
     non-ASCII `x509_san_dns` value;
   - a signed request of a `redirect_uri` client;
   - a signed Request Object holding `request` or `request_uri`; unsigned `data` holding
     `request`;
+  - a compact JWS whose protected header names a `typ` other than `oauth-authz-req+jwt` or an
+    `alg` other than `ES256`, or holds `crit`, or whose signature is not 64 bytes;
+  - a JWS JSON Serialization without a `signatures` array;
   - a multisigned payload holding `client_id` or `verifier_info`;
-  - a multisigned request with no protected header that can qualify: one naming a supported
-    Client Identifier that signs, with a `verifier_info` that keeps the rules;
+  - a multisigned request with no signature that can qualify: one that keeps the JWS rules
+    above, whose protected header names a supported Client Identifier that signs, with a
+    `verifier_info` that keeps the rules;
   - `client_metadata` that is no JSON object;
   - a malformed `verifier_info`: no array, empty, an attestation that is no object, without a
     string `format`, with `data` neither an object nor a string, with `credential_ids` no

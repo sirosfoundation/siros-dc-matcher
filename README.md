@@ -214,9 +214,12 @@ the wallet's plan offers, except where the plan reads what the projection
 leaves out or what only a verified signature tells: the `zkp_req` credential
 tests and seed, the facts at request time, ad-hoc transaction metadata, the
 `semantic` form of the nym_auth `verifier_id`, which reads the access
-certificate, and which signature of a multisigned request qualifies, which
-decides its Verifier metadata and `verifier_info`. The picker shows those
-entries, and the wallet decides after the pick.
+certificate, which signature of a multisigned request qualifies, which
+decides its Verifier metadata and `verifier_info`, and whether a request's
+signature verifies. The picker authenticates no signature, so it shows a
+request whose signature fails, whose certificate does not name its client, or
+whose `openid_federation` client does not chain. The wallet decides these
+after the pick, and refuses such a request.
 
 ## Privacy note
 

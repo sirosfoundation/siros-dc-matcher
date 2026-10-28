@@ -10,6 +10,7 @@ use siros_dcql::QueryError;
 
 use crate::client_id::ClientIdError;
 use crate::error_code::ErrorCode;
+use crate::jws_rules::JwsRule;
 use crate::parameters::ParameterFault;
 
 /// A rule of OpenID4VP 1.0 (or of RFC 9101, RFC 7515, RFC 5280) that a request breaks, or a
@@ -438,6 +439,24 @@ impl From<JwsError> for IntakeError {
             JwsError::AlgorithmUnsupported => Self::AlgorithmUnsupported,
             JwsError::CriticalHeader => Self::CriticalHeader,
         }
+    }
+}
+
+impl From<JwsRule> for JwsError {
+    fn from(rule: JwsRule) -> Self {
+        match rule {
+            JwsRule::Serialization => Self::Malformed(JwsFault::Serialization),
+            JwsRule::Header => Self::Malformed(JwsFault::Header),
+            JwsRule::Signature => Self::Malformed(JwsFault::Signature),
+            JwsRule::Algorithm => Self::AlgorithmUnsupported,
+            JwsRule::Critical => Self::CriticalHeader,
+        }
+    }
+}
+
+impl From<JwsRule> for IntakeError {
+    fn from(rule: JwsRule) -> Self {
+        JwsError::from(rule).into()
     }
 }
 

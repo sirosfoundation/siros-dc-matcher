@@ -17,6 +17,7 @@ use siros_codec::Base64Error;
 use siros_dcql::{DcqlQuery, QueryError};
 
 use crate::client_id::{ClientId, ClientIdError, ClientIdPrefix};
+use crate::jws_rules::JwsRule;
 use crate::parameters::{self, Carrier, DcApiEncoding, Metadata, Nonce, ParameterFault};
 use crate::protocol::Protocol;
 use crate::request::{
@@ -67,9 +68,16 @@ pub enum NoQuery {
     /// An `openid4vp-v1-multisigned` payload holds `verifier_info`, which travels in each
     /// signature's protected header (A.3.2.2).
     VerifierInfoInPayload,
-    /// No protected header of an `openid4vp-v1-multisigned` request names a supported Client
-    /// Identifier that signs: none of its signatures can qualify (A.3.2.2).
+    /// No signature of an `openid4vp-v1-multisigned` request can qualify: none keeps the JWS
+    /// rules that need no key with a protected header naming a supported Client Identifier that
+    /// signs (A.3.2.2).
     NoSignatureQualifies,
+    /// A Request Object's JWS breaks a rule that needs no key, or a JWS JSON Serialization has
+    /// no array `signatures`.
+    Jws(#[source] JwsRule),
+    /// A Request Object's protected header names a `typ` other than `oauth-authz-req+jwt`
+    /// (RFC 9101, Section 10.8).
+    TypMismatch,
     /// The protocol is none of the three of OpenID4VP 1.0, A.1.
     NoParser,
 }
@@ -97,6 +105,8 @@ impl NoQuery {
             Self::ClientIdInPayload => "client_id_in_payload",
             Self::VerifierInfoInPayload => "verifier_info_in_payload",
             Self::NoSignatureQualifies => "no_verifiable_signature",
+            Self::Jws(rule) => rule.code(),
+            Self::TypMismatch => "typ_mismatch",
             Self::NoParser => "protocol_unsupported",
         }
     }
@@ -130,9 +140,9 @@ impl NoQuery {
             Self::SignedRedirectUri => "signed request uses the redirect_uri prefix".into(),
             Self::ClientIdInPayload => "multisigned payload holds `client_id`".into(),
             Self::VerifierInfoInPayload => "multisigned payload holds `verifier_info`".into(),
-            Self::NoSignatureQualifies => {
-                "no protected header names a Client Identifier that signs".into()
-            }
+            Self::NoSignatureQualifies => "no signature can qualify".into(),
+            Self::Jws(rule) => format!("the JWS breaks a rule: {rule}"),
+            Self::TypMismatch => "the Request Object's `typ` is not `oauth-authz-req+jwt`".into(),
             Self::NoParser => "no parser for this protocol in this build".into(),
         }
     }
@@ -391,36 +401,45 @@ fn client(
                 return Err(NoQuery::VerifierInfoInPayload);
             }
             let expected_origins = Some(origins()?);
-            let signers = signers(&shape::signature_headers(data), query)?;
+            let signers = signers(&shape::signature_headers(data)?, query)?;
             let federation = signers
                 .iter()
                 .any(|signer| signer.client.prefix() == ClientIdPrefix::OpenidFederation);
-            let verifier_info = signers
-                .into_iter()
-                .next()
-                .map(|signer| signer.verifier_info)
-                .unwrap_or_default();
             Ok(Client {
                 client: None,
                 expected_origins,
-                verifier_info,
+                verifier_info: signers.first.verifier_info,
                 metadata: metadata(federation),
             })
         }
     }
 }
 
-/// A signature of a multisigned request whose protected header can qualify, read without
-/// verification: a supported Client Identifier that signs, of a prefix other than
-/// `redirect_uri`, and a `verifier_info` that keeps its rules (A.3.2.2; Sections 5.1, 5.9).
+/// A signature of a multisigned request that can qualify, read without verification: it keeps
+/// the JWS rules that need no key, and its protected header names a supported Client
+/// Identifier that signs, of a prefix other than `redirect_uri`, and a `verifier_info` that
+/// keeps its rules (A.3.2.2; Sections 5.1, 5.9).
 struct Signer {
     client: ClientId,
     verifier_info: Vec<AttestationFormat>,
 }
 
-/// Each signature of the protected headers `headers` that can qualify, in their order. Which
-/// one qualifies takes its verification, which intake runs: with several, the picker reads
-/// what any of them admits.
+/// The signatures of a multisigned request that can qualify, in their order: the first, and
+/// the others.
+struct Signers {
+    first: Signer,
+    rest: Vec<Signer>,
+}
+
+impl Signers {
+    fn iter(&self) -> impl Iterator<Item = &Signer> {
+        std::iter::once(&self.first).chain(&self.rest)
+    }
+}
+
+/// The signatures of the protected headers `headers`, each of a signature that keeps the JWS
+/// rules that need no key, that can qualify. Which one qualifies takes its verification, which
+/// intake runs: with several, the picker reads what any of them admits.
 ///
 /// # Errors
 ///
@@ -429,7 +448,7 @@ struct Signer {
 fn signers(
     headers: &[serde_json::Map<String, Value>],
     query: &DcqlQuery,
-) -> Result<Vec<Signer>, NoQuery> {
+) -> Result<Signers, NoQuery> {
     let mut signers = Vec::new();
     let mut first_fault = None;
     for header in headers {
@@ -451,10 +470,14 @@ fn signers(
             }
         }
     }
-    if signers.is_empty() {
-        return Err(first_fault.map_or(NoQuery::NoSignatureQualifies, NoQuery::Parameter));
-    }
-    Ok(signers)
+    let mut signers = signers.into_iter();
+    let first = signers
+        .next()
+        .ok_or_else(|| first_fault.map_or(NoQuery::NoSignatureQualifies, NoQuery::Parameter))?;
+    Ok(Signers {
+        first,
+        rest: signers.collect(),
+    })
 }
 
 /// Why no entry of the DC API request `request` reads, one clause per entry.

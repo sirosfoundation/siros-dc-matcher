@@ -8,6 +8,7 @@ use serde_json::{Map, Value};
 use siros_codec::base64url;
 
 use crate::intake::{Coordinate, IntakeError, JwkFault, JwsError, JwsFault};
+use crate::jws_rules;
 use crate::values::Kid;
 
 /// One signature over a payload: its JOSE Header and what it signs.
@@ -43,20 +44,12 @@ impl Signed {
         payload_b64: &str,
         signature_b64: &str,
     ) -> Result<Self, JwsError> {
-        let malformed = JwsError::Malformed;
-        let header = match serde_json::from_slice(&segment(protected_b64)?) {
-            Ok(Value::Object(header)) => header,
-            _ => return Err(malformed(JwsFault::Header)),
-        };
-        let signature = Signature::from_slice(&segment(signature_b64)?)
-            .map_err(|_| malformed(JwsFault::Signature))?;
-        if header.get("alg").and_then(Value::as_str) != Some("ES256") {
-            return Err(JwsError::AlgorithmUnsupported);
-        }
-        // RFC 7515, Section 4.1.11: no extension is understood here.
-        if header.contains_key("crit") {
-            return Err(JwsError::CriticalHeader);
-        }
+        let header = jws_rules::header(&segment(protected_b64)?)?;
+        let signature = segment(signature_b64)?;
+        jws_rules::signature_length(&signature)?;
+        let signature = Signature::from_slice(&signature)
+            .map_err(|_| JwsError::Malformed(JwsFault::Signature))?;
+        jws_rules::es256(&header)?;
         Ok(Self {
             header,
             signing_input: format!("{protected_b64}.{payload_b64}"),

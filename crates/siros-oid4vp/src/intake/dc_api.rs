@@ -10,6 +10,7 @@ use super::trust::{self, KeyMaterial, TrustSubject, Verdict};
 use super::{Answers, Halt, IntakeError, JwsFault};
 use crate::client_id::ClientId;
 use crate::jose::{self, Signed};
+use crate::jws_rules;
 use crate::protocol::Protocol;
 use crate::unverified::{NoQuery, UnverifiedRequest};
 use crate::values::Origin;
@@ -81,10 +82,7 @@ pub(super) fn intake(
             if params.contains_key("verifier_info") {
                 return Err(IntakeError::VerifierInfoInPayload.into());
             }
-            let signatures = jws
-                .get("signatures")
-                .and_then(Value::as_array)
-                .ok_or_else(malformed)?;
+            let signatures = jws_rules::signatures(jws).map_err(IntakeError::from)?;
             let Qualified {
                 verifier,
                 verifier_info,
@@ -146,6 +144,8 @@ fn rule(refusal: &NoQuery) -> Option<IntakeError> {
         NoQuery::ClientIdInPayload => IntakeError::ClientIdInPayload,
         NoQuery::VerifierInfoInPayload => IntakeError::VerifierInfoInPayload,
         NoQuery::NoSignatureQualifies => IntakeError::NoVerifiableSignature,
+        NoQuery::Jws(rule) => IntakeError::from(*rule),
+        NoQuery::TypMismatch => IntakeError::TypMismatch,
         NoQuery::NoData
         | NoQuery::NoQueryAndNoRequest
         | NoQuery::RequestNotAJwsOrObject

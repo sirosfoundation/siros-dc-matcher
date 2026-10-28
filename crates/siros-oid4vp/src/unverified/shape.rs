@@ -11,6 +11,7 @@ use siros_codec::base64url;
 use siros_codec::json::JsonTextError;
 
 use super::{CompactFault, NoQuery, PayloadFault};
+use crate::jws_rules::{self, JwsRule};
 use crate::protocol::Protocol;
 
 /// The request object an entry carries; it has a `dcql_query`. The unsigned shape borrows
@@ -43,28 +44,39 @@ fn payload_object<'a>(payload: Vec<u8>) -> Result<Cow<'a, Value>, NoQuery> {
     Ok(Cow::Owned(object))
 }
 
-/// The unverified payload of a JWS JSON Serialization object, under `data.request` or as
-/// `data` itself.
-fn json_payload(data: &Value) -> Result<Vec<u8>, NoQuery> {
+/// The JWS JSON Serialization object of a multisigned request: `data.request`, or `data`
+/// itself.
+fn serialization(data: &Value) -> &Value {
     match data.get("request") {
-        Some(request @ Value::Object(_)) => {
-            json_serialization_payload(request, NoQuery::JwsObjectHasNoPayload)
-        }
-        // A string is a compact JWS, the `-signed` shape.
-        Some(Value::String(_)) => Err(NoQuery::ShapeDoesNotMatchProtocol),
-        // A number, a bool, null: present, and unable to carry a payload.
-        Some(_) => Err(NoQuery::RequestNotAJwsOrObject),
-        // An inline query under a signed label.
-        None if data.get("dcql_query").is_some() => Err(NoQuery::ShapeDoesNotMatchProtocol),
-        None => json_serialization_payload(data, NoQuery::NoQueryAndNoRequest),
+        Some(request @ Value::Object(_)) => request,
+        _ => data,
     }
 }
 
-/// The middle segment of a compact JWS, decoded.
+/// The unverified payload of a JWS JSON Serialization object, under `data.request` or as
+/// `data` itself, which has an array `signatures`.
+fn json_payload(data: &Value) -> Result<Vec<u8>, NoQuery> {
+    let missing = match data.get("request") {
+        Some(Value::Object(_)) => NoQuery::JwsObjectHasNoPayload,
+        // A string is a compact JWS, the `-signed` shape.
+        Some(Value::String(_)) => return Err(NoQuery::ShapeDoesNotMatchProtocol),
+        // A number, a bool, null: present, and unable to carry a payload.
+        Some(_) => return Err(NoQuery::RequestNotAJwsOrObject),
+        // An inline query under a signed label.
+        None if data.get("dcql_query").is_some() => return Err(NoQuery::ShapeDoesNotMatchProtocol),
+        None => NoQuery::NoQueryAndNoRequest,
+    };
+    let jws = serialization(data);
+    let payload = json_serialization_payload(jws, missing)?;
+    jws_rules::signatures(jws).map_err(NoQuery::Jws)?;
+    Ok(payload)
+}
+
+/// The middle segment of a compact JWS, decoded, whose protected header and signature keep the
+/// key-free rules of a Request Object's JWS ([`request_object_header`]).
 ///
-/// The serialization is always `header.payload.signature` (RFC 7515, Section 7.1). The
-/// signature may be empty, as in RFC 7519, Section 6: whether such a request is acceptable is
-/// intake's decision. Five segments is a JWE, whose second segment is an encrypted key.
+/// The serialization is always `header.payload.signature` (RFC 7515, Section 7.1). Five
+/// segments is a JWE, whose second segment is an encrypted key.
 ///
 /// `splitn` bounds the work by the meaningful segments: the input is verifier-controlled and
 /// the picker has a time budget.
@@ -83,7 +95,32 @@ fn compact_payload(jws: &str) -> Result<Vec<u8>, NoQuery> {
     let Some(payload) = payload.filter(|p| !p.is_empty()) else {
         return Err(fault(CompactFault::EmptyPayload));
     };
+    if let (Some(header), Some(signature)) = (header, signature) {
+        request_object_header(header, signature)?;
+    }
     decode_payload(payload)
+}
+
+/// The protected header `protected` of a Request Object's JWS signed by `signature`, each as
+/// written in the serialization, when they keep the rules intake applies without a key: the
+/// header is a JSON object naming `alg` `ES256` and `typ` `oauth-authz-req+jwt` without
+/// `crit`, and the signature is the 64 bytes of an ES256 `r ‖ s`.
+///
+/// # Errors
+///
+/// [`NoQuery::Jws`] or [`NoQuery::TypMismatch`]: the first rule they break.
+fn request_object_header(protected: &str, signature: &str) -> Result<Map<String, Value>, NoQuery> {
+    let header = decode_payload(protected)
+        .map_err(|_| JwsRule::Header)
+        .and_then(|decoded| jws_rules::header(&decoded))
+        .map_err(NoQuery::Jws)?;
+    let signature = decode_payload(signature).map_err(|_| NoQuery::Jws(JwsRule::Signature))?;
+    jws_rules::signature_length(&signature).map_err(NoQuery::Jws)?;
+    jws_rules::es256(&header).map_err(NoQuery::Jws)?;
+    if !jws_rules::is_request_object(&header) {
+        return Err(NoQuery::TypMismatch);
+    }
+    Ok(header)
 }
 
 /// The `payload` member of a JWS JSON Serialization object; `missing` when it has none.
@@ -107,25 +144,22 @@ fn decode_payload(payload: &str) -> Result<Vec<u8>, NoQuery> {
     base64url::decode(payload).map_err(|e| NoQuery::PayloadNotBase64url(PayloadFault::Encoding(e)))
 }
 
-/// The protected header of each signature of a multisigned request's JWS JSON Serialization,
-/// decoded and unverified, in their order; a signature without a string `protected` and
-/// `signature`, or whose header decodes to no JSON object, has none.
-pub(super) fn signature_headers(data: &Value) -> Vec<Map<String, Value>> {
-    let jws = match data.get("request") {
-        Some(request @ Value::Object(_)) => request,
-        _ => data,
-    };
-    jws.get("signatures")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
+/// The protected header of each signature of a multisigned request's JWS JSON Serialization
+/// that keeps the key-free rules of a Request Object's JWS ([`request_object_header`]),
+/// decoded and unverified, in their order. A signature without a string `protected` and
+/// `signature`, or that breaks one of those rules, cannot qualify, and has none.
+///
+/// # Errors
+///
+/// [`NoQuery::Jws`] when the serialization has no array `signatures`.
+pub(super) fn signature_headers(data: &Value) -> Result<Vec<Map<String, Value>>, NoQuery> {
+    let signatures = jws_rules::signatures(serialization(data)).map_err(NoQuery::Jws)?;
+    Ok(signatures
+        .iter()
         .filter_map(|signature| {
-            signature.get("signature")?.as_str()?;
-            let header = decode_payload(signature.get("protected")?.as_str()?).ok()?;
-            match serde_json::from_slice(&header).ok()? {
-                Value::Object(header) => Some(header),
-                _ => None,
-            }
+            let protected = signature.get("protected")?.as_str()?;
+            let signature = signature.get("signature")?.as_str()?;
+            request_object_header(protected, signature).ok()
         })
-        .collect()
+        .collect())
 }

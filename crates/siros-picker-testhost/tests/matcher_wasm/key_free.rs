@@ -1,7 +1,7 @@
 //! The rules of the request parameters and of the Client Identifier that need no key: one
 //! request breaks each, and the wallet's intake and the picker refuse it alike. Each
-//! `verifier_info` rule is broken in a request object and in the protected header of a
-//! multisigned request's one signature. Over the DC API the Wallet ignores `state` and, in
+//! `verifier_info` rule, and each rule of a Request Object's JWS, is broken in a compact JWS or
+//! request object and in the one signature of a multisigned request. Over the DC API the Wallet ignores `state` and, in
 //! unsigned `data`, a `request_uri` (A.2): both accept those.
 
 use serde_json::{json, Value};
@@ -48,40 +48,114 @@ fn object() -> Value {
     object
 }
 
+/// A rule of a Request Object's JWS that needs no key, which a row breaks.
+#[derive(Debug, Clone, Copy)]
+enum Broken {
+    Typ,
+    Algorithm,
+    Critical,
+    SignatureLength,
+}
+
+impl Broken {
+    const ALL: [Self; 4] = [
+        Self::Typ,
+        Self::Algorithm,
+        Self::Critical,
+        Self::SignatureLength,
+    ];
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Typ => "with typ JWT",
+            Self::Algorithm => "with alg ES384",
+            Self::Critical => "with crit",
+            Self::SignatureLength => "with a signature of 63 bytes",
+        }
+    }
+
+    /// The code of the refusal of a compact JWS that breaks the rule.
+    fn code(self) -> &'static str {
+        match self {
+            Self::Typ => "typ_mismatch",
+            Self::Algorithm => "algorithm_unsupported",
+            Self::Critical => "critical_header",
+            Self::SignatureLength => "jws_malformed",
+        }
+    }
+
+    fn header(self, header: &mut Value) {
+        match self {
+            Self::Typ => header["typ"] = json!("JWT"),
+            Self::Algorithm => header["alg"] = json!("ES384"),
+            Self::Critical => header["crit"] = json!(["exp"]),
+            Self::SignatureLength => {}
+        }
+    }
+
+    fn signature(self, signature: String) -> String {
+        match self {
+            Self::SignatureLength => b64(&[7; 63]),
+            Self::Typ | Self::Algorithm | Self::Critical => signature,
+        }
+    }
+}
+
+/// The protected header, the payload and the signature of [`SIGNER`]'s JWS of `object` under
+/// `header`, which breaks `broken`.
+fn sign(object: &Value, mut header: Value, broken: Option<Broken>) -> [String; 3] {
+    if let Some(broken) = broken {
+        broken.header(&mut header);
+    }
+    let protected = b64(header.to_string().as_bytes());
+    let payload = b64(object.to_string().as_bytes());
+    let signature = SIGNER.sign(&format!("{protected}.{payload}"));
+    let signature = match broken {
+        Some(broken) => broken.signature(signature),
+        None => signature,
+    };
+    [protected, payload, signature]
+}
+
 /// A compact JWS Request Object of [`SIGNER`] with its `client_id`, edited.
 fn signed(edit: impl Fn(&mut Value)) -> (&'static str, Value) {
+    signed_with(edit, None)
+}
+
+/// A compact JWS Request Object of [`SIGNER`] with its `client_id`, edited, which breaks
+/// `broken`.
+fn signed_with(edit: impl Fn(&mut Value), broken: Option<Broken>) -> (&'static str, Value) {
     let mut object = object();
     object["client_id"] = json!(SIGNER.client_id());
     edit(&mut object);
-    (
-        "openid4vp-v1-signed",
-        json!({"request": SIGNER.compact(&object)}),
-    )
+    let [protected, payload, signature] = sign(&object, SIGNER.header(), broken);
+    let request = format!("{protected}.{payload}.{signature}");
+    ("openid4vp-v1-signed", json!({"request": request}))
 }
 
 /// A multisigned payload, edited, whose one signature's protected header names [`SIGNER`].
 fn multisigned(edit: impl Fn(&mut Value)) -> (&'static str, Value) {
-    multisigned_with(edit, |_| {})
+    multisigned_with(edit, |_| {}, None)
 }
 
 /// A multisigned payload whose one signature's protected header names [`SIGNER`], edited.
 fn multisigned_header(edit: impl Fn(&mut Value)) -> (&'static str, Value) {
-    multisigned_with(|_| {}, edit)
+    multisigned_with(|_| {}, edit, None)
 }
 
-/// A multisigned payload of [`SIGNER`]'s one signature, its object and protected header edited.
+/// A multisigned payload of [`SIGNER`]'s one signature, its object and protected header edited,
+/// which breaks `broken`.
 fn multisigned_with(
     edit_object: impl Fn(&mut Value),
     edit_header: impl Fn(&mut Value),
+    broken: Option<Broken>,
 ) -> (&'static str, Value) {
     let mut object = object();
     edit_object(&mut object);
     let mut header = SIGNER.header();
     header["client_id"] = json!(SIGNER.client_id());
     edit_header(&mut header);
-    let protected = b64(header.to_string().as_bytes());
-    let payload = b64(object.to_string().as_bytes());
-    let signature = SIGNER.sign(&format!("{protected}.{payload}"));
+    let [protected, payload, signature] = sign(&object, header, broken);
     let signatures = json!([{"protected": protected, "signature": signature}]);
     (
         "openid4vp-v1-multisigned",
@@ -289,6 +363,14 @@ fn rows() -> Vec<Row> {
             Some("no_verifiable_signature"),
         ),
         (
+            "a multisigned request without signatures",
+            (
+                "openid4vp-v1-multisigned",
+                json!({"payload": b64(object().to_string().as_bytes())}),
+            ),
+            Some("jws_malformed"),
+        ),
+        (
             "unsigned data with a request",
             unsigned(set("request", json!(SIGNER.compact(&object())))),
             Some("nested_request"),
@@ -329,10 +411,25 @@ fn rows() -> Vec<Row> {
                     ),
                 ]
             });
+    let jws_rows = Broken::ALL.into_iter().flat_map(|broken| {
+        [
+            (
+                format!("a signed JWS {}", broken.name()),
+                signed_with(|_| {}, Some(broken)),
+                Some(broken.code()),
+            ),
+            (
+                format!("a multisigned signature {}", broken.name()),
+                multisigned_with(|_| {}, |_| {}, Some(broken)),
+                Some("no_verifiable_signature"),
+            ),
+        ]
+    });
     table
         .into_iter()
         .map(|(name, request, refusal)| (name.to_owned(), request, refusal))
         .chain(verifier_info_rows)
+        .chain(jws_rows)
         .map(|(name, (protocol, data), refusal)| Row {
             name,
             protocol,

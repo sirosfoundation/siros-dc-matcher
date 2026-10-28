@@ -60,10 +60,23 @@ fn multisigned_object() -> String {
     object.to_string()
 }
 
+/// The protected header of a Request Object's JWS that keeps the rules the picker reads.
+const HEADER: &[u8] = br#"{"alg":"ES256","typ":"oauth-authz-req+jwt"}"#;
+
+/// 64 bytes in place of an ES256 signature, which the picker never verifies.
+fn bogus_signature() -> String {
+    b64(&[7; 64]).to_string()
+}
+
 /// A signature of a multisigned request whose protected header names a Client Identifier.
 fn signature() -> serde_json::Value {
-    let header = br#"{"alg":"ES256","client_id":"x509_san_dns:verifier.example"}"#;
-    serde_json::json!({"protected": b64(header).to_string(), "signature": b64(b"sig").to_string()})
+    let header = br#"{"alg":"ES256","typ":"oauth-authz-req+jwt","client_id":"x509_san_dns:verifier.example"}"#;
+    serde_json::json!({"protected": b64(header).to_string(), "signature": bogus_signature()})
+}
+
+/// A compact JWS of [`HEADER`] whose payload segment is `payload`, as written.
+fn jws(payload: impl std::fmt::Display) -> String {
+    format!("{}.{payload}.{}", b64(HEADER), bogus_signature())
 }
 
 fn envelope(protocol: &str, data: serde_json::Value) -> Vec<u8> {
@@ -73,12 +86,7 @@ fn envelope(protocol: &str, data: serde_json::Value) -> Vec<u8> {
 }
 
 fn compact_jws(payload: &str) -> String {
-    format!(
-        "{}.{}.{}",
-        b64(br#"{"alg":"ES256"}"#),
-        b64(payload.as_bytes()),
-        b64(b"sig")
-    )
+    jws(b64(payload.as_bytes()))
 }
 
 // --- the three shapes ------------------------------------------------------
@@ -143,7 +151,7 @@ fn a_multisigned_payload_at_the_top_level_of_data_is_accepted_too() {
 fn a_bogus_signature_does_not_stop_the_query_being_read() {
     let payload = b64(request_object().as_bytes());
     let data = serde_json::json!({
-        "request": format!("{}.{}.{}", b64(br#"{"alg":"ES256"}"#), payload, b64(b"not-a-signature")),
+        "request": jws(payload),
     });
     assert!(
         first_supported_request(&envelope("openid4vp-v1-signed", data), &siros_default).is_some()
@@ -162,9 +170,9 @@ fn malformed_signed_requests_decline_without_panicking() {
         serde_json::json!({"request": "not-a-jws"}),
         serde_json::json!({"request": "onlyheader."}),
         serde_json::json!({"request": ".."}),
-        serde_json::json!({"request": "aGVhZGVy.!!!not-base64url!!!.c2ln"}),
-        serde_json::json!({"request": format!("aGVhZGVy.{}.c2ln", b64(b"not json at all"))}),
-        serde_json::json!({"request": format!("aGVhZGVy.{}.c2ln", b64(br#"{"nonce":"x"}"#))}),
+        serde_json::json!({"request": jws("!!!not-base64url!!!")}),
+        serde_json::json!({"request": jws(b64(b"not json at all"))}),
+        serde_json::json!({"request": jws(b64(br#"{"nonce":"x"}"#))}),
         serde_json::json!({"request": {"payload": "!!!"}}),
         serde_json::json!({"request": {"signatures": []}}),
         serde_json::json!({"request": 42}),
@@ -222,19 +230,19 @@ fn each_failure_is_named_separately() {
         ),
         (
             "openid4vp-v1-signed",
-            serde_json::json!({"request": "aGVhZGVy.@@@@.c2ln"}),
+            serde_json::json!({"request": jws("@@@@")}),
             NoQuery::PayloadNotBase64url(PayloadFault::Encoding(Base64Error::Alphabet(0))),
         ),
         (
             "openid4vp-v1-signed",
-            serde_json::json!({"request": format!("aGVhZGVy.{}.c2ln", b64(b"plain text"))}),
+            serde_json::json!({"request": jws(b64(b"plain text"))}),
             NoQuery::PayloadNotJson(JsonTextError::of(
                 &serde_json::from_slice::<serde_json::Value>(b"plain text").unwrap_err(),
             )),
         ),
         (
             "openid4vp-v1-signed",
-            serde_json::json!({"request": format!("aGVhZGVy.{}.c2ln", b64(br#"{"nonce":"x"}"#))}),
+            serde_json::json!({"request": jws(b64(br#"{"nonce":"x"}"#))}),
             NoQuery::PayloadHasNoDcqlQuery,
         ),
         // A signed request whose `request` is not even a string.
@@ -297,22 +305,6 @@ fn a_jwe_is_not_mistaken_for_a_jws() {
         UnverifiedRequest::read("openid4vp-v1-signed", &serde_json::json!({"request": jwe})),
         Err(NoQuery::NotACompactJws(CompactFault::Segments))
     );
-}
-
-/// An unsecured token (RFC 7519 §6) is `header.payload.`: its payload is read,
-/// and intake decides whether the request is acceptable.
-#[test]
-fn an_unsecured_token_has_an_empty_signature_not_a_missing_one() {
-    let token = format!(
-        "{}.{}.",
-        b64(br#"{"alg":"none"}"#),
-        b64(request_object().as_bytes())
-    );
-    assert!(UnverifiedRequest::read(
-        "openid4vp-v1-signed",
-        &serde_json::json!({"request": token})
-    )
-    .is_ok());
 }
 
 /// A `dcql_query` that is present but not DCQL is its own failure, not a
@@ -440,7 +432,7 @@ fn a_protocol_outside_the_profile_is_skipped() {
 #[test]
 fn the_diagnostic_names_the_signed_failure_rather_than_the_missing_key() {
     let profile = siros_default;
-    let data = serde_json::json!({"request": "aGVhZGVy.@@@@.c2ln"});
+    let data = serde_json::json!({"request": jws("@@@@")});
     let text = diagnose(&envelope("openid4vp-v1-signed", data), &profile);
     assert!(text.contains("base64url"), "got: {text}");
     assert!(!text.contains("has no `dcql_query`"), "got: {text}");

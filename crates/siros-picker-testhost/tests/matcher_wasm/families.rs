@@ -357,11 +357,11 @@ fn mixed_signers() -> Vec<Case> {
     header["client_id"] = json!(SIGNER.client_id());
     let protected = b64(header.to_string().as_bytes());
     let signature = SIGNER.sign(&format!("{protected}.{payload}"));
-    let federation =
-        json!({"alg": "ES256", "client_id": "openid_federation:https://verifier.example"});
+    let federation = json!({"alg": "ES256", "typ": "oauth-authz-req+jwt",
+        "client_id": "openid_federation:https://verifier.example"});
     let signatures = json!([
         {"protected": protected, "signature": signature},
-        {"protected": b64(federation.to_string().as_bytes()), "signature": b64(b"sig")}
+        {"protected": b64(federation.to_string().as_bytes()), "signature": b64(&[7; 64])}
     ]);
     let mut mixed = case(
         "multisigned, an x509_san_dns signer and an openid_federation one",
