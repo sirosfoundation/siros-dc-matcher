@@ -137,10 +137,10 @@ impl Planned<'_> {
         for member in offer.members() {
             let named = match picked.iter().find(|picked| picked.query == member.query()) {
                 Some(named) => named,
-                None => return Err(PickError::Missing(self.query_id(member.query())).into()),
+                None => return Err(PickError::Missing(self.query_id(member.query())?).into()),
             };
             named.held_in(&self.ids([member])?)?;
-            subsets.extend(self.subset(named));
+            subsets.extend(self.subset(named)?);
         }
         let left: Vec<&Picked> = picked
             .iter()
@@ -154,7 +154,7 @@ impl Planned<'_> {
             .collect();
         for named in &left {
             self.held_by_additions(&additions, named)?;
-            subsets.extend(self.subset(named));
+            subsets.extend(self.subset(named)?);
         }
         let mut fitting: Vec<(AdditionIndex, &Addition)> = Vec::new();
         for (index, addition) in additions {
@@ -247,23 +247,18 @@ impl Planned<'_> {
 
     /// The subset of `picks` when they answer a `multiple` Credential Query.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// When the matching has no query at the position of `picks`.
-    #[expect(
-        clippy::expect_used,
-        reason = "`by_query` takes the position of picks from the matching; another one is a \
-                  bug of the core, and no selection built on it is sound"
-    )]
-    fn subset(&self, picks: &Picked) -> Option<Subset> {
+    /// [`Inconsistency::Query`] when the matching has no query at the position of `picks`.
+    fn subset(&self, picks: &Picked) -> Result<Option<Subset>, Inconsistency> {
         let answers = self
             .answered
             .answers(picks.query)
-            .expect("the picks of a query name a query of the matching");
-        answers
+            .ok_or(Inconsistency::Query(picks.query))?;
+        Ok(answers
             .query()
             .multiple
-            .then(|| Subset::new(picks.id.clone(), picks.credentials.clone()))
+            .then(|| Subset::new(picks.id.clone(), picks.credentials.clone())))
     }
 }
 

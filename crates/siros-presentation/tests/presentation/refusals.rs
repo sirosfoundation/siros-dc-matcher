@@ -118,37 +118,31 @@ fn selections_and_signatures_parse_against_the_plan() {
         assert_eq!(chosen.err(), refusal, "{case}");
     }
 
-    // A5: (case, the signatures from the honest ones, outcome); the first effect is 0, the
-    // second 1. A host that answers an effect twice, one of no effect, or with a signature of
-    // other than 64 bytes breaks the protocol and panics.
-    enum Outcome {
-        Answered,
-        Refused(SignatureError),
-        Panics(&'static str),
-    }
+    // A5: (case, the signatures from the honest ones, refusal); the first effect is 0, the
+    // second 1.
     type Edit = fn(&[Sign], &mut Vec<(SignId, Vec<u8>)>);
     let first = SignId::new(0);
-    let signatures: [(&str, Edit, Outcome); 6] = [
-        ("every signature once", |_, _| {}, Outcome::Answered),
+    let signatures: [(&str, Edit, Option<SignatureError>); 6] = [
+        ("every signature once", |_, _| {}, None),
         (
             "the second missing",
             |_, s| drop(s.pop()),
-            Outcome::Refused(SignatureError::Missing(SignId::new(1))),
+            Some(SignatureError::Missing(SignId::new(1))),
         ),
         (
             "the first twice",
             |_, s| s.push(s[0].clone()),
-            Outcome::Panics("the host answered Sign effect 0 twice"),
+            Some(SignatureError::Repeated(first)),
         ),
         (
             "one of no effect",
             |_, s| s.push((SignId::new(2), s[0].1.clone())),
-            Outcome::Panics("the host signed effect 2, which no Sign effect has"),
+            Some(SignatureError::Unknown(SignId::new(2))),
         ),
         (
             "the first of 63 bytes",
             |_, s| s[0].1.truncate(63),
-            Outcome::Panics("the host's signature of effect 0 has 63 bytes; r || s has 64"),
+            Some(SignatureError::Length(first, 63)),
         ),
         (
             "the first under another key",
@@ -156,11 +150,11 @@ fn selections_and_signatures_parse_against_the_plan() {
                 let other: Signature = testing::key(0x55).sign(signs[0].input());
                 s[0].1 = other.to_bytes().to_vec();
             },
-            Outcome::Refused(SignatureError::Invalid(first)),
+            Some(SignatureError::Invalid(first)),
         ),
     ];
     let parsed = PlanDigest::parse(&digest).unwrap();
-    for (case, edit, outcome) in signatures {
+    for (case, edit, refusal) in signatures {
         let selection = Selection::new(
             parsed,
             OfferIndex::new(0),
@@ -177,28 +171,11 @@ fn selections_and_signatures_parse_against_the_plan() {
         );
         let mut signed = sign_all(prepared.signs());
         edit(prepared.signs(), &mut signed);
-        let finish = std::panic::AssertUnwindSafe(|| {
-            prepared
-                .finish(signed, &TestProver { fail: None }, &mut rng)
-                .err()
-        });
-        match outcome {
-            Outcome::Panics(message) => {
-                let payload = std::panic::catch_unwind(finish)
-                    .err()
-                    .unwrap_or_else(|| panic!("{case}: no panic, expected {message:?}"));
-                assert_eq!(
-                    payload.downcast_ref::<String>().map(String::as_str),
-                    Some(message),
-                    "{case}"
-                );
-            }
-            Outcome::Answered => assert_eq!(finish(), None, "{case}"),
-            Outcome::Refused(refusal) => assert_eq!(
-                finish(),
-                Some(PresentationError::Signature(refusal)),
-                "{case}"
-            ),
-        }
+        let response = prepared.finish(signed, &TestProver { fail: None }, &mut rng);
+        assert_eq!(
+            response.err(),
+            refusal.map(PresentationError::Signature),
+            "{case}"
+        );
     }
 }

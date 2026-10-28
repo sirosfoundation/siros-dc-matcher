@@ -182,7 +182,7 @@ impl<'a> Planned<'a> {
             });
             if let Some(member) = shared {
                 return Err(PresentationError::AdditionQueryRepeated(
-                    self.query_id(member.query()),
+                    self.query_id(member.query())?,
                 ));
             }
             additions.push(addition);
@@ -237,18 +237,12 @@ impl<'a> Planned<'a> {
                     .any(|&(_, candidate)| member.carries(&bound, candidate))
             });
             if !kept {
-                // `bind` makes a binding for a credential that carries at least one entry.
-                #[expect(
-                    clippy::expect_used,
-                    reason = "a binding without an entry is a bug of the core, and the \
-                              refusal it would name has no entry to name"
-                )]
                 let entry = self
                     .transactions
                     .positions(&binding)?
                     .first()
                     .copied()
-                    .expect("a binding binds at least one entry");
+                    .ok_or(Inconsistency::BindingEmpty)?;
                 return Err(PresentationError::BoundCredentialOmitted {
                     entry,
                     credential: bound.credential,
@@ -260,19 +254,14 @@ impl<'a> Planned<'a> {
 
     /// The `id` of the Credential Query at `index`, a position of the plan's matching.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// When the matching has no query at `index`.
-    #[expect(
-        clippy::expect_used,
-        reason = "the plan's positions come from its matching; another one is a bug of the \
-                  core, and no response built on it is sound"
-    )]
-    pub(super) fn query_id(&self, index: QueryIndex) -> QueryId {
+    /// [`Inconsistency::Query`] when the matching has no query at `index`.
+    pub(super) fn query_id(&self, index: QueryIndex) -> Result<QueryId, Inconsistency> {
         self.answered
             .answers(index)
             .map(|answers| answers.id().clone())
-            .expect("a position of the plan names a query of its matching")
+            .ok_or(Inconsistency::Query(index))
     }
 }
 

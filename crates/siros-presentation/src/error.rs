@@ -2,10 +2,13 @@
 //! OpenID4VP 1.0, Section 8.5 code the verifier receives.
 
 use siros_credential::EntryRef;
+use siros_dcql::PathError;
 use siros_display::DisplayError;
+use siros_mdoc::DisclosureError;
 use siros_oid4vp::{ErrorCode, HttpsUrl, ResponseError};
 use siros_sdjwt::KeyBindingError;
 use siros_transaction_data::TransactionDataError;
+use siros_wallet_state::KeyId;
 use siros_zkp_req_nym_auth::presenter::{ProveError, Unanswerable};
 
 use crate::ids::{AdditionIndex, CandidateIndex, OfferIndex, QueryIndex, SetIndex};
@@ -63,6 +66,9 @@ pub enum PresentationError {
     KeyIdMissing,
     /// A member's credential is an SD-JWT VC bound to no key: it has no `cnf`.
     HolderKeyMissing,
+    /// The host reported no authentication factors for this key, whose KB-JWT carries `amr`
+    /// (H3).
+    KeyFactorsMissing(KeyId),
     /// The time is before 1970-01-01T00:00:00Z, which `iat` cannot carry.
     Time,
     /// The request names its audience neither by an origin nor by a Client Identifier.
@@ -77,10 +83,12 @@ pub enum PresentationError {
     Unproven(#[from] Unproven),
     /// A nym_auth credential does not answer its option.
     Unanswerable(#[from] Unanswerable),
+    /// A claims path pointer of the plan selects nothing. The code is its own.
+    Pointer(#[from] PathError),
     /// The KB-JWT claims collide (S4). The code is its own.
     KeyBinding(#[from] KeyBindingError),
-    /// The request selects one mdoc element in two claims queries (M2).
-    ElementRepeated,
+    /// The mdoc elements are no disclosure (M2, M3). The code is its own.
+    Disclosure(#[from] DisclosureError),
     /// The nym_auth proof failed. The code is its own.
     Prove(#[from] ProveError),
     /// The host's signatures do not answer the `Sign` effects (A5).
@@ -103,6 +111,10 @@ pub enum Inconsistency {
     Entry,
     /// A binding names a credential the offer lacks.
     BoundCredential,
+    /// A binding binds no entry.
+    BindingEmpty,
+    /// A proof answers a request the nym_auth policy refuses.
+    NymAuthRequest,
 }
 
 impl Inconsistency {
@@ -114,6 +126,8 @@ impl Inconsistency {
             Self::ZkpQuery(_) => "plan_zkp_query_missing",
             Self::Entry => "plan_entry_unknown",
             Self::BoundCredential => "plan_bound_credential_unknown",
+            Self::BindingEmpty => "plan_binding_empty",
+            Self::NymAuthRequest => "plan_nym_auth_request_refused",
         }
     }
 }
@@ -141,6 +155,7 @@ impl PresentationError {
             Self::WalletDisplayNeeded => "wallet_display_needed",
             Self::KeyIdMissing => "key_id_missing",
             Self::HolderKeyMissing => "holder_key_missing",
+            Self::KeyFactorsMissing(_) => "key_factors_missing",
             Self::Time => "time_before_epoch",
             Self::AudienceMissing => "audience_missing",
             Self::FetchRepeated(_) => "fetch_repeated",
@@ -148,8 +163,9 @@ impl PresentationError {
             Self::Choice(e) => e.code(),
             Self::Unproven(e) => e.code(),
             Self::Unanswerable(e) => e.code(),
+            Self::Pointer(e) => e.code(),
             Self::KeyBinding(e) => e.code(),
-            Self::ElementRepeated => "repeated_selection",
+            Self::Disclosure(e) => e.code(),
             Self::Prove(e) => e.code(),
             Self::Signature(e) => e.code(),
             Self::Response(e) => e.code(),
@@ -182,6 +198,7 @@ impl PresentationError {
             | Self::WalletDisplayNeeded
             | Self::KeyIdMissing
             | Self::HolderKeyMissing
+            | Self::KeyFactorsMissing(_)
             | Self::Time
             | Self::AudienceMissing
             | Self::FetchRepeated(_)
@@ -189,8 +206,9 @@ impl PresentationError {
             | Self::Choice(_)
             | Self::Unproven(_)
             | Self::Unanswerable(_)
+            | Self::Pointer(_)
             | Self::KeyBinding(_)
-            | Self::ElementRepeated
+            | Self::Disclosure(_)
             | Self::Signature(_)
             | Self::Response(_) => ErrorCode::AccessDenied,
         }
