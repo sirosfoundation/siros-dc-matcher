@@ -4,15 +4,42 @@
 //! after it, or a CBOR sequence of such items (RFC 8742). It keeps the encoded bytes of every
 //! item, because a digest or a signature covers an item as it was written. It refuses
 //! floating-point numbers, indefinite lengths, simple values other than `false`, `true`, `null`
-//! and `undefined`, a map key that repeats, and nesting deeper than [`MAX_DEPTH`].
+//! and `undefined`, a map key that repeats, nesting deeper than [`MAX_DEPTH`], and input longer
+//! than [`MAX_INPUT`].
 //!
 //! The writer emits the core deterministic encoding of RFC 8949, Section 4.2.1: shortest heads,
 //! definite lengths, and map keys sorted by their encoded bytes.
 
 use std::str::Utf8Error;
 
+use rustc_hash::FxHashSet;
+
 /// The deepest nesting the reader accepts.
 pub const MAX_DEPTH: usize = 32;
+
+/// The most heap bytes the reader allocates per byte of input. Each item but the outermost
+/// starts at its own byte and takes a slot of [`Item`] in the vector of its array, map or
+/// sequence, or in the box of its tag. A vector grows as its items decode: from four slots,
+/// doubling when full. It holds at most twice the slots it fills, or four for one item, and the
+/// vectors it outgrew hold as many again on an allocator that never frees: four slots per item. The duplicate check of a map adds
+/// [`KEY_SET_PER_KEY`] per key, and a key and its value take two bytes at least.
+///
+/// 127 bytes on wasm32 (an `Item` of 24 bytes, a slice of 8) and 243 on a 64-bit target (48
+/// and 16).
+pub const HEAP_PER_BYTE: usize = 4 * size_of::<Item<'static>>() + KEY_SET_PER_KEY.div_ceil(2);
+
+/// The most heap bytes the duplicate check of a map allocates per key. Its hash set holds a
+/// slice of each key's encoding and a control byte per bucket, in a table of four buckets or
+/// more that doubles when it fills: fewer than five buckets per key over every table it
+/// outgrew. Each table adds a group of control bytes, 16 at most, and the first serves one key.
+pub const KEY_SET_PER_KEY: usize = 5 * (size_of::<&[u8]>() + 1) + 16;
+
+/// The longest input the reader decodes: its items then take at most `isize::MAX` heap bytes,
+/// the most one allocation holds. 16,909,320 bytes on wasm32.
+pub const MAX_INPUT: usize = match (isize::MAX as usize).checked_div(HEAP_PER_BYTE) {
+    Some(bytes) => bytes,
+    None => 0,
+};
 
 /// Why bytes are not one CBOR item the reader accepts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -35,6 +62,9 @@ pub enum CborError {
     /// Arrays, maps and tags nest deeper than [`MAX_DEPTH`].
     #[error("CBOR nests too deeply")]
     TooDeep,
+    /// The input is longer than [`MAX_INPUT`].
+    #[error("CBOR input is longer than the reader decodes")]
+    TooLong,
 }
 
 /// An encoding the reader refuses.
@@ -65,6 +95,7 @@ impl CborError {
             Self::InvalidUtf8(_) => "cbor_invalid_utf8",
             Self::DuplicateKey => "cbor_duplicate_key",
             Self::TooDeep => "cbor_too_deep",
+            Self::TooLong => "cbor_too_long",
         }
     }
 }
@@ -179,8 +210,12 @@ impl<'a> Item<'a> {
 }
 
 /// Decodes `bytes` as exactly one item.
+///
+/// # Errors
+///
+/// [`CborError`]: the first rule the item breaks, [`CborError::TooLong`] first.
 pub fn decode(bytes: &[u8]) -> Result<Item<'_>, CborError> {
-    let mut reader = Reader { bytes, at: 0 };
+    let mut reader = Reader::of(bytes)?;
     let item = reader.item(0)?;
     if reader.at != bytes.len() {
         return Err(CborError::TrailingBytes);
@@ -193,10 +228,10 @@ pub fn decode(bytes: &[u8]) -> Result<Item<'_>, CborError> {
 ///
 /// # Errors
 ///
-/// [`CborError`]: the first item that does not decode, [`CborError::Truncated`] for one the
-/// input ends inside.
+/// [`CborError`]: [`CborError::TooLong`] first, then the first item that does not decode,
+/// [`CborError::Truncated`] for one the input ends inside.
 pub fn decode_sequence(bytes: &[u8]) -> Result<Vec<Item<'_>>, CborError> {
-    let mut reader = Reader { bytes, at: 0 };
+    let mut reader = Reader::of(bytes)?;
     let mut items = Vec::new();
     while reader.at < bytes.len() {
         items.push(reader.item(0)?);
@@ -210,6 +245,14 @@ struct Reader<'a> {
 }
 
 impl<'a> Reader<'a> {
+    /// A reader at the start of `bytes`.
+    fn of(bytes: &'a [u8]) -> Result<Self, CborError> {
+        if bytes.len() > MAX_INPUT {
+            return Err(CborError::TooLong);
+        }
+        Ok(Self { bytes, at: 0 })
+    }
+
     /// The next byte.
     fn byte(&mut self) -> Result<u8, CborError> {
         let byte = *self.bytes.get(self.at).ok_or(CborError::Truncated)?;
@@ -295,20 +338,25 @@ impl<'a> Reader<'a> {
         }
     }
 
+    /// The array of the `argument` items that follow. The vector grows as they decode.
     fn array(&mut self, argument: u64, depth: usize) -> Result<Kind<'a>, CborError> {
         let n = self.length(argument)?;
-        (0..n)
-            .map(|_| self.item(depth + 1))
-            .collect::<Result<_, _>>()
-            .map(Kind::Array)
+        let mut items = Vec::new();
+        for _ in 0..n {
+            items.push(self.item(depth + 1)?);
+        }
+        Ok(Kind::Array(items))
     }
 
+    /// The map of the `argument` entries that follow, each key once: one hash set insertion
+    /// per key. The vector grows as they decode.
     fn map(&mut self, argument: u64, depth: usize) -> Result<Kind<'a>, CborError> {
         let n = self.length(argument)?;
-        let mut entries: Vec<(Item<'a>, Item<'a>)> = Vec::with_capacity(n);
+        let mut entries = Vec::new();
+        let mut keys = FxHashSet::default();
         for _ in 0..n {
             let key = self.item(depth + 1)?;
-            if entries.iter().any(|(k, _)| k.raw == key.raw) {
+            if !keys.insert(key.raw) {
                 return Err(CborError::DuplicateKey);
             }
             let value = self.item(depth + 1)?;

@@ -4,7 +4,7 @@
 use std::cmp::Ordering;
 use std::io::{Read, Seek, SeekFrom};
 
-use siros_codec::cbor;
+use siros_codec::{cbor, json};
 use siros_transaction_data::Projected;
 
 use crate::error::{
@@ -86,7 +86,8 @@ impl<R: Read + Seek> Registration<R> {
         let entries = directory
             .index_entries()
             .map_err(|length| RegistrationError::IndexLength(ByteCount::new(length.into())))?;
-        let bytes = blob.read(&directory.facts, directory.facts.whole())?;
+        let bytes =
+            blob.read_at_most(&directory.facts, directory.facts.whole(), cbor::MAX_INPUT)?;
         let item = cbor::decode(&bytes)
             .map_err(|error| RegistrationError::Facts(FactsFault::Cbor(error)))?;
         let facts = record::facts(&item, &directory.icons).map_err(RegistrationError::Facts)?;
@@ -147,7 +148,9 @@ impl<R: Read + Seek> Registration<R> {
         if let Some(read) = self.definitions.iter().find(|read| read.at == at) {
             return Ok(read.part.clone());
         }
-        let bytes = self.blob.read(&self.directory.definitions, at.span())?;
+        let bytes =
+            self.blob
+                .read_at_most(&self.directory.definitions, at.span(), json::MAX_TEXT)?;
         let refused = |fault| RegistrationError::Definition(at, fault);
         let text = std::str::from_utf8(&bytes).map_err(|e| refused(DefinitionFault::Utf8(e)))?;
         let definition =
@@ -271,7 +274,9 @@ impl<R: Read + Seek> Registration<R> {
         key: &RegisteredType,
         span: Span<RecordsPart>,
     ) -> Result<Vec<Positioned>, RegistrationError> {
-        let bytes = self.blob.read(&self.directory.records, span)?;
+        let bytes = self
+            .blob
+            .read_at_most(&self.directory.records, span, cbor::MAX_INPUT)?;
         let items = cbor::decode_sequence(&bytes)
             .map_err(|error| RegistrationError::Records(key.clone(), error))?;
         let mut records: Vec<Positioned> = Vec::new();
@@ -331,6 +336,25 @@ impl<R: Read + Seek> Blob<R> {
         let mut bytes = vec![0; size];
         self.fill(at, &mut bytes)?;
         Ok(bytes)
+    }
+
+    /// The bytes `span` spans in `bounds`, a part a reader decodes that holds at most `most`
+    /// bytes.
+    ///
+    /// # Errors
+    ///
+    /// [`RegistrationError::TooLong`] for a part longer than `most`: the bytes stay unread.
+    fn read_at_most<S: Part>(
+        &mut self,
+        bounds: &Bounds<S>,
+        span: Span<S>,
+        most: usize,
+    ) -> Result<Vec<u8>, RegistrationError> {
+        let length = span.length();
+        if usize::try_from(length).map_or(true, |length| length > most) {
+            return Err(RegistrationError::TooLong(ByteCount::new(length.into())));
+        }
+        self.read(bounds, span)
     }
 
     /// Fills `out` with the bytes at `at` from the blob's start.

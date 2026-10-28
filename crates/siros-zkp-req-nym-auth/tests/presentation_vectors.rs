@@ -12,22 +12,10 @@ use std::fs;
 use std::path::PathBuf;
 
 use serde_json::Value;
-use siros_codec::cbor::CborError;
 use siros_dcql::CredentialQuery;
 use siros_zkp_req::{presentations_of, EncodingError, StructureRejection, ZkpReqQuery};
 use siros_zkp_req_nym_auth::prover::ProofFailure;
 use siros_zkp_req_nym_auth::verify::{check_presentation, Rejection};
-
-fn cbor_code(e: CborError) -> &'static str {
-    match e {
-        CborError::Truncated => "cbor_truncated",
-        CborError::TrailingBytes => "cbor_trailing_bytes",
-        CborError::Unsupported(_) => "cbor_unsupported",
-        CborError::InvalidUtf8(_) => "cbor_invalid_utf8",
-        CborError::DuplicateKey => "cbor_duplicate_key",
-        CborError::TooDeep => "cbor_too_deep",
-    }
-}
 
 fn structure_code(s: &StructureRejection) -> &'static str {
     match s {
@@ -44,7 +32,7 @@ fn structure_code(s: &StructureRejection) -> &'static str {
 
 fn rejection_code(r: &Rejection) -> &'static str {
     match r {
-        Rejection::Presentation(EncodingError::Cbor(e)) => cbor_code(*e),
+        Rejection::Presentation(EncodingError::Cbor(e)) => e.code(),
         Rejection::Presentation(EncodingError::NotMap) => "presentation_not_map",
         Rejection::Presentation(EncodingError::UnknownMember) => "presentation_unknown_member",
         Rejection::Presentation(EncodingError::Missing(_)) => "presentation_member_missing",

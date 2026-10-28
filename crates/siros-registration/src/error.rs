@@ -279,7 +279,10 @@ pub enum RegistrationError {
     EntryRepeated(CredentialIndex),
     /// The definition of this span breaks a rule.
     Definition(DefinitionRef, #[source] DefinitionFault),
-    /// A part of this many bytes, more than a buffer of the platform holds (`isize::MAX`).
+    /// A part of this many bytes, more than the reader holds: an icon past `isize::MAX`, the
+    /// most a buffer of the platform holds, the facts or the records of a type past
+    /// [`siros_codec::cbor::MAX_INPUT`], and a definition past
+    /// [`siros_codec::json::MAX_TEXT`], the most the CBOR and the JSON reader decode.
     TooLong(ByteCount),
 }
 
