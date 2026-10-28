@@ -12,7 +12,7 @@ use siros_wallet_state::CredentialId;
 use super::digest::PlanDigest;
 use super::transactions::{offered, Bound, EntryPosition, Offered, Transactions, Wallet};
 use crate::display_rule::{Choice, DisplayFacts, Presentability, TransactionData, WalletDisplay};
-use crate::error::PresentationError;
+use crate::error::{Inconsistency, PresentationError};
 use crate::ids::SetIndex;
 use crate::matching::{Answer, Candidate};
 use crate::offers::{Addition, Member, Offer, Offers};
@@ -289,7 +289,7 @@ fn member_views(
     sources: &Sources<'_, '_>,
 ) -> Result<Step<Vec<MemberView>>, PresentationError> {
     let mut views = Vec::with_capacity(members.len());
-    for member in offered(sources.answered, members) {
+    for member in offered(sources.answered, members)? {
         let mut credentials = Vec::with_capacity(member.candidates.len());
         for &(_, candidate) in &member.candidates {
             let bound = Bound::of(member.answers, candidate);
@@ -320,7 +320,7 @@ fn bound_entries(
     let mut transactions = Vec::new();
     for (_, binding) in bindings.iter().filter(|(key, _)| key == bound) {
         transactions.extend(fetched!(binding.views(sources.fetched, sources.locales)?));
-        entries.extend(sources.transactions.positions(binding));
+        entries.extend(sources.transactions.positions(binding)?);
     }
     Ok(Step::Done(BoundEntries {
         entries,
@@ -348,15 +348,6 @@ fn credential_view(
 
 /// What `candidate`, a candidate of `member`, shows: its claim rows or its proof statement
 /// rows.
-///
-/// # Panics
-///
-/// When `candidate` answers with a proof and `member`'s query has no nym_auth query.
-#[expect(
-    clippy::expect_used,
-    reason = "the matching answers with a proof only for a query it read as nym_auth; a proof \
-              without one is a bug of the core, and its view would show nothing true"
-)]
 fn shown(
     member: &Offered<'_, '_>,
     candidate: &Candidate<siros_credential::UsableCredential<'_>>,
@@ -372,7 +363,7 @@ fn shown(
             let zkp = member
                 .answers
                 .zkp()
-                .expect("a proof answers a query the matching read as nym_auth");
+                .ok_or(Inconsistency::ZkpQuery(member.query))?;
             Shown::Proof(verified_rows(zkp.query().query(), zkp.option(choice)?)?)
         }
     })
