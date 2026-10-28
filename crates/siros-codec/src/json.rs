@@ -9,8 +9,6 @@
 //! its last value there, as `JSON.parse` in `wallet-frontend` does, and each `metadata` value
 //! keeps its text.
 
-use std::fmt;
-
 use serde_json::error::Category;
 
 #[cfg(feature = "json")]
@@ -20,19 +18,24 @@ mod reader;
 pub use reader::{Json, JsonFault, JsonNumber, ReadFault, MAX_DEPTH};
 
 /// What serde_json found in text that is no JSON value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum JsonTextFault {
     /// Text that breaks the JSON syntax.
+    #[error("text that breaks the JSON syntax")]
     Syntax,
     /// A value this reader holds no form of: a number beyond a 64-bit float.
+    #[error("a value this reader holds no form of: a number beyond a 64-bit float")]
     Value,
     /// The text ends inside a value.
+    #[error("the text ends inside a value")]
     Eof,
 }
 
 /// Why bytes are no JSON text, and where.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{kind:?} at line {line} column {column}")]
 pub struct JsonTextError {
+    #[source]
     kind: JsonTextFault,
     line: usize,
     column: usize,
@@ -71,15 +74,3 @@ impl JsonTextError {
         self.column
     }
 }
-
-impl fmt::Display for JsonTextError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{:?} at line {} column {}",
-            self.kind, self.line, self.column
-        )
-    }
-}
-
-impl std::error::Error for JsonTextError {}

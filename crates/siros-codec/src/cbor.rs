@@ -25,7 +25,7 @@ pub enum CborError {
     TrailingBytes,
     /// An encoding the reader refuses, named by [`Unsupported`].
     #[error("unsupported CBOR encoding")]
-    Unsupported(Unsupported),
+    Unsupported(#[source] Unsupported),
     /// A text string is not UTF-8.
     #[error("CBOR text is not UTF-8")]
     InvalidUtf8(#[source] Utf8Error),
@@ -38,15 +38,19 @@ pub enum CborError {
 }
 
 /// An encoding the reader refuses.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum Unsupported {
     /// Additional information 31: an indefinite length, or the break that ends one.
+    #[error("additional information 31: an indefinite length, or the break that ends one")]
     IndefiniteLength,
     /// Additional information 28 to 30, which RFC 8949 reserves.
+    #[error("additional information 28 to 30, which RFC 8949 reserves")]
     ReservedInfo,
     /// A floating-point number.
+    #[error("a floating-point number")]
     Float,
     /// A simple value other than `false`, `true`, `null` and `undefined`.
+    #[error("a simple value other than `false`, `true`, `null` and `undefined`")]
     SimpleValue,
 }
 
