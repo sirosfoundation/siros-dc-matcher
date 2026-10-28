@@ -5,8 +5,10 @@
 
 Only the DC API matcher may panic: Credential Manager shows nothing when it
 traps, so its crates (MATCHER_CRATES) keep each panic with the reason it
-cannot recover. Every other crate of the named workspaces runs in a normal
-flow, where a panic crashes the wallet. Each root of its targets that ship
+cannot recover. A test host (a crate named `*-testhost`) runs the matcher in
+the tests, so its code is test code. Every other crate of the named
+workspaces runs in a normal flow, where a panic crashes the wallet, and the
+check covers it with no list to extend. Each root of its targets that ship
 carries `#![cfg_attr(not(test), deny(...))]` over the lints in PANIC_LINTS,
 and this check fails on a root without it and on an `allow`, `expect` or
 `warn` of those lints outside test code: clippy then denies `panic!`,
@@ -50,7 +52,9 @@ from pathlib import Path
 from repo_paths import PathRefused, existing_file
 from rust_tokens import Kind, LexError, Token, matching_closer, tokens
 
-MATCHER_CRATES = frozenset({"android-credman-sys", "android-credman", "siros-dc-matcher-wasm"})
+MATCHER_CRATES = frozenset({"android-credman-sys", "android-credman", "siros-dc-matcher-wasm",
+                            "siros-picker"})
+TEST_HOST_SUFFIX = "-testhost"
 
 # Targets whose code ships. Test, bench and example targets are test code.
 SHIPPING_KINDS = frozenset({"lib", "rlib", "cdylib", "staticlib", "dylib", "proc-macro", "bin",
@@ -470,6 +474,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             for crate in sorted(_crates(manifest), key=lambda crate: crate.name):
                 if crate.name in MATCHER_CRATES:
                     print(f"{crate.name}: the DC API matcher, exempt")
+                    continue
+                if crate.name.endswith(TEST_HOST_SUFFIX):
+                    print(f"{crate.name}: a test host, exempt as test code")
                     continue
                 walk = check_crate(crate)
                 print(f"{crate.name}: {len(walk.sites)} panic sites")
