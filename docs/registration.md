@@ -126,7 +126,8 @@ per byte: 209 on wasm32 and 241 on a 64-bit target. The values of a part thus ta
 ## Writing
 
 `siros_registration::encode` lays a `Projection` out; `write` projects the wallet's state, then
-encodes it. Equal projections give equal bytes: the CBOR is deterministic (RFC 8949, Section
+encodes it. `project` refuses a credential whose `vct` or `docType` is empty
+(`WriteError::TypeEmpty`): a type's name in the index holds at least one byte. Equal projections give equal bytes: the CBOR is deterministic (RFC 8949, Section
 4.2.1), the index is sorted, the records of a type keep the wallet's order, and each icon and
 definition takes the place of its first use, the facts' icon first.
 

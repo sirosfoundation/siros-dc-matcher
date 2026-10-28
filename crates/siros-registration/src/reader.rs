@@ -17,7 +17,8 @@ use crate::layout::{
 };
 use crate::record::{self, Positioned};
 use crate::registration::{
-    DefinitionRef, Facts, Icon, IconRef, Projection, RegisteredCredential, RegisteredType, Version,
+    DefinitionRef, Facts, Icon, IconRef, Projection, RegisteredCredential, RegisteredType,
+    TypeName, TypeNameEmpty, Version,
 };
 
 /// A registration the wallet wrote, open for reading. Opening reads its header, its directory
@@ -258,9 +259,7 @@ impl<R: Read + Seek> Registration<R> {
         let entry = RawEntry::parse(&words, &self.directory).map_err(refused)?;
         let name = self.blob.read(&self.directory.names, entry.name)?;
         let name = std::str::from_utf8(&name).map_err(|e| refused(IndexFault::Name(e)))?;
-        if name.is_empty() {
-            return Err(refused(IndexFault::NameEmpty));
-        }
+        let name = TypeName::new(name).map_err(|TypeNameEmpty| refused(IndexFault::NameEmpty))?;
         Ok(IndexEntry {
             key: RegisteredType::new(entry.format, name),
             records: entry.records,

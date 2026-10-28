@@ -360,25 +360,24 @@ binaryen version_116.
 ### Added
 
 - `siros-codec`, the encodings every wallet core crate shares: a strict CBOR reader (definite
-  lengths, no duplicate keys, found with one hash set insertion per key, no trailing bytes, at
-  most `cbor::MAX_DEPTH` (32) levels, input of at most `cbor::MAX_INPUT` bytes, whose items take
-  at most `cbor::HEAP_PER_BYTE` heap bytes per byte of it), of one item
-  or of a CBOR sequence (`cbor::decode_sequence`, RFC 8742), and a deterministic writer; unpadded
-  base64url and the padded base64 of `x5c` certificates (RFC 4648, Sections 4 and 5); the calendar
-  dates and UTC times of CBOR's `full-date` and `tdate`; the ES256 signature value
-  (`signature::Es256Signature`); an `https` URL (`url::HttpsUrl`); and `json::JsonTextError`, what
-  serde_json reports of text that is no JSON. With the feature `json` it holds the strict JSON
-  reader, `Json::parse_unique`: one value, members in document order, each member name once per
-  object, every number with the text its writer chose (`JsonNumber`), at most `json::MAX_DEPTH` (64)
-  levels, and at most `json::MAX_TEXT` bytes, whose values take at most `json::HEAP_PER_BYTE` heap
-  bytes per byte. It refuses with a `JsonFault`: text too long first, then a text fault anywhere
-  in the bytes, then the first, in document order, of a number beyond binary64, nesting too deep
-  and a member name an object repeats. `siros-wallet-state` reads the wallet state with its own reader, where a repeated
-  name keeps its last value, as `JSON.parse` in `wallet-frontend` does. The crate holds the
-  internals the components share: `member::MemberFault` with its `ArrayIndex`,
-  `chain::CertificateChain` (the DER chain an mdoc `x5chain` and an `x5c` carry), the `position!`
-  and `text_value!` macros that declare value newtypes, and `display_code!`, which shows an error by
-  its stable code.
+  lengths, no duplicate keys, found with one hash set insertion per key, no trailing bytes, at most
+  `cbor::MAX_DEPTH` (32) levels, input of at most `cbor::MAX_INPUT` bytes, whose items take at most
+  `cbor::HEAP_PER_BYTE` heap bytes per byte of it), of one item or of a CBOR sequence
+  (`cbor::decode_sequence`, RFC 8742), and a deterministic writer; unpadded base64url and the padded
+  base64 of `x5c` certificates (RFC 4648, Sections 4 and 5); the calendar dates and UTC times of
+  CBOR's `full-date` and `tdate`; the ES256 signature value (`signature::Es256Signature`); an
+  `https` URL (`url::HttpsUrl`); and `json::JsonTextError`, what serde_json reports of text that is
+  no JSON. With the feature `json` it holds the strict JSON reader, `Json::parse_unique`: one value,
+  members in document order, each member name once per object, every number with the text its writer
+  chose (`JsonNumber`), at most `json::MAX_DEPTH` (64) levels, and at most `json::MAX_TEXT` bytes,
+  whose values take at most `json::HEAP_PER_BYTE` heap bytes per byte. It refuses with a
+  `JsonFault`: text too long first, then a text fault anywhere in the bytes, then the first, in
+  document order, of a number beyond binary64, nesting too deep and a member name an object repeats.
+  `siros-wallet-state` reads the wallet state with its own reader, where a repeated name keeps its
+  last value, as `JSON.parse` in `wallet-frontend` does. The crate holds the internals the
+  components share: `member::MemberFault` with its `ArrayIndex`, `chain::CertificateChain` (the DER
+  chain an mdoc `x5chain` and an `x5c` carry), the `position!` and `text_value!` macros that declare
+  value newtypes, and `display_code!`, which shows an error by its stable code.
 - `siros-mdoc`, ISO/IEC 18013-5 mdocs: the stored credential, element selection, the
   `DeviceResponse`, and the device signature's signing input (`device_signing_input`, a
   `SigStructure` whose `digest` the device key signs). Names and values are types: `DocType`
@@ -737,17 +736,18 @@ binaryen version_116.
   offset or length past its part, an index entry out of order on a search's path, the records of a
   type out of the wallet's order, an icon longer than a buffer of the platform holds, facts or
   records of a type longer than `cbor::MAX_INPUT`, a definition longer than `json::MAX_TEXT`, and
-  every
-  unexpected member, with a `RegistrationError` that names the part and its cause. The reader and
-  the writer give an error for every input. The writer (feature `wallet`): `project` takes the
+  every unexpected member, with a `RegistrationError` that names the part and its cause. The reader
+  and the writer give an error for every input. The writer (feature `wallet`): `project` takes the
   parsed credentials, the presentation records, the display cache and language, the held transaction
   metadata and the configuration, the trust store, the systems, the `verifier_id` form, the
   credentials presented without the wallet's UI, the card wording, the icons, the default icon and
-  the time, and gives the `Projection`; `encode` lays it out, equal projections in equal bytes;
-  `write` does both. An icon is a `RasterIcon`: a PNG or JPEG of 64 to 256 pixels in each direction,
-  read from its header (`IconFault` otherwise). The host rasterises an SVG and resizes an image
-  before it passes it; a credential without an icon of its own gets the default icon. `Unverified`
-  is the picker's transaction data source. It builds with Rust 1.82.
+  the time, and gives the `Projection`, or `WriteError::TypeEmpty` for a credential of an empty
+  `vct` or `docType`: a registered type's name is a `TypeName` of at least one byte. `encode` lays
+  the projection out, equal projections in equal bytes; `write` does both. An icon is a
+  `RasterIcon`: a PNG or JPEG of 64 to 256 pixels in each direction, read from its header
+  (`IconFault` otherwise). The host rasterises an SVG and resizes an image before it passes it; a
+  credential without an icon of its own gets the default icon. `Unverified` is the picker's
+  transaction data source. It builds with Rust 1.82.
 - `scripts/gen_unicode_tables.py` writes the refused-character ranges of siros-display and the
   grapheme break runs of siros-transaction-data from their oracles' tables.
 - siros-registration's example `sample_registration` writes the registration of a sample

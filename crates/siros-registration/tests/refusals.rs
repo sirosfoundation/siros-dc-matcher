@@ -7,12 +7,12 @@ use std::io::Cursor;
 use serde_json::json;
 use siros_codec::cbor::{self, Value as Cbor};
 use siros_codec::date::DateTime;
-use siros_dcql::{DocType, Vct};
+use siros_credential::Format;
 use siros_presentation::testing::verifier::NOW;
 use siros_presentation::testing::wallet::{card_wording, mdoc, sd_jwt, Held, Wallet, MDL, MDL_NS};
 use siros_registration::{
     write, CredentialFault, Diagnostics, IndexFault, OutOfBounds, RasterIcon, RegisteredType,
-    Registration, RegistrationError, RegistrationInput, Within,
+    Registration, RegistrationError, RegistrationInput, TypeName, Within,
 };
 
 const PID: &str = "https://credentials.example/pid";
@@ -85,8 +85,8 @@ fn refusal(blob: &[u8], types: &[RegisteredType]) -> RegistrationError {
 #[test]
 fn each_rule_refuses_with_its_cause() {
     let honest = registration();
-    let pid = RegisteredType::Vct(Vct::new(PID));
-    let mdl = RegisteredType::DocType(DocType::new(MDL));
+    let pid = RegisteredType::new(Format::SdJwtVc, TypeName::new(PID).unwrap());
+    let mdl = RegisteredType::new(Format::Mdoc, TypeName::new(MDL).unwrap());
     assert_eq!(
         Registration::open(Cursor::new(&honest))
             .unwrap()

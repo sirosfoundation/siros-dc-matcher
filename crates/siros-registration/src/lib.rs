@@ -86,7 +86,7 @@ pub use layout::SectionKind;
 pub use reader::Registration;
 pub use registration::{
     DefinitionRef, Diagnostics, Facts, Icon, IconEmpty, IconRef, Projection, RegisteredCard,
-    RegisteredCredential, RegisteredType, Version,
+    RegisteredCredential, RegisteredType, TypeName, TypeNameEmpty, Version,
 };
 pub use selection::Unverified;
 #[cfg(feature = "wallet")]

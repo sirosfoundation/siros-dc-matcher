@@ -23,6 +23,7 @@ use crate::encode::encode;
 use crate::reader::Registration;
 use crate::registration::{
     Diagnostics, Facts, Icon, Projection, RegisteredCard, RegisteredCredential, RegisteredType,
+    TypeName,
 };
 use crate::wire::UNSERVED;
 
@@ -159,7 +160,7 @@ fn credential(
             BatchId::new(at + 1000),
             InstanceId::new(draw.next() % 4),
         ),
-        credential_type: RegisteredType::new(format, name),
+        credential_type: RegisteredType::new(format, TypeName::new(name).built("type name")?),
         key: *draw.pick(&[KeyHolding::Held, KeyHolding::NotHeld])?,
         claims: claims(draw, format)?,
         card: RegisteredCard {
@@ -277,7 +278,7 @@ fn writing_then_reading_gives_the_projection_back() -> Result<(), Box<dyn std::e
         let mut registration = Registration::open(Cursor::new(bytes.as_slice()))?;
         assert_eq!(registration.projection()?, written, "seed {seed}");
         for (format, name) in TYPES {
-            let credential_type = RegisteredType::new(format, name);
+            let credential_type = RegisteredType::new(format, TypeName::new(name)?);
             let read: Vec<EntryRef> = registration
                 .credentials(std::slice::from_ref(&credential_type))?
                 .iter()
