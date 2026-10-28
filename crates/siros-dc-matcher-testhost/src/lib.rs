@@ -405,30 +405,38 @@ fn reached(c: &Caller<'_, State>, level: u32, function: &str) -> Result<()> {
 
 /// The entry a field or a level-5 to level-7 call names.
 ///
-/// A call for an entry that was never added is a matcher bug, and silently
-/// dropping it would hide exactly that bug. The credential id is checked as
-/// well: the platform keys these calls by credential id as well as set
-/// position, so a guest passing the wrong one produces calls that never
-/// attach in a real picker.
+/// The platform keys these calls by set, position and credential id: the
+/// alternatives at one position differ in their credential id alone. A call
+/// for an entry that was never added is a matcher bug, and silently dropping
+/// it would hide exactly that bug; a call with a credential id no alternative
+/// carries never attaches in a real picker.
 fn entry_at<'o>(
     out: &'o mut Captured,
     set_id: &str,
     index: i32,
     cred_id: &str,
 ) -> Result<&'o mut CapturedEntry> {
-    let entry = out
+    let at_position = |e: &CapturedEntry| e.set_id == set_id && e.index == index;
+    if let Some(i) = out
         .entries
-        .iter_mut()
-        .find(|e| e.set_id == set_id && e.index == index)
-        .ok_or_else(|| anyhow::anyhow!("call for unknown entry {set_id}[{index}]"))?;
-    if cred_id != entry.credential_id {
-        return Err(anyhow::anyhow!(
-            "call for entry {set_id}[{index}] carries credential id {cred_id:?}, \
-             but the entry was added as {:?}",
-            entry.credential_id
-        ));
+        .iter()
+        .position(|e| at_position(e) && e.credential_id == cred_id)
+    {
+        return Ok(&mut out.entries[i]);
     }
-    Ok(entry)
+    let added: Vec<&str> = out
+        .entries
+        .iter()
+        .filter(|e| at_position(e))
+        .map(|e| e.credential_id.as_str())
+        .collect();
+    if added.is_empty() {
+        return Err(anyhow::anyhow!("call for unknown entry {set_id}[{index}]"));
+    }
+    Err(anyhow::anyhow!(
+        "call for entry {set_id}[{index}] carries credential id {cred_id:?}, \
+         but the entries there were added as {added:?}"
+    ))
 }
 
 /// The guest's linear memory.
