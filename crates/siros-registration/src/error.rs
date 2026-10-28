@@ -75,8 +75,7 @@ pub struct ByteCount(u64);
 
 impl ByteCount {
     /// The count `bytes`.
-    #[must_use]
-    pub const fn new(bytes: u64) -> Self {
+    pub(crate) const fn new(bytes: u64) -> Self {
         Self(bytes)
     }
 

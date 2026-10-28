@@ -174,7 +174,10 @@ impl<I> Facts<I> {
     /// # Errors
     ///
     /// The error of `f`.
-    pub fn try_map_icon<J, X>(self, f: impl FnOnce(I) -> Result<J, X>) -> Result<Facts<J>, X> {
+    pub(crate) fn try_map_icon<J, X>(
+        self,
+        f: impl FnOnce(I) -> Result<J, X>,
+    ) -> Result<Facts<J>, X> {
         Ok(Facts {
             registered_at: self.registered_at,
             language: self.language,
@@ -338,7 +341,7 @@ impl<D, I> RegisteredCredential<D, I> {
     /// # Errors
     ///
     /// The first error of `f`.
-    pub fn try_map_definitions<E, X>(
+    pub(crate) fn try_map_definitions<E, X>(
         self,
         f: impl FnMut(D) -> Result<E, X>,
     ) -> Result<RegisteredCredential<E, I>, X> {
@@ -350,7 +353,7 @@ impl<D, I> RegisteredCredential<D, I> {
     /// # Errors
     ///
     /// The error of `f`.
-    pub fn try_map_icon<J, X>(
+    pub(crate) fn try_map_icon<J, X>(
         self,
         f: impl FnOnce(I) -> Result<J, X>,
     ) -> Result<RegisteredCredential<D, J>, X> {

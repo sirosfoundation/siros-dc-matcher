@@ -94,8 +94,8 @@ struct Input<'a> {
     level: HostLevel,
 }
 
-/// One matcher invocation, from the host's inputs to emitted entry sets, over the registration
-/// `registration` holds, read as the request needs it.
+/// One matcher invocation, from the host's inputs to emitted entry sets: the request, and of
+/// the registration `registration` reads, the parts the request needs.
 ///
 /// A registration whose header, directory or facts do not read gives nothing: the debug flag is
 /// one of the facts, and the wallet registers the projection together with this binary.
