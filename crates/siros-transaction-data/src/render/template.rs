@@ -64,17 +64,9 @@ pub(super) fn interpolate(
     let mut segments: Vec<Segment> = Vec::new();
     let mut text = String::new();
     let mut rest = template;
-    while let Some(open) = rest.find('{') {
-        let (before, from) = rest.split_at(open);
+    while let Some((before, tail)) = rest.split_once('{') {
         text.push_str(before);
-        let placeholder = from.get(1..).and_then(|tail| {
-            let digits = tail.bytes().take_while(u8::is_ascii_digit).count();
-            let index: usize = tail.get(..digits)?.parse().ok()?;
-            tail.get(digits..)?
-                .strip_prefix('}')
-                .map(|after| (index, after))
-        });
-        match placeholder.filter(|(index, _)| *index < sources.claims.len()) {
+        match placeholder(tail).filter(|(index, _)| *index < sources.claims.len()) {
             Some((index, after)) => {
                 let value = value(ClaimIndex::new(index), wildcards, sources)?;
                 segments
@@ -84,13 +76,23 @@ pub(super) fn interpolate(
             }
             None => {
                 text.push('{');
-                rest = from.get(1..).unwrap_or_default();
+                rest = tail;
             }
         }
     }
     text.push_str(rest);
     segments.extend((!text.is_empty()).then_some(Segment::Text(text)));
     Ok(segments)
+}
+
+/// The claim index of the placeholder `tail` starts with, after its `{`, and the text after
+/// its `}`: decimal digits, then `}`.
+fn placeholder(tail: &str) -> Option<(usize, &str)> {
+    let digits = tail.bytes().take_while(u8::is_ascii_digit).count();
+    let index: usize = tail.get(..digits)?.parse().ok()?;
+    tail.get(digits..)?
+        .strip_prefix('}')
+        .map(|after| (index, after))
 }
 
 /// The value of the claim at `index`, its `null`s resolved to `wildcards`: a typed value, or the

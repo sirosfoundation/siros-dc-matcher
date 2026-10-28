@@ -233,19 +233,19 @@ fn covered<'c>(
 ///
 /// [`PathError::TypeMismatch`] where a `null` meets a value that is no array.
 fn present(root: &Json, components: &[PathComponent], offset: usize) -> Result<bool, PathError> {
-    let Some(null) = components.iter().position(|c| *c == PathComponent::Null) else {
+    let mut parts = components.splitn(2, |c| *c == PathComponent::Null);
+    let (Some(prefix), Some(rest)) = (parts.next(), parts.next()) else {
         return Ok(!select(root, components)?.is_empty());
     };
-    let (prefix, rest) = components.split_at(null);
+    let null = offset + prefix.len();
     let containers = select(root, prefix)?;
     if containers.is_empty() {
         return Ok(false);
     }
-    let rest = rest.get(1..).unwrap_or_default();
     for container in containers {
         let Json::Array(items) = container.value else {
             return Err(PathError::TypeMismatch {
-                at: ComponentIndex::new(offset + null),
+                at: ComponentIndex::new(null),
             });
         };
         // A `null` over an empty array selects nothing (OpenID4VP 1.0, Section 7.1.1, step 3).
@@ -253,7 +253,7 @@ fn present(root: &Json, components: &[PathComponent], offset: usize) -> Result<b
             return Ok(false);
         }
         for item in items {
-            if !present(item, rest, offset + null + 1)? {
+            if !present(item, rest, null + 1)? {
                 return Ok(false);
             }
         }

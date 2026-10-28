@@ -134,12 +134,8 @@ fn transposable(alternatives: Vec<Vec<&str>>) -> bool {
 
 /// `items` in order, each once.
 fn sorted_set<T: Ord>(items: impl IntoIterator<Item = T>) -> Vec<T> {
-    let mut set = Vec::new();
-    for item in items {
-        if let Err(at) = set.binary_search(&item) {
-            // `Vec::insert` panics past the end; `binary_search` gives a position up to it.
-            set.insert(at, item);
-        }
-    }
+    let mut set: Vec<T> = items.into_iter().collect();
+    set.sort();
+    set.dedup();
     set
 }
