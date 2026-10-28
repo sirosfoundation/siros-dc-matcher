@@ -19,11 +19,15 @@
 #![deny(unsafe_code)]
 #![deny(unused_results)]
 #![deny(clippy::cognitive_complexity)]
-#![deny(
+// Nothing here panics: no attribute can allow these lints.
+#![forbid(
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::indexing_slicing,
-    clippy::panic
+    clippy::panic,
+    clippy::unreachable,
+    clippy::todo,
+    clippy::unimplemented
 )]
 
 mod admission;
