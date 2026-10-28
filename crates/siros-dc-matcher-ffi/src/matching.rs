@@ -24,14 +24,10 @@
 //! the symptom is the usual one for this component: nothing appears, and
 //! nothing says why.
 
-use std::collections::HashMap;
-
 use siros_dc_matcher_core::db::CredentialDatabase;
 use siros_dc_matcher_core::evaluator::{credentials, resolve, ProfilePolicy};
 use siros_dcql::{execute, DcqlQuery, Satisfaction};
 use siros_oid4vp::UnverifiedRequest;
-
-use crate::FfiCapability;
 
 /// How many combinations to return at most.
 ///
@@ -84,18 +80,6 @@ pub struct FfiMatchedCredential {
     ///
     /// Each is a path: for ISO mdoc, `[namespace, element_identifier]`.
     pub claims: Vec<Vec<String>>,
-    /// The capability chosen to satisfy this query, if its format needed one.
-    ///
-    /// Returned rather than left to the caller because the engine has already
-    /// decided. Working it out again means parsing the request a second time,
-    /// in a second implementation, and possibly reaching a different answer.
-    pub capabilities: Vec<FfiCapability>,
-    /// `meta` entries the wallet needs at presentation time but which do not
-    /// affect matching — `ppid_context` above all, which both SDKs read today.
-    ///
-    /// A pseudonym context changes what is produced, not which credential can
-    /// produce it, so it is carried rather than matched on.
-    pub meta: HashMap<String, String>,
     /// For a `zkp_req` query: a JSON object `{"circuit": {...},
     /// "proof_backend": "...", "req_set": n, "items": [...]}` holding the
     /// circuit this wallet chose (its registered capability: `system` and
@@ -307,10 +291,6 @@ fn evaluate(
     let dropped_count = u32::try_from(enumerated.dropped().count()).unwrap_or(u32::MAX);
 
     let member = |query_id: &str, candidate: &siros_dcql::Candidate| {
-        // Resolved by core, not here: the matcher binary derives exactly the
-        // same details for its picker metadata, and two derivations are how
-        // the two would come to disagree about which capability satisfied a
-        // query.
         let resolved = query
             .credential(query_id)
             .map(|cq| resolve(&policy, cq, candidate));
@@ -321,29 +301,10 @@ fn evaluate(
                 .as_ref()
                 .map(|r| r.claims.clone())
                 .unwrap_or_default(),
-            capabilities: resolved
-                .as_ref()
-                .map(|r| {
-                    r.capabilities
-                        .iter()
-                        .map(|c| FfiCapability {
-                            system: c.system.clone(),
-                            params: c
-                                .params
-                                .iter()
-                                .map(|(k, v)| (k.clone(), v.clone()))
-                                .collect(),
-                        })
-                        .collect()
-                })
-                .unwrap_or_default(),
             zkp_req: resolved
                 .as_ref()
                 .and_then(|r| r.zkp_req.as_ref())
                 .map(|selection| selection.to_json().to_string()),
-            meta: resolved
-                .map(|r| r.meta.into_iter().collect())
-                .unwrap_or_default(),
         }
     };
 

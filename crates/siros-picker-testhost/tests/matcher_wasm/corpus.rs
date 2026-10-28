@@ -122,29 +122,12 @@ fn mdl_cases() -> Vec<Case> {
         "credentials": [
             {"id": "q1", "format": "mso_mdoc", "meta": {"doctype_value": "org.example.none"}, "claims": [{"path": ["a", "b"]}]}],
         "credential_sets": [{"options": [["q1"]], "required": false}]}});
-    let zk = |systems: Value| json!({"doctype_value": MDL, "zk_system_type": systems});
     vec![
         case("mdoc", unsigned(age("mso_mdoc", mdl_meta())), plain()),
         case(
             "two candidates",
             unsigned(age("mso_mdoc", mdl_meta())),
             two(),
-        ),
-        case(
-            "zk two systems",
-            unsigned(age(
-                "mso_mdoc_zk",
-                zk(json!([{"id": "a", "system": "some-future-zk-system"}])),
-            )),
-            plain(),
-        ),
-        case(
-            "zk one system",
-            unsigned(age(
-                "mso_mdoc_zk",
-                zk(json!([{"id": "1", "system": "longfellow-libzk-v1"}])),
-            )),
-            plain(),
         ),
         case(
             "missing claim",

@@ -774,8 +774,6 @@ internal open class UniffiVTableCallbackInterfaceFfiProofVerifier(
 
 
 
-
-
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -821,8 +819,6 @@ internal interface UniffiLib : Library {
     fun uniffi_siros_dc_matcher_ffi_fn_method_sirosblobbuilder_add_credential(`ptr`: Pointer,`credential`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     fun uniffi_siros_dc_matcher_ffi_fn_method_sirosblobbuilder_add_icon(`ptr`: Pointer,`id`: RustBuffer.ByValue,`bytes`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-    ): Unit
-    fun uniffi_siros_dc_matcher_ffi_fn_method_sirosblobbuilder_add_zk_system(`ptr`: Pointer,`capability`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     fun uniffi_siros_dc_matcher_ffi_fn_method_sirosblobbuilder_add_zkp_req_system(`ptr`: Pointer,`capability`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
@@ -984,8 +980,6 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_add_icon(
     ): Short
-    fun uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_add_zk_system(
-    ): Short
     fun uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_add_zkp_req_system(
     ): Short
     fun uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_build(
@@ -1048,9 +1042,6 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_add_icon() != 3617.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_add_zk_system() != 50234.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_add_zkp_req_system() != 42284.toShort()) {
@@ -2050,14 +2041,6 @@ public interface SirosBlobBuilderInterface {
     fun `addIcon`(`id`: kotlin.String, `bytes`: kotlin.ByteArray)
     
     /**
-     * Declare a ZK proof system this wallet can actually produce.
-     *
-     * Without this, a `mso_mdoc_zk` request matches nothing — which is the
-     * correct outcome for a wallet that cannot produce the proof.
-     */
-    fun `addZkSystem`(`capability`: FfiCapability)
-    
-    /**
      * Register a `zkp_req` circuit this wallet can prove with.
      *
      * `system` is the proof system (for example `longfellow-libzk-v1`). The
@@ -2252,23 +2235,6 @@ open class SirosBlobBuilder: Disposable, AutoCloseable, SirosBlobBuilderInterfac
 
     
     /**
-     * Declare a ZK proof system this wallet can actually produce.
-     *
-     * Without this, a `mso_mdoc_zk` request matches nothing — which is the
-     * correct outcome for a wallet that cannot produce the proof.
-     */override fun `addZkSystem`(`capability`: FfiCapability)
-        = 
-    callWithPointer {
-    uniffiRustCall() { _status ->
-    UniffiLib.INSTANCE.uniffi_siros_dc_matcher_ffi_fn_method_sirosblobbuilder_add_zk_system(
-        it, FfiConverterTypeFfiCapability.lower(`capability`),_status)
-}
-    }
-    
-    
-
-    
-    /**
      * Register a `zkp_req` circuit this wallet can prove with.
      *
      * `system` is the proof system (for example `longfellow-libzk-v1`). The
@@ -2393,22 +2359,15 @@ public object FfiConverterTypeSirosBlobBuilder: FfiConverter<SirosBlobBuilder, P
 
 
 /**
- * Something this wallet can produce beyond what it stores, such as a ZK proof
- * over an mdoc.
+ * A `zkp_req` circuit this wallet can prove with.
  */
 data class FfiCapability (
     /**
-     * System identifier, e.g. `longfellow-libzk-v1`.
+     * Proof system, e.g. `longfellow-libzk-v1`.
      */
     var `system`: kotlin.String, 
     /**
-     * Parameters that must also agree for the capability to apply.
-     *
-     * Supply the real ones. A ZK circuit is built for a fixed attribute
-     * count, so a request naming the right system with the wrong
-     * `num_attributes` is one this wallet cannot satisfy — and omitting the
-     * parameter turns that into a failure after the user has consented,
-     * rather than an entry that was never offered.
+     * The circuit's parameters, which [`SirosBlobBuilder::add_zkp_req_system`] describes.
      */
     var `params`: Map<kotlin.String, kotlin.String>
 ) {
@@ -2731,22 +2690,6 @@ data class FfiMatchedCredential (
      */
     var `claims`: List<List<kotlin.String>>, 
     /**
-     * The capability chosen to satisfy this query, if its format needed one.
-     *
-     * Returned rather than left to the caller because the engine has already
-     * decided. Working it out again means parsing the request a second time,
-     * in a second implementation, and possibly reaching a different answer.
-     */
-    var `capabilities`: List<FfiCapability>, 
-    /**
-     * `meta` entries the wallet needs at presentation time but which do not
-     * affect matching — `ppid_context` above all, which both SDKs read today.
-     *
-     * A pseudonym context changes what is produced, not which credential can
-     * produce it, so it is carried rather than matched on.
-     */
-    var `meta`: Map<kotlin.String, kotlin.String>, 
-    /**
      * For a `zkp_req` query: a JSON object `{"circuit": {...},
      * "proof_backend": "...", "req_set": n, "items": [...]}` holding the
      * circuit this wallet chose (its registered capability: `system` and
@@ -2775,8 +2718,6 @@ public object FfiConverterTypeFfiMatchedCredential: FfiConverterRustBuffer<FfiMa
             FfiConverterString.read(buf),
             FfiConverterString.read(buf),
             FfiConverterSequenceSequenceString.read(buf),
-            FfiConverterSequenceTypeFfiCapability.read(buf),
-            FfiConverterMapStringString.read(buf),
             FfiConverterOptionalString.read(buf),
         )
     }
@@ -2785,8 +2726,6 @@ public object FfiConverterTypeFfiMatchedCredential: FfiConverterRustBuffer<FfiMa
             FfiConverterString.allocationSize(value.`queryId`) +
             FfiConverterString.allocationSize(value.`credentialId`) +
             FfiConverterSequenceSequenceString.allocationSize(value.`claims`) +
-            FfiConverterSequenceTypeFfiCapability.allocationSize(value.`capabilities`) +
-            FfiConverterMapStringString.allocationSize(value.`meta`) +
             FfiConverterOptionalString.allocationSize(value.`zkpReq`)
     )
 
@@ -2794,8 +2733,6 @@ public object FfiConverterTypeFfiMatchedCredential: FfiConverterRustBuffer<FfiMa
             FfiConverterString.write(value.`queryId`, buf)
             FfiConverterString.write(value.`credentialId`, buf)
             FfiConverterSequenceSequenceString.write(value.`claims`, buf)
-            FfiConverterSequenceTypeFfiCapability.write(value.`capabilities`, buf)
-            FfiConverterMapStringString.write(value.`meta`, buf)
             FfiConverterOptionalString.write(value.`zkpReq`, buf)
     }
 }
@@ -3820,34 +3757,6 @@ public object FfiConverterSequenceByteArray: FfiConverterRustBuffer<List<kotlin.
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterByteArray.write(it, buf)
-        }
-    }
-}
-
-
-
-
-/**
- * @suppress
- */
-public object FfiConverterSequenceTypeFfiCapability: FfiConverterRustBuffer<List<FfiCapability>> {
-    override fun read(buf: ByteBuffer): List<FfiCapability> {
-        val len = buf.getInt()
-        return List<FfiCapability>(len) {
-            FfiConverterTypeFfiCapability.read(buf)
-        }
-    }
-
-    override fun allocationSize(value: List<FfiCapability>): ULong {
-        val sizeForLength = 4UL
-        val sizeForItems = value.map { FfiConverterTypeFfiCapability.allocationSize(it) }.sum()
-        return sizeForLength + sizeForItems
-    }
-
-    override fun write(value: List<FfiCapability>, buf: ByteBuffer) {
-        buf.putInt(value.size)
-        value.iterator().forEach {
-            FfiConverterTypeFfiCapability.write(it, buf)
         }
     }
 }

@@ -98,7 +98,7 @@ fn a_zkp_req_match_returns_the_circuit_and_the_option() {
 
 #[test]
 fn other_formats_have_no_zkp_req_member() {
-    let blob = wallet(None);
+    let blob = wallet();
     let query = dcql(
         "mso_mdoc",
         age_claim(),
