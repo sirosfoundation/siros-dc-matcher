@@ -12,6 +12,49 @@ use super::JsonTextError;
 /// The deepest nesting of objects and arrays a document may have.
 pub const MAX_DEPTH: usize = 64;
 
+/// The most heap bytes the reader allocates per byte of text: the slots of arrays or of
+/// objects, whichever take more, a copy of each number's text, and serde_json's stack of the
+/// levels it skips. Each value but the outermost takes a slot in the vector serde_json reads it
+/// into and another in the vector this reader holds it in. A vector grows from four slots,
+/// doubling when full, and with the vectors it outgrew holds at most four slots per value on an
+/// allocator that never frees. serde_json reads each nested array or object again and keeps a
+/// byte per enclosing level of each value it skips: at most twice the levels, [`MAX_DEPTH`],
+/// that a byte lies in.
+///
+/// 209 bytes on wasm32 and 241 on a 64-bit target.
+pub const HEAP_PER_BYTE: usize = max(ARRAY_PER_BYTE, OBJECT_PER_BYTE) + 1 + 2 * MAX_DEPTH;
+
+/// The heap bytes of arrays per byte of text: four slots of each vector per value, and a value
+/// and its separator take two bytes at least. 80 bytes on wasm32 and 112 on a 64-bit target.
+const ARRAY_PER_BYTE: usize = 2 * (size_of::<&RawValue>() + size_of::<Json>());
+
+/// The heap bytes of objects per byte of text: four slots of each vector per member, a set of
+/// the member names, and a member and its separator take five bytes at least. The set holds a
+/// name and a control byte per bucket, in a table of four buckets or more that doubles when it
+/// fills: fewer than five buckets per name over every table it outgrew, and a group of 16
+/// control bytes at most per table. 67 bytes on wasm32 and 104 on a 64-bit target.
+const OBJECT_PER_BYTE: usize = (4
+    * (size_of::<(String, &RawValue)>() + size_of::<(String, Json)>())
+    + 5 * (size_of::<&str>() + 1)
+    + 16)
+    .div_ceil(5);
+
+/// The longest text the reader reads: its values then take at most `isize::MAX` heap bytes, the
+/// most one allocation holds. 10,275,041 bytes on wasm32.
+pub const MAX_TEXT: usize = match (isize::MAX as usize).checked_div(HEAP_PER_BYTE) {
+    Some(bytes) => bytes,
+    None => 0,
+};
+
+/// The greater of `a` and `b`.
+const fn max(a: usize, b: usize) -> usize {
+    if a > b {
+        a
+    } else {
+        b
+    }
+}
+
 /// One JSON value.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Json {
@@ -79,6 +122,9 @@ pub enum ReadFault {
     /// Objects and arrays nest deeper than [`MAX_DEPTH`].
     #[error("nested deeper than {MAX_DEPTH}")]
     TooDeep,
+    /// The text is longer than [`MAX_TEXT`].
+    #[error("longer than {MAX_TEXT} bytes")]
+    TooLong,
 }
 
 /// Why bytes are no JSON value whose objects name each member once.
@@ -98,10 +144,13 @@ impl Json {
     ///
     /// # Errors
     ///
-    /// [`JsonFault`]: a text fault anywhere in the bytes comes first; else the first, in document
-    /// order, of a number beyond binary64, nesting deeper than [`MAX_DEPTH`], and a member name an
-    /// object repeats.
+    /// [`JsonFault`]: text longer than [`MAX_TEXT`] first, then a text fault anywhere in the
+    /// bytes; else the first, in document order, of a number beyond binary64, nesting deeper
+    /// than [`MAX_DEPTH`], and a member name an object repeats.
     pub fn parse_unique(bytes: &[u8]) -> Result<Self, JsonFault> {
+        if bytes.len() > MAX_TEXT {
+            return Err(JsonFault::Read(ReadFault::TooLong));
+        }
         let raw: &RawValue = serde_json::from_slice(bytes).map_err(text)?;
         value(raw, 0)
     }

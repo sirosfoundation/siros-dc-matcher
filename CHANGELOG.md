@@ -370,9 +370,10 @@ binaryen version_116.
   serde_json reports of text that is no JSON. With the feature `json` it holds the strict JSON
   reader, `Json::parse_unique`: one value, members in document order, each member name once per
   object, every number with the text its writer chose (`JsonNumber`), at most `json::MAX_DEPTH` (64)
-  levels. It refuses with a `JsonFault`: a text fault anywhere in the bytes comes first, then the
-  first, in document order, of a number beyond binary64, nesting too deep and a member name an
-  object repeats. `siros-wallet-state` reads the wallet state with its own reader, where a repeated
+  levels, and at most `json::MAX_TEXT` bytes, whose values take at most `json::HEAP_PER_BYTE` heap
+  bytes per byte. It refuses with a `JsonFault`: text too long first, then a text fault anywhere
+  in the bytes, then the first, in document order, of a number beyond binary64, nesting too deep
+  and a member name an object repeats. `siros-wallet-state` reads the wallet state with its own reader, where a repeated
   name keeps its last value, as `JSON.parse` in `wallet-frontend` does. The crate holds the
   internals the components share: `member::MemberFault` with its `ArrayIndex`,
   `chain::CertificateChain` (the DER chain an mdoc `x5chain` and an `x5c` carry), the `position!`
@@ -734,8 +735,9 @@ binaryen version_116.
   then `credentials` of the types asked, `definition` and `icon` by span, each definition and icon
   once, and `projection` the whole. It refuses every version but `Version::CURRENT` (1), every
   offset or length past its part, an index entry out of order on a search's path, the records of a
-  type out of the wallet's order, an icon or a definition longer than a buffer of the platform
-  holds, facts or records of a type longer than `cbor::MAX_INPUT`, and every
+  type out of the wallet's order, an icon longer than a buffer of the platform holds, facts or
+  records of a type longer than `cbor::MAX_INPUT`, a definition longer than `json::MAX_TEXT`, and
+  every
   unexpected member, with a `RegistrationError` that names the part and its cause. The reader and
   the writer give an error for every input. The writer (feature `wallet`): `project` takes the
   parsed credentials, the presentation records, the display cache and language, the held transaction
