@@ -1,8 +1,6 @@
 //! The trust store the host provisions (TR1, TR4): for each authority a Verifier may name, the
 //! certificates to which an issuer chain has a path.
 
-use std::fmt;
-
 use siros_codec::date::DateTime;
 use siros_codec::json::{Json, JsonFault};
 use siros_codec::member::MemberFault;
@@ -29,38 +27,44 @@ pub struct StoreEntry {
 }
 
 /// Why a record is no trust store (TR1).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum StoreError {
     /// The strict reader refuses the record: a member name an object repeats among its faults.
-    Json(JsonFault),
+    #[error("{code}: {0}", code = self.code())]
+    Json(#[source] JsonFault),
     /// The record is not a JSON array.
+    #[error("{}", self.code())]
     NotArray,
     /// An entry breaks a rule.
+    #[error("{code} at entry {at}", code = self.code(), at = entry.value())]
     Entry {
         /// The entry's position.
         entry: EntryIndex,
         /// The rule.
+        #[source]
         error: EntryError,
     },
     /// An entry repeats the `type` and `value` of an earlier one.
+    #[error("{code} at entry {at}", code = self.code(), at = .0.value())]
     Repeated(EntryIndex),
 }
 
 /// Why an entry of a trust store record is refused.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum EntryError {
     /// The entry is not a JSON object.
     NotObject,
     /// The entry has this member, other than `type`, `value` and `certificates`.
     UnknownMember(String),
     /// `type` is absent or not a string.
-    Type(MemberFault),
+    Type(#[source] MemberFault),
     /// `type` names this type, other than `etsi_tl` and `openid_federation`.
     UnknownType(AuthorityType),
     /// `value` is absent or not a string.
-    Value(MemberFault),
+    Value(#[source] MemberFault),
     /// `certificates` is absent, not an array, or empty.
-    Certificates(MemberFault),
+    Certificates(#[source] MemberFault),
     /// A certificate is not a string.
     CertificateNotString(CertificateIndex),
     /// A certificate is not base64 with padding (the `x5c` encoding, RFC 7515, Section 4.1.6).
@@ -68,6 +72,7 @@ pub enum EntryError {
         /// Its position in `certificates`.
         certificate: CertificateIndex,
         /// Why.
+        #[source]
         error: Base64Error,
     },
     /// A certificate does not parse.
@@ -75,6 +80,7 @@ pub enum EntryError {
         /// Its position in `certificates`.
         certificate: CertificateIndex,
         /// Why.
+        #[source]
         error: CertificateError,
     },
 }
@@ -93,28 +99,6 @@ impl StoreError {
     }
 }
 
-impl fmt::Display for StoreError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Json(e) => write!(f, "{}: {e}", self.code()),
-            Self::NotArray => f.write_str(self.code()),
-            Self::Entry { entry, .. } | Self::Repeated(entry) => {
-                write!(f, "{} at entry {}", self.code(), entry.value())
-            }
-        }
-    }
-}
-
-impl std::error::Error for StoreError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Json(e) => Some(e),
-            Self::Entry { error, .. } => Some(error),
-            Self::NotArray | Self::Repeated(_) => None,
-        }
-    }
-}
-
 impl EntryError {
     /// A stable identifier.
     #[must_use]
@@ -129,24 +113,6 @@ impl EntryError {
             Self::CertificateNotString(_) => "trust_store_certificate_not_string",
             Self::Encoding { .. } => "trust_store_certificate_encoding",
             Self::Certificate { error, .. } => error.code(),
-        }
-    }
-}
-
-siros_codec::display_code!(EntryError);
-
-impl std::error::Error for EntryError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Encoding { error, .. } => Some(error),
-            Self::Certificate { error, .. } => Some(error),
-            Self::NotObject
-            | Self::UnknownMember(_)
-            | Self::Type(_)
-            | Self::UnknownType(_)
-            | Self::Value(_)
-            | Self::Certificates(_)
-            | Self::CertificateNotString(_) => None,
         }
     }
 }
@@ -219,7 +185,8 @@ impl TrustStore {
 
 /// Why an issuer chain has a path to no certificate of the trust store: the refusal of each
 /// entry, in the record's order; none for an empty store.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub struct Unanchored(Vec<(StoreAuthority, PathRefusal)>);
 
 impl Unanchored {
@@ -235,10 +202,6 @@ impl Unanchored {
         "chain_unanchored"
     }
 }
-
-siros_codec::display_code!(Unanchored);
-
-impl std::error::Error for Unanchored {}
 
 impl StoreEntry {
     fn parse(entry: &Json) -> Result<Self, EntryError> {

@@ -2691,6 +2691,7 @@ dependencies = [
  "siros-codec",
  "siros-dcql",
  "siros-trust",
+ "thiserror 2.0.20",
  "x509-cert",
 ]
 

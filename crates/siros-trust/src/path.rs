@@ -15,8 +15,6 @@
 //! | a signer's keyUsage, when present, includes keyCertSign | 6.1.4 (n) |
 //! | every certificate on the path, the anchor included, has each critical extension in the set [`extensions`](crate::extensions) processes | 6.1.4 (o) |
 
-use std::fmt;
-
 use der::asn1::ObjectIdentifier;
 use siros_codec::date::DateTime;
 
@@ -37,7 +35,8 @@ pub enum OnPath {
 /// Why an issuer chain has no path to an anchor certificate. It names the attempt it refuses:
 /// the deepest prefix of the chain tried, and there the first anchor tried, when one has the
 /// subject the prefix's last certificate names as its issuer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}: {:?}", self.code(), self)]
 pub enum PathRefusal {
     /// The certificate is not valid at the time.
     NotValid(OnPath),
@@ -104,14 +103,6 @@ impl PathRefusal {
         }
     }
 }
-
-impl fmt::Display for PathRefusal {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: {self:?}", self.code())
-    }
-}
-
-impl std::error::Error for PathRefusal {}
 
 /// A signer on a path, with its position and the number of non-self-issued intermediate
 /// certificates below it.
