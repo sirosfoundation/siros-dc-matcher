@@ -13,6 +13,8 @@ existed.
 
 Adopts the `zkp_req` draft 0.1 and the nym_auth catalogue 0.5 (nym_auth rulebook repository,
 commit `e65861c`), and adds the components of the SIROS wallet core up to the consent view.
+The core is pure and offline: the host resolves the URLs the core lists and transmits the
+bodies it returns.
 **Breaking**: requests and presentations follow the draft, the DCQL parse enforces OpenID4VP
 1.0, Section 6, the FFI loses `zkp_req_plan`, and the vectors move to the crates that own their
 rules. Consumers that keep a copy of the vectors (siros-sdk-kotlin, siros-sdk-swift) must
@@ -414,18 +416,22 @@ binaryen version_116.
   table of 736 ranges.
 - `siros-oid4vp`, OpenID4VP 1.0 for the wallet core. Without `crypto` it holds the picker's
   request reading (`UnverifiedRequest`, `diagnose`, `NoQuery`, whose `Malformed` holds the
-  `QueryError`), `ClientId`, whose parse refuses with a `ClientIdError`, the `Fetch` effect, and
-  what transaction data reads of a request (`RequestSignature`, `ResponseMode`,
-  `TransactionDataItem`), and builds with Rust 1.82. `UnverifiedRequest` carries the request's
+  `QueryError`), `ClientId`, whose parse refuses with a `ClientIdError`, and what transaction
+  data reads of a request (`RequestSignature`, `ResponseMode`, `TransactionDataItem`), and
+  builds with Rust 1.82. `UnverifiedRequest` carries the request's
   `transaction_data` entries, read by the rule intake applies (`TransactionDataItem::list`,
   `NoQuery::TransactionData`), whether it arrived signed, its Response Mode and the formats of
-  its `verifier_info`. With `crypto`: sans-IO intake of redirect
+  its `verifier_info`. The crate is pure and offline. With `crypto`: intake of redirect
   requests (by value, `request`, `request_uri` with `get` or `post`) and DC API requests
-  (unsigned, signed, multisigned) into a `VerifiedRequest`, with `Fetch` and `Trust` effects for
-  the host (a `Fetch` states the most redirects it follows, `Fetch::redirects`); the Client
-  Identifier Prefixes `x509_san_dns`, `x509_hash`, `decentralized_identifier`,
-  `verifier_attestation`, `openid_federation` and `redirect_uri`; and ES256 Request Objects.
-  `Handover` and
+  (unsigned, signed, multisigned) into a `VerifiedRequest`. Its effects are the Request Object
+  of a request by reference (`Effect::RequestObject` with its `RequestUri`: the `https`
+  `request_uri` of RFC 9101, Section 5.2, and its `RequestUriMethod`, whose `post` carries the
+  `WalletParameters`, a `WalletMetadata` and a `WalletNonce`, and gives them as a `FormBody`),
+  which the host answers with the `RequestObjectText` it obtained, at most 256 KiB, and the
+  host's `Trust` evaluation. Intake requires the Request Object of a `post` to echo the
+  `wallet_nonce`. The Client Identifier Prefixes `x509_san_dns`, `x509_hash`,
+  `decentralized_identifier`, `verifier_attestation`, `openid_federation` and `redirect_uri`;
+  and ES256 Request Objects. `Handover` and
   `ec_jwk_thumbprint` give the session transcript's handover, with `None` for the CBOR `null` of
   an unencrypted response (B.2.6). `VerifiedRequest::access_certificate` gives the
   `CertificateDer` and the `SemanticIdentifier`, or the `SemanticIdError`, of an `x509_san_dns` or
@@ -467,12 +473,12 @@ binaryen version_116.
     signed credential metadata that is not held or not valid exclude the credential for every entry,
     an ad-hoc JWT included; a failed ad-hoc JWT makes its entry incompatible.
   - Metadata is input: `HeldMetadata` holds the signed credential metadata JWTs, Type Metadata
-    with the documents it references, and issuer key sets, which the host fetches and renews
-    outside presentations, and records a URL whose fetch answered 404 as absent
+    with the documents it references, and issuer key sets, which the host resolves and renews
+    outside presentations, and records a URL that serves no document as absent
     (`HeldDocument::absent`); the wallet verifies each every time it loads it, a JWT's
-    `credential_metadata_uri` against the URL it was served from (Sections 6 to 8).
-    `HeldJwt::verify_fetched` admits a JWT the host fetched and gives its `Renewal`: its expiry
-    and the URL to renew from. `HeldMetadata::wanted` lists what the host should hold for a
+    `credential_metadata_uri` against the URL that served it (Sections 6 to 8).
+    `HeldJwt::admit` admits a JWT with the URL that served it and gives its `Renewal`: its
+    expiry and the URL to renew from. `HeldMetadata::wanted` lists what the host should hold for a
     credential: issuer metadata, signed credential metadata it lacks or whose JWT no longer
     verifies, and documents neither held nor recorded absent.
   - `Definition::project` keeps the entry of each array the locale function takes, with the
@@ -497,7 +503,7 @@ binaryen version_116.
     checks each label again once formatted). The view carries each image as an `Image` for the
     UI, which resolves the URL, verifies its integrity, holds it to `MAX_IMAGE_BYTES` and
     `MAX_IMAGE_PIXELS`, renders an SVG document statically, and leaves out an image it cannot
-    verify; the core fetches and verifies no image content. Under a TS12 rulebook an image the
+    verify; the core resolves and verifies no image content. Under a TS12 rulebook an image the
     channel does not admit is left out (`TransactionView::absent_images`). Every reason an entry
     does not serve a credential is an `Incompatibility`. A PaSO-sourced definition needs a signed
     request; a TS12 type in an unsigned request carries `UnsignedWarning::Required`.
@@ -634,9 +640,9 @@ binaryen version_116.
     combination.
   - Positions and identifiers are their own types (`QueryIndex`, `CandidateIndex`, `SetIndex`,
     `OfferIndex`, `EntryPosition`, `PlanDigest`, and DCQL's `QueryId`), and so are A9's facts.
-    The plan fetches nothing: the host gives it every input beforehand. Without the default
-    feature `wallet` it holds the matching the picker runs, over `MatchCredential`, links no
-    chain validation, and builds with Rust 1.82: `Asked::of` takes an `UnverifiedRequest` or a
+    The host gives the plan every input beforehand. Without the default feature `wallet` it
+    holds the matching the picker runs, over `MatchCredential`, links no chain validation, and
+    builds with Rust 1.82: `Asked::of` takes an `UnverifiedRequest` or a
     `VerifiedRequest` (`MatchRequest`), `Transactions` selects transaction data over a
     `TransactionSource` and gives the offers or why there are none (`NoOffer`), and `Pick` is
     what a picker entry carries (K3). The feature `test-fixtures` holds the wallet, verifier,

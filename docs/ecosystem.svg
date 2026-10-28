@@ -149,7 +149,7 @@
 <text class="name" x="1246" y="402.5">Keys</text>
 <text class="desc" x="1246" y="419.5">signing through wscd</text>
 <text class="name" x="1246" y="529.0">Network</text>
-<text class="desc" x="1246" y="546.0">Fetch effects</text>
+<text class="desc" x="1246" y="546.0">listed URLs, returned bodies</text>
 <text class="name" x="1246" y="655.5">Trust</text>
 <text class="desc" x="1246" y="672.5">store provisioning, verdicts</text>
 <text class="name" x="1246" y="782.0">Platform</text>
@@ -158,5 +158,5 @@
 <path class="head" d="M 1224 491.0 l -8 -4 v 8 z"/>
 <path class="arrow" d="M 1220 503.0 H 1188"/>
 <path class="head" d="M 1184 503.0 l 8 -4 v 8 z"/>
-<text class="note" x="32" y="842">Dependencies point down the layers. The core is sans-IO: the host supplies its inputs and answers its Fetch and Trust effects.</text>
+<text class="note" x="32" y="842">Dependencies point down the layers. The core is pure and offline: the host supplies its inputs, resolves the URLs it lists, transmits the bodies it returns, and answers its Trust effects.</text>
 </svg>

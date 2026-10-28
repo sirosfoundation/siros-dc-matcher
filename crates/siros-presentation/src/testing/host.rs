@@ -28,7 +28,7 @@ pub fn holding_absent(urls: &[&str]) -> HeldMetadata {
     HeldMetadata::new(Vec::new(), documents).unwrap()
 }
 
-/// The metadata of the documents `documents`, each the body the host fetched from its URL.
+/// The metadata of the documents `documents`, each the body its URL served.
 pub fn holding(documents: Vec<(&str, Vec<u8>)>) -> HeldMetadata {
     let documents = documents
         .into_iter()

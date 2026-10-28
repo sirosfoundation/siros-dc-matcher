@@ -150,7 +150,7 @@ pub fn verified_request(query: &Value, nonce: &str) -> VerifiedRequest {
                     None,
                 )));
             }
-            Step::Effect(other) => panic!("no fetch expected: {other:?}"),
+            Step::Effect(other) => panic!("no Request Object expected: {other:?}"),
         }
     }
 }

@@ -27,15 +27,8 @@ pub enum IntakeError {
     RequestUriMethodWithoutRequestUri,
     /// `request_uri_method` is neither `get` nor `post` (Section 5.1).
     RequestUriMethodInvalid,
-    /// `request_uri` is not an `https` URL (H1).
+    /// `request_uri` is not an `https` URL (RFC 9101, Section 5.2).
     RequestUriNotHttps,
-    /// The Request URI answered with a status other than 200 (Section 5.10.2).
-    FetchStatus,
-    /// The Request URI answered with a media type other than `application/oauth-authz-req+jwt`
-    /// (Section 5.10.1; RFC 9101, Section 10.4.1).
-    FetchContentType,
-    /// The Request URI answered with more bytes than the fetch allowed.
-    FetchTooLarge,
     /// A JWS breaks its serialization.
     JwsMalformed(#[source] JwsFault),
     /// The JWS `alg` is not `ES256`.
@@ -50,7 +43,8 @@ pub enum IntakeError {
     RequestObjectNotObject,
     /// The `client_id` parameter and the Request Object's `client_id` differ (Section 5.10.1).
     ClientIdMismatch,
-    /// The Request Object does not echo the `wallet_nonce` the wallet posted (Section 5.10.1).
+    /// The Request Object does not echo the `wallet_nonce` of the `request_uri_method=post`
+    /// request (Section 5.10.1).
     WalletNonceMismatch,
     /// The `client_id` is not one this wallet supports (Section 5.9).
     ClientId(#[from] ClientIdError),
@@ -95,7 +89,7 @@ pub enum IntakeError {
     OriginNotExpected,
     /// A `direct_post` request has no `response_uri` (Section 8.2).
     ResponseUriMissing,
-    /// `response_uri` is not an `https` URL (H1).
+    /// `response_uri` is not an `https` URL.
     ResponseUriNotHttps,
     /// A `direct_post` request also has `redirect_uri` (Section 8.2).
     RedirectUriWithDirectPost,
@@ -173,9 +167,6 @@ pub enum JwsFault {
     /// The `trust_chain` Header Parameter is not an array of strings.
     #[error("the `trust_chain` Header Parameter is not an array of strings")]
     TrustChain,
-    /// The fetched Request Object is not UTF-8 text.
-    #[error("the fetched Request Object is not UTF-8 text")]
-    NotUtf8(#[source] Utf8Error),
 }
 
 /// Why a JWS is refused: its serialization, its algorithm, or a critical extension.
@@ -349,9 +340,6 @@ impl IntakeError {
             Self::RequestUriMethodWithoutRequestUri => "request_uri_method_without_request_uri",
             Self::RequestUriMethodInvalid => "request_uri_method_invalid",
             Self::RequestUriNotHttps => "request_uri_not_https",
-            Self::FetchStatus => "fetch_status",
-            Self::FetchContentType => "fetch_content_type",
-            Self::FetchTooLarge => "fetch_too_large",
             Self::JwsMalformed(_) => "jws_malformed",
             Self::AlgorithmUnsupported => "algorithm_unsupported",
             Self::CriticalHeader => "critical_header",
@@ -411,9 +399,6 @@ impl IntakeError {
             | Self::RequestAndRequestUri
             | Self::RequestUriMethodWithoutRequestUri
             | Self::RequestUriNotHttps
-            | Self::FetchStatus
-            | Self::FetchContentType
-            | Self::FetchTooLarge
             | Self::JwsMalformed(_)
             | Self::AlgorithmUnsupported
             | Self::CriticalHeader

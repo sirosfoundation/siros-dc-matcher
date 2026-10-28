@@ -5,42 +5,35 @@ use rustc_hash::FxHashMap;
 use serde_json::{Map, Value};
 use siros_codec::date::DateTime;
 use siros_codec::json::JsonTextError;
+use siros_codec::url::HttpsUrl;
 
+use super::reference::{RequestUri, RequestUriMethod, WalletParameters};
 use super::request::{self, Arrival};
 use super::signature::{self, by_request, UriRule};
 use super::trust::{self, KeyMaterial, TrustSubject};
-use super::{Answers, FormFault, Halt, IntakeError, JsonParameter, JwsFault};
+use super::{Answers, FormFault, Halt, IntakeError, JsonParameter};
 use crate::client_id::{ClientId, ClientIdPrefix};
-use crate::fetch::{BodyLimit, Fetch, HttpStatus, HttpsUrl, MediaType, Method};
 use crate::form;
 use crate::jose;
 use crate::values::WalletNonce;
 use crate::verified::VerifiedRequest;
 
-/// The largest Request Object fetched.
-const MAX_REQUEST_OBJECT: BodyLimit = BodyLimit::bytes(256 * 1024);
-
-/// What the wallet posts for `request_uri_method=post` (Section 5.10).
+/// What the wallet sends for `request_uri_method=post` (Section 5.10).
 pub(super) struct Wallet<'a> {
     pub(super) vp_formats_supported: &'a Map<String, Value>,
     pub(super) nonce: &'a WalletNonce,
 }
 
-/// How the wallet fetches a Request Object by reference (Section 5.10).
-#[derive(Clone, Copy)]
-enum RequestUriMethod {
-    /// `get`, the default: a plain `GET`.
-    Get,
-    /// `post`: a `POST` of the wallet's metadata and nonce, which the Request Object echoes.
-    Post,
-}
-
-impl RequestUriMethod {
-    /// The method `request_uri_method` names; `get` when absent.
-    fn parse(method: Option<&str>) -> Result<Self, IntakeError> {
-        match method {
-            None | Some("get") => Ok(Self::Get),
-            Some("post") => Ok(Self::Post),
+impl Wallet<'_> {
+    /// The method `request_uri_method` names, `get` when absent, with this wallet's parameters
+    /// for a `post`.
+    fn method(&self, name: Option<&str>) -> Result<RequestUriMethod, IntakeError> {
+        match name {
+            None | Some("get") => Ok(RequestUriMethod::Get),
+            Some("post") => Ok(RequestUriMethod::Post(WalletParameters::new(
+                self.vp_formats_supported,
+                self.nonce.clone(),
+            ))),
             Some(_) => Err(IntakeError::RequestUriMethodInvalid),
         }
     }
@@ -68,70 +61,23 @@ pub(super) fn intake(
         (_, None) if method.is_some() => Err(IntakeError::RequestUriMethodWithoutRequestUri.into()),
         (Some(jws), None) => signed(jws, outer, None, now, answers),
         (None, Some(request_uri)) => {
-            let method = RequestUriMethod::parse(method)?;
-            // A `redirect_uri` client cannot sign, so its Request Object is not fetched.
+            let method = wallet.method(method)?;
+            // A `redirect_uri` client cannot sign, so its Request Object is not asked for.
             if ClientId::parse(outer)?.prefix() == ClientIdPrefix::RedirectUri {
                 return Err(IntakeError::SignedRedirectUri.into());
             }
-            let url = HttpsUrl::parse(request_uri).ok_or(IntakeError::RequestUriNotHttps)?;
-            let fetch = Fetch::new(
-                url,
-                fetch_method(method, wallet),
-                MediaType::REQUEST_OBJECT,
-                MAX_REQUEST_OBJECT,
-            );
-            let response = answers.fetch(fetch)?;
-            if response.status() != HttpStatus::OK {
-                return Err(IntakeError::FetchStatus.into());
-            }
-            if !response.has_media_type(MediaType::REQUEST_OBJECT) {
-                return Err(IntakeError::FetchContentType.into());
-            }
-            if !MAX_REQUEST_OBJECT.admits(response.body()) {
-                return Err(IntakeError::FetchTooLarge.into());
-            }
-            let jws = std::str::from_utf8(response.body())
-                .map_err(|error| IntakeError::JwsMalformed(JwsFault::NotUtf8(error)))?;
-            let echoed = match method {
-                RequestUriMethod::Get => None,
-                RequestUriMethod::Post => Some(wallet.nonce),
-            };
-            signed(jws.trim(), outer, echoed, now, answers)
+            // RFC 9101, Section 5.2: a Request URI the client gives is an `https` URI.
+            let uri = HttpsUrl::parse(request_uri).ok_or(IntakeError::RequestUriNotHttps)?;
+            let echoed = method.echoed().cloned();
+            let text = answers.request_object(RequestUri::new(uri, method))?;
+            signed(text.as_str().trim(), outer, echoed.as_ref(), now, answers)
         }
         (None, None) => unsigned(&params, outer, answers),
     }
 }
 
-/// The method of the Request Object fetch.
-fn fetch_method(method: RequestUriMethod, wallet: &Wallet<'_>) -> Method {
-    match method {
-        RequestUriMethod::Get => Method::Get,
-        RequestUriMethod::Post => {
-            let metadata = wallet_metadata(wallet.vp_formats_supported);
-            Method::Post {
-                content_type: MediaType::FORM,
-                body: form::encode(&[
-                    ("wallet_metadata", &metadata),
-                    ("wallet_nonce", wallet.nonce.as_str()),
-                ])
-                .into_bytes(),
-            }
-        }
-    }
-}
-
-/// `wallet_metadata` (Section 10): the wallet's formats, and the Client Identifier Prefixes
-/// and Request Object algorithm this core supports.
-fn wallet_metadata(vp_formats_supported: &Map<String, Value>) -> String {
-    serde_json::json!({
-        "vp_formats_supported": vp_formats_supported,
-        "client_id_prefixes_supported": ClientIdPrefix::ALL.map(ClientIdPrefix::as_str),
-        "request_object_signing_alg_values_supported": ["ES256"],
-    })
-    .to_string()
-}
-
-/// A signed Request Object; `wallet_nonce` is the nonce the wallet posted.
+/// A signed Request Object; `wallet_nonce` is the nonce a `request_uri_method=post` request
+/// sent.
 fn signed(
     jws: &str,
     outer: &str,

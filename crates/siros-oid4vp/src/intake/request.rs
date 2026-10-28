@@ -8,7 +8,6 @@ use super::signature::{UriRule, Verifier};
 use super::trust::Verdict;
 use super::{IntakeError, JwkFault};
 use crate::client_id::ClientId;
-use crate::fetch::HttpsUrl;
 use crate::handover::ec_jwk_thumbprint;
 use crate::jose;
 use crate::parameters::{self, Carrier, DcApiEncoding, Encoding, Metadata};
@@ -16,6 +15,7 @@ use crate::protocol::Protocol;
 use crate::request::{TransactionDataInvalid, TransactionDataItem};
 use crate::values::{Kid, Origin};
 use crate::verified::{Channel, ContentEncryption, Encryption, PostEncoding, VerifiedRequest};
+use siros_codec::url::HttpsUrl;
 
 /// The channel a request arrived on, and who sent it.
 pub(super) enum Arrival<'a> {

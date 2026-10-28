@@ -5,7 +5,6 @@ use serde_json::Value;
 use siros_dcql::DcqlQuery;
 
 use crate::client_id::{ClientId, ClientIdPrefix};
-use crate::fetch::HttpsUrl;
 use crate::handover::{Handover, JwkThumbprint};
 use crate::intake::Verdict;
 use crate::parameters::{Nonce, State};
@@ -13,6 +12,7 @@ use crate::protocol::Protocol;
 use crate::request::{AttestationFormat, RequestSignature, ResponseMode, TransactionDataItem};
 use crate::semantic::{SemanticIdError, SemanticIdentifier};
 use crate::values::{Kid, Origin};
+use siros_codec::url::HttpsUrl;
 
 /// An OpenID4VP request that intake verified. Only intake constructs it.
 ///

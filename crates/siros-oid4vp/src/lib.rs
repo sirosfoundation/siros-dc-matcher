@@ -11,8 +11,9 @@
 //! Intake needs the `crypto` feature. Without it the crate holds what the picker links, and
 //! builds with Rust 1.82.
 //!
-//! The crate performs no I/O. Intake asks the host for each fetch and trust evaluation as an
-//! [`intake::Effect`], and randomness comes from the caller's CSPRNG.
+//! The crate is pure and offline. Intake names the Request Object of a request by reference
+//! and each trust evaluation it needs as an [`intake::Effect`], and the host answers with the
+//! text it obtained or its verdict. Randomness comes from the caller's CSPRNG.
 
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
@@ -43,7 +44,8 @@ mod request;
 pub mod semantic;
 pub mod unverified;
 
-pub mod fetch;
+#[cfg(feature = "crypto")]
+mod bound;
 #[cfg(feature = "crypto")]
 mod form;
 #[cfg(feature = "crypto")]
@@ -66,20 +68,24 @@ pub use protocol::Protocol;
 pub use semantic::{Person, SemanticIdError, SemanticIdentifier};
 pub use unverified::{diagnose, CompactFault, NoQuery, PayloadFault, UnverifiedRequest};
 
-pub use fetch::{
-    BodyLimit, Fetch, FetchResponse, HttpStatus, HttpsUrl, MediaType, Method, Redirects,
-};
+pub use siros_codec::url::HttpsUrl;
+
+#[cfg(feature = "crypto")]
+pub use bound::TooLarge;
+#[cfg(feature = "crypto")]
+pub use form::FormBody;
 #[cfg(feature = "crypto")]
 pub use intake::{
     AttestationClaim, AttestationFault, ChainFault, ClaimsFault, Coordinate, Effect, EffectResult,
     FormFault, IntakeError, IntakeState, JsonParameter, JwkFault, JwsError, JwsFault, KeyMaterial,
-    LeafKeyFault, Step, Trust, TrustAnswer, TrustSubject, Verdict,
+    LeafKeyFault, RequestObjectText, RequestUri, RequestUriMethod, Step, Trust, TrustAnswer,
+    TrustSubject, Verdict, WalletMetadata, WalletParameters,
 };
 pub use request::{
     AttestationFormat, RequestSignature, ResponseMode, TransactionDataInvalid, TransactionDataItem,
 };
 #[cfg(feature = "crypto")]
-pub use values::{AttestationIssuer, Kid, Origin, TrustChain};
+pub use values::{AttestationIssuer, Kid, Origin, TrustChain, WalletNonce};
 #[cfg(feature = "crypto")]
 pub use verified::{
     AccessCertificate, CertificateDer, ContentEncryption, Encryption, VerifiedRequest, VerifierView,

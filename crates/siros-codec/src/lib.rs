@@ -1,7 +1,7 @@
 //! The encodings every SIROS wallet core crate shares: a strict CBOR reader and deterministic
 //! writer, the strict JSON reader (feature `json`), unpadded base64url, the padded
 //! base64 of JOSE certificates, the calendar dates and UTC times of CBOR's `full-date` and
-//! `tdate`, the ES256 signature value, and the `https` URL of a host fetch.
+//! `tdate`, the ES256 signature value, and the `https` URL.
 //!
 //! It also holds the internals several components share: [`MemberFault`](member::MemberFault),
 //! the member fault of a decoded structure; the [`position!`] and [`text_value!`] macros that
