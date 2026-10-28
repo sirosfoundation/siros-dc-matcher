@@ -83,6 +83,13 @@ against the 307,200-byte budget (303,418 at v0.11.0).
   `IntakeError`, `InvalidRequest`, `MdocError`, `PresentationError`, `ProveError`,
   `QueryRefusal`, `Rejection`, `RequestRefusal`, `TransactionDataError`, `Unproven`, `Unusable`,
   `WalletStateError` and `ZkpRefusal`.
+- Only the DC API matcher panics. `siros-dcql` turns one dial per query to
+  enumerate an option's combinations, where it divided by each query's
+  candidate count. The test host writes the calling-app fields and finds a
+  captured entry without indexing or `copy_from_slice`.
+- `CapabilitiesError` is an enum: `Json` holds the `serde_json::Error` as its
+  source, and `Schema` holds the `SchemaViolation` with the reason the text
+  carried before.
 
 ### Fixed
 
@@ -237,6 +244,11 @@ against the 307,200-byte budget (303,418 at v0.11.0).
   exports. CI and the release job run it.
 - `clippy.toml` forbids std's `HashMap`, `HashSet` and `RandomState` in the
   crates that link into `matcher.wasm`.
+- Each crate root but the matcher's forbids clippy's panic lints outside the
+  tests, and `clippy.toml` names the std methods that panic on an argument
+  and share their name with a method that does not.
+  `scripts/check_panic_sites.py` fails on a root without the lints and finds
+  the panics no lint covers. CI runs both.
 
 ### Removed
 
