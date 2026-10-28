@@ -2,7 +2,7 @@
 // Run the real matcher.wasm outside Rust, against a request of your choosing.
 //
 //   node scripts/run_matcher.mjs                       # built-in signed request
-//   node scripts/run_matcher.mjs path/to/request.json  # one you captured
+//   node scripts/run_matcher.mjs path/to/request.json  # one you captured, inside this repository
 //
 // Why this exists: the Rust integration tests in
 // crates/siros-dc-matcher-testhost cover the same ground and are what CI runs.
@@ -16,11 +16,11 @@
 // behaviours that have cost the most time — a null icon dropping the entry, and
 // a duplicate set id discarding the whole output — so it reports both instead.
 
-import { readFile, stat } from 'node:fs/promises';
+import { readFile, realpath, stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { dirname, extname, join, resolve } from 'node:path';
+import { dirname, extname, join, resolve, sep } from 'node:path';
 
-const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const root = await realpath(join(dirname(fileURLToPath(import.meta.url)), '..'));
 const WASM = join(root, 'target/wasm32-wasip1/wasm-release/matcher.wasm');
 const BLOB = join(root, 'crates/siros-dc-matcher-core/tests/golden/credential_database_v1.cbor');
 
@@ -48,31 +48,29 @@ function defaultRequest() {
 }
 
 /**
- * Resolve a request path given on the command line.
+ * The request file a command-line argument names.
  *
- * The argument is the tool's whole interface, so this is deliberately *not*
- * containment: any path the developer can read is a valid one, `..` included.
- * A request captured off a device gets triaged where it landed.
- *
- * What the check buys is a named error — resolved, existing, a regular file,
- * `.json` — instead of failing somewhere inside `readFile` with whichever of
- * those four things was wrong left for the reader to work out.
+ * The path is canonicalised first, symbolic links and `..` resolved. The
+ * canonical path must start with the repository root followed by a
+ * separator, name a regular file, and end in `.json`; the harness then reads
+ * that canonical path. A request captured off a device is copied into the
+ * checkout to be triaged.
  */
 async function resolveRequestPath(argument) {
-  const path = resolve(argument);
-  if (extname(path).toLowerCase() !== '.json') {
-    throw new Error(`not a .json file: ${path}`);
-  }
-  // Report what `stat` actually said. Collapsing every error into "no such
-  // file" sends someone hunting for a typo when the answer was EACCES.
-  let info;
+  let canonical;
   try {
-    info = await stat(path);
+    canonical = await realpath(resolve(argument));
   } catch (e) {
-    throw new Error(e.code === 'ENOENT' ? `no such file: ${path}` : `cannot stat ${path}: ${e.message}`);
+    // Report what `realpath` actually said. Collapsing every error into "no
+    // such file" sends someone hunting for a typo when the answer was EACCES.
+    throw new Error(e.code === 'ENOENT' ? `no such file: ${argument}` : `cannot resolve ${argument}: ${e.message}`);
   }
-  if (!info.isFile()) throw new Error(`not a regular file: ${path}`);
-  return path;
+  if (!canonical.startsWith(root + sep)) {
+    throw new Error(`${argument}: ${canonical} lies outside the repository ${root}`);
+  }
+  if (!(await stat(canonical)).isFile()) throw new Error(`not a regular file: ${argument}`);
+  if (extname(canonical).toLowerCase() !== '.json') throw new Error(`not a .json file: ${argument}`);
+  return canonical;
 }
 
 const [, , requestArgument] = process.argv;
