@@ -23,15 +23,13 @@ const DNS: &str = "verifier.example";
 const ATTESTATION_ISSUER: &str = "https://attestation-issuer.example";
 const FEDERATION: &str = "openid_federation:https://federation-verifier.example";
 
-/// What a fixture must give: a refusal, a request of this client and trust verdict, or the
-/// panic of a host that breaks the effect protocol.
+/// What a fixture must give: a refusal, or a request of this client and trust verdict.
 enum Expect {
     Refused(IntakeError),
     Verified {
         client_id: &'static str,
         trusted: bool,
     },
-    Panics(&'static str),
 }
 
 type Answer = Box<dyn Fn(&Effect) -> EffectResult>;
@@ -351,7 +349,7 @@ fn fixtures() -> Vec<Fixture> {
             answer: Box::new(|_| {
                 EffectResult::Fetched(FetchResponse::new(HttpStatus::OK, None, Vec::new()))
             }),
-            expect: Expect::Panics("the host answered a trust lookup with a fetch response"),
+            expect: Expect::Refused(IntakeError::AnswerMismatch),
         },
         Fixture {
             rule: "the trust verdict is carried, untrusted included",
@@ -566,19 +564,6 @@ fn fixtures() -> Vec<Fixture> {
 #[test]
 fn each_construction_rule_of_verified_request() {
     for fixture in fixtures() {
-        if let Expect::Panics(message) = fixture.expect {
-            let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                run(fixture.state, &fixture.answer)
-            }))
-            .err()
-            .unwrap_or_else(|| panic!("{}: no panic, expected {message:?}", fixture.rule));
-            let text = payload
-                .downcast_ref::<&str>()
-                .copied()
-                .or_else(|| payload.downcast_ref::<String>().map(String::as_str));
-            assert_eq!(text, Some(message), "{}", fixture.rule);
-            continue;
-        }
         let outcome = run(fixture.state, &fixture.answer);
         match (fixture.expect, outcome) {
             (Expect::Refused(expected), Err(error)) => {
@@ -604,7 +589,6 @@ fn each_construction_rule_of_verified_request() {
             (Expect::Verified { .. }, Err(error)) => {
                 panic!("{}: refused with {error:?}", fixture.rule)
             }
-            (Expect::Panics(_), _) => unreachable!("a panic fixture runs above"),
         }
     }
 }
