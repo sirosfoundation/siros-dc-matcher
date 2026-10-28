@@ -30,7 +30,6 @@
         clippy::disallowed_methods
     )
 )]
-#![cfg_attr(test, allow(clippy::disallowed_methods))]
 
 use std::num::NonZeroUsize;
 

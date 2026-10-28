@@ -36,7 +36,6 @@
         clippy::disallowed_methods
     )
 )]
-#![cfg_attr(test, allow(clippy::disallowed_methods))]
 
 use std::collections::BTreeMap;
 use std::sync::Mutex;

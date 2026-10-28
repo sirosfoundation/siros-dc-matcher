@@ -20,7 +20,6 @@
         clippy::disallowed_methods
     )
 )]
-#![cfg_attr(test, allow(clippy::disallowed_methods))]
 
 pub mod circuit_capabilities;
 pub mod db;
