@@ -48,7 +48,7 @@ TARGET_FIELDS = ("environ_get", "environ_sizes_get")
 
 
 class StripError(ValueError):
-    """A module this script does not rewrite."""
+    """A module outside the shape this script rewrites."""
 
 
 # ---- instructions -------------------------------------------------------
