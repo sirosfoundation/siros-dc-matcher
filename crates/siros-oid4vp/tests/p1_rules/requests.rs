@@ -3,7 +3,7 @@
 
 use p256::ecdsa::SigningKey;
 use serde_json::{json, Value};
-use siros_oid4vp::{Effect, EffectResult, IntakeState, Origin, TrustSubject};
+use siros_oid4vp::{Effect, EffectResult, IntakeState, Origin, RequestUriMethod, TrustSubject};
 
 use crate::support::*;
 
@@ -11,6 +11,7 @@ pub const ORIGIN: &str = "https://verifier.example";
 pub const DNS: &str = "verifier.example";
 pub const ATTESTATION_ISSUER: &str = "https://attestation-issuer.example";
 pub const FEDERATION: &str = "openid_federation:https://federation-verifier.example";
+pub const REQUEST_URI: &str = "https://verifier.example/request/vapof4ql2i7m41m68uep";
 
 /// How the host answers a fixture's effects.
 pub type Answer = Box<dyn Fn(&Effect) -> EffectResult>;
@@ -187,6 +188,50 @@ pub fn trusting_only(trusted: &'static str) -> Answer {
             let yes = matches!(trust.subject(), TrustSubject::Client(c) if c.as_str() == trusted);
             EffectResult::Trusted(siros_oid4vp::TrustAnswer::new(yes.into(), None, None))
         }
-        Effect::Fetch(_) => panic!("no fetch"),
+        Effect::RequestObject(_) => panic!("no Request Object"),
     })
+}
+
+/// What a Request Object by reference holds as `wallet_nonce`.
+#[derive(Clone, Copy)]
+pub enum Echo {
+    /// The nonce a `post` sent; none after a `get`.
+    Sent,
+    /// None.
+    Omitted,
+    /// Another nonce.
+    Altered,
+}
+
+/// An `x509_san_dns` request by reference at `request_uri`, with `request_uri_method` when
+/// given. The host answers with the Request Object of the request, its `wallet_nonce` per
+/// `echo`, and trusts every subject.
+pub fn by_reference(request_uri: &str, method: Option<&str>, echo: Echo) -> (IntakeState, Answer) {
+    let client_id = x509_client();
+    let mut params = vec![
+        ("client_id", client_id.as_str()),
+        ("request_uri", request_uri),
+    ];
+    params.extend(method.map(|method| ("request_uri_method", method)));
+    let state = IntakeState::redirect(&authorization_uri(&params), formats(), now(), &mut Rng(1));
+    let host = Host::trusting();
+    let answer: Answer = Box::new(move |effect| match effect {
+        Effect::RequestObject(request) => {
+            let mut payload = redirect_payload(&x509_client());
+            let sent = match request.method() {
+                RequestUriMethod::Get => None,
+                RequestUriMethod::Post(parameters) => Some(parameters.wallet_nonce().as_str()),
+            };
+            match (echo, sent) {
+                (Echo::Sent, Some(nonce)) => payload["wallet_nonce"] = nonce.into(),
+                (Echo::Altered, _) => payload["wallet_nonce"] = "qPmxiNFCR3QTm19POc8u".into(),
+                (Echo::Sent, None) | (Echo::Omitted, _) => {}
+            }
+            let key = key(1);
+            let jws = sign(&x5c_header(&certificate(&key, &[DNS])), &payload, &key);
+            EffectResult::RequestObject(request_object(&jws))
+        }
+        Effect::Trust(_) => host.answer(effect),
+    });
+    (state, answer)
 }

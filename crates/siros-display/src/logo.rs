@@ -41,7 +41,7 @@ impl Logo {
         &self.uri
     }
 
-    /// The integrity metadata the fetched image is to match (SD-JWT VC, Section 6). `None`
+    /// The integrity metadata the resolved image is to match (SD-JWT VC, Section 6). `None`
     /// when the metadata gives none.
     pub fn integrity(&self) -> Option<&Integrity> {
         self.integrity.as_ref()
@@ -59,8 +59,7 @@ pub(crate) fn optional(object: &Map<String, Value>) -> Result<Option<Logo>, Disp
 }
 
 /// The `uri` of a logo: an `https://` URL with an authority, or a `data:` URI with its comma
-/// (RFC 2397), of visible ASCII characters only (SD-JWT VC, Section 5.5.1). The host fetches
-/// HTTPS only.
+/// (RFC 2397), of visible ASCII characters only (SD-JWT VC, Section 5.5.1).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogoUri(String);
 

@@ -1,16 +1,15 @@
 //! The metadata the host holds for transaction data (PaSO Proof Metadata, Sections 6 and 8). The
-//! host fetches and renews it outside presentations, because a fetch during a presentation
-//! tells the publisher which credential is presented. The wallet verifies each document every
-//! time it loads it.
+//! host resolves and renews it outside presentations, because resolving it during a
+//! presentation tells the publisher which credential is presented. The wallet verifies each
+//! document every time it loads it.
 //!
 //! What the host holds, for each credential:
 //!
 //! - the issuer metadata of its configuration, in the [`DisplayCache`];
 //! - when that configuration names a `credential_metadata_uri`, the signed credential metadata
-//!   JWT it serves, fetched with `Accept: application/jwt` and the wallet's language as
-//!   `Accept-Language`, and admitted by [`HeldJwt::verify_fetched`] with the URL it answered
-//!   from; the host renews it before the [`Renewal`]'s expiry, from the URL the [`Renewal`]
-//!   names (Section 8);
+//!   JWT it serves in the wallet's language, admitted by [`HeldJwt::admit`] with the URL that
+//!   served it; the host renews it before the [`Renewal`]'s expiry, from the URL the
+//!   [`Renewal`] names (Section 8);
 //! - when the credential is an SD-JWT VC whose `vct` is an `https` URL, the Type Metadata at that
 //!   URL and the documents its `transaction_data_types` entries reference (EC TS12 v1.0.1,
 //!   Section 4.1). The credential's `#integrity` claims pin them, so they change only with the
@@ -18,10 +17,10 @@
 //! - when the credential carries no `x5c` chain, its issuer's JWT VC Issuer Metadata and the key
 //!   set its `jwks_uri` names (SD-JWT VC, Section 4.3).
 //!
-//! A document whose fetch answered 404 the host records as absent ([`HeldDocument::absent`]):
-//! the wallet tells a document the issuer does not publish from one the host never fetched,
-//! which it does not read as absent. [`HeldMetadata::wanted`] lists what the host should hold
-//! for a credential and does not.
+//! A URL that serves no document the host records as absent ([`HeldDocument::absent`]): the
+//! wallet tells a document the issuer does not publish from one the host never resolved, which
+//! it does not read as absent. [`HeldMetadata::wanted`] lists what the host should hold for a
+//! credential and does not.
 
 use rustc_hash::FxHashMap;
 use siros_codec::date::DateTime;
@@ -46,7 +45,7 @@ pub struct HeldJwt {
     served_from: HttpsUrl,
 }
 
-/// A document the host holds, by the URL it fetched it from, or its record that the URL serves
+/// A document the host holds, by the URL that served it, or its record that the URL serves
 /// none.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeldDocument {
@@ -59,7 +58,7 @@ pub struct HeldDocument {
 enum Content {
     /// The document.
     Body(Vec<u8>),
-    /// The fetch answered 404: the URL serves no document.
+    /// The URL serves no document.
     Absent,
 }
 
@@ -69,12 +68,12 @@ pub(crate) enum Holding<'h> {
     Body(&'h [u8]),
     /// The host's record that the URL serves no document.
     Absent,
-    /// Nothing: the host never fetched it.
+    /// Nothing: the host never resolved the URL.
     NotHeld,
 }
 
 impl HeldDocument {
-    /// The document `body` the host fetched from `url`.
+    /// The document `body` that `url` served.
     #[must_use]
     pub fn new(url: HttpsUrl, body: Vec<u8>) -> Self {
         Self {
@@ -83,7 +82,7 @@ impl HeldDocument {
         }
     }
 
-    /// The host's record that `url` serves no document: its fetch answered 404 Not Found.
+    /// The host's record that `url` serves no document.
     #[must_use]
     pub fn absent(url: HttpsUrl) -> Self {
         Self {
@@ -102,13 +101,13 @@ pub struct Renewal {
 }
 
 impl Renewal {
-    /// The JWT's `exp`: the host fetches a new one before it.
+    /// The JWT's `exp`: the host obtains a new one before it.
     #[must_use]
     pub fn expires(&self) -> DateTime {
         self.expires
     }
 
-    /// The JWT's `credential_metadata_uri`: the host fetches the next one from it.
+    /// The JWT's `credential_metadata_uri`, which serves the next one.
     #[must_use]
     pub fn from(&self) -> &HttpsUrl {
         &self.from
@@ -188,8 +187,8 @@ impl HeldMetadata {
     /// What the host should hold for `credential` and does not, in the order the wallet reads
     /// it: its issuer metadata in `display`; its signed credential metadata, or a new one where
     /// the JWT held does not verify against `trust` at `now` (Section 6); and the documents
-    /// it has neither fetched nor recorded as absent. The host fetches each; a document whose
-    /// fetch answers 404 it records with [`HeldDocument::absent`].
+    /// it has neither resolved nor recorded as absent. The host resolves each; a URL that serves
+    /// no document it records with [`HeldDocument::absent`].
     ///
     /// # Errors
     ///
@@ -242,9 +241,9 @@ impl HeldMetadata {
 }
 
 impl HeldJwt {
-    /// The JWT `jwt` the host holds for the configuration `configuration` of `issuer`, fetched
-    /// from `served_from` after redirects. The wallet verifies it each time it loads it: Section
-    /// 7, and its `credential_metadata_uri` against `served_from` (Section 8).
+    /// The JWT `jwt` the host holds for the configuration `configuration` of `issuer`, served by
+    /// `served_from`. The wallet verifies it each time it loads it: Section 7, and its
+    /// `credential_metadata_uri` against `served_from` (Section 8).
     #[must_use]
     pub fn new(
         issuer: IssuerIdentifier,
@@ -278,7 +277,7 @@ impl HeldJwt {
         &self.jwt
     }
 
-    /// The URL the JWT answered from, after redirects.
+    /// The URL that served the JWT.
     #[must_use]
     pub fn served_from(&self) -> &HttpsUrl {
         &self.served_from

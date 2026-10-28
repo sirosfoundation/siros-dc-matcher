@@ -79,7 +79,7 @@ BANDS = [
 HOST_ITEMS = [
     ("Storage", "wallet state, held metadata"),
     ("Keys", "signing through wscd"),
-    ("Network", "Fetch effects"),
+    ("Network", "listed URLs, returned bodies"),
     ("Trust", "store provisioning, verdicts"),
     ("Platform", "clock, language, UI"),
 ]
@@ -187,8 +187,9 @@ def render() -> str:
         f'<path class="head" d="M {x1 - 4} {ay + 6} l 8 -4 v 8 z"/>',
     ])
 
-    note = ("Dependencies point down the layers. The core is sans-IO: the host supplies its inputs "
-            "and answers its Fetch, Sign and Trust effects.")
+    note = ("Dependencies point down the layers. The core is pure and offline: the host supplies its "
+            "inputs, resolves the URLs it lists, transmits the bodies it returns, and answers its "
+            "Sign and Trust effects.")
     out.append(f'<text class="note" x="32" y="{height - 16}">{escape(note)}</text>')
 
     head = [

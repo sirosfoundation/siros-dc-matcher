@@ -127,7 +127,7 @@ pub fn intake_with(
             Step::Effect(Effect::Trust(_)) => {
                 state.answer(EffectResult::Trusted(TrustAnswer::new(verdict, None, None)))
             }
-            Step::Effect(other) => panic!("no fetch expected: {other:?}"),
+            Step::Effect(other) => panic!("no Request Object expected: {other:?}"),
         }
     }
 }

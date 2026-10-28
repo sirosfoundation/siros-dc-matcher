@@ -1,9 +1,30 @@
-//! `application/x-www-form-urlencoded`: the query of an authorization request URI and the body
-//! of a POST.
+//! `application/x-www-form-urlencoded`: the query of an authorization request URI, and the
+//! parameters a `request_uri_method=post` request carries.
+
+use std::fmt;
 
 use rustc_hash::FxHashMap;
 
 use crate::intake::FormFault;
+
+/// Form parameters in the `application/x-www-form-urlencoded` encoding, every byte outside the
+/// unreserved set of RFC 3986, Section 2.3 percent-encoded.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FormBody(String);
+
+impl FormBody {
+    /// The encoded parameters.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for FormBody {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
 
 /// The parameters of a form-encoded string, each name once.
 ///
@@ -22,14 +43,15 @@ pub(crate) fn parse(text: &str) -> Result<FxHashMap<String, String>, FormFault> 
     Ok(out)
 }
 
-/// `pairs` as a form-encoded string, every byte outside the unreserved set of RFC 3986,
-/// Section 2.3 percent-encoded.
-pub(crate) fn encode(pairs: &[(&str, &str)]) -> String {
-    pairs
-        .iter()
-        .map(|(name, value)| format!("{}={}", escape(name), escape(value)))
-        .collect::<Vec<_>>()
-        .join("&")
+/// The form parameters `pairs`, in order.
+pub(crate) fn encode(pairs: &[(&str, &str)]) -> FormBody {
+    FormBody(
+        pairs
+            .iter()
+            .map(|(name, value)| format!("{}={}", escape(name), escape(value)))
+            .collect::<Vec<_>>()
+            .join("&"),
+    )
 }
 
 /// `text` with every byte outside the unreserved set percent-encoded.

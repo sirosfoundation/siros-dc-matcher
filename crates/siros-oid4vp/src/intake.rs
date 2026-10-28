@@ -4,13 +4,14 @@
 //! The host carries an [`IntakeState`]: the inputs and every effect result so far. Each
 //! [`IntakeState::step`] runs intake again from the inputs, checks every rule again, and
 //! answers each effect it reaches from the results in order. The first effect without a
-//! result is returned for the host to perform; when none remains, the request is verified.
+//! result is returned for the host to answer; when none remains, the request is verified.
 //! Intake is deterministic, so the same state gives the same outcome on any host.
 
 mod attestation;
 mod dc_api;
 mod error;
 mod redirect;
+mod reference;
 mod request;
 mod signature;
 mod trust;
@@ -24,27 +25,29 @@ pub use error::{
     AttestationClaim, AttestationFault, ChainFault, ClaimsFault, Coordinate, FormFault,
     IntakeError, JsonParameter, JwkFault, JwsError, JwsFault, LeafKeyFault,
 };
+pub use reference::{
+    RequestObjectText, RequestUri, RequestUriMethod, WalletMetadata, WalletParameters,
+};
 pub use trust::{KeyMaterial, Trust, TrustAnswer, TrustSubject, Verdict};
 
-use crate::fetch::{Fetch, FetchResponse};
 use crate::response::Submission;
 use crate::values::{Origin, WalletNonce};
 use crate::verified::VerifiedRequest;
 
-/// An effect intake asks the host to perform.
+/// What intake needs from the host.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Effect {
-    /// Fetch the Request Object from `request_uri`.
-    Fetch(Fetch),
-    /// Evaluate trust in the verifier.
+    /// The Request Object of a request by reference.
+    RequestObject(RequestUri),
+    /// The host's trust evaluation of the verifier.
     Trust(Trust),
 }
 
 /// The host's result of an [`Effect`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EffectResult {
-    /// The response to an [`Effect::Fetch`].
-    Fetched(FetchResponse),
+    /// The Request Object the host obtained for an [`Effect::RequestObject`].
+    RequestObject(RequestObjectText),
     /// The answer to an [`Effect::Trust`].
     Trusted(TrustAnswer),
 }
@@ -100,7 +103,7 @@ impl IntakeState {
     /// Intake of an authorization request URI (Section 5).
     ///
     /// `vp_formats_supported` is the wallet's, for the `wallet_metadata` of a
-    /// `request_uri_method=post` fetch (Section 5.10); `rng` draws its `wallet_nonce`.
+    /// `request_uri_method=post` request (Section 5.10); `rng` draws its `wallet_nonce`.
     /// `now` is the host's time, against which a Verifier Attestation JWT's validity is judged.
     pub fn redirect(
         uri: &str,
@@ -220,10 +223,10 @@ pub(crate) struct Answers<'a> {
 }
 
 impl<'a> Answers<'a> {
-    fn fetch(&mut self, fetch: Fetch) -> Result<&'a FetchResponse, Halt> {
+    fn request_object(&mut self, uri: RequestUri) -> Result<&'a RequestObjectText, Halt> {
         match self.rest.next() {
-            None => Err(Halt::Pending(Effect::Fetch(fetch))),
-            Some(EffectResult::Fetched(response)) => Ok(response),
+            None => Err(Halt::Pending(Effect::RequestObject(uri))),
+            Some(EffectResult::RequestObject(text)) => Ok(text),
             Some(EffectResult::Trusted(_)) => Err(Halt::HostFault(IntakeError::AnswerMismatch)),
         }
     }
@@ -232,7 +235,9 @@ impl<'a> Answers<'a> {
         match self.rest.next() {
             None => Err(Halt::Pending(Effect::Trust(trust))),
             Some(EffectResult::Trusted(answer)) => Ok(answer),
-            Some(EffectResult::Fetched(_)) => Err(Halt::HostFault(IntakeError::AnswerMismatch)),
+            Some(EffectResult::RequestObject(_)) => {
+                Err(Halt::HostFault(IntakeError::AnswerMismatch))
+            }
         }
     }
 }

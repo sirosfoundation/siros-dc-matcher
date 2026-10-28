@@ -1,7 +1,7 @@
 //! Images of a payload (PaSO View, Section 3, `image`; EC TS12 v1.0.1, Section 4.3.1, for a
 //! TS12 logo): a Data URL, or an `https` URL with the integrity values of its `#integrity`
 //! sibling. The core checks an image's form, and carries it to the consent view for the UI. It
-//! never fetches or verifies image content.
+//! never resolves or verifies image content.
 
 use siros_codec::json::Json;
 use siros_codec::{base64, Base64Error};

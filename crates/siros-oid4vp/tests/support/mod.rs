@@ -18,9 +18,8 @@ use rand_core::{CryptoRng, RngCore};
 use serde_json::{json, Map, Value};
 use siros_codec::base64url;
 pub use siros_codec::date::DateTime;
-pub use siros_oid4vp::HttpStatus;
 use siros_oid4vp::{
-    Effect, EffectResult, FetchResponse, IntakeError, IntakeState, KeyMaterial, Kid, Step,
+    Effect, EffectResult, IntakeError, IntakeState, KeyMaterial, Kid, RequestObjectText, Step,
     TrustAnswer, VerifiedRequest,
 };
 use x509_cert::builder::{Builder, CertificateBuilder, Profile};
@@ -247,7 +246,7 @@ pub fn formats() -> Map<String, Value> {
         .clone()
 }
 
-/// What the host's trust evaluation and its fetches give.
+/// What the host's trust evaluation gives. A test that asks for a Request Object answers it.
 pub struct Host {
     /// The AuthZEN decision on every subject.
     pub trusted: bool,
@@ -255,8 +254,6 @@ pub struct Host {
     pub keys: Vec<(String, Value)>,
     /// The Verifier metadata of an OpenID Federation Trust Chain.
     pub metadata: Option<Value>,
-    /// The documents the host fetches, by URL.
-    pub documents: Vec<(String, FetchResponse)>,
 }
 
 impl Host {
@@ -265,19 +262,14 @@ impl Host {
             trusted: true,
             keys: Vec::new(),
             metadata: None,
-            documents: Vec::new(),
         }
     }
 
     pub fn answer(&self, effect: &Effect) -> EffectResult {
         match effect {
-            Effect::Fetch(fetch) => EffectResult::Fetched(
-                self.documents
-                    .iter()
-                    .find(|(url, _)| url == fetch.url().as_str())
-                    .map(|(_, response)| response.clone())
-                    .unwrap_or_else(|| FetchResponse::new(HttpStatus::new(404), None, Vec::new())),
-            ),
+            Effect::RequestObject(request) => {
+                panic!("no Request Object expected: {request:?}")
+            }
             Effect::Trust(trust) => match trust.key() {
                 KeyMaterial::Resolve { kid, trust_chain } => {
                     let key = self
@@ -294,13 +286,9 @@ impl Host {
     }
 }
 
-/// A Request Object response from a Request URI.
-pub fn request_object(jws: &str) -> FetchResponse {
-    FetchResponse::new(
-        HttpStatus::OK,
-        Some("application/oauth-authz-req+jwt".into()),
-        jws.as_bytes().to_vec(),
-    )
+/// The Request Object `jws`, as the host obtained it.
+pub fn request_object(jws: &str) -> RequestObjectText {
+    RequestObjectText::new(jws.to_owned()).unwrap()
 }
 
 /// Intake to its end, each effect answered by `host`; the verified request and the effects.
@@ -347,7 +335,7 @@ pub fn authorization_uri(params: &[(&str, &str)]) -> String {
     uri
 }
 
-/// The parameters of a form-encoded body.
+/// The parameters of form-encoded text.
 pub fn form(body: &str) -> Vec<(String, String)> {
     let decode = |text: &str| {
         let mut out = Vec::new();

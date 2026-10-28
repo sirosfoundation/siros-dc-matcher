@@ -165,14 +165,17 @@ impl VerifiedRequest {
                             .iter()
                             .map(|(name, value)| (name.as_str(), value.as_str()))
                             .collect();
-                        (MediaType::FORM, form::encode(&pairs).into_bytes())
+                        (
+                            MediaType::FORM,
+                            form::encode(&pairs).to_string().into_bytes(),
+                        )
                     }
                     PostEncoding::Jwe(encryption) => {
                         let payload = Value::Object(answer.json(state)).to_string();
                         let jwe = jwe::encrypt(encryption, payload.as_bytes(), rng)?;
                         (
                             MediaType::FORM,
-                            form::encode(&[("response", &jwe)]).into_bytes(),
+                            form::encode(&[("response", &jwe)]).to_string().into_bytes(),
                         )
                     }
                     PostEncoding::Cose(encryption) => {

@@ -58,7 +58,7 @@ pub struct PlanInput<'a> {
     /// The transaction data types the host configures.
     pub configuration: &'a Configuration,
     /// The transaction metadata the host holds: signed credential metadata, Type Metadata and
-    /// key sets. The plan fetches none of it.
+    /// key sets.
     pub held: &'a HeldMetadata,
     /// The nym_auth systems whose circuits the host loaded, in the wallet's order of
     /// preference.

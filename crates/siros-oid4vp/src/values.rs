@@ -1,4 +1,4 @@
-//! The values a request carries and the effects name.
+//! The values a request carries and intake's effects name.
 
 use std::fmt;
 
@@ -30,11 +30,11 @@ impl fmt::Display for Origin {
     }
 }
 
-/// The `wallet_nonce` of a `request_uri_method=post` fetch (Section 5.10): the base64url of 16
-/// random bytes.
+/// The `wallet_nonce` of a `request_uri_method=post` request (Section 5.10): the base64url of
+/// 16 random bytes, which the Request Object echoes.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
-pub(crate) struct WalletNonce(Base64Url);
+pub struct WalletNonce(Base64Url);
 
 impl WalletNonce {
     /// The nonce of `random`, 128 bits from the caller's CSPRNG.
@@ -43,7 +43,8 @@ impl WalletNonce {
     }
 
     /// The nonce.
-    pub(crate) fn as_str(&self) -> &str {
+    #[must_use]
+    pub fn as_str(&self) -> &str {
         self.0.as_str()
     }
 }
