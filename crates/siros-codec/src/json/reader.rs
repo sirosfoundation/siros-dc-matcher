@@ -71,8 +71,8 @@ impl JsonNumber {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum ReadFault {
     /// The bytes are no JSON text.
-    #[error("{0}")]
-    Text(#[source] JsonTextError),
+    #[error(transparent)]
+    Text(JsonTextError),
     /// A number has no finite binary64 value.
     #[error("a number beyond binary64")]
     NumberUnrepresentable,
@@ -85,8 +85,8 @@ pub enum ReadFault {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum JsonFault {
     /// The bytes are no JSON value this reader holds.
-    #[error("{0}")]
-    Read(#[source] ReadFault),
+    #[error(transparent)]
+    Read(ReadFault),
     /// An object repeats this member name.
     #[error("member {0:?} repeated")]
     RepeatedMember(String),
