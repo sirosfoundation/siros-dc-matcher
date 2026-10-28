@@ -14,7 +14,7 @@ REPOSITORY_ROOT = Path(__file__).resolve(strict=True).parent.parent
 
 
 class PathRefused(Exception):
-    """A path a script does not open; the message names the path and the reason."""
+    """A path a script refuses; the message names the path and the reason."""
 
 
 def _inside_repository(canonical: str, argument: str) -> Path:
