@@ -23,6 +23,7 @@ use crate::protocol::Protocol;
 use crate::request::{
     AttestationFormat, RequestSignature, ResponseMode, TransactionDataInvalid, TransactionDataItem,
 };
+use shape::Shaped;
 
 /// Why one protocol's request data yielded no request.
 ///
@@ -206,8 +207,11 @@ impl UnverifiedRequest {
     /// breaks.
     pub fn read(label: &str, data: &Value) -> Result<Self, NoQuery> {
         let protocol = Protocol::from_label(label).ok_or(NoQuery::NoParser)?;
-        let object = shape::request_object(protocol, data)?;
-        let members = object.as_object().ok_or(NoQuery::PayloadHasNoDcqlQuery)?;
+        let shaped = shape::request_object(protocol, data)?;
+        let members = shaped
+            .object()
+            .as_object()
+            .ok_or(NoQuery::PayloadHasNoDcqlQuery)?;
         let parameter = NoQuery::Parameter;
         let carrier = match protocol {
             Protocol::Unsigned => Carrier::UnsignedData,
@@ -225,7 +229,7 @@ impl UnverifiedRequest {
             expected_origins,
             verifier_info,
             metadata,
-        } = client(protocol, members, data, &query)?;
+        } = client(&shaped, members, &query)?;
         let client_metadata = parameters::client_metadata(members, metadata).map_err(parameter)?;
         let transaction_data = match members.get("transaction_data") {
             None => Vec::new(),
@@ -339,8 +343,8 @@ impl UnverifiedRequest {
     }
 }
 
-/// The Client Identifier rules intake applies before it verifies a signature, over the payload
-/// `members` of the request `data` under `protocol`, whose DCQL query is `query`.
+/// The Client Identifier rules intake applies before it verifies a signature, over the request
+/// `shaped`, whose request object has the members `members` and the DCQL query `query`.
 ///
 /// A signed payload names a supported Client Identifier, not of the `redirect_uri` prefix
 /// (Sections 5.9, 5.9.3; A.2), and `expected_origins`. A multisigned payload names no
@@ -354,9 +358,8 @@ impl UnverifiedRequest {
 ///
 /// [`NoQuery`]: the Client Identifier rule the request breaks.
 fn client(
-    protocol: Protocol,
+    shaped: &Shaped<'_>,
     members: &serde_json::Map<String, Value>,
-    data: &Value,
     query: &DcqlQuery,
 ) -> Result<Client, NoQuery> {
     let origins = || parameters::expected_origins(members).map_err(NoQuery::Parameter);
@@ -369,14 +372,14 @@ fn client(
             Metadata::Request
         }
     };
-    match protocol {
-        Protocol::Unsigned => Ok(Client {
+    match shaped {
+        Shaped::Unsigned(_) => Ok(Client {
             client: None,
             expected_origins: None,
             verifier_info: verifier_info(members.get("verifier_info"))?,
             metadata: Metadata::Request,
         }),
-        Protocol::Signed => {
+        Shaped::Signed(_) => {
             let text = members
                 .get("client_id")
                 .and_then(Value::as_str)
@@ -393,7 +396,7 @@ fn client(
                 metadata: metadata(federation),
             })
         }
-        Protocol::Multisigned => {
+        Shaped::Multisigned { headers, .. } => {
             if members.contains_key("client_id") {
                 return Err(NoQuery::ClientIdInPayload);
             }
@@ -401,7 +404,7 @@ fn client(
                 return Err(NoQuery::VerifierInfoInPayload);
             }
             let expected_origins = Some(origins()?);
-            let signers = signers(&shape::signature_headers(data)?, query)?;
+            let signers = signers(headers, query)?;
             let federation = signers
                 .iter()
                 .any(|signer| signer.client.prefix() == ClientIdPrefix::OpenidFederation);
