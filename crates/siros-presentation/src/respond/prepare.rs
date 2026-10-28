@@ -60,7 +60,7 @@ impl<'p, 'a> Chosen<'p, 'a> {
     ///
     /// - An SD-JWT VC discloses its selected claims (S3). When its query requires holder
     ///   binding, its KB-JWT has `iat` from the plan's time, `nonce`, `aud` (A6) and the claims
-    ///   of the transaction entries bound to it (S4, T3), `jti` drawn from `rng`.
+    ///   of the transaction entries bound to it (S4, T7), `jti` drawn from `rng`.
     /// - An mdoc discloses its selected elements, and its device key signs over the
     ///   SessionTranscript of the request's `Handover` (A7, M2).
     /// - A nym_auth proof's device key signs the data nym_auth gives for the request's session
@@ -143,7 +143,7 @@ impl<'p, 'a> Chosen<'p, 'a> {
         })
     }
 
-    /// The KB-JWT claims of the entry `binding` binds to `credential` (T3): `jti` drawn from
+    /// The KB-JWT claims of the entry `binding` binds to `credential` (T7): `jti` drawn from
     /// `rng` under a TS12 rulebook; none without an entry.
     fn transaction_claims(
         &self,

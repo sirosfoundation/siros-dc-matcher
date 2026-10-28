@@ -14,7 +14,7 @@
 //! | Generic rendering: rows in claims order, `null` paths, `template:` as segments of text and typed values, label limits after interpolation, at most 200 items, `security_hint` as given (View, Section 2) | [`TransactionView`], [`Segment`], [`RenderFault`] |
 //! | Selection: each candidate credential takes its first compatible entry (Core, Section 7.4.2) | [`Selector::first_match`] over [`Definitions`], [`Context::first_match`], [`Selection`] |
 //! | The registration of a credential's sources: for each type a source names, the projected definition or why there is none, and one reason for every other type (K1); the picker's selection over it, which defers to the wallet an entry with ad-hoc metadata (K2) | [`SourceInputs::served_types`], [`ServedTypes`], [`Unserved`], [`Selector::first_match_unverified`], [`Deferral`] |
-//! | T3, T6: the B.3.3.1 hash over the entry as received, one algorithm per credential, `transaction_data_hashes_alg` repeated when the request carried it; `jti`, `response_mode` and `amr` under a TS12 rulebook; SD-JWT VC only | [`Binding::kb_jwt_claims`], [`Amr`] |
+//! | T7: the B.3.3.1 hash over the entry as received, one algorithm per credential, `transaction_data_hashes_alg` repeated when the request carried it; `jti`, `response_mode` and `amr` under a TS12 rulebook; SD-JWT VC only | [`Binding::kb_jwt_claims`], [`Amr`] |
 //!
 //! Every refusal of a request is a [`TransactionDataError`]; every reason an entry does not
 //! serve a credential is an [`Incompatibility`].

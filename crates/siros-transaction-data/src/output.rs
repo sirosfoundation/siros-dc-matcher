@@ -1,4 +1,4 @@
-//! What the entry a chosen credential takes binds into the credential's KB-JWT (T3; OpenID4VP
+//! What the entry a chosen credential takes binds into the credential's KB-JWT (T7; OpenID4VP
 //! 1.0, B.3.3.1; EC TS12 v1.0.1, Section 3.6).
 
 use serde_json::Value;

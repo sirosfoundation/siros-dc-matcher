@@ -1,4 +1,4 @@
-//! The response to a verified request (P4, P5): the `vp_token` (Section 8.1), its submission
+//! The response to a verified request (P4 to P6): the `vp_token` (Section 8.1), its submission
 //! in the form of the Response Mode, error submissions (Section 8.5), and the Verifier's reply
 //! to a direct post (Section 8.2).
 

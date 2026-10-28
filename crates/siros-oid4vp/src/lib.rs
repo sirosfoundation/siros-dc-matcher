@@ -7,7 +7,7 @@
 //! | [`semantic`] | The semantics identifier of a Wallet-Relying Party's certificate | ETSI TS 119 475, 5.1.3, 5.1.5 |
 //! | [`intake`] | Intake of redirect and DC API requests to a [`VerifiedRequest`] (P1, P3) | 5, 5.9, 5.10, A |
 //! | [`verified`] | The verified request and its verifier | 5, 8.3 |
-//! | [`response`] | `vp_token`, submissions, error submissions, the direct post reply (P4, P5) | 8 |
+//! | [`response`] | `vp_token`, submissions, error submissions, the direct post reply (P4 to P6) | 8 |
 //!
 //! Intake and the response need the `crypto` feature. Without it the crate holds what the
 //! picker links, and builds with Rust 1.82.
