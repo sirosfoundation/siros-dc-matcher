@@ -23,10 +23,12 @@ pub(crate) fn read<R: Read + Seek>(
     asked: &[QueryTypes],
     entries: Option<&RequestEntries>,
 ) -> Result<Vec<Requested>, RegistrationError> {
+    // The writer registers no type of an empty name: a query that asks for one has no
+    // credential to read.
     let types: Vec<RegisteredType> = asked
         .iter()
         .flat_map(QueryTypes::types)
-        .map(RegisteredType::from)
+        .filter_map(|asked| RegisteredType::try_from(asked).ok())
         .collect();
     registration
         .credentials(&types)?

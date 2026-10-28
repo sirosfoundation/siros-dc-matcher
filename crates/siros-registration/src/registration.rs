@@ -6,7 +6,7 @@ use std::cmp::Ordering;
 use serde_json::Value;
 use siros_codec::date::DateTime;
 use siros_credential::{ClaimTree, EntryRef, Format, Instance, TypedValue};
-use siros_dcql::{ClaimPath, DocType, PathError, Vct};
+use siros_dcql::{ClaimPath, PathError};
 use siros_display::{CardText, ClaimLabels, Locale};
 use siros_presentation::{AskedType, KeyHolding, MatchCredential, Presentability};
 use siros_transaction_data::{Definitions, Entry, Incompatibility, Projected, ServedTypes, TypeId};
@@ -189,43 +189,66 @@ impl<I> Facts<I> {
     }
 }
 
-/// A credential's type, with the format it belongs to.
+/// The name of a credential type, a `vct` or a `docType`: text of at least one byte.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum RegisteredType {
-    /// An SD-JWT VC's `vct`.
-    Vct(Vct),
-    /// An mdoc's `docType`.
-    DocType(DocType),
+pub struct TypeName(String);
+
+/// Why text is no type name: it is empty.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("registration_credential_type_empty")]
+pub struct TypeNameEmpty;
+
+impl TypeName {
+    /// The type name `name`.
+    ///
+    /// # Errors
+    ///
+    /// [`TypeNameEmpty`] for the empty string.
+    pub fn new(name: &str) -> Result<Self, TypeNameEmpty> {
+        if name.is_empty() {
+            return Err(TypeNameEmpty);
+        }
+        Ok(Self(name.to_owned()))
+    }
+
+    /// The text.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// A credential's type: an SD-JWT VC's `vct` or an mdoc's `docType`, with the format it
+/// belongs to.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct RegisteredType {
+    format: Format,
+    name: TypeName,
 }
 
 impl RegisteredType {
     /// The type `name` of `format`.
-    pub fn new(format: Format, name: &str) -> Self {
-        match format {
-            Format::SdJwtVc => Self::Vct(Vct::new(name)),
-            Format::Mdoc => Self::DocType(DocType::new(name)),
-        }
+    pub fn new(format: Format, name: TypeName) -> Self {
+        Self { format, name }
     }
 
     /// The format the type belongs to.
     pub fn format(&self) -> Format {
-        match self {
-            Self::Vct(_) => Format::SdJwtVc,
-            Self::DocType(_) => Format::Mdoc,
-        }
+        self.format
     }
 
-    /// The type's text.
+    /// The name.
+    pub fn name(&self) -> &TypeName {
+        &self.name
+    }
+
+    /// The name's text.
     pub fn as_str(&self) -> &str {
-        match self {
-            Self::Vct(vct) => vct.as_str(),
-            Self::DocType(doc_type) => doc_type.as_str(),
-        }
+        self.name.as_str()
     }
 
     /// What the index sorts by: the format's code, then the name's bytes.
     fn sort_key(&self) -> (u32, &[u8]) {
-        (format_code(self.format()), self.as_str().as_bytes())
+        (format_code(self.format), self.as_str().as_bytes())
     }
 }
 
@@ -242,9 +265,12 @@ impl PartialOrd for RegisteredType {
     }
 }
 
-impl From<&AskedType> for RegisteredType {
-    fn from(asked: &AskedType) -> Self {
-        Self::new(asked.format(), asked.name())
+/// The type a Credential Query asks for, when its name is no empty string.
+impl TryFrom<&AskedType> for RegisteredType {
+    type Error = TypeNameEmpty;
+
+    fn try_from(asked: &AskedType) -> Result<Self, TypeNameEmpty> {
+        Ok(Self::new(asked.format(), TypeName::new(asked.name())?))
     }
 }
 

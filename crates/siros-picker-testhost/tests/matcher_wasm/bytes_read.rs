@@ -1,12 +1,11 @@
 //! The picker reads of the registration only what a request needs (`docs/registration.md`):
-//! the header, the directory and the facts; the index entries its binary search visits; the
-//! records of the type the request asks for; the definitions the request's entry names for
-//! them; and the icons of the entries it emits. The count of bytes the host copies is the sum
-//! of those parts, which the layout's lengths and the writer's projection give.
+//! the header, the directory, the index, the types' names and the facts; the records of the
+//! type the request asks for; the definitions the request's entry names for them; and the icons
+//! of the entries it emits. The count of bytes the host copies is the sum of those parts, which
+//! the layout's lengths and the writer's projection give.
 
 use serde_json::{json, Value};
 use siros_codec::cbor::Value as Cbor;
-use siros_credential::Format;
 use siros_presentation::testing::wallet::{mdoc, sd_jwt, Held, MDL, MDL_NS};
 use siros_registration::{encode, project, CredentialIcon, RegisteredCredential};
 use siros_transaction_data::{Projected, TypeId};
@@ -43,14 +42,6 @@ fn section(blob: &[u8], kind: usize) -> (usize, usize) {
     (number(blob, entry + 4), number(blob, entry + 8))
 }
 
-/// The code the index sorts a format by.
-fn code(format: Format) -> usize {
-    match format {
-        Format::SdJwtVc => 1,
-        Format::Mdoc => 2,
-    }
-}
-
 /// The length of the records the index lists for the SD-JWT VCs of `vct`.
 fn records_of(blob: &[u8], vct: &str) -> usize {
     let (index, length) = section(blob, 2);
@@ -64,23 +55,6 @@ fn records_of(blob: &[u8], vct: &str) -> usize {
         })
         .map(|entry| number(blob, entry + 16))
         .unwrap()
-}
-
-/// The positions a binary search over the sorted `keys` reads to find `key`: the entry at the
-/// middle of the range, rounded down, until it is the key.
-fn probes(keys: &[(usize, &[u8])], key: (usize, &[u8])) -> Vec<usize> {
-    let (mut low, mut high) = (0, keys.len());
-    let mut read = Vec::new();
-    while low < high {
-        let at = low + (high - low) / 2;
-        read.push(at);
-        match keys[at].cmp(&key) {
-            std::cmp::Ordering::Less => low = at + 1,
-            std::cmp::Ordering::Greater => high = at,
-            std::cmp::Ordering::Equal => break,
-        }
-    }
-    read
 }
 
 /// Each value of `values` once, in order.
@@ -140,18 +114,16 @@ fn the_picker_reads_what_the_request_needs() {
     let a1_entry: Value = serde_json::from_str(A1_ENTRY).unwrap();
     let request = request(a1_request["dcql_query"].clone(), &[a1_entry]);
 
-    let mut keys = distinct(projection.credentials().iter().map(|credential| {
-        let credential_type = credential.credential_type();
-        (
-            code(credential_type.format()),
-            credential_type.as_str().as_bytes(),
-        )
-    }));
-    keys.sort();
-    let index_read: usize = probes(&keys, (1, CARD.as_bytes()))
-        .into_iter()
-        .map(|at| INDEX_ENTRY + keys[at].1.len())
-        .sum();
+    // An entry and a name per type.
+    let index_and_names: usize = distinct(
+        projection
+            .credentials()
+            .iter()
+            .map(|credential| credential.credential_type()),
+    )
+    .iter()
+    .map(|credential_type| INDEX_ENTRY + credential_type.as_str().len())
+    .sum();
     let cards: Vec<&RegisteredCredential<Projected, _>> = projection
         .credentials()
         .iter()
@@ -173,7 +145,7 @@ fn the_picker_reads_what_the_request_needs() {
     let (_, facts) = section(&blob, 1);
     let expected = HEADER_AND_DIRECTORY
         + facts
-        + index_read
+        + index_and_names
         + records_of(&blob, CARD)
         + definitions
         + icons_emitted;

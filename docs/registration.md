@@ -5,12 +5,11 @@ The registration is the blob the wallet registers with Credential Manager beside
 it through `std::io::Read + Seek`. The picker reads the parts a request needs through
 `android_credman::CredentialReader`, each at its offset with `ReadCredentialsBuffer`:
 
-1. the header, the directory and the facts, when it opens the registration;
-2. the index entries a binary search visits, for each credential type the request's queries
-   ask for;
-3. the records of those types;
-4. the definitions the request's transaction data entries name for those credentials;
-5. the icons of the entries it emits.
+1. the header, the directory, the index, the types' names and the facts, when it opens the
+   registration;
+2. the records of the credential types the request's queries ask for;
+3. the definitions the request's transaction data entries name for those credentials;
+4. the icons of the entries it emits.
 
 This document describes version 1.
 
@@ -53,11 +52,12 @@ An index entry is five numbers:
 | 12–15 | The offset of the type's records in the records section |
 | 16–19 | The length of the records |
 
-The entries are sorted by format, then by the bytes of the name, each type once. The reader
-finds a type by binary search over the range `[low, high)` of entries, from `[0, count)`: it
-reads the entry at `low + (high − low) / 2`, rounded down, and its name, and keeps the half
-that can hold the type. Each entry a search reads must sort after every entry the search read
-below it and before every entry it read above it.
+The entries sort strictly by format, then by the bytes of the name: each type once. The names
+tile the names section, and the records tile the records section, both in the index's order:
+the first span starts at its section's start, each next one where the one before it ends, each
+holds a byte at least, and the last ends at the section's end. The reader reads the index and
+the names whole when it opens the registration and checks these rules there. It then finds a
+type by binary search in memory.
 
 ### Spans
 
@@ -105,8 +105,10 @@ The reader refuses, with a `RegistrationError` that names the part and the cause
 - a header, directory or section that ends past the blob, a directory that breaks its order or
   leaves bytes after the last section, a span that ends past its section, and a read that ends
   past the blob;
-- an index whose length is no multiple of 20, an unknown format code, a name of no byte or no
-  UTF-8, and an index entry that a search finds out of order;
+- an index whose length is no multiple of 20, an unknown format code, a name of no UTF-8, an
+  entry whose type does not sort after the type of the entry before it, and names or records
+  that do not tile their section: a span that starts after or before the end of the span before
+  it, holds no byte, or ends past its section, and spans that end before the section's end;
 - facts or a record that do not parse: no CBOR map, an absent or unknown member, a value of
   the wrong type;
 - records of a type out of the wallet's order, and two records read with one position,
@@ -126,7 +128,8 @@ per byte: 209 on wasm32 and 241 on a 64-bit target. The values of a part thus ta
 ## Writing
 
 `siros_registration::encode` lays a `Projection` out; `write` projects the wallet's state, then
-encodes it. Equal projections give equal bytes: the CBOR is deterministic (RFC 8949, Section
+encodes it. `project` refuses a credential whose `vct` or `docType` is empty
+(`WriteError::TypeEmpty`): a type's name in the index holds at least one byte. Equal projections give equal bytes: the CBOR is deterministic (RFC 8949, Section
 4.2.1), the index is sorted, the records of a type keep the wallet's order, and each icon and
 definition takes the place of its first use, the facts' icon first.
 
@@ -140,10 +143,12 @@ length-delimited records.
   with an exact version. For files from untrusted sources SQLite turns on checks of each page's
   cell offsets as it reads the page (`PRAGMA cell_size_check`); here every offset becomes a span
   only through the check against its part.
-- **SSTable** (LevelDB) finds a key by binary search over a sorted index block, whose entries
-  hold block handles. The registration's index is that block, with fixed-width entries and the
-  handles of the records. A reader that trusts the order misses keys silently, so the reader
-  checks each entry it reads against the ones read before it in the same search.
+- **SSTable** (LevelDB) reads a table's index block whole when it opens the table, and finds a
+  key by binary search over it in memory; the block's entries hold the handles of the data
+  blocks. The registration's index is that block, with fixed-width entries and the handles of the
+  names and the records. A reader that trusts the order misses keys, and one that trusts the
+  handles reads one type's records as another's. This reader checks, when it opens the
+  registration, that the entries sort strictly and that the handles tile their sections.
 - **zip** keeps a central directory of offsets beside the local headers. Readers that trust
   different copies read different files, and overlapping entries make zip bombs. The
   registration states each fact once, and its sections tile the blob.

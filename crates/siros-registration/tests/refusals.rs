@@ -7,12 +7,12 @@ use std::io::Cursor;
 use serde_json::json;
 use siros_codec::cbor::{self, Value as Cbor};
 use siros_codec::date::DateTime;
-use siros_dcql::{DocType, Vct};
+use siros_credential::Format;
 use siros_presentation::testing::verifier::NOW;
 use siros_presentation::testing::wallet::{card_wording, mdoc, sd_jwt, Held, Wallet, MDL, MDL_NS};
 use siros_registration::{
     write, CredentialFault, Diagnostics, IndexFault, OutOfBounds, RasterIcon, RegisteredType,
-    Registration, RegistrationError, RegistrationInput, Within,
+    Registration, RegistrationError, RegistrationInput, TileFault, TypeName, Within,
 };
 
 const PID: &str = "https://credentials.example/pid";
@@ -75,6 +75,87 @@ fn section(blob: &[u8], kind: usize) -> (usize, usize) {
     )
 }
 
+/// An index entry: its format code, and its type's name and records.
+#[derive(Clone)]
+struct Entry {
+    format: u32,
+    name: Vec<u8>,
+    records: Vec<u8>,
+}
+
+/// The sections of a registration, in the directory's order.
+struct Layout([Vec<u8>; 6]);
+
+impl Layout {
+    fn of(blob: &[u8]) -> Self {
+        Self(std::array::from_fn(|at| {
+            let (offset, length) = section(blob, at + 1);
+            blob[offset..offset + length].to_vec()
+        }))
+    }
+
+    /// The header, the directory, then the sections, each where the one before it ends.
+    fn blob(&self) -> Vec<u8> {
+        let mut blob = b"\x89SRG\r\n\x1a\n".to_vec();
+        blob.extend(1u32.to_le_bytes());
+        let mut at = 84;
+        for (kind, section) in (1u32..).zip(&self.0) {
+            for word in [kind, at, section.len() as u32] {
+                blob.extend(word.to_le_bytes());
+            }
+            at += section.len() as u32;
+        }
+        blob.extend(self.0.concat());
+        blob
+    }
+
+    fn entries(&self) -> Vec<Entry> {
+        let [_, index, names, records, ..] = &self.0;
+        index
+            .chunks(20)
+            .map(|entry| {
+                let word = |at: usize| number(entry, 4 * at) as usize;
+                Entry {
+                    format: word(0) as u32,
+                    name: names[word(1)..word(1) + word(2)].to_vec(),
+                    records: records[word(3)..word(3) + word(4)].to_vec(),
+                }
+            })
+            .collect()
+    }
+
+    /// The layout with the index, names and records of `entries`, in their order, each name and
+    /// each run of records where the one before it ends.
+    fn with_entries(mut self, entries: &[Entry]) -> Self {
+        let [_, index, names, records, ..] = &mut self.0;
+        index.clear();
+        names.clear();
+        records.clear();
+        for entry in entries {
+            for word in [
+                entry.format,
+                names.len() as u32,
+                entry.name.len() as u32,
+                records.len() as u32,
+                entry.records.len() as u32,
+            ] {
+                index.extend(word.to_le_bytes());
+            }
+            names.extend(&entry.name);
+            records.extend(&entry.records);
+        }
+        self
+    }
+
+    /// The layout with `change` added to word `word` (0 to 4) of the index entry at `entry`.
+    fn shifted(mut self, entry: usize, word: usize, change: i64) -> Self {
+        let at = 20 * entry + 4 * word;
+        let value = i64::from(number(&self.0[1], at)) + change;
+        self.0[1][at..at + 4].copy_from_slice(&(value as u32).to_le_bytes());
+        self
+    }
+}
+
 /// The refusal of `blob`: when it opens, of reading the credentials of `types`.
 fn refusal(blob: &[u8], types: &[RegisteredType]) -> RegistrationError {
     let read = Registration::open(Cursor::new(blob))
@@ -85,8 +166,8 @@ fn refusal(blob: &[u8], types: &[RegisteredType]) -> RegistrationError {
 #[test]
 fn each_rule_refuses_with_its_cause() {
     let honest = registration();
-    let pid = RegisteredType::Vct(Vct::new(PID));
-    let mdl = RegisteredType::DocType(DocType::new(MDL));
+    let pid = RegisteredType::new(Format::SdJwtVc, TypeName::new(PID).unwrap());
+    let mdl = RegisteredType::new(Format::Mdoc, TypeName::new(MDL).unwrap());
     assert_eq!(
         Registration::open(Cursor::new(&honest))
             .unwrap()
@@ -128,19 +209,45 @@ fn each_rule_refuses_with_its_cause() {
         "{error:?}"
     );
 
-    // The first and the last of the three index entries swapped: a search for the type now
-    // last reads the middle entry, then the first, which sorts above the middle one.
-    let out_of_order = changed(&|blob| {
-        let (index, _) = section(blob, 2);
-        let first: Vec<u8> = blob[index..index + 20].to_vec();
-        let last: Vec<u8> = blob[index + 40..index + 60].to_vec();
-        blob[index..index + 20].copy_from_slice(&last);
-        blob[index + 40..index + 60].copy_from_slice(&first);
-    });
-    let error = refusal(&out_of_order, std::slice::from_ref(&pid));
+    // The index sorts PID, then the loyalty card, then the mDL.
+    let entries = Layout::of(&honest).entries();
+    let [pid_entry, loyalty, mdl_entry] = [&entries[0], &entries[1], &entries[2]];
+    let index_refusal = |layout: Layout| match refusal(&layout.blob(), &[]) {
+        RegistrationError::Index(at, fault) => (at.value(), fault),
+        error => panic!("{error:?}"),
+    };
+
+    // The loyalty card's entry names PID.
+    let repeated = Entry {
+        name: pid_entry.name.clone(),
+        ..loyalty.clone()
+    };
+    let layout =
+        Layout::of(&honest).with_entries(&[pid_entry.clone(), repeated, mdl_entry.clone()]);
+    assert_eq!(index_refusal(layout), (1, IndexFault::Repeated));
+
+    let layout =
+        Layout::of(&honest).with_entries(&[loyalty.clone(), pid_entry.clone(), mdl_entry.clone()]);
+    assert_eq!(index_refusal(layout), (1, IndexFault::Order));
+
+    // The loyalty card's name starts a byte after PID's ends, and ends where it did.
+    let pid_name = pid_entry.name.len() as u64;
+    let layout = Layout::of(&honest).shifted(1, 1, 1).shifted(1, 2, -1);
+    let fault = index_refusal(layout);
     assert!(
-        matches!(error, RegistrationError::Index(at, IndexFault::Order) if at.value() == 0),
-        "{error:?}"
+        matches!(fault, (1, IndexFault::Name(TileFault::Gap { end, offset }))
+            if end.value() == pid_name && offset.value() == pid_name + 1),
+        "{fault:?}"
+    );
+
+    // The loyalty card's records start a byte before PID's end, and end where they did.
+    let pid_records = pid_entry.records.len() as u64;
+    let layout = Layout::of(&honest).shifted(1, 3, -1).shifted(1, 4, 1);
+    let fault = index_refusal(layout);
+    assert!(
+        matches!(fault, (1, IndexFault::Records(TileFault::Overlap { end, offset }))
+            if end.value() == pid_records && offset.value() == pid_records - 1),
+        "{fault:?}"
     );
 
     // The PID's record with its member `position` renamed.

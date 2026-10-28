@@ -2,11 +2,12 @@
 //! and the spans that locate bytes inside a section. Every integer of the layout is an
 //! unsigned 32-bit little-endian number.
 
+use std::cmp::Ordering;
 use std::marker::PhantomData;
 
 use siros_credential::Format;
 
-use crate::error::{ByteCount, DirectoryFault, IndexFault, OutOfBounds, Within};
+use crate::error::{ByteCount, DirectoryFault, OutOfBounds, RegistrationError, TileFault, Within};
 
 /// The bytes a registration starts with.
 pub(crate) const MAGIC: [[u8; 4]; 2] = [*b"\x89SRG", *b"\r\n\x1a\n"];
@@ -22,10 +23,7 @@ pub(crate) const SECTIONS_START: u32 = (HEADER_LENGTH + DIRECTORY_LENGTH) as u32
 
 /// The bytes of an index entry: the format, the span of the type's name in the names section,
 /// and the span of its records in the records section.
-pub(crate) const INDEX_ENTRY_LENGTH: u64 = 20;
-
-/// [`INDEX_ENTRY_LENGTH`], for arithmetic on the index section's u32 offsets.
-const INDEX_ENTRY_WORDS: u32 = 20;
+const INDEX_ENTRY_LENGTH: u32 = 20;
 
 /// The header as the blob holds it: the magic number's two words and the version.
 pub(crate) type HeaderWords = [[u8; 4]; 3];
@@ -211,6 +209,11 @@ impl<S: Part> Bounds<S> {
         wide::sum(self.start, span.offset)
     }
 
+    /// The section's bytes.
+    pub(crate) fn length(&self) -> u32 {
+        self.length
+    }
+
     fn at(located: Located) -> Self {
         Self {
             start: located.start,
@@ -310,57 +313,130 @@ impl Directory {
     pub(crate) fn index_entries(&self) -> Result<u32, u32> {
         let length = self.index.length;
         let whole = (
-            length.checked_div(INDEX_ENTRY_WORDS),
-            length.checked_rem(INDEX_ENTRY_WORDS),
+            length.checked_div(INDEX_ENTRY_LENGTH),
+            length.checked_rem(INDEX_ENTRY_LENGTH),
         );
         match whole {
             (Some(entries), Some(0)) => Ok(entries),
             _ => Err(length),
         }
     }
+}
 
-    /// The span of the index entry at `at`.
-    ///
-    /// # Errors
-    ///
-    /// [`OutOfBounds`] for a position at or past [`Directory::index_entries`].
-    pub(crate) fn index_entry(&self, at: u32) -> Result<Span<IndexPart>, OutOfBounds> {
-        self.index
-            .span(wide::product(at, INDEX_ENTRY_WORDS), INDEX_ENTRY_LENGTH)
+/// Spans that tile the section `S`, read in order: each starts where the one before it ends,
+/// the first at the section's start, each holds a byte at least, and the last ends at the
+/// section's end.
+#[derive(Debug)]
+pub(crate) struct Tiles<S> {
+    limit: u32,
+    end: u32,
+    part: PhantomData<fn() -> S>,
+}
+
+impl<S: Part> Tiles<S> {
+    /// The tiles of the section `bounds` locates, none read yet.
+    pub(crate) fn of(bounds: &Bounds<S>) -> Self {
+        Self {
+            limit: bounds.length,
+            end: 0,
+            part: PhantomData,
+        }
     }
-}
 
-/// An index entry: the format of a type, its name, and the span of its records.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct RawEntry {
-    pub(crate) format: Format,
-    pub(crate) name: Span<NamesPart>,
-    pub(crate) records: Span<RecordsPart>,
-}
-
-impl RawEntry {
-    /// The entry of `words`, its spans in the sections of `directory`.
+    /// The tile of `length` bytes at `offset`, after the tiles read before it.
     ///
     /// # Errors
     ///
-    /// [`IndexFault`]: an unknown format code, or a span past its section.
-    pub(crate) fn parse(words: &EntryWords, directory: &Directory) -> Result<Self, IndexFault> {
-        let [format, name_offset, name_length, records_offset, records_length] =
-            words.map(u32::from_le_bytes);
-        let format = format_of(format).ok_or(IndexFault::Format(format))?;
-        let name = directory
-            .names
-            .span(name_offset.into(), name_length.into())
-            .map_err(IndexFault::Span)?;
-        let records = directory
-            .records
-            .span(records_offset.into(), records_length.into())
-            .map_err(IndexFault::Span)?;
-        Ok(Self {
-            format,
-            name,
-            records,
+    /// [`TileFault`]: a gap or an overlap with the tile before it, no byte, or an end past the
+    /// section.
+    pub(crate) fn next(&mut self, offset: u32, length: u32) -> Result<Span<S>, TileFault> {
+        let end = self.place(offset, length)?;
+        let Some(end) = u32::try_from(end).ok().filter(|end| *end <= self.limit) else {
+            return Err(self.past(offset, length));
+        };
+        self.end = end;
+        Ok(Span {
+            offset,
+            length,
+            part: PhantomData,
         })
+    }
+
+    /// The bytes of the tile of `length` bytes at `offset`, after the tiles read before it, in
+    /// `held`: the section's bytes.
+    ///
+    /// # Errors
+    ///
+    /// [`TileFault`]: a gap or an overlap with the tile before it, no byte, or an end past
+    /// `held`.
+    pub(crate) fn next_of<'h>(
+        &mut self,
+        offset: u32,
+        length: u32,
+        held: &'h [u8],
+    ) -> Result<&'h [u8], TileFault> {
+        let end = self.place(offset, length)?;
+        // A u32 fits the usize of every target the crate builds for.
+        let bytes = usize::try_from(end)
+            .ok()
+            .and_then(|end| held.get(offset as usize..end));
+        let (Some(bytes), Ok(end)) = (bytes, u32::try_from(end)) else {
+            return Err(self.past(offset, length));
+        };
+        self.end = end;
+        Ok(bytes)
+    }
+
+    /// Checks that the tiles read end at the section's end.
+    ///
+    /// # Errors
+    ///
+    /// [`RegistrationError::Uncovered`]: where the tiles end, before the section's end.
+    pub(crate) fn finish(self) -> Result<(), RegistrationError> {
+        if self.end == self.limit {
+            Ok(())
+        } else {
+            Err(RegistrationError::Uncovered {
+                section: S::KIND,
+                end: ByteCount::new(self.end.into()),
+            })
+        }
+    }
+
+    /// The end of the tile of `length` bytes at `offset`, which starts where the tile before it
+    /// ends and holds a byte at least.
+    fn place(&self, offset: u32, length: u32) -> Result<u64, TileFault> {
+        let tiles = ByteCount::new(self.end.into());
+        let found = ByteCount::new(offset.into());
+        match offset.cmp(&self.end) {
+            Ordering::Greater => {
+                return Err(TileFault::Gap {
+                    end: tiles,
+                    offset: found,
+                })
+            }
+            Ordering::Less => {
+                return Err(TileFault::Overlap {
+                    end: tiles,
+                    offset: found,
+                })
+            }
+            Ordering::Equal => {}
+        }
+        if length == 0 {
+            return Err(TileFault::Empty);
+        }
+        Ok(wide::sum(offset, length))
+    }
+
+    /// The fault of a tile of `length` bytes at `offset` that ends past the section.
+    fn past(&self, offset: u32, length: u32) -> TileFault {
+        TileFault::Past(OutOfBounds::new(
+            Within::Section(S::KIND),
+            offset.into(),
+            length.into(),
+            self.limit.into(),
+        ))
     }
 }
 
@@ -374,26 +450,21 @@ pub(crate) fn format_code(format: Format) -> u32 {
 }
 
 /// The format of the code `code`.
-fn format_of(code: u32) -> Option<Format> {
+pub(crate) fn format_of(code: u32) -> Option<Format> {
     [Format::SdJwtVc, Format::Mdoc]
         .into_iter()
         .find(|format| format_code(*format) == code)
 }
 
-/// Arithmetic on u32 values widened to u64: no sum or product of two of them overflows a u64.
+/// Arithmetic on u32 values widened to u64: no sum of two of them overflows a u64.
 mod wide {
     #![expect(
         clippy::arithmetic_side_effects,
-        reason = "two u32 values widened to u64 neither sum nor multiply past u64::MAX"
+        reason = "two u32 values widened to u64 sum within u64::MAX"
     )]
 
     /// `a + b`.
     pub(crate) fn sum(a: u32, b: u32) -> u64 {
         u64::from(a) + u64::from(b)
-    }
-
-    /// `a × b`.
-    pub(crate) fn product(a: u32, b: u32) -> u64 {
-        u64::from(a) * u64::from(b)
     }
 }

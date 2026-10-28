@@ -16,6 +16,7 @@ use crate::icon::RasterIcon;
 use crate::layout::SectionKind;
 use crate::registration::{
     Diagnostics, Facts, Icon, Projection, RegisteredCard, RegisteredCredential, RegisteredType,
+    TypeName,
 };
 
 /// What a registration is made from: the wallet state, the metadata the host holds, the trust
@@ -75,6 +76,8 @@ pub struct CredentialIcon {
 pub enum WriteError {
     /// The claims of this credential make no claim tree.
     Claims(CredentialId, #[source] TreeError),
+    /// This credential's `vct` or `docType` is the empty string.
+    TypeEmpty(CredentialId),
     /// This section, or the sections up to its end, holds more bytes than a 32-bit offset
     /// reaches, or than a buffer of the platform holds (`isize::MAX`).
     TooLarge(SectionKind),
@@ -86,6 +89,7 @@ impl WriteError {
     pub fn code(&self) -> &'static str {
         match self {
             Self::Claims(_, error) => error.code(),
+            Self::TypeEmpty(_) => "registration_credential_type_empty",
             Self::TooLarge(_) => "registration_too_large",
         }
     }
@@ -95,8 +99,8 @@ impl WriteError {
 ///
 /// # Errors
 ///
-/// [`WriteError`]: a claim tree out of CBOR's integers, or a registration past 4 GiB or past
-/// the longest buffer of the platform.
+/// [`WriteError`]: a claim tree out of CBOR's integers, an empty `vct` or `docType`, or a
+/// registration past 4 GiB or past the longest buffer of the platform.
 pub fn write(input: &RegistrationInput<'_>) -> Result<Vec<u8>, WriteError> {
     encode(&project(input)?)
 }
@@ -109,7 +113,8 @@ pub fn write(input: &RegistrationInput<'_>) -> Result<Vec<u8>, WriteError> {
 ///
 /// # Errors
 ///
-/// [`WriteError::Claims`]: a claim tree out of CBOR's integers.
+/// [`WriteError::Claims`]: a claim tree out of CBOR's integers; [`WriteError::TypeEmpty`]: an
+/// empty `vct` or `docType`.
 pub fn project(input: &RegistrationInput<'_>) -> Result<Projection, WriteError> {
     let usable: Vec<UsableCredential<'_>> = input
         .credentials
@@ -161,7 +166,10 @@ fn credential(
     };
     Ok(RegisteredCredential {
         entry: credential.entry(),
-        credential_type: RegisteredType::new(credential.format(), credential_type.as_str()),
+        credential_type: RegisteredType::new(
+            credential.format(),
+            TypeName::new(credential_type.as_str()).map_err(|_| WriteError::TypeEmpty(id))?,
+        ),
         key: usable.key_holding(),
         claims,
         card: card(input, credential),

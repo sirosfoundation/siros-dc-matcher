@@ -237,9 +237,9 @@ The registration is binary, laid out for reads at offsets
 directory of sections, an index of the credential types sorted for binary
 search, the records of each type, and the definitions and icons the records
 name. The picker reads it through `ReadCredentialsBuffer`, part by part: the
-header, the directory and the facts, the index entries its search visits, the
-records of the types the request asks for, the definitions the request's
-transaction data entries name, and the icons of the entries it shows.
+header, the directory, the index, the types' names and the facts when it opens
+it, then the records of the types the request asks for, the definitions the
+request's transaction data entries name, and the icons of the entries it shows.
 
 ## Privacy note
 

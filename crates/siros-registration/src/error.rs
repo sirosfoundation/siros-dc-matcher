@@ -171,20 +171,48 @@ pub enum FactsFault {
     DefaultIconEmpty,
 }
 
+/// Why a span is no tile of its section: the tiles start where the ones before them end, from
+/// the section's start, and each holds a byte at least.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
+pub enum TileFault {
+    /// The span starts at `offset`, after `end`, where the tiles before it end: the bytes
+    /// between belong to no tile.
+    Gap {
+        /// Where the tiles before the span end.
+        end: ByteCount,
+        /// Where the span starts.
+        offset: ByteCount,
+    },
+    /// The span starts at `offset`, before `end`, where the tiles before it end: the bytes
+    /// between belong to two tiles.
+    Overlap {
+        /// Where the tiles before the span end.
+        end: ByteCount,
+        /// Where the span starts.
+        offset: ByteCount,
+    },
+    /// The span holds no byte.
+    Empty,
+    /// The span ends past its section.
+    Past(#[source] OutOfBounds),
+}
+
 /// Why an index entry is refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("{}", self.code())]
 pub enum IndexFault {
     /// The entry has this format code, which is neither 1 (`dc+sd-jwt`) nor 2 (`mso_mdoc`).
     Format(u32),
-    /// The span of the name or of the records ends past its section.
-    Span(#[source] OutOfBounds),
+    /// The span of the name is no tile of the names section.
+    Name(#[source] TileFault),
     /// The name is no UTF-8.
-    Name(#[source] Utf8Error),
-    /// The name is the empty string: no `vct` or `docType` is.
-    NameEmpty,
-    /// The entry's type does not sort between the types of the entries read before it in the
-    /// same search: the index is out of order.
+    NameText(#[source] Utf8Error),
+    /// The span of the records is no tile of the records section.
+    Records(#[source] TileFault),
+    /// The entry's type is the type of the entry before it.
+    Repeated,
+    /// The entry's type sorts before the type of the entry before it.
     Order,
 }
 
@@ -252,6 +280,14 @@ pub enum RegistrationError {
     IndexLength(ByteCount),
     /// The index entry at this position breaks a rule.
     Index(KeyIndex, #[source] IndexFault),
+    /// The tiles of this section end at `end`, before the section's end: the bytes after
+    /// belong to no tile.
+    Uncovered {
+        /// The section.
+        section: SectionKind,
+        /// Where its tiles end.
+        end: ByteCount,
+    },
     /// The records of this type are no CBOR sequence.
     Records(RegisteredType, #[source] CborError),
     /// A record of a type has a position at or before the record ahead of it: the records of
@@ -299,6 +335,7 @@ impl RegistrationError {
             Self::Facts(fault) => fault.code(),
             Self::IndexLength(_) => "registration_index_length",
             Self::Index(_, fault) => fault.code(),
+            Self::Uncovered { .. } => "registration_uncovered",
             Self::Records(_, error) => error.code(),
             Self::RecordOrder { .. } => "registration_record_order",
             Self::Credential { fault, .. } => fault.code(),
@@ -328,15 +365,28 @@ impl FactsFault {
     }
 }
 
+impl TileFault {
+    /// A stable identifier.
+    #[must_use]
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Gap { .. } => "registration_tile_gap",
+            Self::Overlap { .. } => "registration_tile_overlap",
+            Self::Empty => "registration_tile_empty",
+            Self::Past(_) => "registration_out_of_bounds",
+        }
+    }
+}
+
 impl IndexFault {
     /// A stable identifier.
     #[must_use]
     pub fn code(self) -> &'static str {
         match self {
             Self::Format(_) => "registration_format_unknown",
-            Self::Span(_) => "registration_out_of_bounds",
-            Self::Name(_) => "registration_type_not_utf8",
-            Self::NameEmpty => "registration_credential_type_empty",
+            Self::Name(fault) | Self::Records(fault) => fault.code(),
+            Self::NameText(_) => "registration_type_not_utf8",
+            Self::Repeated => "registration_index_repeated",
             Self::Order => "registration_index_order",
         }
     }

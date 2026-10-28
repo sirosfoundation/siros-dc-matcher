@@ -1,18 +1,18 @@
-//! The reader of a registration: the header, the directory and the facts when it opens, then
-//! each part a caller asks for, read through `Read + Seek` when asked.
+//! The reader of a registration: the header, the directory, the index, the names and the facts
+//! when it opens, then each part a caller asks for, read through `Read + Seek` when asked.
 
-use std::cmp::Ordering;
 use std::io::{Read, Seek, SeekFrom};
 
 use siros_codec::{cbor, json};
 use siros_transaction_data::Projected;
 
 use crate::error::{
-    ByteCount, DefinitionFault, FactsFault, IndexFault, OutOfBounds, RegistrationError, Within,
+    ByteCount, DefinitionFault, FactsFault, OutOfBounds, RegistrationError, Within,
 };
-use crate::ids::{CredentialIndex, KeyIndex, RecordIndex};
+use crate::ids::{CredentialIndex, RecordIndex};
+use crate::index::Index;
 use crate::layout::{
-    Bounds, Directory, DirectoryRefusal, DirectoryWords, EntryWords, HeaderWords, Part, RawEntry,
+    Bounds, Directory, DirectoryRefusal, DirectoryWords, EntryWords, HeaderWords, Part,
     RecordsPart, Span, HEADER_LENGTH, MAGIC,
 };
 use crate::record::{self, Positioned};
@@ -20,15 +20,15 @@ use crate::registration::{
     DefinitionRef, Facts, Icon, IconRef, Projection, RegisteredCredential, RegisteredType, Version,
 };
 
-/// A registration the wallet wrote, open for reading. Opening reads its header, its directory
-/// and its facts; each other part is read when a caller asks for it, and a definition or an
-/// icon once.
+/// A registration the wallet wrote, open for reading. Opening reads its header, its directory,
+/// its index, its names and its facts; each other part is read when a caller asks for it, and a
+/// definition or an icon once.
 #[derive(Debug)]
 pub struct Registration<R> {
     blob: Blob<R>,
     version: Version,
     directory: Directory,
-    entries: u32,
+    index: Index,
     facts: Facts,
     definitions: Vec<Cached<DefinitionRef, Projected>>,
     icons: Vec<Cached<IconRef, Icon>>,
@@ -48,23 +48,10 @@ struct Blob<R> {
     length: u64,
 }
 
-/// An index entry read: its type and the span of its records.
-struct IndexEntry {
-    key: RegisteredType,
-    records: Span<RecordsPart>,
-}
-
-/// The types of the entries a search read on either side of the type it looks for: every entry
-/// it reads next sorts between them.
-#[derive(Default)]
-struct Fences {
-    below: Option<RegisteredType>,
-    above: Option<RegisteredType>,
-}
-
 impl<R: Read + Seek> Registration<R> {
     /// The registration of `source`: [`Version::CURRENT`] of the layout of
-    /// `docs/registration.md`. Reads the header, the directory and the facts.
+    /// `docs/registration.md`. Reads the header, the directory, the index, the names and the
+    /// facts.
     ///
     /// # Errors
     ///
@@ -83,9 +70,7 @@ impl<R: Read + Seek> Registration<R> {
             DirectoryRefusal::Fault(fault) => RegistrationError::Directory(fault),
             DirectoryRefusal::OutOfBlob(error) => RegistrationError::OutOfBlob(error),
         })?;
-        let entries = directory
-            .index_entries()
-            .map_err(|length| RegistrationError::IndexLength(ByteCount::new(length.into())))?;
+        let index = blob.index(&directory)?;
         let bytes =
             blob.read_at_most(&directory.facts, directory.facts.whole(), cbor::MAX_INPUT)?;
         let item = cbor::decode(&bytes)
@@ -95,7 +80,7 @@ impl<R: Read + Seek> Registration<R> {
             blob,
             version,
             directory,
-            entries,
+            index,
             facts,
             definitions: Vec::new(),
             icons: Vec::new(),
@@ -112,15 +97,13 @@ impl<R: Read + Seek> Registration<R> {
         &self.facts
     }
 
-    /// The credentials of the types of `types`, in the wallet's order. Reads, for each type once,
-    /// the index entries a binary search visits, then the type's records when the index lists
-    /// it.
+    /// The credentials of the types of `types`, in the wallet's order. Reads the records of each
+    /// type the index lists, once.
     ///
     /// # Errors
     ///
-    /// [`RegistrationError`]: an index entry or a record that breaks a rule, an index out of
-    /// order on a search's path, records of a type out of the wallet's order, or two
-    /// credentials with one position, `credentialId` or batch.
+    /// [`RegistrationError`]: a record that breaks a rule, records of a type out of the wallet's
+    /// order, or two credentials with one position, `credentialId` or batch.
     pub fn credentials(
         &mut self,
         types: &[RegisteredType],
@@ -130,8 +113,8 @@ impl<R: Read + Seek> Registration<R> {
             if types.iter().take(at).any(|earlier| earlier == key) {
                 continue;
             }
-            if let Some(records) = self.find(key)? {
-                runs.push(self.records(key, records)?);
+            if let Some(records) = self.index.find(key) {
+                runs.push(records_of(&mut self.blob, &self.directory, key, records)?);
             }
         }
         in_wallet_order(runs)
@@ -182,24 +165,19 @@ impl<R: Read + Seek> Registration<R> {
         Ok(icon)
     }
 
-    /// The whole registration: every index entry, in order, and every record, definition and
-    /// icon.
+    /// The whole registration: the records of every type of the index, in its order, and every
+    /// definition and icon they name.
     ///
     /// # Errors
     ///
-    /// [`RegistrationError`]: the first part that breaks a rule, an index entry that does not
-    /// sort after the one before it.
+    /// [`RegistrationError`]: the first part that breaks a rule.
     pub fn projection(&mut self) -> Result<Projection, RegistrationError> {
-        let mut runs = Vec::new();
-        let mut previous: Option<RegisteredType> = None;
-        for at in 0..self.entries {
-            let entry = self.entry(at)?;
-            if previous.as_ref().is_some_and(|before| *before >= entry.key) {
-                return Err(order(at));
-            }
-            runs.push(self.records(&entry.key, entry.records)?);
-            previous = Some(entry.key);
-        }
+        let runs = self
+            .index
+            .entries()
+            .iter()
+            .map(|entry| records_of(&mut self.blob, &self.directory, &entry.key, entry.records))
+            .collect::<Result<Vec<_>, _>>()?;
         let credentials = in_wallet_order(runs)?
             .into_iter()
             .map(|credential| {
@@ -211,97 +189,41 @@ impl<R: Read + Seek> Registration<R> {
         let facts = self.facts.clone().try_map_icon(|at| self.icon(at))?;
         Ok(Projection { facts, credentials })
     }
+}
 
-    /// The span of the records of `key`, when the index lists it: a binary search over the
-    /// index entries, each entry it reads checked against the entries read before it.
-    #[expect(
-        clippy::arithmetic_side_effects,
-        reason = "low < high ≤ the entry count, a u32, inside the loop: high − low, the middle \
-                  and the position after it stay within u32"
-    )]
-    fn find(
-        &mut self,
-        key: &RegisteredType,
-    ) -> Result<Option<Span<RecordsPart>>, RegistrationError> {
-        let mut low = 0;
-        let mut high = self.entries;
-        let mut fences = Fences::default();
-        while low < high {
-            let at = low + (high - low) / 2;
-            let entry = self.entry(at)?;
-            if !fences.admit(&entry.key) {
-                return Err(order(at));
+/// The credentials the records of `key` at `span` in `blob` hold, in the sections of
+/// `directory`: a CBOR sequence of records, in the wallet's order.
+fn records_of<R: Read + Seek>(
+    blob: &mut Blob<R>,
+    directory: &Directory,
+    key: &RegisteredType,
+    span: Span<RecordsPart>,
+) -> Result<Vec<Positioned>, RegistrationError> {
+    let bytes = blob.read_at_most(&directory.records, span, cbor::MAX_INPUT)?;
+    let items = cbor::decode_sequence(&bytes)
+        .map_err(|error| RegistrationError::Records(key.clone(), error))?;
+    let mut records: Vec<Positioned> = Vec::new();
+    for (at, item) in items.iter().enumerate() {
+        let record = RecordIndex::new(at);
+        let read = record::credential(item, key, directory).map_err(|fault| {
+            RegistrationError::Credential {
+                credential_type: key.clone(),
+                record,
+                fault,
             }
-            match entry.key.cmp(key) {
-                Ordering::Less => {
-                    low = at + 1;
-                    fences.below = Some(entry.key);
-                }
-                Ordering::Greater => {
-                    high = at;
-                    fences.above = Some(entry.key);
-                }
-                Ordering::Equal => return Ok(Some(entry.records)),
-            }
+        })?;
+        if records
+            .last()
+            .is_some_and(|ahead| ahead.position >= read.position)
+        {
+            return Err(RegistrationError::RecordOrder {
+                credential_type: key.clone(),
+                record,
+            });
         }
-        Ok(None)
+        records.push(read);
     }
-
-    /// The index entry at `at`, with its type's name.
-    fn entry(&mut self, at: u32) -> Result<IndexEntry, RegistrationError> {
-        let refused = |fault| RegistrationError::Index(key_index(at), fault);
-        let span = self
-            .directory
-            .index_entry(at)
-            .map_err(|error| refused(IndexFault::Span(error)))?;
-        let words: EntryWords = self.blob.words(self.directory.index.start_of(span))?;
-        let entry = RawEntry::parse(&words, &self.directory).map_err(refused)?;
-        let name = self.blob.read(&self.directory.names, entry.name)?;
-        let name = std::str::from_utf8(&name).map_err(|e| refused(IndexFault::Name(e)))?;
-        if name.is_empty() {
-            return Err(refused(IndexFault::NameEmpty));
-        }
-        Ok(IndexEntry {
-            key: RegisteredType::new(entry.format, name),
-            records: entry.records,
-        })
-    }
-
-    /// The credentials the records of `key` at `span` hold: a CBOR sequence of records, in the
-    /// wallet's order.
-    fn records(
-        &mut self,
-        key: &RegisteredType,
-        span: Span<RecordsPart>,
-    ) -> Result<Vec<Positioned>, RegistrationError> {
-        let bytes = self
-            .blob
-            .read_at_most(&self.directory.records, span, cbor::MAX_INPUT)?;
-        let items = cbor::decode_sequence(&bytes)
-            .map_err(|error| RegistrationError::Records(key.clone(), error))?;
-        let mut records: Vec<Positioned> = Vec::new();
-        for (at, item) in items.iter().enumerate() {
-            let record = RecordIndex::new(at);
-            let read = record::credential(item, key, &self.directory).map_err(|fault| {
-                RegistrationError::Credential {
-                    credential_type: key.clone(),
-                    record,
-                    fault,
-                }
-            })?;
-            if records
-                .last()
-                .is_some_and(|ahead| ahead.position >= read.position)
-            {
-                return Err(RegistrationError::RecordOrder {
-                    credential_type: key.clone(),
-                    record,
-                });
-            }
-            records.push(read);
-        }
-        Ok(records)
-    }
+    Ok(records)
 }
 
 impl<R: Read + Seek> Blob<R> {
@@ -309,6 +231,24 @@ impl<R: Read + Seek> Blob<R> {
     fn of(mut source: R) -> Result<Self, RegistrationError> {
         let length = source.seek(SeekFrom::End(0))?;
         Ok(Self { source, length })
+    }
+
+    /// The index of the blob of `directory`: the index and the names sections, read whole.
+    fn index(&mut self, directory: &Directory) -> Result<Index, RegistrationError> {
+        let entries = directory
+            .index_entries()
+            .map_err(|length| RegistrationError::IndexLength(ByteCount::new(length.into())))?;
+        let index = &directory.index;
+        // The entries take the section's bytes: a buffer holds them when it holds the section.
+        // A u32 fits the usize of every target the crate builds for.
+        self.buffer(index.length()).map(drop)?;
+        let mut words = vec![EntryWords::default(); entries as usize];
+        self.fill(
+            index.start_of(index.whole()),
+            words.as_flattened_mut().as_flattened_mut(),
+        )?;
+        let names = self.read(&directory.names, directory.names.whole())?;
+        Index::parse(&words, &names, directory)
     }
 
     /// The words of `W` at `at` from the blob's start.
@@ -327,15 +267,22 @@ impl<R: Read + Seek> Blob<R> {
         let at = bounds.start_of(span);
         let length = span.length();
         self.within(at, length.into())?;
-        // A buffer holds at most isize::MAX bytes. Below that, `vec!` aborts when the platform
-        // has no memory for the part, and allocates it otherwise.
-        let size = isize::try_from(length)
-            .ok()
-            .and_then(|size| usize::try_from(size).ok())
-            .ok_or(RegistrationError::TooLong(ByteCount::new(length.into())))?;
-        let mut bytes = vec![0; size];
+        let mut bytes = vec![0; self.buffer(length)?];
         self.fill(at, &mut bytes)?;
         Ok(bytes)
+    }
+
+    /// The size of a buffer of `length` bytes. Below `isize::MAX`, the most a buffer holds,
+    /// `vec!` aborts when the platform has no memory for it, and allocates it otherwise.
+    ///
+    /// # Errors
+    ///
+    /// [`RegistrationError::TooLong`] for a length past `isize::MAX`.
+    fn buffer(&self, length: u32) -> Result<usize, RegistrationError> {
+        isize::try_from(length)
+            .ok()
+            .and_then(|size| usize::try_from(size).ok())
+            .ok_or(RegistrationError::TooLong(ByteCount::new(length.into())))
     }
 
     /// The bytes `span` spans in `bounds`, a part a reader decodes that holds at most `most`
@@ -402,25 +349,6 @@ impl Words for DirectoryWords {
     fn bytes(&mut self) -> &mut [u8] {
         self.as_flattened_mut().as_flattened_mut()
     }
-}
-
-impl Fences {
-    /// Whether `key` sorts strictly between the fences.
-    fn admit(&self, key: &RegisteredType) -> bool {
-        self.below.as_ref().is_none_or(|below| below < key)
-            && self.above.as_ref().is_none_or(|above| key < above)
-    }
-}
-
-/// The refusal of the index entry at `at`, out of order.
-fn order(at: u32) -> RegistrationError {
-    RegistrationError::Index(key_index(at), IndexFault::Order)
-}
-
-/// The index position `at`, as errors name it.
-fn key_index(at: u32) -> KeyIndex {
-    // A u32 fits the usize of every target the crate builds for.
-    KeyIndex::new(at as usize)
 }
 
 /// The credentials of `runs`, each the records of one type in the wallet's order, merged into

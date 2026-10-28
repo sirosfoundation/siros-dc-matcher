@@ -129,14 +129,14 @@ binaryen version_116.
   credential read that reports more bytes than it was asked for, or one that
   copies nothing before the reported size. It used to emit entries from the
   first. Release and debug builds trap alike.
-- The matcher reads the registration through `android-credman`'s `CredentialReader`, at the
-  offsets of the parts a request needs (`docs/registration.md`): the header, the directory and
-  the facts, the index entries its search visits, the records of the types the request's
-  queries ask for, the definitions its transaction data entries name, and the icons of the
-  entries it emits. Each read runs until complete; a short `ReadCredentialsBuffer` read used to
-  leave the blob's tail zeroed. A header, directory or facts that break a rule give no entry. A
-  part the request reads after them that breaks a rule gives no offer, and a registration with
-  its diagnostics shown names the error's code in one entry (`registration: <code>`).
+- The matcher reads the registration through `android-credman`'s `CredentialReader`, at the offsets
+  of the parts a request needs (`docs/registration.md`): the header, the directory, the index, the
+  types' names and the facts, then the records of the types the request's queries ask for, the
+  definitions its transaction data entries name, and the icons of the entries it emits. Each read
+  runs until complete; a short `ReadCredentialsBuffer` read used to leave the blob's tail zeroed. A
+  header, directory or facts that break a rule give no entry. A part the request reads after them
+  that breaks a rule gives no offer, and a registration with its diagnostics shown names the error's
+  code in one entry (`registration: <code>`).
 - `siros-dc-matcher-core`'s unused `sink` module is removed.
 - Entry metadata is the standard object
   `{"display_skipped":bool,"host_level":n,"data":{…}}`. The matcher's own
@@ -345,25 +345,24 @@ binaryen version_116.
 ### Added
 
 - `siros-codec`, the encodings every wallet core crate shares: a strict CBOR reader (definite
-  lengths, no duplicate keys, found with one hash set insertion per key, no trailing bytes, at
-  most `cbor::MAX_DEPTH` (32) levels, input of at most `cbor::MAX_INPUT` bytes, whose items take
-  at most `cbor::HEAP_PER_BYTE` heap bytes per byte of it), of one item
-  or of a CBOR sequence (`cbor::decode_sequence`, RFC 8742), and a deterministic writer; unpadded
-  base64url and the padded base64 of `x5c` certificates (RFC 4648, Sections 4 and 5); the calendar
-  dates and UTC times of CBOR's `full-date` and `tdate`; the ES256 signature value
-  (`signature::Es256Signature`); an `https` URL (`url::HttpsUrl`); and `json::JsonTextError`, what
-  serde_json reports of text that is no JSON. With the feature `json` it holds the strict JSON
-  reader, `Json::parse_unique`: one value, members in document order, each member name once per
-  object, every number with the text its writer chose (`JsonNumber`), at most `json::MAX_DEPTH` (64)
-  levels, and at most `json::MAX_TEXT` bytes, whose values take at most `json::HEAP_PER_BYTE` heap
-  bytes per byte. It refuses with a `JsonFault`: text too long first, then a text fault anywhere
-  in the bytes, then the first, in document order, of a number beyond binary64, nesting too deep
-  and a member name an object repeats. `siros-wallet-state` reads the wallet state with its own reader, where a repeated
-  name keeps its last value, as `JSON.parse` in `wallet-frontend` does. The crate holds the
-  internals the components share: `member::MemberFault` with its `ArrayIndex`,
-  `chain::CertificateChain` (the DER chain an mdoc `x5chain` and an `x5c` carry), the `position!`
-  and `text_value!` macros that declare value newtypes, and `display_code!`, which shows an error by
-  its stable code.
+  lengths, no duplicate keys, found with one hash set insertion per key, no trailing bytes, at most
+  `cbor::MAX_DEPTH` (32) levels, input of at most `cbor::MAX_INPUT` bytes, whose items take at most
+  `cbor::HEAP_PER_BYTE` heap bytes per byte of it), of one item or of a CBOR sequence
+  (`cbor::decode_sequence`, RFC 8742), and a deterministic writer; unpadded base64url and the padded
+  base64 of `x5c` certificates (RFC 4648, Sections 4 and 5); the calendar dates and UTC times of
+  CBOR's `full-date` and `tdate`; the ES256 signature value (`signature::Es256Signature`); an
+  `https` URL (`url::HttpsUrl`); and `json::JsonTextError`, what serde_json reports of text that is
+  no JSON. With the feature `json` it holds the strict JSON reader, `Json::parse_unique`: one value,
+  members in document order, each member name once per object, every number with the text its writer
+  chose (`JsonNumber`), at most `json::MAX_DEPTH` (64) levels, and at most `json::MAX_TEXT` bytes,
+  whose values take at most `json::HEAP_PER_BYTE` heap bytes per byte. It refuses with a
+  `JsonFault`: text too long first, then a text fault anywhere in the bytes, then the first, in
+  document order, of a number beyond binary64, nesting too deep and a member name an object repeats.
+  `siros-wallet-state` reads the wallet state with its own reader, where a repeated name keeps its
+  last value, as `JSON.parse` in `wallet-frontend` does. The crate holds the internals the
+  components share: `member::MemberFault` with its `ArrayIndex`, `chain::CertificateChain` (the DER
+  chain an mdoc `x5chain` and an `x5c` carry), the `position!` and `text_value!` macros that declare
+  value newtypes, and `display_code!`, which shows an error by its stable code.
 - `siros-mdoc`, ISO/IEC 18013-5 mdocs: the stored credential and the device signature's
   signing input (`device_signing_input`, a
   `SigStructure` whose `digest` the device key signs). Names and values are types: `DocType`
@@ -696,23 +695,25 @@ binaryen version_116.
   UI, the TR5 facts, and for each transaction data type the projected definition that serves it or
   why none does. The facts hold the time of registration, the language, the diagnostics flag, the
   system ids the wallet proves, the form of the nym_auth `verifier_id` and the wallet's default
-  icon. `Registration<R: Read + Seek>` reads the header, the directory and the facts when it opens,
-  then `credentials` of the types asked, `definition` and `icon` by span, each definition and icon
-  once, and `projection` the whole. It refuses every version but `Version::CURRENT` (1), every
-  offset or length past its part, an index entry out of order on a search's path, the records of a
-  type out of the wallet's order, an icon longer than a buffer of the platform holds, facts or
-  records of a type longer than `cbor::MAX_INPUT`, a definition longer than `json::MAX_TEXT`, and
-  every
-  unexpected member, with a `RegistrationError` that names the part and its cause. The reader and
-  the writer give an error for every input. The writer (feature `wallet`): `project` takes the
-  parsed credentials, the presentation records, the display cache and language, the held transaction
+  icon. `Registration<R: Read + Seek>` reads the header, the directory, the index, the names and the
+  facts when it opens, then `credentials` of the types asked, `definition` and `icon` by span, each
+  definition and icon once, and `projection` the whole. It refuses every version but
+  `Version::CURRENT` (1), every offset or length past its part, an index whose types do not sort
+  strictly or whose names and records do not tile their sections, the records of a type out of the
+  wallet's order, an icon longer than a buffer of the platform holds, facts or records of a type
+  longer than `cbor::MAX_INPUT`, a definition longer than `json::MAX_TEXT`, and every unexpected
+  member, with a `RegistrationError` that names the part and its cause. The reader and the writer
+  give an error for every input. The writer (feature `wallet`): `project` takes the parsed
+  credentials, the presentation records, the display cache and language, the held transaction
   metadata and the configuration, the trust store, the systems, the `verifier_id` form, the
   credentials presented without the wallet's UI, the card wording, the icons, the default icon and
-  the time, and gives the `Projection`; `encode` lays it out, equal projections in equal bytes;
-  `write` does both. An icon is a `RasterIcon`: a PNG or JPEG of 64 to 256 pixels in each direction,
-  read from its header (`IconFault` otherwise). The host rasterises an SVG and resizes an image
-  before it passes it; a credential without an icon of its own gets the default icon. `Unverified`
-  is the picker's transaction data source. It builds with Rust 1.82.
+  the time, and gives the `Projection`, or `WriteError::TypeEmpty` for a credential of an empty
+  `vct` or `docType`: a registered type's name is a `TypeName` of at least one byte. `encode` lays
+  the projection out, equal projections in equal bytes; `write` does both. An icon is a
+  `RasterIcon`: a PNG or JPEG of 64 to 256 pixels in each direction, read from its header
+  (`IconFault` otherwise). The host rasterises an SVG and resizes an image before it passes it; a
+  credential without an icon of its own gets the default icon. `Unverified` is the picker's
+  transaction data source. It builds with Rust 1.82.
 - `scripts/gen_unicode_tables.py` writes the refused-character ranges of siros-display and the
   grapheme break runs of siros-transaction-data from their oracles' tables.
 - siros-registration's example `sample_registration` writes the registration of a sample

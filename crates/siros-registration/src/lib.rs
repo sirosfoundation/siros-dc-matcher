@@ -13,10 +13,11 @@
 //! with a magic number and the version, a directory of sections, an index of the credential
 //! types sorted for binary search, the records of each type as one CBOR sequence, and the
 //! definitions and icons the records name by span. [`Registration`] reads it through
-//! `Read + Seek`: the header, the directory and the facts when it opens, then each part a
-//! request needs when asked. It refuses every version but [`Version::CURRENT`], every offset or
-//! length past its part, every member a record does not define, and an index out of order on a
-//! search's path. The wallet registers the projection with the matcher it ships, so the two
+//! `Read + Seek`: the header, the directory, the index, the names and the facts when it opens,
+//! then each part a request needs when asked. It refuses every version but
+//! [`Version::CURRENT`], every offset or length past its part, every member a record does not
+//! define, and an index whose types do not sort strictly or whose names and records do not tile
+//! their sections. The wallet registers the projection with the matcher it ships, so the two
 //! versions are one.
 //!
 //! Without the feature `wallet` the crate holds the reader the credential picker links. It builds
@@ -62,6 +63,7 @@ mod error;
 #[cfg(feature = "wallet")]
 mod icon;
 mod ids;
+mod index;
 mod layout;
 mod reader;
 mod record;
@@ -77,7 +79,7 @@ mod write;
 pub use encode::encode;
 pub use error::{
     ByteCount, CredentialFault, DefinitionFault, DirectoryFault, FactsFault, IndexFault, Member,
-    OutOfBounds, RegistrationError, Within,
+    OutOfBounds, RegistrationError, TileFault, Within,
 };
 #[cfg(feature = "wallet")]
 pub use icon::{Dimensions, IconFault, RasterIcon, MAX_ICON_PIXELS, MIN_ICON_PIXELS};
@@ -86,7 +88,7 @@ pub use layout::SectionKind;
 pub use reader::Registration;
 pub use registration::{
     DefinitionRef, Diagnostics, Facts, Icon, IconEmpty, IconRef, Projection, RegisteredCard,
-    RegisteredCredential, RegisteredType, Version,
+    RegisteredCredential, RegisteredType, TypeName, TypeNameEmpty, Version,
 };
 pub use selection::Unverified;
 #[cfg(feature = "wallet")]
