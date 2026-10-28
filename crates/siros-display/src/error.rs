@@ -1,6 +1,7 @@
 //! Why display refuses an input. Each error has a stable code.
 
 use siros_dcql::{ClaimPathError, PathError};
+use siros_zkp_req::ItemIndex;
 
 use crate::locale::LocaleError;
 use crate::text::TextError;
@@ -13,6 +14,9 @@ pub enum DisplayError {
     Text(#[source] TextError),
     /// A `locale` is no language tag. The code is its own.
     Locale(#[source] LocaleError),
+    /// A `zkp_req` option names this `_req` index, which its query lacks: the option is
+    /// another query's.
+    OptionItemUnknown(ItemIndex),
     /// A metadata document, or one of its members, is no JSON object.
     NotObject,
     /// `credential_issuer` is absent, no string, or empty.
@@ -142,6 +146,7 @@ impl DisplayError {
             Self::Text(e) => e.code(),
             Self::Locale(e) => e.code(),
             Self::Pointer(e) => e.code(),
+            Self::OptionItemUnknown(_) => "option_item_unknown",
             Self::NotObject => "metadata_not_object",
             Self::IssuerIdentifier => "credential_issuer_malformed",
             Self::ConfigurationUnknown => "configuration_unknown",
