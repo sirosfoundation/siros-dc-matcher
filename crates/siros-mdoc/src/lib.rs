@@ -6,8 +6,11 @@
 //! bytes the issuer wrote. Parsing refuses a credential whose `Document` names another
 //! `docType` than its MSO, or whose items do not have the digests `valueDigests` lists.
 //!
-//! [`device_signing_input`] gives the data the device key signs from a session transcript, a
-//! document type and the `DeviceSigned` namespaces.
+//! [`Mdoc::disclose`] selects items and takes the `DeviceSigned` elements the response carries.
+//! It refuses an element the MSO's `KeyAuthorizations` do not authorize (OpenID4VP 1.0, B.2.1).
+//! The [`Disclosure`] gives the data the device key signs and, with that signature, the
+//! `DeviceResponse`. [`device_signing_input`] gives the same data from a session transcript, a
+//! document type and the `DeviceSigned` namespaces alone.
 //!
 //! The feature `crypto` adds ES256 verification ([`es256_verifies`]).
 
@@ -32,6 +35,7 @@
 
 mod device;
 mod device_key;
+mod disclosure;
 mod error;
 mod issuer_auth;
 mod key_authorizations;
@@ -43,12 +47,13 @@ mod signature;
 #[cfg(feature = "crypto")]
 mod es256;
 
-pub use device::{device_signing_input, DeviceNameSpaces};
+pub use device::{device_signing_input, DeviceNameSpaces, DeviceSignedElement};
 pub use device_key::{P256Key, PointError};
+pub use disclosure::{Disclosure, ElementId};
 pub use error::{
-    AlgorithmFault, DeviceKeyFault, DocTypeFault, EnvelopeFault, IssuerAuthFault, ItemFault,
-    ItemMember, KeyAuthorizationsFault, MdocError, NameFault, NameSpacesFault, NamesFault,
-    PayloadFault, ValidityFault, ValidityTime, ValueDigestsFault,
+    AlgorithmFault, DeviceKeyFault, DisclosureError, DocTypeFault, EnvelopeFault, IssuerAuthFault,
+    ItemFault, ItemMember, KeyAuthorizationsFault, MdocError, NameFault, NameSpacesFault,
+    NamesFault, PayloadFault, ValidityFault, ValidityTime, ValueDigestsFault,
 };
 pub use issuer_auth::IssuerAuth;
 pub use key_authorizations::KeyAuthorizations;
