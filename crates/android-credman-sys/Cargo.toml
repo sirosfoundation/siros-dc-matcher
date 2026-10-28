@@ -11,3 +11,6 @@ rust-version = "1.82"
 readme = "README.md"
 
 [dependencies]
+
+[lints]
+workspace = true

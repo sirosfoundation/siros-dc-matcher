@@ -14,8 +14,8 @@ disallowed-types = [
 
 # The std methods that panic on an argument and share their name with a
 # method that does not, so only a lint that resolves the type finds them.
-# Every crate but the DC API matcher's denies them outside its tests;
-# scripts/check_panic_sites.py finds the panicking methods by name.
+# Cargo.toml allows them in the tests, and each crate root denies them outside
+# its tests. scripts/check_panic_sites.py finds the panicking methods by name.
 disallowed-methods = [
     { path = "alloc::vec::Vec::remove", reason = "panics on an index at or past the length" },
     { path = "alloc::vec::Vec::insert", reason = "panics on an index past the length" },
