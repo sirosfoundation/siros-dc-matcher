@@ -4,7 +4,7 @@
 # v0.11.0 did, on zkp_req requests). The crates that link into matcher.wasm
 # use rustc_hash::FxHashMap and FxHashSet, which need no seed.
 #
-# siros-dc-matcher-ffi and siros-dc-matcher-testhost never link into
+# siros-dc-matcher-ffi and siros-picker-testhost never link into
 # matcher.wasm and allow `clippy::disallowed_types` at their crate root.
 disallowed-types = [
     { path = "std::collections::HashMap", reason = "its RandomState reads WASI random_get, which the Credential Manager host lacks; use rustc_hash::FxHashMap" },

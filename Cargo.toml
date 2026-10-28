@@ -10,8 +10,11 @@ members = [
     "crates/siros-mdoc",
     "crates/siros-oid4vp",
     "crates/siros-presentation",
+    "crates/siros-registration",
     "crates/siros-dc-matcher-core",
+    "crates/siros-picker",
     "crates/siros-dc-matcher-ffi",
+    "crates/siros-picker-testhost",
     "crates/siros-sdjwt",
     "crates/siros-transaction-data",
     "crates/siros-trust",
@@ -25,9 +28,12 @@ edition = "2021"
 license = "BSD-2-Clause"
 repository = "https://github.com/sirosfoundation/siros-dc-matcher"
 authors = ["SIROS Foundation"]
-# Held by every crate of this workspace but -ffi, and checked on 1.82 in CI: the wallet core
-# crates hold it for the credential picker. -ffi overrides this upward: uniffi's bindgen chain
-# needs more.
+# Held by everything that ships inside the credential picker — siros-picker, siros-registration,
+# siros-presentation without `wallet` and the wallet core crates it builds on, siros-dcql,
+# siros-oid4vp without `crypto`, the two zkp_req crates, siros-trust and the two
+# android-credman crates — and by -core, siros-mdoc and siros-sdjwt, and checked on 1.82 in
+# CI. -ffi and siros-picker-testhost override this upward: uniffi's bindgen chain and
+# wasmtime both need more.
 rust-version = "1.82"
 
 [workspace.dependencies]
@@ -38,6 +44,7 @@ siros-display = { path = "crates/siros-display", default-features = false }
 siros-mdoc = { path = "crates/siros-mdoc" }
 siros-oid4vp = { path = "crates/siros-oid4vp" }
 siros-presentation = { path = "crates/siros-presentation", default-features = false }
+siros-registration = { path = "crates/siros-registration" }
 siros-sdjwt = { path = "crates/siros-sdjwt" }
 siros-transaction-data = { path = "crates/siros-transaction-data", default-features = false }
 siros-trust = { path = "crates/siros-trust", default-features = false }

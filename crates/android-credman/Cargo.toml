@@ -13,6 +13,8 @@ readme = "README.md"
 [dependencies]
 android-credman-sys = { path = "../android-credman-sys", version = "0.1.0" }
 c8str = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
 
 [lints]
 workspace = true
