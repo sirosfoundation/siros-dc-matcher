@@ -8,6 +8,7 @@ use sha2::Sha256;
 use siros_codec::cbor::Value as Cbor;
 
 use super::aead::{self, ContentKey};
+use super::submission::CoseEncrypt;
 use super::{EncryptionFault, ResponseError};
 use crate::verified::{ContentEncryption, Encryption};
 
@@ -66,7 +67,7 @@ pub(super) fn encrypt(
     encryption: &Encryption,
     plaintext: &[u8],
     rng: &mut impl CryptoRngCore,
-) -> Result<Vec<u8>, ResponseError> {
+) -> Result<CoseEncrypt, ResponseError> {
     let agreement = aead::agree(encryption, rng)?;
     let cek = cose_kdf(agreement.shared.raw_secret_bytes(), encryption.enc)?;
     let protected = Cbor::Map(vec![(
@@ -109,5 +110,7 @@ pub(super) fn encrypt(
         Cbor::Bytes([sealed.ciphertext, sealed.tag].concat()),
         Cbor::Array(vec![recipient]),
     ]);
-    Ok(Cbor::Tag(COSE_ENCRYPT, Box::new(message)).encode())
+    Ok(CoseEncrypt::new(
+        Cbor::Tag(COSE_ENCRYPT, Box::new(message)).encode(),
+    ))
 }

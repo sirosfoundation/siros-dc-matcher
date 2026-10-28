@@ -19,8 +19,8 @@ use serde_json::{json, Map, Value};
 use siros_codec::base64url;
 pub use siros_codec::date::DateTime;
 use siros_oid4vp::{
-    Effect, EffectResult, IntakeError, IntakeState, KeyMaterial, Kid, RequestObjectText, Step,
-    TrustAnswer, VerifiedRequest,
+    DcApiData, Effect, EffectResult, IntakeError, IntakeState, KeyMaterial, Kid, RequestObjectText,
+    Step, Submission, TrustAnswer, VerifiedRequest,
 };
 use x509_cert::builder::{Builder, CertificateBuilder, Profile};
 use x509_cert::der::asn1::{Ia5String, UtcTime};
@@ -289,6 +289,22 @@ impl Host {
 /// The Request Object `jws`, as the host obtained it.
 pub fn request_object(jws: &str) -> RequestObjectText {
     RequestObjectText::new(jws.to_owned()).unwrap()
+}
+
+/// The `data` of a DC API submission.
+pub fn dc_api_data(submission: &Submission) -> Value {
+    let Submission::DcApi(data) = submission else {
+        panic!("a DC API response, got {submission:?}")
+    };
+    data.json()
+}
+
+/// The JWE of a `dc_api.jwt` submission.
+pub fn dc_api_jwe(submission: &Submission) -> String {
+    let Submission::DcApi(DcApiData::Jwt(jwe)) = submission else {
+        panic!("a dc_api.jwt response, got {submission:?}")
+    };
+    jwe.as_str().to_owned()
 }
 
 /// Intake to its end, each effect answered by `host`; the verified request and the effects.

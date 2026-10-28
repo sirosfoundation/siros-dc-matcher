@@ -462,11 +462,15 @@ binaryen version_116.
   host's `Trust` evaluation. Intake requires the Request Object of a `post` to echo the
   `wallet_nonce`. The Client Identifier Prefixes `x509_san_dns`, `x509_hash`,
   `decentralized_identifier`, `verifier_attestation`, `openid_federation` and `redirect_uri`;
-  ES256 Request Objects; the `vp_token` (`VpToken::json`), its submission per Response Mode,
-  `ECDH-ES` response encryption with `A128GCM` or `A256GCM`, error submissions, and the reply to
-  a direct post. `direct_post.cwt` (`zkp_req.md`, Section 6.2) posts the CBOR Authorization
-  Response in a `COSE_Encrypt` by ECDH-ES + HKDF-256 with `A128GCM`, `A192GCM` or `A256GCM`.
-  `Handover` and
+  ES256 Request Objects; the `vp_token` (`VpToken::json`, a `VpTokenJson`); its `Submission`
+  per Response Mode, as data the host transmits: a `Post` to the `response_uri` with its
+  `PostParameters` (the `ResponseParameters` of `direct_post`, the `Jwe` of `direct_post.jwt`,
+  the `CoseEncrypt` of `direct_post.cwt`) and its `PostBody`, or the `DcApiData` of `dc_api` and
+  `dc_api.jwt`; `ECDH-ES` response encryption with `A128GCM` or `A256GCM`; error submissions;
+  and `Reply::parse`, which reads the `redirect_uri` of the body the Response URI answers a
+  direct post with, at most 64 KiB, and refuses with its `ReplyFault`.
+  `direct_post.cwt` (`zkp_req.md`, Section 6.2) posts the CBOR Authorization Response in a
+  `COSE_Encrypt` by ECDH-ES + HKDF-256 with `A128GCM`, `A192GCM` or `A256GCM`. `Handover` and
   `ec_jwk_thumbprint` give the session transcript's handover, with `None` for the CBOR `null` of
   an unencrypted response (B.2.6). `VerifiedRequest::access_certificate` gives the
   `CertificateDer` and the `SemanticIdentifier`, or the `SemanticIdError`, of an `x509_san_dns` or

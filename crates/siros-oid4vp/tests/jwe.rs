@@ -18,7 +18,8 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use siros_codec::base64url;
 use siros_oid4vp::{
-    ErrorCode, IntakeState, Method, Origin, Presentation, Submission, VerifiedRequest,
+    ErrorCode, IntakeState, Origin, PostBody, PostParameters, Presentation, ResponseMode,
+    Submission, VerifiedRequest,
 };
 use support::*;
 
@@ -142,16 +143,19 @@ fn direct_post_request() -> VerifiedRequest {
 /// The JWE a submission carries: `data.response`, or the form parameter `response`.
 fn jwe_of(submission: Submission) -> String {
     match submission {
-        Submission::DcApi(data) => data["response"].as_str().unwrap().to_owned(),
+        Submission::DcApi(_) => dc_api_jwe(&submission),
         Submission::Post(post) => {
-            let Method::Post { content_type, body } = post.method() else {
-                panic!("a POST")
+            let PostParameters::Jwt(jwe) = post.parameters() else {
+                panic!("direct_post.jwt, got {post:?}")
             };
-            assert_eq!(content_type.as_str(), "application/x-www-form-urlencoded");
-            let fields = form(std::str::from_utf8(body).unwrap());
-            assert_eq!(fields.len(), 1);
-            assert_eq!(fields[0].0, "response");
-            fields[0].1.clone()
+            let PostBody::Form(body) = post.body() else {
+                panic!("form parameters")
+            };
+            assert_eq!(
+                form(body.as_str()),
+                [("response".to_owned(), jwe.as_str().to_owned())]
+            );
+            jwe.as_str().to_owned()
         }
     }
 }
@@ -168,20 +172,34 @@ fn a_produced_response_decrypts_to_its_payload() {
     let cases = [
         (
             dc_api_request(Some("k1"), None),
+            ResponseMode::DcApiJwt,
             "A128GCM",
             Some("k1"),
             false,
         ),
         (
             dc_api_request(None, Some(json!(["A128CBC-HS256", "A256GCM", "A128GCM"]))),
+            ResponseMode::DcApiJwt,
             "A256GCM",
             None,
             false,
         ),
-        (direct_post_request(), "A128GCM", Some("k1"), false),
-        (direct_post_request(), "A128GCM", Some("k1"), true),
+        (
+            direct_post_request(),
+            ResponseMode::DirectPostJwt,
+            "A128GCM",
+            Some("k1"),
+            false,
+        ),
+        (
+            direct_post_request(),
+            ResponseMode::DirectPostJwt,
+            "A128GCM",
+            Some("k1"),
+            true,
+        ),
     ];
-    for (seed, (request, enc, kid, refusal)) in cases.into_iter().enumerate() {
+    for (seed, (request, mode, enc, kid, refusal)) in cases.into_iter().enumerate() {
         let mut rng = Rng(100 + seed as u64);
         let (submission, expected) = if refusal {
             let submission = request
@@ -199,6 +217,7 @@ fn a_produced_response_decrypts_to_its_payload() {
             }
             (token.submission(&mut rng).unwrap(), expected)
         };
+        assert_eq!(submission.mode(), mode, "case {seed}");
         let (header, plaintext) = decrypt(&jwe_of(submission), &recipient());
         assert_eq!(header["enc"], enc, "case {seed}");
         assert_eq!(

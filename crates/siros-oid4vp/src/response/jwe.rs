@@ -7,6 +7,7 @@ use sha2::{Digest, Sha256};
 use siros_codec::base64url;
 
 use super::aead::{self, ContentKey};
+use super::submission::Jwe;
 use super::{EncryptionFault, ResponseError};
 use crate::verified::{ContentEncryption, Encryption};
 
@@ -45,7 +46,7 @@ pub(super) fn encrypt(
     encryption: &Encryption,
     payload: &[u8],
     rng: &mut impl CryptoRngCore,
-) -> Result<String, ResponseError> {
+) -> Result<Jwe, ResponseError> {
     let agreement = aead::agree(encryption, rng)?;
     let z: &[u8] = agreement.shared.raw_secret_bytes();
     let cek = concat_kdf(z, encryption.enc, &[], &[])?;
@@ -78,10 +79,10 @@ pub(super) fn encrypt(
         payload,
     )?;
     // The JWE Encrypted Key is empty in Direct Key Agreement (RFC 7518, Section 4.6).
-    Ok(format!(
+    Ok(Jwe::new(format!(
         "{protected}..{}.{}.{}",
         base64url::encode(&iv),
         base64url::encode(&sealed.ciphertext),
         base64url::encode(&sealed.tag)
-    ))
+    )))
 }

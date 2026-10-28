@@ -53,12 +53,9 @@ impl Prepared<'_, '_> {
     ///
     /// # Errors
     ///
-    /// [`PresentationError`]: an effect without a signature, a signature that does not verify,
-    /// a proof that failed, or a `vp_token` or submission that could not be built.
-    ///
-    /// # Panics
-    ///
-    /// When a signature names no effect, or two answer one effect.
+    /// [`PresentationError`]: a signature that names no effect, two that answer one effect, an
+    /// effect without a signature, a signature that does not verify, a proof that failed, or a
+    /// `vp_token` or submission that could not be built.
     pub fn finish(
         self,
         signatures: Vec<(SignId, Es256Signature)>,

@@ -21,7 +21,7 @@ use p256::{EncodedPoint, PublicKey, SecretKey};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use siros_oid4vp::{
-    ErrorCode, Handover, IntakeState, JwkThumbprint, Method, Presentation, ResponseMode,
+    ErrorCode, Handover, IntakeState, JwkThumbprint, PostBody, Presentation, ResponseMode,
     Submission, VerifiedRequest,
 };
 use support::*;
@@ -303,12 +303,12 @@ fn a_produced_cwt_response_decrypts_to_its_authorization_response() {
         let Submission::Post(post) = submission else {
             panic!("a POST")
         };
-        assert_eq!(post.url().as_str(), RESPONSE_URI);
-        let Method::Post { content_type, body } = post.method() else {
-            panic!("a POST")
+        assert_eq!(post.response_uri().as_str(), RESPONSE_URI);
+        assert_eq!(post.mode(), ResponseMode::DirectPostCwt, "case {seed}");
+        let PostBody::Cwt(message) = post.body() else {
+            panic!("a COSE_Encrypt body")
         };
-        assert_eq!(content_type.as_str(), "application/cwt", "case {seed}");
-        let opened = decrypt(body, &recipient());
+        let opened = decrypt(message.as_bytes(), &recipient());
         assert_eq!(opened.alg, alg, "case {seed}");
         assert_eq!(opened.kid, kid, "case {seed}");
         assert_eq!(entries(&opened.plaintext), entries(expected), "case {seed}");

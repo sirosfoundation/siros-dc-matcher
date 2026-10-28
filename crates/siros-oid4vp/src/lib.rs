@@ -14,7 +14,9 @@
 //!
 //! The crate is pure and offline. Intake names the Request Object of a request by reference
 //! and each trust evaluation it needs as an [`intake::Effect`], and the host answers with the
-//! text it obtained or its verdict. Randomness comes from the caller's CSPRNG.
+//! text it obtained or its verdict. A [`Submission`] is the response as data, which the host
+//! transmits; [`Reply::parse`] reads the body the Verifier answers a direct post with.
+//! Randomness comes from the caller's CSPRNG.
 
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
@@ -47,7 +49,6 @@ pub mod unverified;
 
 #[cfg(feature = "crypto")]
 mod bound;
-pub mod fetch;
 #[cfg(feature = "crypto")]
 mod form;
 #[cfg(feature = "crypto")]
@@ -72,7 +73,6 @@ pub use protocol::Protocol;
 pub use semantic::{Person, SemanticIdError, SemanticIdentifier};
 pub use unverified::{diagnose, CompactFault, NoQuery, PayloadFault, UnverifiedRequest};
 
-pub use fetch::{BodyLimit, Fetch, FetchResponse, HttpStatus, MediaType, Method, Redirects};
 pub use siros_codec::url::HttpsUrl;
 
 #[cfg(feature = "crypto")]
@@ -91,8 +91,9 @@ pub use request::{
 };
 #[cfg(feature = "crypto")]
 pub use response::{
-    concat_kdf, cose_kdf, read_reply, ContentKey, EncryptionFault, Presentation, RedirectUri,
-    ReplyFault, ResponseError, Submission, VpToken,
+    concat_kdf, cose_kdf, ContentKey, CoseEncrypt, DcApiData, EncryptionFault, Jwe, Outcome, Post,
+    PostBody, PostParameters, Presentation, RedirectUri, Reply, ReplyFault, ResponseError,
+    ResponseParameters, Submission, VpToken, VpTokenJson,
 };
 #[cfg(feature = "crypto")]
 pub use values::{AttestationIssuer, Kid, Origin, TrustChain, WalletNonce};

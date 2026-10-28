@@ -17,8 +17,8 @@ use sha2::{Digest, Sha256};
 use siros_codec::base64url;
 use siros_codec::date::DateTime;
 use siros_oid4vp::{
-    concat_kdf, cose_kdf, ContentEncryption, Effect, EffectResult, IntakeError, IntakeState,
-    Method, Origin, Step, Submission, TrustAnswer, Verdict, VerifiedRequest,
+    concat_kdf, cose_kdf, ContentEncryption, DcApiData, Effect, EffectResult, IntakeError,
+    IntakeState, Origin, PostParameters, Step, Submission, TrustAnswer, Verdict, VerifiedRequest,
 };
 use x509_cert::builder::{Builder, CertificateBuilder, Profile};
 use x509_cert::der::asn1::ObjectIdentifier;
@@ -383,17 +383,12 @@ pub fn dc_api_signed_request(params: &Value, signer: Signer, form: SignedForm) -
 /// The JWE a submission carries: `data.response`, or the form parameter `response`.
 fn jwe_of(submission: &Submission) -> String {
     match submission {
-        Submission::DcApi(data) => data["response"].as_str().unwrap().to_owned(),
-        Submission::Post(post) => {
-            let Method::Post { body, .. } = post.method() else {
-                panic!("a POST")
-            };
-            let body = std::str::from_utf8(body).unwrap();
-            let encoded = body.strip_prefix("response=").unwrap();
-            assert!(!encoded.contains('&'), "one form parameter");
-            // The JWE's characters need no percent-encoding.
-            encoded.to_owned()
-        }
+        Submission::DcApi(DcApiData::Jwt(jwe)) => jwe.as_str().to_owned(),
+        Submission::Post(post) => match post.parameters() {
+            PostParameters::Jwt(jwe) => jwe.as_str().to_owned(),
+            other => panic!("direct_post.jwt, got {other:?}"),
+        },
+        Submission::DcApi(other) => panic!("dc_api.jwt, got {other:?}"),
     }
 }
 
@@ -466,11 +461,10 @@ pub fn decrypt_cwt(submission: &Submission) -> Cbor {
     let Submission::Post(post) = submission else {
         panic!("a POST")
     };
-    let Method::Post { content_type, body } = post.method() else {
-        panic!("a POST")
+    let PostParameters::Cwt(message) = post.parameters() else {
+        panic!("direct_post.cwt, got {post:?}")
     };
-    assert_eq!(content_type.as_str(), "application/cwt");
-    let message: Cbor = ciborium::from_reader(&body[..]).unwrap();
+    let message: Cbor = ciborium::from_reader(message.as_bytes()).unwrap();
     let Cbor::Tag(96, message) = message else {
         panic!("COSE_Encrypt")
     };
