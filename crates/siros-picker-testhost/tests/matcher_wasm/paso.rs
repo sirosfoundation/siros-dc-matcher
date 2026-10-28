@@ -25,18 +25,18 @@ macro_rules! vector {
     };
 }
 
-const CARD: &str = "https://bank.example/sca/card";
-const ACCOUNT: &str = "https://bank.example/sca/account";
-const PID: &str = "https://credentials.example/pid";
-const PID_2: &str = "https://credentials.example/pid-2";
-const LOYALTY: &str = "https://shop.example/loyalty";
-const PAYMENT: &str = "urn:paso:sca:global:payment:1";
+pub const CARD: &str = "https://bank.example/sca/card";
+pub const ACCOUNT: &str = "https://bank.example/sca/account";
+pub const PID: &str = "https://credentials.example/pid";
+pub const PID_2: &str = "https://credentials.example/pid-2";
+pub const LOYALTY: &str = "https://shop.example/loyalty";
+pub const PAYMENT: &str = "urn:paso:sca:global:payment:1";
 const VERSIONED: &str = "https://bank.example/sca/versioned";
 const LEGACY: &str = "https://bank.example/sca/legacy";
 const IBAN: &str = "https://issuer.bank.example/credentials/sca/iban/1.0";
 
 /// The signed DC API request of `dcql_query` carrying `entries`.
-fn request(dcql_query: Value, entries: &[Value]) -> Vec<u8> {
+pub fn request(dcql_query: Value, entries: &[Value]) -> Vec<u8> {
     let transaction_data: Vec<String> = entries
         .iter()
         .map(|entry| b64(entry.to_string().as_bytes()))
@@ -63,7 +63,7 @@ fn query(id: &str, vct: &str, claims: &[&str]) -> Value {
 }
 
 /// The PaSO payment definition of Proof Metadata, Annex A.2.
-fn payment_definition() -> Value {
+pub fn payment_definition() -> Value {
     vector!("paso/metadata-a2-payload.json")["credential_metadata"]["transaction_data_types"]
         [PAYMENT]
         .clone()
@@ -71,7 +71,7 @@ fn payment_definition() -> Value {
 
 /// A wallet holding `held`, the host configuring `configured` and holding no type metadata of
 /// the credentials' types.
-fn configured_wallet(held: Vec<Held>, configured: &Value, absent: &[&str]) -> Wallet {
+pub fn configured_wallet(held: Vec<Held>, configured: &Value, absent: &[&str]) -> Wallet {
     let mut wallet = Wallet::new(held);
     wallet.configuration = Configuration::parse(&configured.to_string()).unwrap();
     wallet.metadata = holding_absent(absent);

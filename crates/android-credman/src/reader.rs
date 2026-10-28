@@ -63,8 +63,8 @@ impl Seek for CredentialReader {
             SeekFrom::End(n) => (self.size as u64).checked_add_signed(n),
             SeekFrom::Current(n) => self.position.checked_add_signed(n),
         };
-        let target = target
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "seek before the start"))?;
+        // A seek before the start is the one error a seek gives: its kind names it.
+        let target = target.ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
         self.position = target;
         Ok(target)
     }

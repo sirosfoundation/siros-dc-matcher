@@ -1,5 +1,6 @@
-//! The CBOR form of a registration's parts: maps with text keys, and the claims path pointers,
-//! entry references, trust store authorities and served-type reasons they carry.
+//! The CBOR form of a registration's facts and records: maps with text keys, and the spans,
+//! claims path pointers, entry references, trust store authorities and served-type reasons they
+//! carry.
 
 #[cfg(feature = "wallet")]
 use siros_codec::cbor::Value as Cbor;
@@ -12,25 +13,20 @@ use siros_trust::{StoreAuthority, StoreType};
 use siros_wallet_state::{BatchId, CredentialId, InstanceId};
 use siros_zkp_req_nym_auth::verifier_id::VerifierIdForm;
 
-use crate::error::{CredentialFault, Member, RegistrationError};
+use crate::error::{CredentialFault, FactsFault, Member};
 
 impl Member {
     /// The member's name in the registration's CBOR.
     pub(crate) fn name(self) -> &'static str {
         match self {
-            Self::Version => "version",
             Self::RegisteredAt => "registered_at",
             Self::Language => "language",
             Self::Diagnostics => "diagnostics",
             Self::Systems => "systems",
             Self::VerifierId => "verifier_id",
-            Self::Icons => "icons",
             Self::DefaultIcon => "default_icon",
-            Self::Definitions => "definitions",
-            Self::Credentials => "credentials",
+            Self::Position => "position",
             Self::Entry => "entry",
-            Self::Format => "format",
-            Self::Type => "type",
             Self::Key => "key",
             Self::Claims => "claims",
             Self::Card => "card",
@@ -55,7 +51,7 @@ impl Member {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Malformed(pub(crate) Member, pub(crate) MemberFault);
 
-impl From<Malformed> for RegistrationError {
+impl From<Malformed> for FactsFault {
     fn from(Malformed(member, fault): Malformed) -> Self {
         Self::Member(member, fault)
     }
@@ -132,6 +128,24 @@ pub(crate) fn boolean(item: &Item<'_>) -> Option<bool> {
     }
 }
 
+/// A span as a record writes it, `[offset, length]`: bytes of a section, from its start.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct WireSpan {
+    pub(crate) offset: u64,
+    pub(crate) length: u64,
+}
+
+/// The span `[offset, length]`.
+pub(crate) fn span(item: &Item<'_>) -> Option<WireSpan> {
+    match item.as_array()? {
+        [offset, length] => Some(WireSpan {
+            offset: unsigned(offset)?,
+            length: unsigned(length)?,
+        }),
+        _ => None,
+    }
+}
+
 /// The entry `[credentialId, batchId, instanceId]`.
 pub(crate) fn entry(item: &Item<'_>) -> Option<EntryRef> {
     match item.as_array()? {
@@ -189,7 +203,7 @@ pub(crate) fn verifier_id_form(name: &str) -> Option<VerifierIdForm> {
 }
 
 /// Every reason a registration records.
-const UNSERVED: [Unserved; 10] = [
+pub(crate) const UNSERVED: [Unserved; 10] = [
     Unserved::Format,
     Unserved::TypeUnsupported,
     Unserved::TypeUndeclared,
@@ -245,6 +259,14 @@ pub(crate) mod write {
                 .map(|(member, value)| (Cbor::text(member.name()), value))
                 .collect(),
         )
+    }
+
+    /// `[offset, length]`.
+    pub(crate) fn span(span: WireSpan) -> Cbor {
+        Cbor::Array(vec![
+            Cbor::Unsigned(span.offset),
+            Cbor::Unsigned(span.length),
+        ])
     }
 
     /// `[credentialId, batchId, instanceId]`.

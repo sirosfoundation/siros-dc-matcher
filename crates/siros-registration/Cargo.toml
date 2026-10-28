@@ -34,6 +34,7 @@ siros-trust = { workspace = true }
 siros-wallet-state = { workspace = true }
 siros-zkp-req = { workspace = true }
 siros-zkp-req-nym-auth = { workspace = true }
+rustc-hash = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
@@ -45,6 +46,10 @@ required-features = ["wallet"]
 
 [[test]]
 name = "icon"
+required-features = ["wallet"]
+
+[[test]]
+name = "refusals"
 required-features = ["wallet"]
 
 [[test]]

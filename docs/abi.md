@@ -12,7 +12,7 @@ and an entry its delegation from level 7; a missing import traps only when calle
 |---|---|---|
 | `GetWasmVersion` | `credman` | Host ABI level. Below 2 the matcher emits nothing |
 | `GetRequestSize` / `GetRequestBuffer` | `credman` | The DC API request JSON, shaped `{"requests":[{"protocol":…,"data":…}]}` |
-| `GetCredentialsSize` / `ReadCredentialsBuffer` | `credman` | The registration the wallet registered (`siros-registration`), read at an offset until complete |
+| `GetCredentialsSize` / `ReadCredentialsBuffer` | `credman` | The registration the wallet registered (`siros-registration`, [`registration.md`](registration.md)), read at the offsets of the parts a request needs |
 | `AddEntrySet` / `AddEntryToSet` / `AddFieldToEntrySet` | `credman_v2` | Grouped entries: one set per offer. An entry's `metadata` string carries the pick (K3) |
 | `AddPaymentEntryToSet` / `AddPaymentEntryToSetV2` | `credman_v2` | The payment entry of a credential that takes a payment rulebook's transaction: payee, amount, and from level 3 `additional_info` |
 | `SetDelegationTypeForEntryInSet` | `credman_v7` | Whether the host completes the presentation without the wallet's UI (A9) |

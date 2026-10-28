@@ -140,7 +140,7 @@ impl ZkpReqQuery {
         if !query.claims().is_empty() {
             return Err(RequestRule::ClaimsPresent);
         }
-        let credential_type = read_meta(query.meta())?;
+        let credential_type = CredentialType::of_meta(query.meta())?;
         let items = read_items(query.extension("_req"))?;
         let (options, req_sets) = read_options(query.extension("_req_sets"), items.len())?;
         Ok(Self {
@@ -215,37 +215,44 @@ impl ZkpReqQuery {
     }
 }
 
-fn read_meta(meta: &Map<String, Value>) -> Result<CredentialType, RequestRule> {
-    let source_format = match meta.get("source_format") {
-        None => Err(MemberFault::Absent),
-        Some(Value::String(text)) if text.is_empty() => Err(MemberFault::Empty),
-        Some(Value::String(text)) => Ok(text.as_str()),
-        Some(_) => Err(MemberFault::WrongType),
-    }
-    .map_err(RequestRule::SourceFormatInvalid)?;
-    let credential_type = match source_format {
-        "mso_mdoc" => match meta.get("doctype_value") {
-            None => Err(TypeValueFault::Member(MemberFault::Absent)),
-            Some(Value::String(doctype)) => Ok(CredentialType::MsoMdoc {
-                doctype: DocType::new(doctype),
-            }),
-            Some(_) => Err(TypeValueFault::Member(MemberFault::WrongType)),
-        },
-        "dc+sd-jwt" => non_empty_strings(meta.get("vct_values"), Vct::new)
-            .map(|vct_values| CredentialType::SdJwt { vct_values })
-            .map_err(TypeValueFault::Member),
-        "jwt_vc_json" | "ldp_vc" => {
-            type_values(meta.get("type_values")).map(|type_values| CredentialType::W3c {
-                source_format: CredentialFormat::new(source_format),
-                type_values,
-            })
+impl CredentialType {
+    /// The credential type `meta` names for its `source_format` (Section 1.1).
+    ///
+    /// # Errors
+    ///
+    /// [`RequestRule::SourceFormatInvalid`] and [`RequestRule::TypeValueInvalid`].
+    pub fn of_meta(meta: &Map<String, Value>) -> Result<Self, RequestRule> {
+        let source_format = match meta.get("source_format") {
+            None => Err(MemberFault::Absent),
+            Some(Value::String(text)) if text.is_empty() => Err(MemberFault::Empty),
+            Some(Value::String(text)) => Ok(text.as_str()),
+            Some(_) => Err(MemberFault::WrongType),
         }
-        _ => Ok(CredentialType::Profiled {
-            source_format: CredentialFormat::new(source_format),
-            meta: meta.clone(),
-        }),
-    };
-    credential_type.map_err(RequestRule::TypeValueInvalid)
+        .map_err(RequestRule::SourceFormatInvalid)?;
+        let credential_type = match source_format {
+            "mso_mdoc" => match meta.get("doctype_value") {
+                None => Err(TypeValueFault::Member(MemberFault::Absent)),
+                Some(Value::String(doctype)) => Ok(CredentialType::MsoMdoc {
+                    doctype: DocType::new(doctype),
+                }),
+                Some(_) => Err(TypeValueFault::Member(MemberFault::WrongType)),
+            },
+            "dc+sd-jwt" => non_empty_strings(meta.get("vct_values"), Vct::new)
+                .map(|vct_values| CredentialType::SdJwt { vct_values })
+                .map_err(TypeValueFault::Member),
+            "jwt_vc_json" | "ldp_vc" => {
+                type_values(meta.get("type_values")).map(|type_values| CredentialType::W3c {
+                    source_format: CredentialFormat::new(source_format),
+                    type_values,
+                })
+            }
+            _ => Ok(CredentialType::Profiled {
+                source_format: CredentialFormat::new(source_format),
+                meta: meta.clone(),
+            }),
+        };
+        credential_type.map_err(RequestRule::TypeValueInvalid)
+    }
 }
 
 /// `type_values`: a non-empty array of non-empty arrays of strings.

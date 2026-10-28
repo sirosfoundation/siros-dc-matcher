@@ -5,7 +5,7 @@
 //   node scripts/run_matcher.mjs path/to/request.json  # one you captured
 //
 // The registration is a sample wallet's, which siros-registration's example
-// `sample_registration` writes to target/sample-registration.cbor on the first
+// `sample_registration` writes to target/sample-registration.bin on the first
 // run: one mDL holding `age_over_18` and `family_name`, diagnostics shown.
 //
 // Why this exists: the Rust integration tests in
@@ -28,7 +28,7 @@ import { dirname, extname, join, resolve } from 'node:path';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const WASM = join(root, 'target/wasm32-wasip1/wasm-release/matcher.wasm');
-const REGISTRATION = join(root, 'target/sample-registration.cbor');
+const REGISTRATION = join(root, 'target/sample-registration.bin');
 
 const b64url = (s) => Buffer.from(s, 'utf8').toString('base64url');
 
