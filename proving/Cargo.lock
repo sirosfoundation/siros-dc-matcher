@@ -1315,6 +1315,7 @@ dependencies = [
  "p384",
  "siros-codec",
  "siros-dcql",
+ "thiserror 2.0.21",
  "x509-cert",
 ]
 
