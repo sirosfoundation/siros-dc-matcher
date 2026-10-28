@@ -50,3 +50,6 @@ required-features = ["wallet"]
 [[test]]
 name = "secrets"
 required-features = ["wallet"]
+
+[lints]
+workspace = true

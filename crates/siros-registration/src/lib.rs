@@ -21,7 +21,22 @@
 #![deny(unused_results)]
 #![deny(clippy::cognitive_complexity)]
 #![deny(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
-// Nothing here panics: no attribute can allow these lints.
+// Nothing panics outside the tests. scripts/check_panic_sites.py refuses an
+// allow of these lints there and finds the panics they cannot see.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::panic,
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::unreachable,
+        clippy::todo,
+        clippy::unimplemented,
+        clippy::indexing_slicing,
+        clippy::disallowed_methods
+    )
+)]
+// No attribute can allow these lints, in the tests either.
 #![forbid(
     clippy::unwrap_used,
     clippy::expect_used,
