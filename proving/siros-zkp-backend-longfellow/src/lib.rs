@@ -13,8 +13,6 @@
     clippy::panic
 )]
 
-use std::fmt;
-
 use siros_codec::date::Date;
 use siros_zkp_req::ZkProof;
 use siros_zkp_req_nym_auth::prover::{
