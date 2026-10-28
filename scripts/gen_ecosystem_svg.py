@@ -31,20 +31,21 @@ BANDS = [
     ]]),
     ("l4", "L4", "facades · picker · provers", [
         [
-            ("siros-dc-matcher-wasm", "the picker binary"),
-            ("siros-dc-matcher-core", "registration blob, profile"),
+            ("siros-picker", "the picker binary"),
+            ("siros-registration", "the picker's registration"),
             ("android-credman", "host ABI as types"),
             ("android-credman-sys", "Credential Manager imports"),
         ],
         [
-            ("siros-dc-matcher-testhost", "wasmtime host for tests"),
             ("siros-dc-matcher-ffi", "UniFFI surface"),
+            ("siros-dc-matcher-core", "v1 blob and profile, for the FFI"),
+            ("siros-picker-testhost", "the picker off-device"),
             ("siros-zkp-req-wasm", "browser presenter"),
         ],
         [
             ("siros-zkp-backend-longfellow", "Longfellow prover"),
             ("siros-zkp-backend-vega", "Vega prover"),
-            ("siros-zkp-proving-e2e", "real-proof tests"),
+            ("siros-zkp-proving-e2e", "real proofs end to end"),
         ],
     ]),
     ("l3", "L3", "presentation", [[
@@ -52,11 +53,11 @@ BANDS = [
     ]]),
     ("l2", "L2", "wallet model", [[
         ("siros-wallet-state", "decrypted private data"),
-        ("siros-credential", "typed credentials"),
-        ("siros-display", "cards, claim rows, display text"),
-        ("siros-transaction-data", "TS12 transaction data"),
+        ("siros-credential", "typed credentials, issuer chain"),
+        ("siros-display", "cards and rows, one language"),
+        ("siros-transaction-data", "PaSO and TS12 transactions"),
     ]]),
-    ("l1", "L1", "protocols · formats", [
+    ("l1", "L1", "protocols · formats · trust", [
         [
             ("siros-dcql", "DCQL · on crates.io"),
             ("siros-oid4vp", "OpenID4VP request intake"),
@@ -66,18 +67,19 @@ BANDS = [
         [
             ("siros-zkp-req", "zkp_req protocol"),
             ("siros-zkp-req-nym-auth", "nym_auth catalogue"),
+            ("siros-trust", "trust store, issuer chains"),
         ],
     ]),
     ("l0", "L0", "encodings", [[
-        ("siros-codec", "strict CBOR · base64url · CBOR dates"),
+        ("siros-codec", "strict CBOR and JSON · base64url · shared types"),
     ]]),
 ]
 
 HOST_ITEMS = [
-    ("Storage", "wallet state, display metadata"),
+    ("Storage", "wallet state, held metadata"),
     ("Keys", "signing through wscd"),
     ("Network", "Fetch effects"),
-    ("Trust", "Trust effect verdicts"),
+    ("Trust", "store provisioning, verdicts"),
     ("Platform", "clock, language, UI"),
 ]
 

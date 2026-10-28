@@ -20,19 +20,27 @@ The Verifier's `client_metadata.vp_formats_supported.zkp_req` holds `proof_backe
 
 ## The protocol's rules (`zkp_req`, Sections 1.1, 1.2, 2, 2.1)
 
-Each makes the request invalid (`invalid_request`). Codes:
+`siros-dcql` parses the Credential Query first and refuses what OpenID4VP 1.0, Section 6 forbids,
+with its own codes (`dcql_malformed`, `query_id_empty`, `claim_sets_without_claims`, …): a query
+that is no object, an `id` outside Section 6.1, an absent or non-object `meta`, a member of DCQL's
+of the wrong type. `ZkpReqQuery::parse` reads the `CredentialQuery` DCQL gives; `_req` and
+`_req_sets` are its extension members. Each rule below makes the request invalid
+(`invalid_request`). Codes:
 
 | Code | Rule |
 | :-- | :-- |
-| `query_not_object`, `query_id_invalid`, `format_not_zkp_req` | the Credential Query is an object with a non-empty `id` and `format` `zkp_req` |
-| `claims_present`, `claim_sets_present` | `claims` and `claim_sets` are absent |
-| `meta_invalid`, `source_format_invalid`, `type_value_invalid` | `meta` is an object with `source_format` and the type member DCQL defines for it |
+| `format_not_zkp_req` | `format` is `zkp_req` |
+| `claims_present` | `claims` is absent, and with it `claim_sets` |
+| `source_format_invalid`, `type_value_invalid` | `meta` has `source_format` and the type member DCQL defines for it |
 | `req_invalid`, `item_not_object`, `item_member_unknown` | `_req` is a non-empty array of objects with only `fn_id`, `params` and `return` |
 | `fn_id_invalid`, `params_not_object` | `fn_id` is a non-empty string, `params` an object |
 | `return_invalid`, `return_repeated` | `return` is ASCII letters, digits, `_` and `-`, unique in the query |
 | `req_sets_invalid`, `option_invalid` | `_req_sets` is a non-empty array of non-empty arrays of `_req` indexes, each once |
-| `trusted_authorities_invalid`, `holder_binding_invalid`, `multiple_invalid` | DCQL's own members are well formed |
 | `formats_missing`, `proof_backend_values_invalid`, `system_id_values_invalid` | the Verifier sends both lists |
+
+`trusted_authorities` follows OpenID4VP 1.0, Section 6.1.1: `siros-dcql` parses it with the
+query, and `siros-trust` resolves it against the credential's issuer chain and the trust store.
+An issuer it does not admit matches nothing; a malformed `aki` value makes the request invalid.
 
 ## The nym_auth catalogue's rules
 
@@ -59,9 +67,10 @@ the Longfellow and Vega systems need a `pseudonym` item with `known-offender-mat
 `sha-256`, and E and C from 0000-01-01 to 9999-12-31. When no option has a usable pair, the Wallet
 sends `vp_formats_not_supported`.
 
-The matcher reads a registered circuit as a system: its `system_id` param is the system, its
-`system` the proof backend, and its `capabilities` (or `functions` and `credential_type`) say what
-it supports.
+The picker reads the systems the registration names, the nym_auth systems whose circuits the
+wallet loaded, in its order of preference. The FFI matching reads a registered circuit as a
+system: its `system_id` param is the system, its `system` the proof backend, and its
+`capabilities` (or `functions` and `credential_type`) say what it supports.
 
 ## Non-disclosure
 
