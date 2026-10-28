@@ -12,20 +12,20 @@ existed.
 ## Unreleased
 
 Adopts the `zkp_req` draft 0.1 and the nym_auth catalogue 0.5 (nym_auth rulebook repository,
-commit `e65861c`), and adds the components of the SIROS wallet core up to the consent view.
-**Breaking**: requests and presentations follow the draft, the DCQL parse enforces OpenID4VP
-1.0, Section 6, the FFI loses `zkp_req_plan`, and the vectors move to the crates that own their
-rules. Consumers that keep a copy of the vectors (siros-sdk-kotlin, siros-sdk-swift) must
-re-copy them from the new directories; the vector set digest below identifies them.
-`matcher.wasm` is 366,631 bytes against the 409,600-byte budget (303,418 at v0.11.0), sha256
-`e67d934f3d689faaf46176742bdcdaa2d832fc428f1914ec34bd84b50c6e2bb7` with Rust 1.99.1 and
+commit `e65861c`), and adds the components of the SIROS wallet core. **Breaking**: requests and
+presentations follow the draft, the DCQL parse enforces OpenID4VP 1.0, Section 6, the FFI loses
+`zkp_req_plan`, and the vectors move to the crates that own their rules. Consumers that keep a
+copy of the vectors (siros-sdk-kotlin, siros-sdk-swift) must re-copy them from the new
+directories; the vector set digest below identifies them. `matcher.wasm` is 366,632 bytes
+against the 409,600-byte budget (303,418 at v0.11.0), sha256
+`70bfee85c1cfa109083bb0acc19de6a38ad886d5be80fc373f0e2b9ac5e412fc` with Rust 1.99.1 and
 binaryen version_116.
 
 ### Changed
 
 - The `matcher.wasm` size budget is 409,600 bytes (400 KiB), up from 307,200. The picker runs
   the wallet's matching and transaction data selection over the registration (K2): with images
-  passed through and `wasm-opt -Oz` it measures 366,631 bytes, and the measured alternatives
+  passed through and `wasm-opt -Oz` it measures 366,632 bytes, and the measured alternatives
   that drop parts of K2 were declined.
 - The matcher crate `siros-dc-matcher-wasm` is `siros-picker`, and its test host
   `siros-dc-matcher-testhost` is `siros-picker-testhost`. `make matcher` builds `matcher.wasm`
@@ -49,7 +49,7 @@ binaryen version_116.
   picker ships with the facades wave that gives wallets the writer. Each
   offer is the set `siros-{offer}`, an entry's `cred_id` is the `credentialId`, and the
   standard object's `data` is the pick `{"offer", "query", "credential"}` that
-  `Pick::parse` reads. An entry's fields are its claim rows, then
+  `Planned::picked` maps to the wallet's selection. An entry's fields are its claim rows, then
   the displayed claims of the transaction it takes. An entry's title, subtitle and icon are the
   registered card's title, issuer line and icon. A credential that takes an entry of a
   payment rulebook (the EC TS12 v1.0.1 payment type, PaSO Payment) is a payment entry: payee,
@@ -63,7 +63,9 @@ binaryen version_116.
   reads no calling app origin. `mso_mdoc_zk` matches nothing.
 - The picker and the wallet's plan apply one rule each:
   - A9's rows: `Rows::of` judges the picker's fields (`Field::of_claim`, `proof::rows`), which
-    the plan computes for each credential (`CredentialView::fields`).
+    the plan computes for each credential (`CredentialView::fields`). A background fulfilment
+    takes what the host showed of the picked entries: `Fulfilment::Background(HostDisplay)`,
+    from their `display_skipped`.
   - T4: `Transactions::bind` binds each entry to one credential, and the picker shows the
     transaction on that credential alone.
   - Display: an offer whose members' or additions' claims or proof statements do not show is
@@ -94,6 +96,9 @@ binaryen version_116.
     signers, and whether a signature verifies, takes the wallet, which decides after the
     pick.
     `UnverifiedRequest` holds the values it reads typed.
+  - K3: `Planned::picked` selects the one offer of the plan whose members alone hold the
+    picks, the offer the picker shows; else the one whose members and additions hold them.
+    The picker's offer number is the picker's (`PickError::Unmatched`, `PickError::Ambiguous`).
 - **BREAKING (display):** a label is `LabelText`, display text with a character other than
   white space. A blank OPTIONAL display member (the issuer's `name`, a claim's `name`, a
   logo's `alt_text`) reads as absent; a blank REQUIRED one (the credential's display `name`,
@@ -220,10 +225,12 @@ binaryen version_116.
   - `siros-oid4vp`: `HandoverInvalid` (`Cbor`); `IntakeError` (`AttestationInvalid`,
     `CertificateChainInvalid`, `EncryptionKeyInvalid`, `JwsMalformed`,
     `NotAnAuthorizationRequest`, `ResolvedKeyInvalid`); `NoQuery` (`NotACompactJws`,
-    `PayloadNotBase64url`); `SemanticIdError` (`Encoding`, `Policies`).
-  - `siros-presentation`: `ChoiceError` (`Pair`); `PickFault` (`Member`); `PresentationError`
-    (`NoOffer`); `QueryRefusal` (`Authorities`, `Zkp`); `Unproven` (`Seed`, `Unreadable`);
-    `ZkpRefusal` (`Catalogue`, `ClientMetadata`, `Policy`, `Query`).
+    `PayloadNotBase64url`); `ResponseError` (`EncryptionFailed`, `ReplyNotObject`);
+    `SemanticIdError` (`Encoding`, `Policies`).
+  - `siros-presentation`: `ChoiceError` (`Pair`); `DigestError` (`Encoding`); `PickFault`
+    (`Member`); `PresentationError` (`NoOffer`); `QueryRefusal` (`Authorities`, `Zkp`);
+    `Unproven` (`Seed`, `Unreadable`); `ZkpRefusal` (`Catalogue`, `ClientMetadata`,
+    `Policy`, `Query`).
   - `siros-registration`: `CredentialFault` (`Member`); `RegistrationError` (`Member`).
   - `siros-sdjwt`: `ParseError` (`Disclosure`, `IssuerJwt`, `ReservedClaimName`,
     `UnsupportedSdAlg`, `X5c`).
@@ -294,13 +301,19 @@ binaryen version_116.
   each panic with the reason it cannot recover. Every other crate returns an error where a
   broken contract panicked, or a type rules the state out:
   - `siros-presentation`: `PresentationError::Inconsistent` with `Inconsistency` (`Query`,
-    `Candidate`, `Entry`, `ZkpQuery`; `plan_query_unknown`, `plan_candidate_unknown`,
-    `plan_entry_unknown`, `plan_zkp_query_missing`) for a plan that contradicts the matching it
-    was built from, which `Transactions::bind` returns too; `ChoiceError::OptionUnknown`
-    (`choice_option_unknown`) for a proof choice of another query; and `Unproven::Issuer` for
-    an admission of another issuer.
+    `Candidate`, `Entry`, `ZkpQuery`, `NymAuthRequest`; `plan_query_unknown`,
+    `plan_candidate_unknown`, `plan_entry_unknown`, `plan_zkp_query_missing`,
+    `plan_nym_auth_request_refused`) for a plan that contradicts the matching it was built
+    from, which `Transactions::bind` returns too; `ChoiceError::OptionUnknown`
+    (`choice_option_unknown`) for a proof choice of another query; `Unproven::Issuer` for an
+    admission of another issuer; `PresentationError::Pointer` and `Disclosure` for a claims
+    pointer or a disclosure the credential refuses, `Disclosure` in place of `ElementRepeated`;
+    `KeyFactorsMissing` for a signing key without its authentication factors; and
+    `SignatureError::Unknown` and `Repeated` for a signature of no `Sign` effect and a second
+    one.
   - `siros-oid4vp`: `IntakeError::AnswerMismatch`, `UnexpectedTrustKey` and `UnusedAnswer`
-    for a host that breaks intake's effect protocol.
+    for a host that breaks intake's effect protocol, and `EncryptionFault::EphemeralKey`,
+    `KdfLength` and `Seal` for an encryption the core cannot complete.
   - `siros-zkp-req-nym-auth`: `OtherIssuer::Certificate` and `Query`
     (`admission_other_certificate`, `admission_other_query`) for an admission of another
     certificate or query; `Unanswerable::OtherQuery` and `ProveError::OtherQuery`
@@ -315,6 +328,8 @@ binaryen version_116.
     template splits and sorted helpers, `siros-presentation`'s seed opening,
     `siros-dc-matcher-core`'s `ZkpReqSelection::to_json` and the test host's calling-app
     fields and entry lookup have no panic path.
+- **BREAKING (Rust API):** `Prepared::finish` takes the host's signatures as
+  `Es256Signature`, which `Es256Signature::parse` reads from the 64 bytes of `r ‖ s`.
 - The picker panics, with its reason, on an `Inconsistency` or a `ChoiceError` the
   presentation component returns for an offer: no entry is right for it.
 - **BREAKING (Rust API):** `android-credman` panics on a host that breaks its ABI; its
@@ -353,20 +368,23 @@ binaryen version_116.
   `member::MemberFault` with its `ArrayIndex`, `chain::CertificateChain` (the DER chain an mdoc
   `x5chain` and an `x5c` carry), the `position!` and `text_value!` macros that declare value
   newtypes, and `display_code!`, which shows an error by its stable code.
-- `siros-mdoc`, ISO/IEC 18013-5 mdocs: the stored credential and the device signature's
-  signing input (`device_signing_input`, a
+- `siros-mdoc`, ISO/IEC 18013-5 mdocs: the stored credential, element selection, the
+  `DeviceResponse`, and the device signature's signing input (`device_signing_input`, a
   `SigStructure` whose `digest` the device key signs). Names and values are types: `DocType`
   (siros-dcql's), `NameSpace`, `ElementIdentifier`, `DigestId`, `ItemDigest`, `CoseAlgorithm`,
   `SigStructure`, `MessageDigest` and `SessionTranscript`. `IssuerAuth::x5chain` gives the whole
   `x5chain`, the Document Signer's certificate first, and `P256Key` reads an uncompressed point.
   Every `MdocError` carries its fault.
-- `siros-sdjwt`, SD-JWT VC: the stored credential with its issuer JWT's `x5c` (`SdJwt::x5c`).
-  Its JSON parts read with
+- `siros-sdjwt`, SD-JWT VC: the stored credential with its issuer JWT's `x5c` (`SdJwt::x5c`),
+  disclosure selection over `ClaimPath`s (`SdJwt::select`), and the presentation with its KB-JWT
+  signing input: `Presentation::key_binding` takes a `NumericDate`, an `Audience` and a
+  `KbNonce`, and `KeyBinding::assemble` an `Es256Signature`. Its JSON parts read with
   siros-codec's strict reader. Every `ParseError` carries its cause: `IssuerJwtFault`,
   `DisclosureFault` with the disclosure's `DisclosureId`, `SdAlgFault`, `ReservedFault`, the
   repeated `Digest`, the misplaced disclosure with its `Placement`, the existing claim name, the
   unreferenced disclosure, and `X5cError` with the certificate's `X5cIndex`. A part nested
   deeper than 64 levels is a JSON fault of that part; `claims_too_deep` covers 33 to 64 levels.
+  `KeyBindingError` is `RequiredClaim` or `RepeatedClaim` with the name.
 - `siros-credential`, the format-independent credential: typed claims read by `ClaimPath`,
   validity (`UsableCredential::time`), `credential_type()` (a `CredentialType`: `Vct` or
   `DocType`), `issuer()` (an `IssuerIdentifier`), `configuration_id()` (a `ConfigurationId`),
@@ -387,7 +405,8 @@ binaryen version_116.
   `kid` of each key pair. A repeated member name keeps its last value, as `JSON.parse` in
   `wallet-frontend` does. A refusal is a `WalletStateError` with its cause: the `JsonTextError`
   of a member of another JSON type (`ArrayFault`, `MetadataFault`, `TypeFault`,
-  `PresentationsFault`). `CredentialId::new`, `BatchId::new` and `InstanceId::new` are
+  `PresentationsFault`). `PresentationRecord::new` gives the record the host appends as a
+  `new_presentation` event (H5). `CredentialId::new`, `BatchId::new` and `InstanceId::new` are
   public, for the entry references the picker registration carries; `IssuerIdentifier::parse`
   and `ConfigurationId::parse` refuse the empty string (`EmptyIdentifier`).
 - `siros-display`, display for the wallet core: display metadata, credential cards (`Card`, with
@@ -424,8 +443,11 @@ binaryen version_116.
   (unsigned, signed, multisigned) into a `VerifiedRequest`, with `Fetch` and `Trust` effects for
   the host (a `Fetch` states the most redirects it follows, `Fetch::redirects`); the Client
   Identifier Prefixes `x509_san_dns`, `x509_hash`, `decentralized_identifier`,
-  `verifier_attestation`, `openid_federation` and `redirect_uri`; and ES256 Request Objects.
-  `Handover` and
+  `verifier_attestation`, `openid_federation` and `redirect_uri`; ES256 Request Objects; the
+  `vp_token` (`VpToken::json`), its submission per Response Mode, `ECDH-ES` response encryption
+  with `A128GCM` or `A256GCM`, error submissions, and the reply to a direct post.
+  `direct_post.cwt` (`zkp_req.md`, Section 6.2) posts the CBOR Authorization Response in a
+  `COSE_Encrypt` by ECDH-ES + HKDF-256 with `A128GCM`, `A192GCM` or `A256GCM`. `Handover` and
   `ec_jwk_thumbprint` give the session transcript's handover, with `None` for the CBOR `null` of
   an unencrypted response (B.2.6). `VerifiedRequest::access_certificate` gives the
   `CertificateDer` and the `SemanticIdentifier`, or the `SemanticIdError`, of an `x509_san_dns` or
@@ -509,6 +531,9 @@ binaryen version_116.
     `Taken::payment` gives the payee and amount of a payment rulebook's entry (`Payment`).
     `grapheme_clusters` counts UAX #29 clusters over a table of 1,117 runs of Unicode 16.0;
     unicode-segmentation is the oracle of a test.
+  - `Binding::kb_jwt_claims` gives the KB-JWT claims of the entry a credential binds:
+    `transaction_data_hashes` over the entry as received, `transaction_data_hashes_alg` when
+    the entry carried it, and under a TS12 rulebook `jti`, `response_mode` and `amr`.
   - Every refusal of a request is a `TransactionDataError`: `invalid_request` for an unsigned
     request, `invalid_transaction_data` otherwise.
   - Without the default feature `wallet` the crate holds the selection over a registration for
@@ -605,7 +630,7 @@ binaryen version_116.
     against the host's `TrustStore` (`PlanInput`): the format table, `meta`, holder binding and
     no query but `zkp_req` on a nym_auth attestation (A1); a credential whose issuer the query's
     `trusted_authorities` refuse matches nothing, in every format (TR3), and a candidate carries
-    its issuer's admission into the offers. `zkp_req` is one selection, then the
+    its issuer's admission into the offers and phase 2. `zkp_req` is one selection, then the
     usable attestation and the `secret_seed` delivered in the credential's auxiliary data (A2),
     read with siros-codec's strict reader: a credential without one is excluded with its
     `NoSeed`, an `opening` absent, not a string, not base64url or not 16 bytes each its own.
@@ -632,11 +657,22 @@ binaryen version_116.
     `zkp_req` query. A request without an offer gives its `Failure`: the refused query and why,
     the credentials the first query without candidates excludes and why (`excluded`), or no
     combination.
+  - Phase 2 parses the selection against the plan made again, with the non-empty subset of each
+    `multiple` member by `credentialId`, kept in the member's order. A selection that leaves out
+    the credential an entry binds to is refused, and phase 2 binds the entries to the
+    credentials the view named. `Planned::picked` makes the selection from the credential picker
+    entries the user picked, each naming its offer, query and `credentialId` (K3). Phase 2 gives
+    a `Sign` effect per signing input, verifies each signature under the instance's holder key
+    (A5), and gives one `vp_token` (A8), its submission for the request's Response Mode and the
+    presentation record. It proves `zkp_req` in-process through a `NymAuthProver`. A decline,
+    and a background fulfilment of an offer that needs the wallet's display, give
+    `access_denied`.
   - Positions and identifiers are their own types (`QueryIndex`, `CandidateIndex`, `SetIndex`,
-    `OfferIndex`, `EntryPosition`, `PlanDigest`, and DCQL's `QueryId`), and so are A9's facts.
-    The plan fetches nothing: the host gives it every input beforehand. Without the default
-    feature `wallet` it holds the matching the picker runs, over `MatchCredential`, links no
-    chain validation, and builds with Rust 1.82: `Asked::of` takes an `UnverifiedRequest` or a
+    `OfferIndex`, `AdditionIndex`, `EntryPosition`, `PlanDigest`, `SignId`, and DCQL's
+    `QueryId`), and so are A9's facts. The plan fetches nothing: the host gives it every input
+    beforehand. Without the default feature `wallet` it holds the
+    matching the picker runs, over `MatchCredential`, links no chain validation or response
+    crypto, and builds with Rust 1.82: `Asked::of` takes an `UnverifiedRequest` or a
     `VerifiedRequest` (`MatchRequest`), `Transactions` selects transaction data over a
     `TransactionSource` and gives the offers or why there are none (`NoOffer`), and `Pick` is
     what a picker entry carries (K3). The feature `test-fixtures` holds the wallet, verifier,
