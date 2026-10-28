@@ -40,7 +40,6 @@
         clippy::disallowed_methods
     )
 )]
-#![cfg_attr(test, allow(clippy::disallowed_methods))]
 
 pub mod consent;
 pub mod formats;

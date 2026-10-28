@@ -44,7 +44,6 @@
         clippy::disallowed_methods
     )
 )]
-#![cfg_attr(test, allow(clippy::disallowed_methods))]
 
 pub mod age;
 pub mod catalogue;

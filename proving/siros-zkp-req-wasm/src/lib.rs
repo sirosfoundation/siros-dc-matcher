@@ -28,7 +28,6 @@
         clippy::disallowed_methods
     )
 )]
-#![cfg_attr(test, allow(clippy::disallowed_methods))]
 
 use serde::{Deserialize, Serialize};
 use serde_bytes::ByteBuf;

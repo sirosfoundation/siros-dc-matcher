@@ -21,7 +21,6 @@
         clippy::disallowed_methods
     )
 )]
-#![cfg_attr(test, allow(clippy::disallowed_methods))]
 
 use siros_codec::date::Date;
 use siros_zkp_req_nym_auth::prover::{

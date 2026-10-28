@@ -37,7 +37,6 @@
         clippy::disallowed_methods
     )
 )]
-#![cfg_attr(test, allow(clippy::disallowed_methods))]
 
 mod credential;
 mod display_rule;

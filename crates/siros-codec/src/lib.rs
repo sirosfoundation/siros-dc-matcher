@@ -22,7 +22,6 @@
         clippy::disallowed_methods
     )
 )]
-#![cfg_attr(test, allow(clippy::disallowed_methods))]
 
 pub mod base64;
 pub mod base64url;

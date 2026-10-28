@@ -32,7 +32,6 @@
         clippy::disallowed_methods
     )
 )]
-#![cfg_attr(test, allow(clippy::disallowed_methods))]
 
 pub mod client_id;
 pub mod error_code;
