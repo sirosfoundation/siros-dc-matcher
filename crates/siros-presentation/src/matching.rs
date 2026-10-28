@@ -480,6 +480,13 @@ impl<'r, C: MatchCredential, R> Answered<'r, C, R> {
         self.queries.get(index.value())
     }
 
+    /// The position of the Credential Query `id`.
+    pub fn index_of(&self, id: &str) -> Option<QueryIndex> {
+        self.indexed()
+            .find(|(_, answers)| answers.asked.id == *id)
+            .map(|(index, _)| index)
+    }
+
     /// The request's `credential_sets`.
     pub fn credential_sets(&self) -> Option<&'r [CredentialSetQuery]> {
         self.credential_sets

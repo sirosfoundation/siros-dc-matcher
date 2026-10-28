@@ -100,6 +100,14 @@ pub(crate) struct Offered<'w, 'a, C: MatchCredential, R> {
     pub(crate) candidates: Vec<(CandidateIndex, &'w Candidate<C>)>,
 }
 
+#[cfg(feature = "wallet")]
+impl<C: MatchCredential, R> Offered<'_, '_, C, R> {
+    /// Whether the entry of `bound` binds to the member's candidate `candidate`.
+    pub(crate) fn carries(&self, bound: &Bound, candidate: &Candidate<C>) -> bool {
+        *bound == Bound::of(self.answers, candidate)
+    }
+}
+
 /// Each member of `members` as the matching answers it, in order.
 ///
 /// # Errors

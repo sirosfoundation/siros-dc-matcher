@@ -1,6 +1,6 @@
 //! The wallet, its host and the verifier that this crate's tests and the credential picker's
-//! differential test drive the plan with: credentials issued here, and requests signed and taken
-//! through intake.
+//! differential test drive the plan with: credentials issued here, requests signed and taken
+//! through intake, responses decrypted with JWE and COSE code of their own.
 //!
 //! Behind the `test-fixtures` feature: a dev-time facility, outside the shipped surface. It
 //! panics on a broken fixture, as a test does.

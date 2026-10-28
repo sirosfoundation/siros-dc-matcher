@@ -2600,6 +2600,8 @@ dependencies = [
 name = "siros-presentation"
 version = "0.11.0"
 dependencies = [
+ "aes-gcm",
+ "ciborium",
  "itertools",
  "p256",
  "rand_core",
@@ -2610,8 +2612,10 @@ dependencies = [
  "siros-credential",
  "siros-dcql",
  "siros-display",
+ "siros-mdoc",
  "siros-oid4vp",
  "siros-presentation",
+ "siros-sdjwt",
  "siros-transaction-data",
  "siros-trust",
  "siros-wallet-state",

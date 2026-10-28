@@ -1,7 +1,7 @@
 //! What each side offers for a case: the wallet's plan over the request intake verified, and
 //! the picker's entry sets over the registration the wallet writes, in one form to compare.
 
-use android_credman::Picked;
+use android_credman::{Picked, Shown as HostShown};
 use serde_json::Value;
 use siros_codec::date::DateTime;
 use siros_display::Field;
@@ -9,7 +9,9 @@ use siros_oid4vp::Verdict;
 use siros_presentation::testing::host::label_text;
 use siros_presentation::testing::verifier::{dc_api_intake, intake_with, NOW, ORIGIN};
 use siros_presentation::testing::wallet::Wallet;
-use siros_presentation::{ConsentView, CredentialView, OfferView, Pick, WalletDisplay};
+use siros_presentation::{
+    ConsentView, CredentialView, Fulfilment, HostDisplay, OfferView, Pick, Planned, WalletDisplay,
+};
 use siros_registration::{write, CredentialIcon, Diagnostics, RasterIcon, RegistrationInput};
 use siros_transaction_data::{LocationStep, RowValue, Segment};
 
@@ -303,4 +305,38 @@ pub fn picker_offers(captured: &Captured, level: u32) -> Vec<Offered> {
     }
     offers.sort_by_key(|(at, _)| *at);
     offers.into_iter().map(|(_, offer)| offer).collect()
+}
+
+/// The offer of `planned` the picks of the entries of the picker's offer at `offer` select,
+/// when the wallet then chooses it (K3): from its background service when the picker delegated
+/// the offer, with what the host showed of the picked entries (K4), else on its UI.
+pub fn chosen_through_picks(
+    planned: &Planned<'_>,
+    captured: &Captured,
+    offer: usize,
+) -> Option<usize> {
+    let entries: Vec<&CapturedEntry> = captured
+        .entries
+        .iter()
+        .filter(|entry| entry.set_id == format!("siros-{offer}"))
+        .collect();
+    let picks: Vec<Pick> = entries.iter().map(|entry| pick(entry)).collect();
+    let selection = planned.picked(&picks).ok()?;
+    let fulfilment = if entries.iter().all(|entry| entry.delegation == Some(1)) {
+        Fulfilment::Background(HostDisplay::of(entries.iter().map(|entry| {
+            match Picked::parse(entry.metadata.as_deref().unwrap())
+                .unwrap()
+                .shown()
+            {
+                HostShown::Full => HostDisplay::Full,
+                HostShown::Skipped => HostDisplay::Skipped,
+            }
+        })))
+    } else {
+        Fulfilment::WalletUi
+    };
+    planned
+        .choose(&selection, fulfilment)
+        .ok()
+        .map(|_| selection.offer().value())
 }

@@ -1,6 +1,10 @@
-//! The wallet: its credentials, its host, and the plan.
+//! The wallet: its credentials, its host, and the phases driven to the response.
 
-use crate::{plan, PlanInput, Planned, PresentationError};
+use crate::{
+    plan, AdditionIndex, Fulfilment, OfferIndex, PlanInput, Planned, PresentationError, Response,
+    Selection, SignId, Subset,
+};
+use ciborium::Value as Ciborium;
 use p256::ecdsa::signature::Signer;
 use p256::ecdsa::{Signature, SigningKey};
 use serde_json::{json, Value};
@@ -8,18 +12,20 @@ use sha2::{Digest, Sha256};
 use siros_codec::base64url;
 use siros_codec::cbor::Value as Cbor;
 use siros_codec::date::DateTime;
+use siros_codec::signature::Es256Signature;
 use siros_credential::Credential;
+use siros_dcql::QueryId;
 use siros_display::{CardText, CardWording, DisplayCache, Locale};
 use siros_oid4vp::VerifiedRequest;
-use siros_transaction_data::{Configuration, HeldMetadata};
+use siros_transaction_data::{Amr, Configuration, Factor, HeldMetadata, Inherence, Possession};
 use siros_trust::TrustStore;
 use siros_wallet_state::{CredentialId, WalletState};
 use siros_zkp_req_nym_auth::system::NymAuthSystem;
-use siros_zkp_req_nym_auth::testing::{self, Issuer, Spec, SEED};
+use siros_zkp_req_nym_auth::testing::{self, Issuer, Spec, TestProver, SEED};
 use siros_zkp_req_nym_auth::verifier_id::VerifierIdForm;
 
 use super::host::{holding_absent, issuer_display, label_text};
-use super::verifier::{b64, NOW};
+use super::verifier::{b64, Rng, NOW};
 
 /// The holder's key, nym_auth's test device key, which every credential is bound to.
 pub fn holder() -> SigningKey {
@@ -104,6 +110,11 @@ fn sd_jwt_issued(vct: &str, claims: &[(&str, Value)], extra: Value, header: Valu
         compact.push('~');
     }
     compact
+}
+
+/// The disclosure of a claim of [`sd_jwt`], as the presentation carries it.
+pub fn disclosed(name: &str, value: &Value) -> String {
+    disclosure(name, value)
 }
 
 /// An mdoc of `doc_type` bound to the holder's key, with the elements `items` in one namespace.
@@ -222,6 +233,11 @@ pub fn nym_auth(spec: &Spec) -> (String, Value) {
     (data, auxiliary)
 }
 
+/// The issuer certificate of [`nym_auth`]'s attestations.
+pub fn nym_auth_issuer() -> Vec<u8> {
+    Issuer::root(0x11, "Test Document Signer").der
+}
+
 /// A credential entry of the wallet state: `(format, data, metadata)` with `credentialId` `id`
 /// in batch `batch`.
 pub struct Held {
@@ -264,6 +280,7 @@ pub struct Wallet {
     pub systems: Vec<NymAuthSystem>,
     pub verifier_id: VerifierIdForm,
     pub background: Vec<CredentialId>,
+    pub key_factors: Vec<(siros_wallet_state::KeyId, Amr)>,
     /// The transaction metadata the host holds.
     pub metadata: HeldMetadata,
     pub trust: TrustStore,
@@ -326,6 +343,16 @@ impl Wallet {
             .iter()
             .map(|e| Credential::parse(e).unwrap())
             .collect();
+        let amr = Amr::new(vec![
+            Factor::Possession(Possession::KeyInLocalNativeWscd),
+            Factor::Inherence(Inherence::FingerprintDevice),
+        ])
+        .unwrap();
+        let key_factors = credentials
+            .iter()
+            .filter_map(|c| c.key_id().cloned())
+            .map(|kid| (kid, amr.clone()))
+            .collect();
         Self {
             credentials,
             display: issuer_display(),
@@ -335,6 +362,7 @@ impl Wallet {
             systems: NymAuthSystem::ALL.to_vec(),
             verifier_id: VerifierIdForm::X509SanDns,
             background: Vec::new(),
+            key_factors,
             metadata: holding_absent(&[VCT]),
             trust: TrustStore::parse("[]").unwrap(),
             state,
@@ -370,6 +398,7 @@ impl Wallet {
             systems: &self.systems,
             verifier_id: self.verifier_id,
             background: &self.background,
+            key_factors: &self.key_factors,
             now: DateTime::from_unix(NOW).unwrap(),
         }
     }
@@ -387,6 +416,82 @@ pub fn ready<'a>(input: &PlanInput<'a>) -> Result<Planned<'a>, PresentationError
         "{texts:?}"
     );
     Ok(planned)
+}
+
+/// The host's signatures for every `Sign` effect of `prepared`, with the holder's key.
+pub fn sign_all(signs: &[crate::Sign]) -> Vec<(SignId, Es256Signature)> {
+    signs
+        .iter()
+        .map(|sign| {
+            assert!(sign.key().as_str().starts_with("key-"));
+            let signature: Signature = holder().sign(sign.input());
+            (sign.id(), Es256Signature::new(signature.to_bytes().into()))
+        })
+        .collect()
+}
+
+/// Both phases for the offer at `offer` of the plan of `input`, with the additions at
+/// `additions` and the subsets `subsets` of `credentialId`s: the plan, then
+/// [`respond_with`] the selection on the plan's digest.
+pub fn respond_to(
+    input: &PlanInput<'_>,
+    offer: usize,
+    additions: Vec<usize>,
+    subsets: Vec<(String, Vec<u64>)>,
+) -> Result<Response, PresentationError> {
+    let digest = *ready(input)?.view().digest();
+    let subsets = subsets
+        .into_iter()
+        .map(|(query, ids)| {
+            let ids = ids.into_iter().map(CredentialId::new).collect();
+            Subset::new(QueryId::parse(&query).unwrap(), ids)
+        })
+        .collect();
+    let additions = additions.into_iter().map(AdditionIndex::new).collect();
+    let selection = Selection::new(digest, OfferIndex::new(offer), additions, subsets);
+    respond_with(input, |_| Ok(selection))
+}
+
+/// Phase 2 for the selection `select` makes on the plan of `input`: the plan again, the
+/// selection, the holder's signatures and the response.
+pub fn respond_with(
+    input: &PlanInput<'_>,
+    select: impl FnOnce(&Planned<'_>) -> Result<Selection, PresentationError>,
+) -> Result<Response, PresentationError> {
+    let planned = ready(input)?;
+    let selection = select(&planned)?;
+    let chosen = planned.choose(&selection, Fulfilment::WalletUi)?;
+    let mut rng = Rng(77);
+    let prepared = chosen.prepare(&mut rng)?;
+    let signatures = sign_all(prepared.signs());
+    prepared.finish(signatures, &TestProver { fail: None }, &mut rng)
+}
+
+/// Both phases for the first offer of the plan of `input`: the plan, the plan again, the
+/// selection on the plan's digest, the signatures and the response.
+pub fn respond(input: &PlanInput<'_>) -> Response {
+    let digest = *ready(input).unwrap().view().digest();
+    let planned = ready(input).unwrap();
+    let selection = Selection::new(digest, OfferIndex::new(0), Vec::new(), Vec::new());
+    let chosen = planned.choose(&selection, Fulfilment::WalletUi).unwrap();
+    let mut rng = Rng(77);
+    let prepared = chosen.prepare(&mut rng).unwrap();
+    let signatures = sign_all(prepared.signs());
+    prepared
+        .finish(signatures, &TestProver { fail: None }, &mut rng)
+        .unwrap()
+}
+
+/// An ES256 signature `r ‖ s` verifies `message` under the holder's key.
+pub fn holder_signed(message: &[u8], signature: &[u8]) -> bool {
+    use p256::ecdsa::signature::Verifier;
+    let signature = Signature::from_slice(signature).unwrap();
+    holder().verifying_key().verify(message, &signature).is_ok()
+}
+
+/// The CBOR item of `bytes`, read with ciborium.
+pub fn ciborium(bytes: &[u8]) -> Ciborium {
+    ciborium::from_reader(bytes).unwrap()
 }
 
 /// Every text a consent view shows, the digest included.

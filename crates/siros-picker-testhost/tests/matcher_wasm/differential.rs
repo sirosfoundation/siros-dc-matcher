@@ -1,8 +1,9 @@
 //! The picker against the wallet (K2): for the same request, credentials, metadata, trust store
 //! and time, `matcher.wasm` over the registration the wallet writes offers what the wallet's plan
 //! offers, with the same credentials, titles, issuer lines, rows, transactions, purposes and
-//! delegation. Where the wallet's plan reads what the registration leaves out, the picker offers
-//! more, and the wallet decides. Every run keeps the host's rules: one declaration per set id, and a null
+//! delegation, and the picks of each offer's entries select that offer in the plan (K3). Where
+//! the wallet's plan reads what the registration leaves out, the picker offers more, and the
+//! wallet decides. Every run keeps the host's rules: one declaration per set id, and a null
 //! pointer for an absent subtitle, disclaimer or warning.
 
 use serde_json::Value;
@@ -12,7 +13,8 @@ use siros_presentation::{Exclusion, Failure, PresentationError};
 use siros_registration::CredentialIcon;
 
 use crate::sides::{
-    intake, picker_offers, picker_run, registration, wallet_offers, Offered, LEVELS,
+    chosen_through_picks, intake, picker_offers, picker_run, registration, wallet_offers, Offered,
+    LEVELS,
 };
 use crate::{corpus, families, key_free, paso};
 
@@ -76,8 +78,8 @@ fn the_picker_offers_what_the_wallet_plans() {
 }
 
 /// What the picker, for a host at `level`, and the wallet offer for `case` agree: equal
-/// offers; or, under an exception, each of the wallet's offers shown alike by one of more of the
-/// picker's.
+/// offers, each chosen through its picks; or, under an exception, each of the wallet's offers
+/// shown alike by one of more of the picker's.
 fn compare(case: &Case, level: u32) -> Result<(), String> {
     let request = intake(&case.request);
     let planned = request
@@ -107,6 +109,13 @@ fn compare(case: &Case, level: u32) -> Result<(), String> {
             if picker != wallet {
                 return Err(format!("wallet {wallet:#?}\npicker {picker:#?}"));
             }
+            if let Some(Ok(planned)) = &planned {
+                if let Some(offer) = (0..picker.len())
+                    .find(|&at| chosen_through_picks(planned, &captured, at) != Some(at))
+                {
+                    return Err(format!("the picks of offer {offer} select another"));
+                }
+            }
             Ok(())
         }
         Some(exception) => {
@@ -119,6 +128,20 @@ fn compare(case: &Case, level: u32) -> Result<(), String> {
                     "{exception:?}: wallet {unmatched:#?} not shown alike among more of picker \
                      {picker:#?}"
                 ));
+            }
+            // K3: the picks of each picker offer that shows a wallet offer select that offer in
+            // the plan, whatever the picker numbers it.
+            if let Some(Ok(planned)) = &planned {
+                let unchosen = picker.iter().enumerate().find(|(at, shown)| {
+                    wallet.iter().any(|offer| shows(shown, offer))
+                        && !chosen_through_picks(planned, &captured, *at)
+                            .is_some_and(|chosen| shows(shown, &wallet[chosen]))
+                });
+                if let Some((at, _)) = unchosen {
+                    return Err(format!(
+                        "{exception:?}: the picks of picker offer {at} select no offer"
+                    ));
+                }
             }
             Ok(())
         }

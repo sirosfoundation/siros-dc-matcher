@@ -1,20 +1,24 @@
-//! The verifier: its requests, through intake.
+//! The verifier: its requests, through intake, and the decryption of the responses, with JWE and
+//! COSE code written here from RFC 7516, RFC 7518, RFC 9052 and RFC 9053.
 
 use std::str::FromStr;
 use std::time::Duration;
 
+use aes_gcm::aead::{Aead, KeyInit, Payload};
+use aes_gcm::{Aes128Gcm, Nonce};
+use ciborium::Value as Cbor;
 use p256::ecdsa::signature::Signer as _;
 use p256::ecdsa::{DerSignature, Signature, SigningKey};
 use p256::elliptic_curve::sec1::ToEncodedPoint;
-use p256::SecretKey;
+use p256::{EncodedPoint, PublicKey, SecretKey};
 use rand_core::{CryptoRng, RngCore};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use siros_codec::base64url;
 use siros_codec::date::DateTime;
 use siros_oid4vp::{
-    Effect, EffectResult, IntakeError, IntakeState, Origin, Step, TrustAnswer, Verdict,
-    VerifiedRequest,
+    concat_kdf, cose_kdf, ContentEncryption, Effect, EffectResult, IntakeError, IntakeState,
+    Method, Origin, Step, Submission, TrustAnswer, Verdict, VerifiedRequest,
 };
 use x509_cert::builder::{Builder, CertificateBuilder, Profile};
 use x509_cert::der::asn1::ObjectIdentifier;
@@ -87,6 +91,13 @@ fn coordinates() -> (String, String) {
 pub fn encryption_jwk() -> Value {
     let (x, y) = coordinates();
     json!({"kty": "EC", "crv": "P-256", "alg": "ECDH-ES", "use": "enc", "kid": "enc-1", "x": x, "y": y})
+}
+
+/// The JWK SHA-256 Thumbprint of the encryption key (RFC 7638, Section 3.2).
+pub fn thumbprint() -> [u8; 32] {
+    let (x, y) = coordinates();
+    let canonical = format!(r#"{{"crv":"P-256","kty":"EC","x":"{x}","y":"{y}"}}"#);
+    Sha256::digest(canonical.as_bytes()).into()
 }
 
 /// The verifier metadata: the encryption key and the `zkp_req` lists.
@@ -367,4 +378,184 @@ pub fn dc_api_signed_request(params: &Value, signer: Signer, form: SignedForm) -
         "openid4vp-v1-multisigned",
         json!({"payload": payload, "signatures": [{"protected": protected, "signature": signature}]}),
     )
+}
+
+/// The JWE a submission carries: `data.response`, or the form parameter `response`.
+fn jwe_of(submission: &Submission) -> String {
+    match submission {
+        Submission::DcApi(data) => data["response"].as_str().unwrap().to_owned(),
+        Submission::Post(post) => {
+            let Method::Post { body, .. } = post.method() else {
+                panic!("a POST")
+            };
+            let body = std::str::from_utf8(body).unwrap();
+            let encoded = body.strip_prefix("response=").unwrap();
+            assert!(!encoded.contains('&'), "one form parameter");
+            // The JWE's characters need no percent-encoding.
+            encoded.to_owned()
+        }
+    }
+}
+
+/// The ECDH secret of the recipient's key with the ephemeral key `(x, y)`.
+fn agree(x: &[u8], y: &[u8]) -> Vec<u8> {
+    let point = EncodedPoint::from_affine_coordinates(x.into(), y.into(), false);
+    let epk = PublicKey::from_sec1_bytes(point.as_bytes()).unwrap();
+    let z = p256::ecdh::diffie_hellman(recipient().to_nonzero_scalar(), epk.as_affine());
+    z.raw_secret_bytes().to_vec()
+}
+
+/// The JSON Authorization Response a JWE submission encrypts (RFC 7516, Section 5.2).
+pub fn decrypt_jwe(submission: &Submission) -> Value {
+    let jwe = jwe_of(submission);
+    let parts: Vec<&str> = jwe.split('.').collect();
+    let [protected, "", iv, ciphertext, tag] = parts[..] else {
+        panic!("a JWE with an empty encrypted key: {jwe}")
+    };
+    let header: Value = serde_json::from_slice(&base64url::decode(protected).unwrap()).unwrap();
+    assert_eq!(
+        (&header["alg"], &header["enc"]),
+        (&json!("ECDH-ES"), &json!("A128GCM"))
+    );
+    let epk = &header["epk"];
+    let coordinate = |name: &str| base64url::decode(epk[name].as_str().unwrap()).unwrap();
+    let z = agree(&coordinate("x"), &coordinate("y"));
+    let cek = concat_kdf(&z, ContentEncryption::A128Gcm, &[], &[]).unwrap();
+    let iv: [u8; 12] = base64url::decode(iv).unwrap().try_into().unwrap();
+    let sealed = [
+        base64url::decode(ciphertext).unwrap(),
+        base64url::decode(tag).unwrap(),
+    ]
+    .concat();
+    let plaintext = Aes128Gcm::new_from_slice(cek.as_bytes())
+        .unwrap()
+        .decrypt(
+            &Nonce::from(iv),
+            Payload {
+                msg: &sealed,
+                aad: protected.as_bytes(),
+            },
+        )
+        .unwrap();
+    serde_json::from_slice(&plaintext).unwrap()
+}
+
+fn cbor(value: &Cbor) -> Vec<u8> {
+    let mut out = Vec::new();
+    ciborium::into_writer(value, &mut out).unwrap();
+    out
+}
+
+fn int(n: i64) -> Cbor {
+    Cbor::Integer(n.into())
+}
+
+/// The member `key` of the CBOR map `map`.
+pub fn get<'v>(map: &'v Cbor, key: &Cbor) -> &'v Cbor {
+    map.as_map()
+        .unwrap()
+        .iter()
+        .find(|(k, _)| k == key)
+        .map(|(_, v)| v)
+        .unwrap_or_else(|| panic!("{key:?} is missing"))
+}
+
+/// The CBOR Authorization Response a `direct_post.cwt` submission encrypts: a `COSE_Encrypt` by
+/// ECDH-ES + HKDF-256 with A128GCM (RFC 9052, Sections 5.1 and 5.3; RFC 9053, Section 6.3).
+pub fn decrypt_cwt(submission: &Submission) -> Cbor {
+    let Submission::Post(post) = submission else {
+        panic!("a POST")
+    };
+    let Method::Post { content_type, body } = post.method() else {
+        panic!("a POST")
+    };
+    assert_eq!(content_type.as_str(), "application/cwt");
+    let message: Cbor = ciborium::from_reader(&body[..]).unwrap();
+    let Cbor::Tag(96, message) = message else {
+        panic!("COSE_Encrypt")
+    };
+    let [Cbor::Bytes(protected), unprotected, Cbor::Bytes(sealed), Cbor::Array(recipients)] =
+        &message.as_array().unwrap()[..]
+    else {
+        panic!("COSE_Encrypt")
+    };
+    let header: Cbor = ciborium::from_reader(&protected[..]).unwrap();
+    assert_eq!(get(&header, &int(1)), &int(1), "A128GCM");
+    let iv: [u8; 12] = get(unprotected, &int(5)).as_bytes().unwrap()[..]
+        .try_into()
+        .unwrap();
+    let [Cbor::Array(recipient)] = &recipients[..] else {
+        panic!("one recipient")
+    };
+    let [_, recipient_unprotected, _] = &recipient[..] else {
+        panic!("recipient")
+    };
+    let epk = get(recipient_unprotected, &int(-1));
+    let z = agree(
+        get(epk, &int(-2)).as_bytes().unwrap(),
+        get(epk, &int(-3)).as_bytes().unwrap(),
+    );
+    let cek = cose_kdf(&z, ContentEncryption::A128Gcm).unwrap();
+    let aad = cbor(&Cbor::Array(vec![
+        Cbor::Text("Encrypt".into()),
+        Cbor::Bytes(protected.clone()),
+        Cbor::Bytes(Vec::new()),
+    ]));
+    let plaintext = Aes128Gcm::new_from_slice(cek.as_bytes())
+        .unwrap()
+        .decrypt(
+            &Nonce::from(iv),
+            Payload {
+                msg: sealed,
+                aad: &aad,
+            },
+        )
+        .unwrap();
+    ciborium::from_reader(&plaintext[..]).unwrap()
+}
+
+/// The encoded `Handover` of OpenID4VP 1.0, B.2.6: `[name, SHA-256(cbor(info))]`, built from the
+/// verifier's own values.
+pub fn handover(name: &str, info: Vec<Cbor>) -> Vec<u8> {
+    let digest = Sha256::digest(cbor(&Cbor::Array(info)));
+    cbor(&Cbor::Array(vec![
+        Cbor::Text(name.into()),
+        Cbor::Bytes(digest.to_vec()),
+    ]))
+}
+
+/// The `Handover` of a DC API request from [`ORIGIN`] encrypted to the verifier's key (B.2.6.2).
+pub fn dc_api_handover() -> Vec<u8> {
+    handover(
+        "OpenID4VPDCAPIHandover",
+        vec![
+            Cbor::Text(ORIGIN.into()),
+            Cbor::Text(NONCE.into()),
+            Cbor::Bytes(thumbprint().to_vec()),
+        ],
+    )
+}
+
+/// The `Handover` of a signed redirect request encrypted to the verifier's key (B.2.6.1).
+pub fn redirect_handover() -> Vec<u8> {
+    handover(
+        "OpenID4VPHandover",
+        vec![
+            Cbor::Text(signed_client_id()),
+            Cbor::Text(NONCE.into()),
+            Cbor::Bytes(thumbprint().to_vec()),
+            Cbor::Text(RESPONSE_URI.into()),
+        ],
+    )
+}
+
+/// The encoded `SessionTranscript = [null, null, Handover]` of `handover`.
+pub fn transcript(handover: &[u8]) -> Vec<u8> {
+    let handover: Cbor = ciborium::from_reader(handover).unwrap();
+    cbor(&Cbor::Array(vec![Cbor::Null, Cbor::Null, handover]))
+}
+
+/// The SessionTranscript of a DC API request from [`ORIGIN`] encrypted to the verifier's key.
+pub fn dc_api_transcript() -> Vec<u8> {
+    transcript(&dc_api_handover())
 }
