@@ -12,7 +12,8 @@ use siros_transaction_data::{Projected, TypeId};
 use siros_wallet_state::CredentialId;
 
 use crate::paso::{
-    configured_wallet, payment_definition, request, ACCOUNT, CARD, LOYALTY, PAYMENT, PID, PID_2,
+    configured_wallet, payment_definition, points_definition, request, ACCOUNT, CARD, LOYALTY,
+    PAYMENT, PID, PID_2, POINTS,
 };
 use crate::sides::{icon, input, picker_run};
 
@@ -27,9 +28,6 @@ const TABLE_COUNT: usize = 4;
 
 /// A table entry.
 const TABLE_ENTRY: usize = 8;
-
-/// A type the configuration defines for the PIDs, which a request for cards names nothing of.
-const POINTS: &str = "urn:example:loyalty-points:1";
 
 /// PaSO Core, Annex A.1: a query for a card, and a payment entry that targets it.
 const A1_REQUEST: &str =
@@ -97,22 +95,23 @@ fn held() -> Vec<Held> {
 
 #[test]
 fn the_picker_reads_what_the_request_needs() {
-    let points = json!({"claims": [{"path": ["points"],
-        "display": [{"locale": "en", "name": "Points"}]}]});
     let configured = json!([
         {"type": PAYMENT, "vct_values": [CARD, ACCOUNT], "definition": payment_definition()},
-        {"type": POINTS, "vct_values": [PID], "definition": points}
+        {"type": POINTS, "vct_values": [PID], "definition": points_definition()}
     ]);
     let wallet = configured_wallet(held(), &configured, &[CARD, ACCOUNT, PID, PID_2, LOYALTY]);
-    // Three icons the host prepared, over three of every four cards; the fourth shows the
-    // wallet's.
-    let icons: Vec<CredentialIcon> = (0..30u32)
-        .filter(|card| card % 4 != 3)
+    // An icon the host prepared for each card, three in turn, and one for credential 1, an
+    // account the request asks for no entry of. No entry shows the wallet's icon.
+    let mut icons: Vec<CredentialIcon> = (0..30u32)
         .map(|card| CredentialIcon {
             credential: CredentialId::new(u64::from(7 * card + 7)),
-            icon: icon(100 + card % 4 * 20, 80),
+            icon: icon(100 + card % 3 * 20, 80),
         })
         .collect();
+    icons.push(CredentialIcon {
+        credential: CredentialId::new(1),
+        icon: icon(200, 80),
+    });
     let default_icon = icon(64, 64);
     let projection = project(&input(&wallet, &icons, &default_icon)).unwrap();
     let blob = encode(&projection).unwrap();

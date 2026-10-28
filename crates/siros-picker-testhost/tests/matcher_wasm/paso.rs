@@ -31,6 +31,8 @@ pub const PID: &str = "https://credentials.example/pid";
 pub const PID_2: &str = "https://credentials.example/pid-2";
 pub const LOYALTY: &str = "https://shop.example/loyalty";
 pub const PAYMENT: &str = "urn:paso:sca:global:payment:1";
+/// A transaction data type a configuration defines, of the generic rulebook.
+pub const POINTS: &str = "urn:example:loyalty-points:1";
 const VERSIONED: &str = "https://bank.example/sca/versioned";
 const LEGACY: &str = "https://bank.example/sca/legacy";
 const IBAN: &str = "https://issuer.bank.example/credentials/sca/iban/1.0";
@@ -94,7 +96,44 @@ pub fn cases() -> Vec<Case> {
     let mut cases = core_annex();
     cases.extend(sources());
     cases.extend(cs12());
+    cases.push(two_definitions());
     cases
+}
+
+/// The definition of [`POINTS`]: one claim, `points`.
+pub fn points_definition() -> Value {
+    json!({"claims": [{"path": ["points"], "display": [{"locale": "en", "name": "Points"}]}]})
+}
+
+/// A card and a loyalty card in one offer, each taking an entry of a type the configuration
+/// defines for it alone: the picker reads two definitions in one run and shows each on its
+/// credential.
+fn two_definitions() -> Case {
+    let configured = json!([
+        {"type": PAYMENT, "vct_values": [CARD], "definition": payment_definition()},
+        {"type": POINTS, "vct_values": [LOYALTY], "definition": points_definition()}
+    ]);
+    let card = [("pan_last_four", json!("4242")), ("scheme", json!("visa"))];
+    let wallet = configured_wallet(
+        vec![
+            Held::new(1, "dc+sd-jwt", sd_jwt(CARD, &card)),
+            Held::new(2, "dc+sd-jwt", sd_jwt(LOYALTY, &[])),
+        ],
+        &configured,
+        &[CARD, LOYALTY],
+    );
+    let points = json!({"type": POINTS, "credential_ids": ["loyalty"],
+                        "payload": {"points": "120"}});
+    let dcql_query = json!({
+        "credentials": [query("sca_card", CARD, &[]), query("loyalty", LOYALTY, &[])],
+        "credential_sets": [{"options": [["sca_card", "loyalty"]]}]
+    });
+    case(
+        "two definitions in one run",
+        dcql_query,
+        vec![vector!("paso/core-a1-entry.json"), points],
+        wallet,
+    )
 }
 
 /// PaSO Core, Annex A.1, A.5, A.6 and A.7.
