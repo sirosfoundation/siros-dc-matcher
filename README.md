@@ -98,7 +98,8 @@ cargo build --locked -p siros-zkp-req-wasm --target wasm32-unknown-unknown --rel
 CI also enforces four things a green build does not imply:
 
 - **No panic outside the tests and the matcher.** Each crate root but the
-  matcher's denies clippy's panic lints outside the tests.
+  matcher's and the test host's denies clippy's panic lints outside the
+  tests, a new crate's included.
   `scripts/check_panic_sites.py` fails on a root without them and on an
   `allow` of them outside the tests, and finds the panics no lint covers:
   `assert!`, the std methods that panic on an argument, map indexing and
