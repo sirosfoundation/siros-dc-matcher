@@ -3,7 +3,7 @@
 The registration is the blob the wallet registers with Credential Manager beside
 `matcher.wasm`. `siros_registration::write` writes it; `siros_registration::Registration` reads
 it through `std::io::Read + Seek`. The picker reads the parts a request needs through
-`android_credman::CredentialReader`, one `ReadCredentialsBuffer` call per read:
+`android_credman::CredentialReader`, each at its offset with `ReadCredentialsBuffer`:
 
 1. the header, the directory and the facts, when it opens the registration;
 2. the index entries a binary search visits, for each credential type the request's queries
@@ -12,7 +12,7 @@ it through `std::io::Read + Seek`. The picker reads the parts a request needs th
 4. the definitions the request's transaction data entries name for those credentials;
 5. the icons of the entries it emits.
 
-This document is version 1.
+This document describes version 1.
 
 ## Layout
 
@@ -111,8 +111,8 @@ The reader refuses, with a `RegistrationError` that names the part and the cause
 - two records read with one position, `credentialId` or batch;
 - a definition of no UTF-8, no projection, or another language than the facts'.
 
-Every allocation is the length of a span, which lies within its section, which lies within the
-blob.
+The buffer the reader allocates for a part is the length of its span, which lies within its
+section, which lies within the blob.
 
 ## Writing
 
