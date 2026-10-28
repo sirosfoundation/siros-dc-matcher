@@ -2,13 +2,7 @@
 //! gives the projection again, and equal projections give equal bytes. The projections are
 //! drawn at random from fixed seeds.
 
-#![allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::panic,
-    clippy::arithmetic_side_effects
-)]
+#![allow(clippy::arithmetic_side_effects)]
 
 use std::io::Cursor;
 
@@ -35,6 +29,29 @@ use crate::wire::UNSERVED;
 /// The projections drawn.
 const DRAWS: u64 = 64;
 
+/// What a draw built no value of: the part named.
+#[derive(Debug, thiserror::Error)]
+#[error("the draw built no {0}")]
+struct Unbuilt(&'static str);
+
+/// A drawn part that may not build.
+trait Built<T> {
+    /// The part, or [`Unbuilt`] naming `part`.
+    fn built(self, part: &'static str) -> Result<T, Unbuilt>;
+}
+
+impl<T, E> Built<T> for Result<T, E> {
+    fn built(self, part: &'static str) -> Result<T, Unbuilt> {
+        self.map_err(|_| Unbuilt(part))
+    }
+}
+
+impl<T> Built<T> for Option<T> {
+    fn built(self, part: &'static str) -> Result<T, Unbuilt> {
+        self.ok_or(Unbuilt(part))
+    }
+}
+
 /// SplitMix64: a seeded generator of the draws.
 struct Draw(u64);
 
@@ -47,6 +64,7 @@ impl Draw {
         z ^ (z >> 31)
     }
 
+    /// A number below `n`, which is at least 1.
     fn below(&mut self, n: usize) -> usize {
         (self.next() % n as u64) as usize
     }
@@ -55,8 +73,9 @@ impl Draw {
         self.next() & 1 == 1
     }
 
-    fn pick<'a, T>(&mut self, items: &'a [T]) -> &'a T {
-        &items[self.below(items.len())]
+    fn pick<'a, T>(&mut self, items: &'a [T]) -> Result<&'a T, Unbuilt> {
+        let at = self.next().checked_rem(items.len() as u64).built("pick")?;
+        items.get(at as usize).built("pick")
     }
 
     fn bytes(&mut self, most: usize) -> Vec<u8> {
@@ -89,30 +108,31 @@ const NAMES: [&str; 8] = [
 
 const LANGUAGES: [&str; 3] = ["en", "sv", "de-AT"];
 
-fn projection(seed: u64) -> Projection {
+fn projection(seed: u64) -> Result<Projection, Unbuilt> {
     let mut draw = Draw(seed);
-    let language = *draw.pick(&LANGUAGES);
+    let language = *draw.pick(&LANGUAGES)?;
     let icons: Vec<Icon> = (0..4)
-        .map(|_| Icon::new(draw.bytes(300)).unwrap())
-        .collect();
+        .map(|_| Icon::new(draw.bytes(300)).built("icon"))
+        .collect::<Result<_, _>>()?;
     let definitions: Vec<Projected> = (0..3)
         .map(|at| definition(language, &format!("Amount {at}")))
-        .collect();
+        .collect::<Result<_, _>>()?;
+    let registered_at = 1_700_000_000 + draw.below(1 << 30) as i64;
     let facts = Facts {
-        registered_at: DateTime::from_unix(1_700_000_000 + draw.below(1 << 30) as i64).unwrap(),
-        language: Locale::parse(language).unwrap(),
-        diagnostics: *draw.pick(&[Diagnostics::Shown, Diagnostics::Hidden]),
+        registered_at: DateTime::from_unix(registered_at).built("time")?,
+        language: Locale::parse(language).built("language")?,
+        diagnostics: *draw.pick(&[Diagnostics::Shown, Diagnostics::Hidden])?,
         systems: NymAuthSystem::ALL
             .into_iter()
             .filter(|_| draw.coin())
             .collect(),
-        verifier_id: *draw.pick(&[VerifierIdForm::X509SanDns, VerifierIdForm::Semantic]),
-        default_icon: draw.pick(&icons).clone(),
+        verifier_id: *draw.pick(&[VerifierIdForm::X509SanDns, VerifierIdForm::Semantic])?,
+        default_icon: draw.pick(&icons)?.clone(),
     };
     let credentials = (0..draw.below(60))
         .map(|at| credential(&mut draw, at as u64, &icons, &definitions))
-        .collect();
-    Projection { facts, credentials }
+        .collect::<Result<_, _>>()?;
+    Ok(Projection { facts, credentials })
 }
 
 fn credential(
@@ -120,88 +140,91 @@ fn credential(
     at: u64,
     icons: &[Icon],
     definitions: &[Projected],
-) -> RegisteredCredential<Projected, Icon> {
-    let (format, name) = *draw.pick(&TYPES);
-    let text = |draw: &mut Draw| CardText::new(draw.pick(&NAMES)).unwrap();
+) -> Result<RegisteredCredential<Projected, Icon>, Unbuilt> {
+    let (format, name) = *draw.pick(&TYPES)?;
+    let text = |draw: &mut Draw| CardText::new(draw.pick(&NAMES)?).built("card text");
     let served = (0..draw.below(3))
         .map(|kind| {
-            let type_id = TypeId::parse(&format!("urn:example:type:{kind}")).unwrap();
+            let type_id = TypeId::parse(&format!("urn:example:type:{kind}")).built("type")?;
             let served = match draw.coin() {
-                true => Ok(draw.pick(definitions).clone()),
-                false => Err(*draw.pick(&UNSERVED)),
+                true => Ok(draw.pick(definitions)?.clone()),
+                false => Err(*draw.pick(&UNSERVED)?),
             };
-            (type_id, served)
+            Ok((type_id, served))
         })
-        .collect();
-    RegisteredCredential {
+        .collect::<Result<_, Unbuilt>>()?;
+    Ok(RegisteredCredential {
         entry: EntryRef::new(
             CredentialId::new(at + 1),
             BatchId::new(at + 1000),
             InstanceId::new(draw.next() % 4),
         ),
         credential_type: RegisteredType::new(format, name),
-        key: *draw.pick(&[KeyHolding::Held, KeyHolding::NotHeld]),
-        claims: claims(draw, format),
+        key: *draw.pick(&[KeyHolding::Held, KeyHolding::NotHeld])?,
+        claims: claims(draw, format)?,
         card: RegisteredCard {
-            title: text(draw),
-            issuer: text(draw),
-            icon: draw.pick(icons).clone(),
+            title: text(draw)?,
+            issuer: text(draw)?,
+            icon: draw.pick(icons)?.clone(),
         },
-        labels: ClaimLabels::new(labels(draw), labels(draw)),
-        presentability: *draw.pick(&[Presentability::WithoutUi, Presentability::OnWalletUi]),
-        issuer: IssuerFacts::new(
-            (0..draw.below(3))
-                .map(|_| KeyIdentifier::new(&draw.bytes(20)).unwrap())
-                .collect(),
-            (0..draw.below(3))
-                .map(|_| {
-                    let kind = *draw.pick(&[StoreType::EtsiTl, StoreType::OpenidFederation]);
-                    StoreAuthority::new(kind, AuthorityValue::new(draw.pick(&NAMES)))
-                })
-                .collect(),
-        ),
-        transactions: ServedTypes::new(served, *draw.pick(&UNSERVED)).unwrap(),
-    }
+        labels: ClaimLabels::new(labels(draw)?, labels(draw)?),
+        presentability: *draw.pick(&[Presentability::WithoutUi, Presentability::OnWalletUi])?,
+        issuer: facts(draw)?,
+        transactions: ServedTypes::new(served, *draw.pick(&UNSERVED)?).built("served types")?,
+    })
+}
+
+/// Issuer facts: up to two key identifiers and up to two admitting authorities.
+fn facts(draw: &mut Draw) -> Result<IssuerFacts, Unbuilt> {
+    let keys = (0..draw.below(3))
+        .map(|_| KeyIdentifier::new(&draw.bytes(20)).built("key identifier"))
+        .collect::<Result<_, _>>()?;
+    let admitting = (0..draw.below(3))
+        .map(|_| {
+            let kind = *draw.pick(&[StoreType::EtsiTl, StoreType::OpenidFederation])?;
+            let value = AuthorityValue::new(draw.pick(&NAMES)?);
+            Ok(StoreAuthority::new(kind, value))
+        })
+        .collect::<Result<_, Unbuilt>>()?;
+    Ok(IssuerFacts::new(keys, admitting))
 }
 
 /// A definition of one claim, `name`d in `language`, projected from the configuration.
-fn definition(language: &str, name: &str) -> Projected {
+fn definition(language: &str, name: &str) -> Result<Projected, Unbuilt> {
     let projection = json!({"language": language, "source": "configuration",
         "rulebook": "generic", "definition": {"claims": [{"path": ["amount"],
             "display": [{"locale": language, "name": name}]}]}});
-    Projected::parse(&projection.to_string()).unwrap()
+    Projected::parse(&projection.to_string()).built("definition")
 }
 
 /// A claim tree of `format`: an SD-JWT VC's claims, or an mdoc's namespaces of elements.
-fn claims(draw: &mut Draw, format: Format) -> ClaimTree {
+fn claims(draw: &mut Draw, format: Format) -> Result<ClaimTree, Unbuilt> {
     let root = match format {
-        Format::SdJwtVc => members(draw, 2),
+        Format::SdJwtVc => members(draw, 2)?,
         Format::Mdoc => Cbor::Map(
             (0..=draw.below(2))
-                .map(|at| (Cbor::text(&format!("org.example.{at}")), members(draw, 1)))
-                .collect(),
+                .map(|at| Ok((Cbor::text(&format!("org.example.{at}")), members(draw, 1)?)))
+                .collect::<Result<_, Unbuilt>>()?,
         ),
     };
     let bytes = root.encode();
-    ClaimTree::from_cbor(format, &cbor::decode(&bytes).unwrap()).unwrap()
+    let item = cbor::decode(&bytes).built("claims")?;
+    ClaimTree::from_cbor(format, &item).built("claim tree")
 }
 
-/// A map of distinct names, each with a value nested at most `depth` deep.
-fn members(draw: &mut Draw, depth: usize) -> Cbor {
-    let mut names: Vec<&str> = NAMES.to_vec();
-    Cbor::Map(
-        (0..draw.below(5))
-            .map(|_| {
-                let name = names.remove(draw.below(names.len()));
-                (Cbor::text(name), value(draw, depth))
-            })
-            .collect(),
-    )
+/// A map of up to four distinct names, each with a value nested at most `depth` deep.
+fn members(draw: &mut Draw, depth: usize) -> Result<Cbor, Unbuilt> {
+    let names: Vec<&str> = NAMES.into_iter().filter(|_| draw.coin()).take(4).collect();
+    names
+        .into_iter()
+        .map(|name| Ok((Cbor::text(name), value(draw, depth)?)))
+        .collect::<Result<_, Unbuilt>>()
+        .map(Cbor::Map)
 }
 
-fn value(draw: &mut Draw, depth: usize) -> Cbor {
-    match draw.below(if depth == 0 { 6 } else { 8 }) {
-        0 => Cbor::text(draw.pick(&NAMES)),
+fn value(draw: &mut Draw, depth: usize) -> Result<Cbor, Unbuilt> {
+    Ok(match draw.below(if depth == 0 { 6 } else { 8 }) {
+        0 => Cbor::text(draw.pick(&NAMES)?),
         1 => Cbor::Unsigned(draw.next()),
         2 => Cbor::Negative(draw.next() >> 1),
         3 => Cbor::Bool(draw.coin()),
@@ -211,49 +234,52 @@ fn value(draw: &mut Draw, depth: usize) -> Cbor {
             (0..draw.below(4))
                 .map(|_| match draw.coin() {
                     true => value(draw, depth - 1),
-                    false => Cbor::Encoded(vec![0xf7]),
+                    false => Ok(Cbor::Encoded(vec![0xf7])),
                 })
-                .collect(),
+                .collect::<Result<_, _>>()?,
         ),
-        _ => members(draw, depth - 1),
-    }
+        _ => members(draw, depth - 1)?,
+    })
 }
 
-fn labels(draw: &mut Draw) -> Vec<DescribedLabel> {
+fn labels(draw: &mut Draw) -> Result<Vec<DescribedLabel>, Unbuilt> {
     (0..draw.below(3))
         .map(|_| {
             let components = (0..=draw.below(3))
-                .map(|_| match draw.below(3) {
-                    0 => PathComponent::Key((*draw.pick(&NAMES)).to_owned()),
-                    1 => PathComponent::Index(draw.next() % 8),
-                    _ => PathComponent::Null,
+                .map(|_| {
+                    Ok(match draw.below(3) {
+                        0 => PathComponent::Key((*draw.pick(&NAMES)?).to_owned()),
+                        1 => PathComponent::Index(draw.next() % 8),
+                        _ => PathComponent::Null,
+                    })
                 })
-                .collect();
-            let label = draw
-                .coin()
-                .then(|| LabelText::new(draw.pick(&NAMES)).unwrap());
-            DescribedLabel::new(ClaimPath::new(components).unwrap(), label)
+                .collect::<Result<_, Unbuilt>>()?;
+            let label = match draw.coin() {
+                true => Some(LabelText::new(draw.pick(&NAMES)?).built("label")?),
+                false => None,
+            };
+            let path = ClaimPath::new(components).built("path")?;
+            Ok(DescribedLabel::new(path, label))
         })
         .collect()
 }
 
 #[test]
-fn writing_then_reading_gives_the_projection_back() {
+fn writing_then_reading_gives_the_projection_back() -> Result<(), Box<dyn std::error::Error>> {
     for seed in 0..DRAWS {
-        let written = projection(seed);
-        let bytes = encode(&written).unwrap();
+        let written = projection(seed)?;
+        let bytes = encode(&written)?;
         assert_eq!(
-            encode(&projection(seed)).unwrap(),
+            encode(&projection(seed)?)?,
             bytes,
             "seed {seed}: equal projections give equal bytes"
         );
-        let mut registration = Registration::open(Cursor::new(bytes.as_slice())).unwrap();
-        assert_eq!(registration.projection().unwrap(), written, "seed {seed}");
+        let mut registration = Registration::open(Cursor::new(bytes.as_slice()))?;
+        assert_eq!(registration.projection()?, written, "seed {seed}");
         for (format, name) in TYPES {
             let credential_type = RegisteredType::new(format, name);
             let read: Vec<EntryRef> = registration
-                .credentials(std::slice::from_ref(&credential_type))
-                .unwrap()
+                .credentials(std::slice::from_ref(&credential_type))?
                 .iter()
                 .map(RegisteredCredential::entry)
                 .collect();
@@ -266,4 +292,5 @@ fn writing_then_reading_gives_the_projection_back() {
             assert_eq!(read, expected, "seed {seed}: the credentials of {name}");
         }
     }
+    Ok(())
 }
