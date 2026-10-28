@@ -42,6 +42,10 @@ pub enum Exception {
     /// The `semantic` form of the nym_auth `verifier_id`, the owner's K2 exception: its
     /// identifier comes from the access certificate's DER, which the projection leaves out.
     SemanticVerifierId,
+    /// Which signature of a multisigned request qualifies, which decides its Verifier metadata
+    /// and `verifier_info`: the owner's K2 exception, as only the signatures' verification
+    /// tells.
+    MixedSigners,
     /// The purpose of an offer a payment entry shows, which the wallet configuration maps to a
     /// payment entry's fields in a later wave: the picker's payment entry shows none.
     PaymentPurpose,

@@ -45,7 +45,8 @@ pub enum PickError {
     /// No offer of the plan holds the picks: each of its members picked, each pick a credential
     /// of a member or of its additions. Each offer, with why it does not.
     Unmatched(Vec<(OfferIndex, PickError)>),
-    /// These offers of the plan each hold the picks.
+    /// These offers of the plan each hold the picks: by their members alone, or, when no
+    /// offer's members alone hold them, through their additions.
     Ambiguous(Vec<OfferIndex>),
 }
 
@@ -91,7 +92,10 @@ impl Planned<'_> {
     /// holds them, with the additions whose members they name, and for each `multiple` member
     /// the picked credentials. The picks hold their Credential Queries and `credentialId`s;
     /// the offer they name is the picker's, which numbers offers the wallet leaves out under a
-    /// K2 exception, so the plan's offer is the one whose members and additions hold them.
+    /// K2 exception, so the plan's offer is the one that holds them. The picker shows an
+    /// offer's members, and the plan holds one offer per set of members: the offer whose
+    /// members alone hold the picks is selected first, and an offer through its additions
+    /// only when no offer's members alone hold them.
     ///
     /// When several combinations of additions answer the picked queries, the first in the
     /// offer's order is chosen: each presents the picked credentials.
@@ -117,15 +121,21 @@ impl Planned<'_> {
             .into());
         }
         let picked = self.by_query(picks)?;
-        let (mut held, mut unheld) = (Vec::new(), Vec::new());
+        let (mut alone, mut through, mut unheld) = (Vec::new(), Vec::new(), Vec::new());
         for (at, view) in self.view.offers().iter().enumerate() {
             let at = OfferIndex::new(at);
+            let members = view.offer().members();
+            let by_members = picked
+                .iter()
+                .all(|picked| members.iter().any(|member| member.query() == picked.query));
             match self.held_by(at, view.offer(), &picked) {
-                Ok(selection) => held.push(selection),
+                Ok(selection) if by_members => alone.push(selection),
+                Ok(selection) => through.push(selection),
                 Err(PresentationError::Pick(why)) => unheld.push((at, why)),
                 Err(error) => return Err(error),
             }
         }
+        let held = if alone.is_empty() { through } else { alone };
         match <[Selection; 1]>::try_from(held) {
             Ok([selection]) => Ok(selection),
             Err(held) if held.is_empty() => Err(PickError::Unmatched(unheld).into()),

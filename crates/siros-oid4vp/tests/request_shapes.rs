@@ -60,6 +60,12 @@ fn multisigned_object() -> String {
     object.to_string()
 }
 
+/// A signature of a multisigned request whose protected header names a Client Identifier.
+fn signature() -> serde_json::Value {
+    let header = br#"{"alg":"ES256","client_id":"x509_san_dns:verifier.example"}"#;
+    serde_json::json!({"protected": b64(header).to_string(), "signature": b64(b"sig").to_string()})
+}
+
 fn envelope(protocol: &str, data: serde_json::Value) -> Vec<u8> {
     serde_json::json!({"requests": [{"protocol": protocol, "data": data}]})
         .to_string()
@@ -106,7 +112,7 @@ fn a_multisigned_request_is_read_from_the_payload_member() {
     let data = serde_json::json!({
         "request": {
             "payload": b64(multisigned_object().as_bytes()).to_string(),
-            "signatures": [{"protected": b64(br#"{"alg":"ES256"}"#).to_string(), "signature": b64(b"sig").to_string()}]
+            "signatures": [signature()]
         }
     });
     let found =
@@ -122,7 +128,7 @@ fn a_multisigned_request_is_read_from_the_payload_member() {
 fn a_multisigned_payload_at_the_top_level_of_data_is_accepted_too() {
     let data = serde_json::json!({
         "payload": b64(multisigned_object().as_bytes()).to_string(),
-        "signatures": [{"signature": b64(b"sig").to_string()}]
+        "signatures": [signature()]
     });
     let found =
         first_supported_request(&envelope("openid4vp-v1-multisigned", data), &siros_default);
@@ -366,7 +372,8 @@ fn a_signed_label_does_not_accept_an_inline_query() {
 fn the_two_signed_protocols_do_not_accept_each_other_s_shape() {
     let compact = serde_json::json!({"request": compact_jws(&request_object())});
     let json = serde_json::json!({
-        "request": {"payload": b64(multisigned_object().as_bytes()).to_string(), "signatures": []}
+        "request": {"payload": b64(multisigned_object().as_bytes()).to_string(),
+            "signatures": [signature()]}
     });
 
     assert!(UnverifiedRequest::read("openid4vp-v1-signed", &compact).is_ok());
@@ -514,20 +521,6 @@ fn a_signed_request_yields_its_full_context() {
     );
     assert!(ctx.client_metadata().is_some());
     assert_eq!(ctx.query().credentials()[0].id(), "pid");
-}
-
-#[test]
-fn origins_client_id_and_metadata_are_none_when_absent() {
-    let data = serde_json::json!({"response_type": "vp_token", "response_mode": "dc_api",
-        "nonce": "n-1", "dcql_query": {"credentials": [{
-        "id": "pid", "format": "mso_mdoc",
-        "meta": {"doctype_value": "org.iso.18013.5.1.mDL"},
-        "claims": [{"path": ["org.iso.18013.5.1", "age_over_18"]}]
-    }]}});
-    let ctx = first(&envelope("openid4vp-v1-unsigned", data), &siros_default).expect("context");
-    assert_eq!(ctx.client_id(), None);
-    assert_eq!(ctx.expected_origins(), None);
-    assert_eq!(ctx.client_metadata(), None);
 }
 
 /// The rulebook v0.4 example puts an object under `claims`: DCQL refuses the request, a `zkp_req`

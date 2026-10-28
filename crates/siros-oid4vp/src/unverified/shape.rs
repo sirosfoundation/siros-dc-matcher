@@ -6,12 +6,11 @@
 
 use std::borrow::Cow;
 
-use serde_json::Value;
+use serde_json::{Map, Value};
 use siros_codec::base64url;
 use siros_codec::json::JsonTextError;
 
 use super::{CompactFault, NoQuery, PayloadFault};
-use crate::client_id::ClientId;
 use crate::protocol::Protocol;
 
 /// The request object an entry carries; it has a `dcql_query`. The unsigned shape borrows
@@ -108,9 +107,10 @@ fn decode_payload(payload: &str) -> Result<Vec<u8>, NoQuery> {
     base64url::decode(payload).map_err(|e| NoQuery::PayloadNotBase64url(PayloadFault::Encoding(e)))
 }
 
-/// The Client Identifier each signature of a multisigned request's JWS JSON Serialization names
-/// in its protected header, unverified; a header that does not decode names none.
-pub(super) fn signature_clients(data: &Value) -> Vec<ClientId> {
+/// The protected header of each signature of a multisigned request's JWS JSON Serialization,
+/// decoded and unverified, in their order; a signature without a string `protected` and
+/// `signature`, or whose header decodes to no JSON object, has none.
+pub(super) fn signature_headers(data: &Value) -> Vec<Map<String, Value>> {
     let jws = match data.get("request") {
         Some(request @ Value::Object(_)) => request,
         _ => data,
@@ -120,9 +120,12 @@ pub(super) fn signature_clients(data: &Value) -> Vec<ClientId> {
         .into_iter()
         .flatten()
         .filter_map(|signature| {
+            signature.get("signature")?.as_str()?;
             let header = decode_payload(signature.get("protected")?.as_str()?).ok()?;
-            let header: Value = serde_json::from_slice(&header).ok()?;
-            ClientId::parse(header.get("client_id")?.as_str()?).ok()
+            match serde_json::from_slice(&header).ok()? {
+                Value::Object(header) => Some(header),
+                _ => None,
+            }
         })
         .collect()
 }

@@ -1,6 +1,8 @@
 //! The rules of the request parameters and of the Client Identifier that need no key: one
-//! request breaks each, and the wallet's intake and the picker refuse it alike. Over the DC API
-//! the Wallet ignores `state` and, in unsigned `data`, a `request_uri` (A.2): both accept those.
+//! request breaks each, and the wallet's intake and the picker refuse it alike. Each
+//! `verifier_info` rule is broken in a request object and in the protected header of a
+//! multisigned request's one signature. Over the DC API the Wallet ignores `state` and, in
+//! unsigned `data`, a `request_uri` (A.2): both accept those.
 
 use serde_json::{json, Value};
 use siros_codec::cbor::Value as Cbor;
@@ -15,7 +17,7 @@ use crate::families::{ask, case, mdl};
 
 /// A DC API request entry that breaks one rule, or keeps every rule.
 struct Row {
-    name: &'static str,
+    name: String,
     protocol: &'static str,
     data: Value,
     /// The code of the rule intake and the picker's reader refuse the entry under; `None` for
@@ -59,10 +61,24 @@ fn signed(edit: impl Fn(&mut Value)) -> (&'static str, Value) {
 
 /// A multisigned payload, edited, whose one signature's protected header names [`SIGNER`].
 fn multisigned(edit: impl Fn(&mut Value)) -> (&'static str, Value) {
+    multisigned_with(edit, |_| {})
+}
+
+/// A multisigned payload whose one signature's protected header names [`SIGNER`], edited.
+fn multisigned_header(edit: impl Fn(&mut Value)) -> (&'static str, Value) {
+    multisigned_with(|_| {}, edit)
+}
+
+/// A multisigned payload of [`SIGNER`]'s one signature, its object and protected header edited.
+fn multisigned_with(
+    edit_object: impl Fn(&mut Value),
+    edit_header: impl Fn(&mut Value),
+) -> (&'static str, Value) {
     let mut object = object();
-    edit(&mut object);
+    edit_object(&mut object);
     let mut header = SIGNER.header();
     header["client_id"] = json!(SIGNER.client_id());
+    edit_header(&mut header);
     let protected = b64(header.to_string().as_bytes());
     let payload = b64(object.to_string().as_bytes());
     let signature = SIGNER.sign(&format!("{protected}.{payload}"));
@@ -85,15 +101,57 @@ fn verifier_info(attestations: Value) -> impl Fn(&mut Value) {
     set("verifier_info", attestations)
 }
 
+/// One attestation, `jwt` with `data`, with the members of `extra`.
+fn attestation(extra: Value) -> Value {
+    let mut attestation = json!({"format": "jwt", "data": "x"});
+    let extra = extra.as_object().unwrap().clone();
+    attestation.as_object_mut().unwrap().extend(extra);
+    json!([attestation])
+}
+
+/// A `verifier_info` that keeps its rules, and one that breaks each, with the rule's code.
+fn verifier_info_rules() -> Vec<(&'static str, Value, Option<&'static str>)> {
+    vec![
+        (
+            "naming its query",
+            attestation(json!({"credential_ids": ["q1"]})),
+            None,
+        ),
+        (
+            "no array",
+            json!({"format": "jwt", "data": "x"}),
+            Some("verifier_info_not_array"),
+        ),
+        ("empty", json!([]), Some("verifier_info_empty")),
+        (
+            "an attestation no object",
+            json!(["x"]),
+            Some("verifier_info_not_object"),
+        ),
+        (
+            "an attestation without format",
+            json!([{"data": "x"}]),
+            Some("verifier_info_format"),
+        ),
+        (
+            "an attestation with data a number",
+            json!([{"format": "jwt", "data": 7}]),
+            Some("verifier_info_data"),
+        ),
+        (
+            "an attestation with empty credential_ids",
+            attestation(json!({"credential_ids": []})),
+            Some("verifier_info_credential_ids"),
+        ),
+        (
+            "an attestation naming an unknown query",
+            attestation(json!({"credential_ids": ["q9"]})),
+            Some("verifier_info_credential_id_unknown"),
+        ),
+    ]
+}
+
 fn rows() -> Vec<Row> {
-    let attestation = |extra: Value| {
-        let mut attestation = json!({"format": "jwt", "data": "x"});
-        attestation
-            .as_object_mut()
-            .unwrap()
-            .extend(extra.as_object().unwrap().clone());
-        json!([attestation])
-    };
     let table: Vec<(&str, (&str, Value), Option<&str>)> = vec![
         ("unsigned, every rule kept", unsigned(|_| {}), None),
         ("signed, every rule kept", signed(|_| {}), None),
@@ -162,50 +220,6 @@ fn rows() -> Vec<Row> {
             Some("expected_origins_missing"),
         ),
         (
-            "verifier_info naming its query",
-            unsigned(verifier_info(attestation(
-                json!({"credential_ids": ["q1"]}),
-            ))),
-            None,
-        ),
-        (
-            "verifier_info no array",
-            unsigned(verifier_info(json!({"format": "jwt", "data": "x"}))),
-            Some("verifier_info_not_array"),
-        ),
-        (
-            "verifier_info empty",
-            unsigned(verifier_info(json!([]))),
-            Some("verifier_info_empty"),
-        ),
-        (
-            "a verifier_info attestation no object",
-            unsigned(verifier_info(json!(["x"]))),
-            Some("verifier_info_not_object"),
-        ),
-        (
-            "a verifier_info attestation without format",
-            unsigned(verifier_info(json!([{"data": "x"}]))),
-            Some("verifier_info_format"),
-        ),
-        (
-            "a verifier_info attestation with data a number",
-            unsigned(verifier_info(json!([{"format": "jwt", "data": 7}]))),
-            Some("verifier_info_data"),
-        ),
-        (
-            "a verifier_info attestation with empty credential_ids",
-            unsigned(verifier_info(attestation(json!({"credential_ids": []})))),
-            Some("verifier_info_credential_ids"),
-        ),
-        (
-            "a verifier_info attestation naming an unknown query",
-            unsigned(verifier_info(attestation(
-                json!({"credential_ids": ["q9"]}),
-            ))),
-            Some("verifier_info_credential_id_unknown"),
-        ),
-        (
             "signed without client_id",
             signed(without("client_id")),
             Some("client_id_missing"),
@@ -257,6 +271,29 @@ fn rows() -> Vec<Row> {
             Some("verifier_info_in_payload"),
         ),
         (
+            "a multisigned header without client_id",
+            multisigned_header(without("client_id")),
+            Some("no_verifiable_signature"),
+        ),
+        (
+            "a multisigned header naming a pre-registered client",
+            multisigned_header(set("client_id", json!("verifier.example"))),
+            Some("no_verifiable_signature"),
+        ),
+        (
+            "a multisigned header naming a redirect_uri client",
+            multisigned_header(set(
+                "client_id",
+                json!("redirect_uri:https://verifier.example/cb"),
+            )),
+            Some("no_verifiable_signature"),
+        ),
+        (
+            "unsigned data with a request",
+            unsigned(set("request", json!(SIGNER.compact(&object())))),
+            Some("nested_request"),
+        ),
+        (
             "state with a space over the DC API",
             unsigned(set("state", json!("a b"))),
             None,
@@ -275,8 +312,27 @@ fn rows() -> Vec<Row> {
             None,
         ),
     ];
+    let verifier_info_rows =
+        verifier_info_rules()
+            .into_iter()
+            .flat_map(|(rule, value, refusal)| {
+                [
+                    (
+                        format!("verifier_info {rule}"),
+                        unsigned(verifier_info(value.clone())),
+                        refusal,
+                    ),
+                    (
+                        format!("a multisigned header's verifier_info {rule}"),
+                        multisigned_header(verifier_info(value)),
+                        refusal,
+                    ),
+                ]
+            });
     table
         .into_iter()
+        .map(|(name, request, refusal)| (name.to_owned(), request, refusal))
+        .chain(verifier_info_rows)
         .map(|(name, (protocol, data), refusal)| Row {
             name,
             protocol,
@@ -292,7 +348,7 @@ pub fn cases() -> Vec<Case> {
         .into_iter()
         .map(|row| {
             let wallet = Wallet::new(vec![mdl(1, &[("age_over_18", Cbor::Bool(true))])]);
-            case(row.name, dc_api_request(row.protocol, row.data), wallet)
+            case(&row.name, dc_api_request(row.protocol, row.data), wallet)
         })
         .collect()
 }

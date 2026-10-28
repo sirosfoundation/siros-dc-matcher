@@ -145,6 +145,7 @@ fn rule(refusal: &NoQuery) -> Option<IntakeError> {
         NoQuery::SignedRedirectUri => IntakeError::SignedRedirectUri,
         NoQuery::ClientIdInPayload => IntakeError::ClientIdInPayload,
         NoQuery::VerifierInfoInPayload => IntakeError::VerifierInfoInPayload,
+        NoQuery::NoSignatureQualifies => IntakeError::NoVerifiableSignature,
         NoQuery::NoData
         | NoQuery::NoQueryAndNoRequest
         | NoQuery::RequestNotAJwsOrObject

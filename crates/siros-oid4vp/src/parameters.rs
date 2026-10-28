@@ -13,7 +13,7 @@ use crate::request::{AttestationFormat, ResponseMode};
 #[error("{}", self.code())]
 pub enum ParameterFault {
     /// A Request Object or a redirect's parameters hold `request` or `request_uri` (RFC 9101,
-    /// Section 4).
+    /// Section 4), or unsigned DC API `data` holds `request` (A.2).
     NestedRequest,
     /// `response_type` is not `vp_token` (Section 5.6).
     ResponseTypeUnsupported,
@@ -146,8 +146,9 @@ pub(crate) enum Carrier {
 /// The `nonce` of the request parameters `params`, which `carrier` brought.
 ///
 /// `response_type` is `vp_token` (Section 5.6). A Request Object, and the parameters of a
-/// redirect, hold no `request` or `request_uri` (RFC 9101, Section 4); in the `data` of an
-/// unsigned DC API request they are unrecognized parameters, which the Wallet ignores (A.2).
+/// redirect, hold no `request` or `request_uri` (RFC 9101, Section 4). The `data` of an
+/// unsigned DC API request holds no `request`, a parameter of the signed DC API protocols;
+/// a `request_uri` there is an unrecognized parameter, which the Wallet ignores (A.2).
 ///
 /// # Errors
 ///
@@ -157,8 +158,8 @@ pub(crate) fn nonce(
     carrier: Carrier,
 ) -> Result<Nonce, ParameterFault> {
     let text = |name: &str| params.get(name).and_then(Value::as_str);
-    let nested = params.contains_key("request") || params.contains_key("request_uri");
-    if nested && carrier != Carrier::UnsignedData {
+    let by_reference = carrier != Carrier::UnsignedData && params.contains_key("request_uri");
+    if params.contains_key("request") || by_reference {
         return Err(ParameterFault::NestedRequest);
     }
     if text("response_type") != Some("vp_token") {

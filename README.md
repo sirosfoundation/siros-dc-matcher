@@ -211,10 +211,12 @@ time. These are the issuers' admission and the validity of the certificates
 that admit them (TR5), the credentials' validity (C4), and the dates of the
 held transaction metadata and of the TS12 definitions. The picker offers what
 the wallet's plan offers, except where the plan reads what the projection
-leaves out: the `zkp_req` credential tests and seed, the facts at request
-time, ad-hoc transaction metadata, and the `semantic` form of the nym_auth
-`verifier_id`, which reads the access certificate. The wallet decides those
-after the pick.
+leaves out or what only a verified signature tells: the `zkp_req` credential
+tests and seed, the facts at request time, ad-hoc transaction metadata, the
+`semantic` form of the nym_auth `verifier_id`, which reads the access
+certificate, and which signature of a multisigned request qualifies, which
+decides its Verifier metadata and `verifier_info`. The picker shows those
+entries, and the wallet decides after the pick.
 
 ## Privacy note
 

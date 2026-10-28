@@ -1,14 +1,15 @@
 //! The case families the K2 differential needs beyond the G2 corpus: `values` filters,
 //! SD-JWT objects and arrays, `multiple`, `claim_sets` and additions, credentials presented in
-//! the background with clipped rows or with transaction data, the `verifier_id` forms, offers
-//! whose rows do not show, a payment with a purpose, and one entry two queries share.
+//! the background with clipped rows or with transaction data, the `verifier_id` forms, a
+//! multisigned request of mixed signers, offers whose rows do not show, a payment with a purpose,
+//! and one entry two queries share.
 
 use serde_json::{json, Value};
 use siros_codec::cbor::Value as Cbor;
 use siros_presentation::testing::host::holding_absent;
 use siros_presentation::testing::verifier::{
     b64, client_metadata, dc_api_request, dc_api_signed_request, encryption_jwk, SignedForm,
-    SignedPrefix, Signer, NONCE, SIGNER,
+    SignedPrefix, Signer, NONCE, ORIGIN, SIGNER,
 };
 use siros_presentation::testing::wallet::{
     mdoc, nym_auth, sd_jwt, sd_jwt_with, Held, Wallet, MDL, MDL_NS, VCT,
@@ -41,6 +42,7 @@ pub fn cases() -> Vec<Case> {
     cases.extend(choices());
     cases.extend(background());
     cases.extend(verifier_ids());
+    cases.extend(mixed_signers());
     cases.extend(unshown());
     cases.extend(payments());
     cases
@@ -202,9 +204,18 @@ fn choices() -> Vec<Case> {
         "claims": [{"id": "a", "path": [MDL_NS, "age_over_21"]},
                    {"id": "b", "path": [MDL_NS, "age_over_18"]}],
         "claim_sets": [["a"], ["b"]]}]);
-    let additions = unsigned(json!({"dcql_query": {
-        "credentials": [ask("q1", "age_over_18"), ask("q2", "family_name")],
-        "credential_sets": [{"options": [["q1"]]}, {"options": [["q2"]], "required": false}]}}));
+    let sets = |credential_sets: Value| {
+        unsigned(json!({"dcql_query": {
+            "credentials": [ask("q1", "age_over_18"), ask("q2", "family_name")],
+            "credential_sets": credential_sets}}))
+    };
+    let additions = sets(json!([{"options": [["q1"]]}, {"options": [["q2"]], "required": false}]));
+    let one_each = || {
+        Wallet::new(vec![
+            mdl(1, &[("age_over_18", Cbor::Bool(true))]),
+            mdl(2, &[("family_name", Cbor::text("Andersson"))]),
+        ])
+    };
     vec![
         case(
             "multiple, two candidates",
@@ -220,6 +231,21 @@ fn choices() -> Vec<Case> {
                 mdl(2, &[("family_name", Cbor::text("Johansson"))]),
                 mdl(3, &[("family_name", Cbor::text("Andersson"))]),
             ]),
+        ),
+        // K3: the picks of the offer {q1, q2} are held by its members alone, and by {q1} with
+        // its addition {q2}.
+        case(
+            "an offer another holds with an addition",
+            sets(json!([{"options": [["q1"], ["q1", "q2"]]},
+                {"options": [["q2"]], "required": false}])),
+            one_each(),
+        ),
+        case(
+            "optional sets, an offer two others hold with additions",
+            sets(json!([{"options": [["q1"]], "required": false},
+                {"options": [["q2"]], "required": false},
+                {"options": [["q1", "q2"]], "required": false}])),
+            one_each(),
         ),
     ]
 }
@@ -316,6 +342,37 @@ fn verifier_ids() -> Vec<Case> {
         semantic,
         renumbered,
     ]
+}
+
+/// A multisigned request whose first signature is [`SIGNER`]'s and whose second names an
+/// `openid_federation` client, with a `client_metadata` that is no object: the wallet verifies
+/// the first, takes the metadata from the request and refuses it; the picker cannot tell which
+/// signature qualifies, and shows the entry. The owner's K2 exception.
+fn mixed_signers() -> Vec<Case> {
+    let object = json!({"response_type": "vp_token", "response_mode": "dc_api.jwt",
+        "nonce": NONCE, "client_metadata": "x", "expected_origins": [ORIGIN],
+        "dcql_query": {"credentials": [ask("q1", "age_over_18")]}});
+    let payload = b64(object.to_string().as_bytes());
+    let mut header = SIGNER.header();
+    header["client_id"] = json!(SIGNER.client_id());
+    let protected = b64(header.to_string().as_bytes());
+    let signature = SIGNER.sign(&format!("{protected}.{payload}"));
+    let federation =
+        json!({"alg": "ES256", "client_id": "openid_federation:https://verifier.example"});
+    let signatures = json!([
+        {"protected": protected, "signature": signature},
+        {"protected": b64(federation.to_string().as_bytes()), "signature": b64(b"sig")}
+    ]);
+    let mut mixed = case(
+        "multisigned, an x509_san_dns signer and an openid_federation one",
+        dc_api_request(
+            "openid4vp-v1-multisigned",
+            json!({"payload": payload, "signatures": signatures}),
+        ),
+        Wallet::new(vec![mdl(1, &[("age_over_18", Cbor::Bool(true))])]),
+    );
+    mixed.exception = Some(Exception::MixedSigners);
+    vec![mixed]
 }
 
 /// Two offers whose second shows a claim key that is no safe label, or longer than a label: the

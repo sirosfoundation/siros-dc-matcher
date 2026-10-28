@@ -76,18 +76,24 @@ binaryen version_116.
     wallet's: it reads the access certificate.
   - Request parameters: siros-oid4vp's key-free rules (`response_type`, `nonce`, the Response
     Mode of the channel, `expected_origins`, `client_metadata`, `verifier_info`; a nested
-    request in a Request Object or a redirect) and the Client Identifier rules apply to
-    `UnverifiedRequest` as to intake (`ParameterFault`; `IntakeError::Parameter` replaces the
-    variants it holds). Intake reports the rule of the first entry it skips. Over the DC API
-    the Wallet ignores `state`, which the digest leaves out there, and a `request_uri` in
-    unsigned `data` (A.2). The Verifier metadata is the request's `client_metadata`, except
-    for an `openid_federation` client, a signed request's or one a multisigned request's
-    protected header names (Section 5.9.3). A multisigned payload holds no `verifier_info`
-    (`IntakeError::VerifierInfoInPayload`): intake reads it from the qualifying signature's
-    protected header (A.3.2.2). `UnverifiedRequest` holds the values it reads typed.
-  - K3: `Planned::picked` selects the one offer of the plan whose members and additions hold
-    the picks; the picker's offer number is the picker's (`PickError::Unmatched`,
-    `PickError::Ambiguous`).
+    request in a Request Object, a redirect, or `request` in unsigned DC API `data`) and the
+    Client Identifier rules apply to `UnverifiedRequest` as to intake (`ParameterFault`;
+    `IntakeError::Parameter` replaces the variants it holds). Intake reports the rule of the
+    first entry it skips. Over the DC API the Wallet ignores `state`, which the digest leaves
+    out there, and a `request_uri` in unsigned `data` (A.2). The Verifier metadata is the
+    request's `client_metadata`, except for an `openid_federation` client, a signed request's
+    or one named by a multisigned request's protected header that can qualify (Section
+    5.9.3). A multisigned payload holds no `verifier_info` (`IntakeError::VerifierInfoInPayload`):
+    intake reads it from the qualifying signature's protected header (A.3.2.2). A multisigned
+    request reads when a protected header can qualify: it names a supported Client Identifier
+    that signs, and its `verifier_info` keeps the rules (`NoQuery::NoSignatureQualifies`,
+    which intake reports as `IntakeError::NoVerifiableSignature`). Which signature qualifies,
+    and so the Verifier metadata and `verifier_info` of a request of several signers, takes
+    the signatures' verification: the picker shows such an entry, and the wallet decides.
+    `UnverifiedRequest` holds the values it reads typed.
+  - K3: `Planned::picked` selects the one offer of the plan whose members alone hold the
+    picks, the offer the picker shows; else the one whose members and additions hold them.
+    The picker's offer number is the picker's (`PickError::Unmatched`, `PickError::Ambiguous`).
 - **BREAKING (display):** a label is `LabelText`, display text with a character other than
   white space. A blank OPTIONAL display member (the issuer's `name`, a claim's `name`, a
   logo's `alt_text`) reads as absent; a blank REQUIRED one (the credential's display `name`,
@@ -165,11 +171,24 @@ binaryen version_116.
   with an object under `claims` gave `Ok` with `satisfiable: false`.
 - **BREAKING (FFI):** `match_dc_api_request` and `UnverifiedRequest::first_registered` refuse a
   DC API request entry that breaks a rule intake applies without a key, as intake refuses it:
-  - no `nonce`, `response_type` or `response_mode`;
-  - a signed request without `client_id` or `expected_origins`;
-  - a pre-registered client, a `client_id` without a prefix;
+  - no `nonce`, or one with a character other than ASCII URL-safe (`"a b"`);
+  - no `response_type`, or one other than `vp_token` (`id_token`);
+  - no `response_mode`, or one other than `dc_api` and `dc_api.jwt` (`direct_post`);
+  - a signed request without `client_id`; a signed or multisigned request without
+    `expected_origins`;
+  - a `client_id` without a prefix (a pre-registered client), of an unsupported prefix, with
+    an empty value (`x509_san_dns:`), a `decentralized_identifier` value that is no DID, or a
+    non-ASCII `x509_san_dns` value;
+  - a signed request of a `redirect_uri` client;
+  - a signed Request Object holding `request` or `request_uri`; unsigned `data` holding
+    `request`;
+  - a multisigned payload holding `client_id` or `verifier_info`;
+  - a multisigned request with no protected header that can qualify: one naming a supported
+    Client Identifier that signs, with a `verifier_info` that keeps the rules;
   - `client_metadata` that is no JSON object;
-  - a malformed `verifier_info`.
+  - a malformed `verifier_info`: no array, empty, an attestation that is no object, without a
+    string `format`, with `data` neither an object nor a string, with `credential_ids` no
+    non-empty array of strings, or naming no Credential Query.
 
   `match_dc_api_request` fails with `MatchError::Request` naming the rule (`request parameter
   refused: nonce_invalid`, `client_id refused: client_id_unprefixed`), and `first_registered`

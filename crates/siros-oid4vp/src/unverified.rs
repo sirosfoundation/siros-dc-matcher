@@ -67,6 +67,9 @@ pub enum NoQuery {
     /// An `openid4vp-v1-multisigned` payload holds `verifier_info`, which travels in each
     /// signature's protected header (A.3.2.2).
     VerifierInfoInPayload,
+    /// No protected header of an `openid4vp-v1-multisigned` request names a supported Client
+    /// Identifier that signs: none of its signatures can qualify (A.3.2.2).
+    NoSignatureQualifies,
     /// The protocol is none of the three of OpenID4VP 1.0, A.1.
     NoParser,
 }
@@ -93,6 +96,7 @@ impl NoQuery {
             Self::SignedRedirectUri => "signed_redirect_uri",
             Self::ClientIdInPayload => "client_id_in_payload",
             Self::VerifierInfoInPayload => "verifier_info_in_payload",
+            Self::NoSignatureQualifies => "no_verifiable_signature",
             Self::NoParser => "protocol_unsupported",
         }
     }
@@ -126,6 +130,9 @@ impl NoQuery {
             Self::SignedRedirectUri => "signed request uses the redirect_uri prefix".into(),
             Self::ClientIdInPayload => "multisigned payload holds `client_id`".into(),
             Self::VerifierInfoInPayload => "multisigned payload holds `verifier_info`".into(),
+            Self::NoSignatureQualifies => {
+                "no protected header names a Client Identifier that signs".into()
+            }
             Self::NoParser => "no parser for this protocol in this build".into(),
         }
     }
@@ -171,11 +178,12 @@ pub struct UnverifiedRequest {
     transaction_data: Vec<TransactionDataItem>,
 }
 
-/// The Client Identifier rules of a request's payload: its Client Identifier, its
-/// `expected_origins`, and where its Verifier metadata comes from.
+/// The Client Identifier rules of a request: its Client Identifier, its `expected_origins`, its
+/// `verifier_info` formats, and where its Verifier metadata comes from.
 struct Client {
     client: Option<ClientId>,
     expected_origins: Option<Vec<String>>,
+    verifier_info: Vec<AttestationFormat>,
     metadata: Metadata,
 }
 
@@ -198,18 +206,17 @@ impl UnverifiedRequest {
         let nonce = parameters::nonce(members, carrier).map_err(parameter)?;
         let mode = members.get("response_mode").and_then(Value::as_str);
         let encoding = DcApiEncoding::of(mode).map_err(parameter)?;
-        let Client {
-            client,
-            expected_origins,
-            metadata,
-        } = client(protocol, members, data)?;
-        let client_metadata = parameters::client_metadata(members, metadata).map_err(parameter)?;
         let raw = members
             .get("dcql_query")
             .ok_or(NoQuery::PayloadHasNoDcqlQuery)?;
         let query = DcqlQuery::parse(raw).map_err(NoQuery::Malformed)?;
-        let verifier_info =
-            parameters::verifier_info(members.get("verifier_info"), &query).map_err(parameter)?;
+        let Client {
+            client,
+            expected_origins,
+            verifier_info,
+            metadata,
+        } = client(protocol, members, data, &query)?;
+        let client_metadata = parameters::client_metadata(members, metadata).map_err(parameter)?;
         let transaction_data = match members.get("transaction_data") {
             None => Vec::new(),
             Some(entries) => {
@@ -279,9 +286,9 @@ impl UnverifiedRequest {
         self.encoding.mode()
     }
 
-    /// The `format` of each `verifier_info` attestation of the request object, in the request's
-    /// order (Section 5.1). A multisigned request carries `verifier_info` in its signatures'
-    /// protected headers, which intake reads of the signature that qualifies: none here.
+    /// The `format` of each `verifier_info` attestation, in the request's order (Section 5.1):
+    /// the request object's, or of a multisigned request, the first protected header's that can
+    /// qualify. Intake reads the header of the signature that qualifies.
     #[must_use]
     pub fn verifier_info_formats(&self) -> &[AttestationFormat] {
         &self.verifier_info
@@ -323,24 +330,28 @@ impl UnverifiedRequest {
 }
 
 /// The Client Identifier rules intake applies before it verifies a signature, over the payload
-/// `members` of the request `data` under `protocol`.
+/// `members` of the request `data` under `protocol`, whose DCQL query is `query`.
 ///
 /// A signed payload names a supported Client Identifier, not of the `redirect_uri` prefix
 /// (Sections 5.9, 5.9.3; A.2), and `expected_origins`. A multisigned payload names no
 /// `client_id` and no `verifier_info`, which travel in each signature's protected header, and
-/// `expected_origins` (A.3.2.2). The Verifier metadata comes from the request, except for an
+/// `expected_origins` (A.3.2.2); its request reads when a protected header can qualify (see
+/// [`Signer`]). The Verifier metadata comes from the request, except for an
 /// `openid_federation` client, whose Trust Chain carries it: a signed request's, or one a
-/// multisigned request's protected header names.
+/// multisigned request's protected header that can qualify names.
 ///
 /// # Errors
 ///
-/// [`NoQuery`]: the Client Identifier rule the payload breaks.
+/// [`NoQuery`]: the Client Identifier rule the request breaks.
 fn client(
     protocol: Protocol,
     members: &serde_json::Map<String, Value>,
     data: &Value,
+    query: &DcqlQuery,
 ) -> Result<Client, NoQuery> {
     let origins = || parameters::expected_origins(members).map_err(NoQuery::Parameter);
+    let verifier_info =
+        |value: Option<&Value>| parameters::verifier_info(value, query).map_err(NoQuery::Parameter);
     let metadata = |federation: bool| {
         if federation {
             Metadata::TrustChain(None)
@@ -352,6 +363,7 @@ fn client(
         Protocol::Unsigned => Ok(Client {
             client: None,
             expected_origins: None,
+            verifier_info: verifier_info(members.get("verifier_info"))?,
             metadata: Metadata::Request,
         }),
         Protocol::Signed => {
@@ -367,6 +379,7 @@ fn client(
             Ok(Client {
                 client: Some(client),
                 expected_origins: Some(origins()?),
+                verifier_info: verifier_info(members.get("verifier_info"))?,
                 metadata: metadata(federation),
             })
         }
@@ -377,16 +390,71 @@ fn client(
             if members.contains_key("verifier_info") {
                 return Err(NoQuery::VerifierInfoInPayload);
             }
-            let federation = shape::signature_clients(data)
+            let expected_origins = Some(origins()?);
+            let signers = signers(&shape::signature_headers(data), query)?;
+            let federation = signers
                 .iter()
-                .any(|client| client.prefix() == ClientIdPrefix::OpenidFederation);
+                .any(|signer| signer.client.prefix() == ClientIdPrefix::OpenidFederation);
+            let verifier_info = signers
+                .into_iter()
+                .next()
+                .map(|signer| signer.verifier_info)
+                .unwrap_or_default();
             Ok(Client {
                 client: None,
-                expected_origins: Some(origins()?),
+                expected_origins,
+                verifier_info,
                 metadata: metadata(federation),
             })
         }
     }
+}
+
+/// A signature of a multisigned request whose protected header can qualify, read without
+/// verification: a supported Client Identifier that signs, of a prefix other than
+/// `redirect_uri`, and a `verifier_info` that keeps its rules (A.3.2.2; Sections 5.1, 5.9).
+struct Signer {
+    client: ClientId,
+    verifier_info: Vec<AttestationFormat>,
+}
+
+/// Each signature of the protected headers `headers` that can qualify, in their order. Which
+/// one qualifies takes its verification, which intake runs: with several, the picker reads
+/// what any of them admits.
+///
+/// # Errors
+///
+/// When none can qualify: the `verifier_info` rule of the first header with a Client
+/// Identifier that signs, else [`NoQuery::NoSignatureQualifies`].
+fn signers(
+    headers: &[serde_json::Map<String, Value>],
+    query: &DcqlQuery,
+) -> Result<Vec<Signer>, NoQuery> {
+    let mut signers = Vec::new();
+    let mut first_fault = None;
+    for header in headers {
+        let client = header
+            .get("client_id")
+            .and_then(Value::as_str)
+            .and_then(|text| ClientId::parse(text).ok())
+            .filter(|client| client.prefix() != ClientIdPrefix::RedirectUri);
+        let Some(client) = client else {
+            continue;
+        };
+        match parameters::verifier_info(header.get("verifier_info"), query) {
+            Ok(verifier_info) => signers.push(Signer {
+                client,
+                verifier_info,
+            }),
+            Err(fault) => {
+                first_fault.get_or_insert(fault);
+            }
+        }
+    }
+    if signers.is_empty() {
+        return Err(first_fault.map_or(NoQuery::NoSignatureQualifies, NoQuery::Parameter));
+    }
+    Ok(signers)
 }
 
 /// Why no entry of the DC API request `request` reads, one clause per entry.

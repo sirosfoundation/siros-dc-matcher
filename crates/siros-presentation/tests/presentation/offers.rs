@@ -269,9 +269,10 @@ fn picks_select_against_the_plan() {
     }
 }
 
-/// K3: picks two offers of the plan both hold make no selection.
+/// K3: of two offers that hold the picks, one through an addition, the one whose members alone
+/// hold them is selected: the offer the picker shows.
 #[test]
-fn picks_two_offers_hold_are_refused() {
+fn picks_select_the_offer_whose_members_hold_them() {
     let pid = Held::new(
         1,
         "dc+sd-jwt",
@@ -294,13 +295,12 @@ fn picks_two_offers_hold_are_refused() {
             CredentialId::new(credential),
         )
     };
-    assert_eq!(
-        planned.picked(&[pick("pid", 1), pick("mdl", 2)]),
-        Err(PresentationError::Pick(PickError::Ambiguous(vec![
-            OfferIndex::new(0),
-            OfferIndex::new(1)
-        ])))
-    );
+    let selection = planned
+        .picked(&[pick("pid", 1), pick("mdl", 2)])
+        .expect("a selection");
+    let offer = &planned.view().offers()[selection.offer().value()];
+    let members = vec![("pid".to_owned(), 1), ("mdl".to_owned(), 1)];
+    assert_eq!(shape(offer), (members, vec![]));
 }
 
 /// A3: required and optional sets, additions, `multiple` members, and the limits.

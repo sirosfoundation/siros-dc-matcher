@@ -236,6 +236,17 @@ fn fixtures() -> Vec<Fixture> {
             answer: honest(Host::trusting()),
             expect: Expect::Refused(IntakeError::Parameter(ParameterFault::NonceInvalid)),
         },
+        // A redirect's state is of ASCII URL-safe characters.
+        Fixture {
+            rule: "a redirect's state is ASCII URL-safe",
+            state: {
+                let mut payload = redirect_payload(&x509);
+                payload["state"] = "a b".into();
+                x509_san_dns(DNS, &a, &a, payload)
+            },
+            answer: honest(Host::trusting()),
+            expect: Expect::Refused(IntakeError::Parameter(ParameterFault::StateInvalid)),
+        },
         // The response mode belongs to the channel.
         Fixture {
             rule: "redirects use direct_post or direct_post.jwt",
