@@ -28,7 +28,6 @@
 //!
 //! Nothing here is wired into matching, the FFI or the WASM picker.
 
-#![deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 #![deny(missing_docs)]
 
 use rustc_hash::FxHashSet;

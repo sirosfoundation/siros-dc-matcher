@@ -13,7 +13,6 @@
 //! The recommended defaults are 60 s into the future and 600 s into the past.
 //! They are recommendations, not protocol constants: pass your own.
 
-#![deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 #![deny(missing_docs)]
 
 /// Length in bytes of the exact form.

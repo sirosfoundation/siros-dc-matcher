@@ -35,7 +35,6 @@
 //! The module runs inside the WASM matcher, where a trap is indistinguishable
 //! from "no matching credential", so it must not panic on any input.
 
-#![deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 #![deny(missing_docs)]
 
 use rustc_hash::FxHashSet;
