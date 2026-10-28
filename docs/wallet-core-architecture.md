@@ -308,6 +308,7 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
   - Optional sets are additions the user may choose on top of an offer, at most one option per set.
   - Each member a transaction entry targets holds the entry T4 selects for it.
   - When every set is optional, each option is an offer.
+  - An offer whose members' or additions' claims or proof statements cannot be displayed (D-rules, A9's rows) is left out; the other offers keep their order. When no offer remains, the plan fails with the first display error.
   - Each member names its query, its instance (C5), its answer (SD-JWT pointers, mdoc elements, or the `zkp_req` system, backend and option) and the transaction entries bound to it (T4).
   - The member of a `multiple` query holds every candidate. The selection chooses a non-empty subset of them, naming each chosen credential by its `credentialId`.
 - **A4. Plan binding.** A plan MUST carry a digest of what the user consents to:
