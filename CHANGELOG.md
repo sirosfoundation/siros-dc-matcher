@@ -244,11 +244,12 @@ against the 307,200-byte budget (303,418 at v0.11.0).
   exports. CI and the release job run it.
 - `clippy.toml` forbids std's `HashMap`, `HashSet` and `RandomState` in the
   crates that link into `matcher.wasm`.
-- Each crate root but the matcher's forbids clippy's panic lints outside the
+- Each crate root but the matcher's denies clippy's panic lints outside the
   tests, and `clippy.toml` names the std methods that panic on an argument
   and share their name with a method that does not.
-  `scripts/check_panic_sites.py` fails on a root without the lints and finds
-  the panics no lint covers. CI runs both.
+  `scripts/check_panic_sites.py` fails on a root without the lints and on an
+  `allow` of them outside the tests, and finds the panics no lint covers. CI
+  runs both.
 
 ### Removed
 

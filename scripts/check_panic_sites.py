@@ -7,12 +7,13 @@ Only the DC API matcher may panic: Credential Manager shows nothing when it
 traps, so its crates (MATCHER_CRATES) keep each panic with the reason it
 cannot recover. Every other crate of the named workspaces runs in a normal
 flow, where a panic crashes the wallet. Each root of its targets that ship
-carries `#![cfg_attr(not(test), forbid(...))]` over the lints in
-FORBIDDEN_LINTS, and this check fails on a root without it: clippy then
-forbids `panic!`, `unreachable!`, `todo!`, `unimplemented!`, `unwrap`,
-`expect`, indexing, and the std methods that clippy.toml's
-`disallowed-methods` names, which panic and share their name with a method
-that does not. This check finds the rest by name:
+carries `#![cfg_attr(not(test), deny(...))]` over the lints in PANIC_LINTS,
+and this check fails on a root without it and on an `allow`, `expect` or
+`warn` of those lints outside test code: clippy then denies `panic!`,
+`unreachable!`, `todo!`, `unimplemented!`, `unwrap`, `expect`, indexing, and
+the std methods that clippy.toml's `disallowed-methods` names, which panic
+and share their name with a method that does not. This check finds the rest
+by name:
 
   - the `assert!` family and `debug_assert!` family;
   - `panic_any` and `resume_unwind`;
@@ -26,9 +27,9 @@ that does not. This check finds the rest by name:
     The check reads no types, so it flags a float divisor too.
 
 Test code is exempt: the integration tests, benches and examples, an item
-under `#[test]` or under a `#[cfg(...)]` that implies `test`, the module
-files such an item declares, and a file or inline module that starts with
-`#![cfg(...)]` implying `test`. The check walks each target's module tree
+under `#[test]` or under a `#[cfg(...)]` that implies `test` or a feature in
+TEST_FEATURES, the module files such an item declares, and a file or inline
+module that starts with such a `#![cfg(...)]`. The check walks each target's module tree
 from its root, as cargo metadata names it, and fails on a `.rs` file under a
 crate's `src/` that the walk does not reach.
 
@@ -59,8 +60,12 @@ PANIC_MACROS = frozenset({"assert", "assert_eq", "assert_ne", "assert_matches", 
                           "debug_assert_eq", "debug_assert_ne", "debug_assert_matches"})
 PANIC_FUNCTIONS = frozenset({"panic_any", "resume_unwind"})
 
-FORBIDDEN_LINTS = frozenset({"panic", "unwrap_used", "expect_used", "unreachable", "todo",
-                             "unimplemented", "indexing_slicing", "disallowed_methods"})
+PANIC_LINTS = frozenset({"panic", "unwrap_used", "expect_used", "unreachable", "todo",
+                         "unimplemented", "indexing_slicing", "disallowed_methods"})
+LEVELS_BELOW_DENY = frozenset({"allow", "expect", "warn"})
+
+# Features that compile code for other crates' tests.
+TEST_FEATURES = frozenset({"test-fixtures"})
 
 
 @dataclass(frozen=True)
@@ -111,7 +116,7 @@ class Site:
 @dataclass
 class Walk:
     """What the walk of one crate found: the panic sites, the target roots
-    without the forbidden lints, and every file it read as shipping code or as
+    without the panic lints, and every file it read as shipping code or as
     test code."""
 
     sites: list[Site] = field(default_factory=list)
@@ -122,9 +127,12 @@ class Walk:
 # ---- attributes --------------------------------------------------------
 
 def _predicate_implies_test(items: list[Token], start: int, end: int) -> bool:
-    """Whether the cfg predicate `items[start:end]` holds only under `test`."""
+    """Whether the cfg predicate `items[start:end]` holds only under `test` or
+    a feature in TEST_FEATURES."""
     if end - start == 1:
         return items[start].is_ident("test")
+    if end - start == 3 and items[start].is_ident("feature") and items[start + 1].is_punct("="):
+        return items[start + 2].text.strip('"') in TEST_FEATURES
     head = items[start]
     if head.kind is not Kind.IDENT or not items[start + 1].is_punct("("):
         return False
@@ -155,7 +163,7 @@ def _arguments(items: list[Token], opener: int, closer: int) -> Iterator[tuple[i
 
 def _attribute_gates_test(items: list[Token], opener: int, closer: int) -> bool:
     """Whether the attribute `#[...]` between `opener` and `closer` compiles
-    its item under `test` only."""
+    its item for tests only."""
     path = [token.text for token in items[opener + 1:closer]]
     if path and path[-1] in ("test", "bench") and all(
             text == "::" or text.isidentifier() for text in path):
@@ -163,6 +171,26 @@ def _attribute_gates_test(items: list[Token], opener: int, closer: int) -> bool:
     if len(path) > 3 and path[0] == "cfg" and path[1] == "(":
         return _predicate_implies_test(items, opener + 3, closer - 1)
     return False
+
+
+def _lowered_panic_lints(items: list[Token], start: int, end: int) -> str:
+    """The `allow`, `expect` or `warn` of a panic lint the attribute body
+    `items[start:end]` sets, and an empty text when it sets none. A
+    `cfg_attr` whose predicate implies test code sets nothing outside it."""
+    head = items[start]
+    if end - start < 3 or not items[start + 1].is_punct("("):
+        return ""
+    parts = list(_arguments(items, start + 1, end - 1))
+    if head.is_ident("cfg_attr") and parts:
+        if _predicate_implies_test(items, *parts[0]):
+            return ""
+        return "".join(_lowered_panic_lints(items, a, b) for a, b in parts[1:])
+    if head.text not in LEVELS_BELOW_DENY:
+        return ""
+    lints = [items[b - 1].text for a, b in parts
+             if [t.text for t in items[a:b - 1]] == ["clippy", "::"]]
+    named = sorted(set(lints) & PANIC_LINTS)
+    return f"{head.text}(clippy::{', clippy::'.join(named)})" if named else ""
 
 
 def _item_end(items: list[Token], start: int) -> int:
@@ -300,6 +328,10 @@ class _Scanner:
             return index + 1
         closer = matching_closer(items, opener)
         if not _attribute_gates_test(items, opener, closer):
+            lowered = _lowered_panic_lints(items, opener + 1, closer)
+            if lowered and not in_test:
+                self.walk.sites.append(Site(self.module.path, items[index].line,
+                                            f"{lowered} outside test code"))
             return closer + 1
         if inner:
             self.scan(closer + 1, end, True, inline)
@@ -343,10 +375,10 @@ class _Scanner:
         return None
 
 
-def _forbidden_outside_tests(items: list[Token]) -> frozenset[str]:
-    """The clippy lints an inner `#![cfg_attr(not(test), forbid(...))]` names."""
+def _denied_outside_tests(items: list[Token]) -> frozenset[str]:
+    """The clippy lints an inner `#![cfg_attr(not(test), deny(...))]` names."""
     texts = [token.text for token in items]
-    head = ["#", "!", "[", "cfg_attr", "(", "not", "(", "test", ")", ",", "forbid", "("]
+    head = ["#", "!", "[", "cfg_attr", "(", "not", "(", "test", ")", ",", "deny", "("]
     found: set[str] = set()
     for start in range(len(texts) - len(head)):
         if texts[start:start + len(head)] != head:
@@ -366,9 +398,9 @@ def _read(path: Path) -> list[Token]:
 
 
 def _walk_tree(root: Path, walk: Walk) -> None:
-    missing = FORBIDDEN_LINTS - _forbidden_outside_tests(_read(root))
+    missing = PANIC_LINTS - _denied_outside_tests(_read(root))
     if missing:
-        walk.unlinted.append(Site(root, 1, "the root lacks #![cfg_attr(not(test), forbid(clippy::"
+        walk.unlinted.append(Site(root, 1, "the root lacks #![cfg_attr(not(test), deny(clippy::"
                                   + ", clippy::".join(sorted(missing)) + "))]"))
     pending = [ModuleFile(root, root.parent, in_test=False)]
     while pending:
