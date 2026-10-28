@@ -11,6 +11,8 @@
 
 use std::str::Utf8Error;
 
+use rustc_hash::FxHashSet;
+
 /// The deepest nesting the reader accepts.
 pub const MAX_DEPTH: usize = 32;
 
@@ -303,12 +305,15 @@ impl<'a> Reader<'a> {
             .map(Kind::Array)
     }
 
+    /// The map of the `argument` entries that follow, each key once: one hash set insertion
+    /// per key.
     fn map(&mut self, argument: u64, depth: usize) -> Result<Kind<'a>, CborError> {
         let n = self.length(argument)?;
         let mut entries: Vec<(Item<'a>, Item<'a>)> = Vec::with_capacity(n);
+        let mut keys = FxHashSet::default();
         for _ in 0..n {
             let key = self.item(depth + 1)?;
-            if entries.iter().any(|(k, _)| k.raw == key.raw) {
+            if !keys.insert(key.raw) {
                 return Err(CborError::DuplicateKey);
             }
             let value = self.item(depth + 1)?;

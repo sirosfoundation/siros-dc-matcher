@@ -360,7 +360,8 @@ binaryen version_116.
 ### Added
 
 - `siros-codec`, the encodings every wallet core crate shares: a strict CBOR reader (definite
-  lengths, no duplicate keys, no trailing bytes, at most `cbor::MAX_DEPTH` (32) levels), of one item
+  lengths, no duplicate keys, found with one hash set insertion per key, no trailing bytes, at
+  most `cbor::MAX_DEPTH` (32) levels), of one item
   or of a CBOR sequence (`cbor::decode_sequence`, RFC 8742), and a deterministic writer; unpadded
   base64url and the padded base64 of `x5c` certificates (RFC 4648, Sections 4 and 5); the calendar
   dates and UTC times of CBOR's `full-date` and `tdate`; the ES256 signature value
