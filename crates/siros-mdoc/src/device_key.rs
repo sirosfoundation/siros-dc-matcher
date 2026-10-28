@@ -5,7 +5,8 @@ use siros_codec::cbor::Item;
 use crate::error::DeviceKeyFault;
 
 /// Why bytes are no P-256 key.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum PointError {
     /// The bytes are not an uncompressed SEC 1 point of 32-byte coordinates.
     NotUncompressed,
@@ -20,10 +21,6 @@ impl PointError {
         }
     }
 }
-
-siros_codec::display_code!(PointError);
-
-impl std::error::Error for PointError {}
 
 /// A P-256 public key: its coordinates, big-endian.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

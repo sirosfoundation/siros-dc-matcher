@@ -12,12 +12,12 @@ use crate::tree::DisclosureId;
 pub enum EncodedJsonFault {
     /// The segment is not base64url without padding.
     #[error("the segment is not base64url without padding")]
-    Base64(Base64Error),
+    Base64(#[source] Base64Error),
     /// The bytes are no JSON value, or an object repeats a member name (RFC 7519, Section 4).
     #[error(
         "the bytes are no JSON value, or an object repeats a member name (RFC 7519, Section 4)"
     )]
-    Json(JsonFault),
+    Json(#[source] JsonFault),
 }
 
 /// Why the issuer JWT is no compact JWS of a JSON header and payload (RFC 7515, Section 7.1).
@@ -31,16 +31,16 @@ pub enum IssuerJwtFault {
     SignatureEmpty,
     /// The signature segment is not base64url without padding.
     #[error("the signature segment is not base64url without padding")]
-    Signature(Base64Error),
+    Signature(#[source] Base64Error),
     /// The header segment encodes no JSON value.
     #[error("the header segment encodes no JSON value")]
-    Header(EncodedJsonFault),
+    Header(#[source] EncodedJsonFault),
     /// The header is not a JSON object.
     #[error("the header is not a JSON object")]
     HeaderNotObject,
     /// The payload segment encodes no JSON value.
     #[error("the payload segment encodes no JSON value")]
-    Payload(EncodedJsonFault),
+    Payload(#[source] EncodedJsonFault),
     /// The payload is not a JSON object.
     #[error("the payload is not a JSON object")]
     PayloadNotObject,
@@ -51,7 +51,7 @@ pub enum IssuerJwtFault {
 pub enum DisclosureFault {
     /// The text encodes no JSON value.
     #[error("the text encodes no JSON value")]
-    Encoding(EncodedJsonFault),
+    Encoding(#[source] EncodedJsonFault),
     /// The value is not a JSON array.
     #[error("the value is not a JSON array")]
     NotArray,
@@ -119,19 +119,20 @@ pub enum Placement {
 pub enum ParseError {
     /// The issuer JWT is not three base64url segments whose header and payload are JSON objects
     /// with unique member names.
-    IssuerJwt(IssuerJwtFault),
+    IssuerJwt(#[source] IssuerJwtFault),
     /// A disclosure does not decode to a JSON array of a string salt and a value, or of a string
     /// salt, a string claim name and a value (Section 4.2).
     Disclosure {
         /// The disclosure.
         disclosure: DisclosureId,
         /// What breaks its form.
+        #[source]
         fault: DisclosureFault,
     },
     /// `_sd_alg` is not `sha-256`, `sha-384` or `sha-512` (Sections 4.1.1 and 9.4).
-    UnsupportedSdAlg(SdAlgFault),
+    UnsupportedSdAlg(#[source] SdAlgFault),
     /// `_sd`, `...` or `_sd_alg` appears outside its role.
-    ReservedClaimName(ReservedFault),
+    ReservedClaimName(#[source] ReservedFault),
     /// This digest appears twice in the payload and the disclosures, or two disclosures share it
     /// (Section 7.1, step 4).
     RepeatedDigest(Digest),
@@ -151,7 +152,7 @@ pub enum ParseError {
     /// The claims nest deeper than [`MAX_DEPTH`](crate::MAX_DEPTH), disclosures included.
     TooDeep,
     /// The issuer JWT's `x5c` header parameter breaks RFC 7515, Section 4.1.6.
-    X5c(X5cError),
+    X5c(#[source] X5cError),
 }
 
 siros_codec::position!(
@@ -173,7 +174,7 @@ pub enum X5cError {
     NotString(X5cIndex),
     /// The certificate at this position is not base64 with padding.
     #[error("the certificate at this position is not base64 with padding")]
-    Base64(X5cIndex, Base64Error),
+    Base64(X5cIndex, #[source] Base64Error),
 }
 
 impl ParseError {

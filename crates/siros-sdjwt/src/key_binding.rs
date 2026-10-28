@@ -1,7 +1,5 @@
 //! The presentation as sent and its Key Binding JWT (RFC 9901, Sections 4.3 and 4.3.1).
 
-use std::fmt;
-
 use rustc_hash::FxHashSet;
 use serde_json::Value;
 use siros_codec::base64url;
@@ -23,16 +21,9 @@ const REQUIRED: [&str; 4] = ["iat", "aud", "nonce", "sd_hash"];
 pub struct NumericDate(u64);
 
 /// A time before 1970-01-01T00:00:00Z, which no NumericDate of whole seconds writes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("time_before_epoch")]
 pub struct BeforeEpoch;
-
-impl fmt::Display for BeforeEpoch {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("time_before_epoch")
-    }
-}
-
-impl std::error::Error for BeforeEpoch {}
 
 impl NumericDate {
     /// The NumericDate of `time`.

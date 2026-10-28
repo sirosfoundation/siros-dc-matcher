@@ -8,26 +8,26 @@ use siros_codec::member::MemberFault;
 #[error("{}", self.code())]
 pub enum WalletStateError {
     /// The text is not a JSON object of the members `S` gives them.
-    Malformed(JsonTextError),
+    Malformed(#[source] JsonTextError),
     /// `schemaVersion` is neither 3 nor 4.
     UnsupportedSchemaVersion(FoundVersion),
     /// `credentials` is absent or not an array.
-    Credentials(ArrayFault),
+    Credentials(#[source] ArrayFault),
     /// An entry of `credentials` is not an object.
-    CredentialEntry(JsonTextError),
+    CredentialEntry(#[source] JsonTextError),
     /// A member of Section 6.0 of a credential entry breaks its rule. The number members are
     /// non-negative integers of 64 bits; the others are strings.
     #[error("{code}: {member}", code = self.code(), member = .0.name())]
-    CredentialMember(Member, MemberFault),
+    CredentialMember(Member, #[source] MemberFault),
     /// Two credential entries share a `credentialId`.
     RepeatedCredentialId,
     /// `metadata` is not an array of objects, each with a non-empty string `type` and a
     /// `value`.
-    Metadata(MetadataFault),
+    Metadata(#[source] MetadataFault),
     /// `keypairs` is absent or not an array.
-    Keypairs(ArrayFault),
+    Keypairs(#[source] ArrayFault),
     /// `presentations` is not an array of the records of `new_presentation`.
-    Presentations(PresentationsFault),
+    Presentations(#[source] PresentationsFault),
 }
 
 /// The `schemaVersion` of a state of a version other than 3 and 4.
@@ -86,7 +86,7 @@ pub enum ArrayFault {
     Absent,
     /// The member holds no array.
     #[error("the member holds no array")]
-    NotArray(JsonTextError),
+    NotArray(#[source] JsonTextError),
 }
 
 /// The rule `metadata` breaks.
@@ -94,13 +94,13 @@ pub enum ArrayFault {
 pub enum MetadataFault {
     /// `metadata` is not an array.
     #[error("`metadata` is not an array")]
-    NotArray(JsonTextError),
+    NotArray(#[source] JsonTextError),
     /// An entry is not an object.
     #[error("an entry is not an object")]
-    EntryNotObject(JsonTextError),
+    EntryNotObject(#[source] JsonTextError),
     /// An entry has no non-empty string `type`.
     #[error("an entry has no non-empty string `type`")]
-    Type(TypeFault),
+    Type(#[source] TypeFault),
     /// An entry has no `value`.
     #[error("an entry has no `value`")]
     Value,
@@ -114,7 +114,7 @@ pub enum TypeFault {
     Absent,
     /// `type` is not a string.
     #[error("`type` is not a string")]
-    NotString(JsonTextError),
+    NotString(#[source] JsonTextError),
     /// `type` is the empty string.
     #[error("`type` is the empty string")]
     Empty,
@@ -125,13 +125,13 @@ pub enum TypeFault {
 pub enum PresentationsFault {
     /// `presentations` is absent or not an array.
     #[error("`presentations` is absent or not an array")]
-    NotArray(ArrayFault),
+    NotArray(#[source] ArrayFault),
     /// An entry lacks one of the six members of `new_presentation`, or one of them has the
     /// wrong type: `presentationId` and `transactionId` non-negative integers of 64 bits,
     /// `usedCredentialIds` an array of them, `presentationTimestampSeconds` an integer, and
     /// the strings `data` and `audience`.
     #[error("an entry lacks one of the six members of `new_presentation`, or one of them has the wrong type: `presentationId` and `transactionId` non-negative integers of 64 bits, `usedCredentialIds` an array of them, `presentationTimestampSeconds` an integer, and the strings `data` and `audience`")]
-    Record(JsonTextError),
+    Record(#[source] JsonTextError),
     /// A `presentationTimestampSeconds` is outside the years 0000 to 9999.
     #[error("a `presentationTimestampSeconds` is outside the years 0000 to 9999")]
     Timestamp,

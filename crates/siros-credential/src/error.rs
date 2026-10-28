@@ -58,11 +58,13 @@ impl RegisteredClaim {
 }
 
 /// Why a claim is refused.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum ClaimFault {
     /// It is absent.
+    #[error("it is absent")]
     Absent,
     /// It has another JSON type than its rule gives it.
+    #[error("it has another JSON type than its rule gives it")]
     WrongType,
 }
 
@@ -77,7 +79,7 @@ pub enum CredentialError {
     /// `data` is no mdoc [`siros_mdoc::Mdoc::parse`] reads. The code is its own.
     Mdoc(#[from] MdocError),
     /// The SD-JWT VC has no `vct`, or its `vct` is not a string (SD-JWT VC, Section 2.2.2.3).
-    Vct(ClaimFault),
+    Vct(#[source] ClaimFault),
     /// The SD-JWT VC discloses this registered claim, or one of its sub-claims, selectively
     /// (SD-JWT VC, Section 2.2.2.3).
     #[error("{code}: {claim}", code = self.code(), claim = .0.name())]
@@ -179,13 +181,16 @@ pub enum Coordinate {
 }
 
 /// Why a coordinate of the `jwk` is no 32 bytes of base64url.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum CoordinateFault {
     /// It is absent or not a string.
+    #[error("it is absent or not a string")]
     NotString,
     /// The string is not base64url.
-    Base64(Base64Error),
+    #[error("the string is not base64url")]
+    Base64(#[source] Base64Error),
     /// The bytes number this many, where a P-256 coordinate has 32.
+    #[error("the bytes number this many, where a P-256 coordinate has 32")]
     Length(usize),
 }
 
@@ -200,7 +205,7 @@ pub enum HolderKeyError {
     /// The `jwk`'s `crv` is not `P-256` (RFC 7518, Section 6.2.1).
     Curve,
     /// The `jwk`'s `x` or `y` is not 32 bytes of base64url.
-    Coordinate(Coordinate, CoordinateFault),
+    Coordinate(Coordinate, #[source] CoordinateFault),
 }
 
 impl HolderKeyError {

@@ -16,36 +16,36 @@ pub enum MdocError {
     #[error("mso_mdoc: cbor: {0}")]
     Cbor(#[source] CborError),
     /// The top level is no `IssuerSigned`, `Document` or one-document `DeviceResponse`.
-    Envelope(EnvelopeFault),
+    Envelope(#[source] EnvelopeFault),
     /// `issuerAuth` is not an untagged `COSE_Sign1` with a protected header, a payload and a
     /// signature as byte strings.
-    IssuerAuth(IssuerAuthFault),
+    IssuerAuth(#[source] IssuerAuthFault),
     /// The protected header names no algorithm (label 1) as an integer.
-    Algorithm(AlgorithmFault),
+    Algorithm(#[source] AlgorithmFault),
     /// The unprotected header has no `x5chain` (label 33) of DER certificates.
-    X5chain(MemberFault),
+    X5chain(#[source] MemberFault),
     /// The payload is not `#6.24(bstr .cbor MobileSecurityObject)`.
-    Payload(PayloadFault),
+    Payload(#[source] PayloadFault),
     /// The MSO has no `docType`, or the `Document` names another.
-    DocType(DocTypeFault),
+    DocType(#[source] DocTypeFault),
     /// `digestAlgorithm` is not `SHA-256`, `SHA-384` or `SHA-512`.
-    DigestAlgorithm(NameFault),
+    DigestAlgorithm(#[source] NameFault),
     /// `valueDigests` is no non-empty map from namespaces to non-empty maps from `digestID` to
     /// digests of the algorithm's length, each namespace and `digestID` once.
-    ValueDigests(ValueDigestsFault),
+    ValueDigests(#[source] ValueDigestsFault),
     /// `deviceKeyInfo.deviceKey` is no P-256 `COSE_Key` with 32-byte coordinates.
-    DeviceKey(DeviceKeyFault),
+    DeviceKey(#[source] DeviceKeyFault),
     /// `keyAuthorizations` breaks its CDDL, repeats a name, or names a namespace both whole and
     /// by its elements.
-    KeyAuthorizations(KeyAuthorizationsFault),
+    KeyAuthorizations(#[source] KeyAuthorizationsFault),
     /// `validityInfo` lacks `signed`, `validFrom` or `validUntil` as a 20-character `tdate`, or
     /// `validFrom` precedes `signed` or does not precede `validUntil`.
-    Validity(ValidityFault),
+    Validity(#[source] ValidityFault),
     /// `nameSpaces` is no non-empty map from namespaces to non-empty arrays of
     /// `IssuerSignedItemBytes`, each namespace once.
-    NameSpaces(NameSpacesFault),
+    NameSpaces(#[source] NameSpacesFault),
     /// An `IssuerSignedItem` lacks `digestID`, `random`, `elementIdentifier` or `elementValue`.
-    Item(ItemFault),
+    Item(#[source] ItemFault),
     /// A namespace holds an element identifier twice.
     RepeatedElement,
     /// The digest of an `IssuerSignedItemBytes` is not the one `valueDigests` lists under its
@@ -89,7 +89,7 @@ pub enum IssuerAuthFault {
 pub enum AlgorithmFault {
     /// The header is not one CBOR item.
     #[error("the header is not one CBOR item")]
-    Header(CborError),
+    Header(#[source] CborError),
     /// The header has no integer under label 1.
     #[error("the header has no integer under label 1")]
     Absent,
@@ -100,13 +100,13 @@ pub enum AlgorithmFault {
 pub enum PayloadFault {
     /// The payload is not one CBOR item.
     #[error("the payload is not one CBOR item")]
-    Cbor(CborError),
+    Cbor(#[source] CborError),
     /// It is not a byte string under tag 24.
     #[error("it is not a byte string under tag 24")]
     NotTagged,
     /// The tagged bytes are not one CBOR item.
     #[error("the tagged bytes are not one CBOR item")]
-    Mso(CborError),
+    Mso(#[source] CborError),
 }
 
 /// Why the `docType` is refused.
@@ -128,7 +128,7 @@ pub enum DocTypeFault {
 pub enum NameFault {
     /// It is absent or not text.
     #[error("it is absent or not text")]
-    Member(MemberFault),
+    Member(#[source] MemberFault),
     /// It names none of the values this crate reads.
     #[error("it names none of the values this crate reads")]
     Unknown,
@@ -139,13 +139,13 @@ pub enum NameFault {
 pub enum ValueDigestsFault {
     /// `valueDigests` is no non-empty map.
     #[error("`valueDigests` is no non-empty map")]
-    Member(MemberFault),
+    Member(#[source] MemberFault),
     /// A namespace is not text.
     #[error("a namespace is not text")]
     NameSpace,
     /// The namespace's digests are no non-empty map.
     #[error("the namespace's digests are no non-empty map")]
-    Digests(NameSpace, MemberFault),
+    Digests(NameSpace, #[source] MemberFault),
     /// A `digestID` of the namespace is not an unsigned integer.
     #[error("a `digestID` of the namespace is not an unsigned integer")]
     DigestId(NameSpace),
@@ -191,7 +191,7 @@ pub enum DeviceKeyFault {
 pub enum NamesFault {
     /// It is no non-empty array.
     #[error("it is no non-empty array")]
-    Member(MemberFault),
+    Member(#[source] MemberFault),
     /// A name is not text.
     #[error("a name is not text")]
     NotText,
@@ -208,16 +208,16 @@ pub enum KeyAuthorizationsFault {
     NotMap,
     /// `nameSpaces`.
     #[error("`nameSpaces`")]
-    NameSpaces(NamesFault),
+    NameSpaces(#[source] NamesFault),
     /// `dataElements` is no non-empty map.
     #[error("`dataElements` is no non-empty map")]
-    DataElements(MemberFault),
+    DataElements(#[source] MemberFault),
     /// A namespace of `dataElements` is not text.
     #[error("a namespace of `dataElements` is not text")]
     NameSpace,
     /// The element identifiers of this namespace.
     #[error("the element identifiers of this namespace")]
-    Elements(NameSpace, NamesFault),
+    Elements(NameSpace, #[source] NamesFault),
     /// This namespace is in `nameSpaces` and in `dataElements`.
     #[error("this namespace is in `nameSpaces` and in `dataElements`")]
     Overlap(NameSpace),
@@ -268,7 +268,7 @@ pub enum ValidityFault {
 pub enum NameSpacesFault {
     /// `nameSpaces` is no non-empty map.
     #[error("`nameSpaces` is no non-empty map")]
-    Member(MemberFault),
+    Member(#[source] MemberFault),
     /// A namespace is not text.
     #[error("a namespace is not text")]
     NameNotText,
@@ -277,7 +277,7 @@ pub enum NameSpacesFault {
     Repeated(NameSpace),
     /// The namespace's items are no non-empty array.
     #[error("the namespace's items are no non-empty array")]
-    Items(NameSpace, MemberFault),
+    Items(NameSpace, #[source] MemberFault),
     /// An item of the namespace is no byte string under tag 24.
     #[error("an item of the namespace is no byte string under tag 24")]
     NotTagged(NameSpace),
@@ -301,7 +301,7 @@ pub enum ItemMember {
 pub enum ItemFault {
     /// The tagged bytes are not one CBOR item.
     #[error("the tagged bytes are not one CBOR item")]
-    Cbor(CborError),
+    Cbor(#[source] CborError),
     /// This member is absent or of another CBOR type.
     #[error("this member is absent or of another CBOR type")]
     Member(ItemMember),
