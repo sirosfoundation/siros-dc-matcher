@@ -5,6 +5,7 @@
 //! disclosure, a decoy among them, is an [`Element::Withheld`] at its position.
 
 use serde_json::Number;
+use siros_codec::base64url::Base64Url;
 
 /// A JSON object of the processed payload.
 ///
@@ -64,6 +65,10 @@ impl Claim {
     pub fn disclosure(&self) -> Option<DisclosureId> {
         self.disclosure.as_ref().map(|d| d.id)
     }
+
+    pub(crate) fn disclosure_text(&self) -> Option<&str> {
+        self.disclosure.as_ref().map(|d| d.encoded.as_str())
+    }
 }
 
 /// A claim value of the processed payload.
@@ -97,14 +102,15 @@ siros_codec::position!(
     pub DisclosureId
 );
 
-/// A disclosure as stored: its position.
+/// A disclosure as stored: its position and its base64url text.
 pub(crate) struct Disclosure {
     id: DisclosureId,
+    encoded: Base64Url,
 }
 
 impl Disclosure {
-    pub(crate) fn new(id: DisclosureId) -> Self {
-        Self { id }
+    pub(crate) fn new(id: DisclosureId, encoded: Base64Url) -> Self {
+        Self { id, encoded }
     }
 
     pub(crate) fn id(&self) -> DisclosureId {
