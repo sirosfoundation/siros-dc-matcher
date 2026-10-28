@@ -16,6 +16,8 @@ impl MediaType {
     pub const REQUEST_OBJECT: Self = Self("application/oauth-authz-req+jwt");
     /// `application/x-www-form-urlencoded`.
     pub const FORM: Self = Self("application/x-www-form-urlencoded");
+    /// `application/cwt`, the body of `direct_post.cwt` (`zkp_req.md`, Section 6.2).
+    pub const CWT: Self = Self("application/cwt");
 
     /// `type/subtype`.
     #[must_use]
