@@ -14,10 +14,16 @@
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
 
+use std::num::NonZeroUsize;
+
 use anyhow::{Context, Result};
 use wasmtime::{Caller, Engine, Extern, Linker, Memory, Module, Store};
+use wasmtime_wasi::pipe::MemoryOutputPipe;
 use wasmtime_wasi::preview1::{self, WasiP1Ctx};
 use wasmtime_wasi::WasiCtxBuilder;
+
+/// The most a matcher may write to stderr in one run.
+const STDERR_CAPACITY: usize = 1 << 20;
 
 /// What the host offers a matcher on one invocation.
 #[derive(Debug, Clone, Default)]
@@ -32,6 +38,42 @@ pub struct Invocation {
     pub origin: String,
     /// Host ABI version reported through `GetWasmVersion`.
     pub wasm_version: u32,
+    /// How the host answers each `ReadCredentialsBuffer` call.
+    pub credential_reads: CredentialReads,
+}
+
+/// How the host answers `ReadCredentialsBuffer`: copy from the blob at the
+/// offset asked, at most the length asked, and report the count copied.
+/// The last two variants break that contract.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum CredentialReads {
+    /// Each call copies all the bytes asked for that the blob holds.
+    #[default]
+    Whole,
+    /// Each call copies at most this many bytes.
+    Chunks(NonZeroUsize),
+    /// Each call copies what [`CredentialReads::Whole`] copies and reports
+    /// one byte more.
+    OverReport,
+    /// Each call copies nothing and reports 0, before the end of the blob
+    /// too.
+    Stall,
+}
+
+impl CredentialReads {
+    /// The bytes one call copies from `blob` at `offset`, at most `len` of
+    /// them, and the count it reports. Past the end it copies nothing.
+    fn answer(self, blob: &[u8], offset: usize, len: usize) -> (&[u8], usize) {
+        let remaining = blob.get(offset..).unwrap_or_default();
+        let most = match self {
+            Self::Whole | Self::OverReport => len,
+            Self::Chunks(chunk) => len.min(chunk.get()),
+            Self::Stall => 0,
+        };
+        let copied = remaining.get(..most).unwrap_or(remaining);
+        let reported = copied.len() + usize::from(self == Self::OverReport);
+        (copied, reported)
+    }
 }
 
 /// One credential the matcher offered to the picker.
@@ -72,12 +114,14 @@ pub struct CapturedEntry {
 }
 
 /// Everything a matcher emitted during one run.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Captured {
     /// Sets declared, as `(set_id, declared_length)`.
     pub sets: Vec<(String, i32)>,
     /// Entries emitted, in order.
     pub entries: Vec<CapturedEntry>,
+    /// What the matcher wrote to stderr.
+    pub stderr: Vec<u8>,
 }
 
 impl Captured {
@@ -109,14 +153,21 @@ struct State {
 /// # Errors
 ///
 /// Returns an error if the module fails to compile, fails to instantiate
-/// (typically a host import it needs and we do not provide), or traps.
+/// (typically a host import it needs and we do not provide), or traps. The
+/// error of a trap carries what the matcher wrote to stderr, where a
+/// panicking matcher writes its panic message.
 pub fn run(wasm: &[u8], input: Invocation) -> Result<Captured> {
     let (engine, module) = compiled(wasm)?;
 
+    let stderr = MemoryOutputPipe::new(STDERR_CAPACITY);
     let mut store = Store::new(
         &engine,
         State {
-            wasi: WasiCtxBuilder::new().inherit_stdio().build_p1(),
+            wasi: WasiCtxBuilder::new()
+                .inherit_stdin()
+                .inherit_stdout()
+                .stderr(stderr.clone())
+                .build_p1(),
             input,
             out: Captured::default(),
         },
@@ -137,13 +188,20 @@ pub fn run(wasm: &[u8], input: Invocation) -> Result<Captured> {
         .instantiate(&mut store, &module)
         .context("instantiating matcher")?;
 
-    instance
+    let ran = instance
         .get_typed_func::<(), ()>(&mut store, "_start")
         .context("matcher has no _start export")?
-        .call(&mut store, ())
-        .context("matcher trapped — in a real picker this shows the user nothing at all")?;
-
-    Ok(store.into_data().out)
+        .call(&mut store, ());
+    let mut out = store.into_data().out;
+    out.stderr = stderr.contents().to_vec();
+    ran.with_context(|| {
+        format!(
+            "matcher trapped — in a real picker this shows the user nothing at all; \
+             its stderr:\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        )
+    })?;
+    Ok(out)
 }
 
 /// Compile a module once per process, reusing it across runs.
@@ -217,18 +275,20 @@ fn add_credman(linker: &mut Linker<State>) -> Result<()> {
         },
     )?;
 
-    // Returns how many bytes were actually read, which is not necessarily the
-    // number asked for — a matcher may request past the end of the blob.
+    // The offset and the length are `size_t`, unsigned on wasm32. Returns the
+    // count the host reports, as `Invocation::credential_reads` answers.
     linker.func_wrap(
         "credman",
         "ReadCredentialsBuffer",
-        |mut c: Caller<'_, State>, ptr: i32, offset: i32, len: i32| -> Result<i32> {
-            let blob = c.data().input.credentials.clone();
-            let start = (offset.max(0) as usize).min(blob.len());
-            let end = start.saturating_add(len.max(0) as usize).min(blob.len());
-            let slice = blob.get(start..end).unwrap_or_default().to_vec();
-            write_bytes(&mut c, ptr, &slice)?;
-            Ok(slice.len() as i32)
+        |mut c: Caller<'_, State>, ptr: i32, offset: u32, len: u32| -> Result<i32> {
+            let input = &c.data().input;
+            let (copied, reported) =
+                input
+                    .credential_reads
+                    .answer(&input.credentials, offset as usize, len as usize);
+            let copied = copied.to_vec();
+            write_bytes(&mut c, ptr, &copied)?;
+            i32::try_from(reported).context("a read count beyond i32")
         },
     )?;
 

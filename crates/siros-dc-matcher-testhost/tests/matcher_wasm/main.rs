@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 use siros_dc_matcher_core::db::CredentialDatabase;
 use siros_dc_matcher_core::fixtures;
 use siros_dc_matcher_core::profile::{Capability, MatchProfile};
-use siros_dc_matcher_testhost::{run, Captured, CapturedEntry, Invocation};
+use siros_dc_matcher_testhost::{run, Captured, CapturedEntry, CredentialReads, Invocation};
 
 /// The matcher's own JSON: `data` in the standard metadata object.
 fn data(entry: &CapturedEntry) -> Value {
@@ -103,20 +103,24 @@ fn request(format: &str, meta: Value) -> Vec<u8> {
     .into_bytes()
 }
 
-fn invoke(db: &CredentialDatabase, request: Vec<u8>) -> Captured {
-    run(
-        matcher_wasm(),
-        Invocation {
-            request,
-            credentials: db.to_cbor().expect("encoding blob"),
-            calling_package: "com.android.chrome".into(),
-            origin: "https://verifier.example.org".into(),
-            wasm_version: 2,
-        },
-    )
-    .expect("matcher ran")
+/// A level-2 host that answers each read whole, from Chrome on a verifier's
+/// origin.
+fn invocation(db: &CredentialDatabase, request: Vec<u8>) -> Invocation {
+    Invocation {
+        request,
+        credentials: db.to_cbor().expect("encoding blob"),
+        calling_package: "com.android.chrome".into(),
+        origin: "https://verifier.example.org".into(),
+        wasm_version: 2,
+        credential_reads: CredentialReads::Whole,
+    }
 }
 
+fn invoke(db: &CredentialDatabase, request: Vec<u8>) -> Captured {
+    run(matcher_wasm(), invocation(db, request)).expect("matcher ran")
+}
+
+mod credential_reads;
 mod offers;
 mod purpose;
 mod signed_requests;
