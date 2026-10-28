@@ -275,23 +275,25 @@ fn writing_then_reading_gives_the_projection_back() -> Result<(), Box<dyn std::e
             bytes,
             "seed {seed}: equal projections give equal bytes"
         );
-        let mut registration = Registration::open(Cursor::new(bytes.as_slice()))?;
-        assert_eq!(registration.projection()?, written, "seed {seed}");
-        for (format, name) in TYPES {
-            let credential_type = RegisteredType::new(format, TypeName::new(name)?);
-            let read: Vec<EntryRef> = registration
-                .credentials(std::slice::from_ref(&credential_type))?
-                .iter()
-                .map(RegisteredCredential::entry)
-                .collect();
-            let expected: Vec<EntryRef> = written
-                .credentials
-                .iter()
-                .filter(|credential| credential.credential_type == credential_type)
-                .map(RegisteredCredential::entry)
-                .collect();
-            assert_eq!(read, expected, "seed {seed}: the credentials of {name}");
-        }
+        Registration::open(Cursor::new(bytes.as_slice()), |mut registration| {
+            assert_eq!(registration.projection()?, written, "seed {seed}");
+            for (format, name) in TYPES {
+                let credential_type = RegisteredType::new(format, TypeName::new(name)?);
+                let read: Vec<EntryRef> = registration
+                    .credentials(std::slice::from_ref(&credential_type))?
+                    .iter()
+                    .map(RegisteredCredential::entry)
+                    .collect();
+                let expected: Vec<EntryRef> = written
+                    .credentials
+                    .iter()
+                    .filter(|credential| credential.credential_type == credential_type)
+                    .map(RegisteredCredential::entry)
+                    .collect();
+                assert_eq!(read, expected, "seed {seed}: the credentials of {name}");
+            }
+            Ok::<_, Box<dyn std::error::Error>>(())
+        })??;
     }
     Ok(())
 }

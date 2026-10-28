@@ -106,10 +106,10 @@ struct Input<'a> {
 /// nothing: the debug flag is one of the facts, and the wallet registers the projection together
 /// with this binary.
 fn run(input: &Input<'_>, registration: impl Read + Seek, sets: &mut impl SetSink) {
-    let Ok(mut registration) = Registration::open(registration) else {
-        return;
-    };
-    let diagnostics = Diagnostics::of(registration.facts());
-    let unshown = matching::pick(input, &mut registration, sets);
-    diagnostics.emit(&mut registration, sets, &unshown);
+    Registration::open(registration, |mut registration| {
+        let diagnostics = Diagnostics::of(registration.facts());
+        let unshown = matching::pick(input, &mut registration, sets);
+        diagnostics.emit(&mut registration, sets, &unshown);
+    })
+    .unwrap_or_default();
 }

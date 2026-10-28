@@ -57,15 +57,16 @@ pub(crate) enum Unshown {
     Registration(&'static str),
 }
 
-/// Whether the wallet registered with its diagnostics shown, and the icon they show.
-pub(crate) struct Diagnostics {
+/// Whether the wallet registered with its diagnostics shown, and the icon they show, of the
+/// registration of the brand `'id`.
+pub(crate) struct Diagnostics<'id> {
     shown: Shown,
-    icon: IconRef,
+    icon: IconRef<'id>,
 }
 
-impl Diagnostics {
+impl<'id> Diagnostics<'id> {
     /// The diagnostics a registration of `facts` asks for.
-    pub(crate) fn of(facts: &Facts) -> Self {
+    pub(crate) fn of(facts: &Facts<IconRef<'id>>) -> Self {
         Self {
             shown: facts.diagnostics(),
             icon: *facts.default_icon(),
@@ -77,7 +78,7 @@ impl Diagnostics {
     /// that does not read leaves nothing to emit.
     pub(crate) fn emit<R: Read + Seek>(
         &self,
-        registration: &mut Registration<R>,
+        registration: &mut Registration<'id, R>,
         sets: &mut impl SetSink,
         unshown: &[Unshown],
     ) {

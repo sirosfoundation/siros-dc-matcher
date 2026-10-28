@@ -45,16 +45,20 @@ const RECORD_MEMBERS: [Member; 9] = [
     Member::Transactions,
 ];
 
-/// A credential record: the credential's position in the wallet's order, and the credential.
-pub(crate) struct Positioned {
+/// A credential record of the registration of the brand `'id`: the credential's position in
+/// the wallet's order, and the credential.
+pub(crate) struct Positioned<'id> {
     pub(crate) position: CredentialIndex,
-    pub(crate) credential: RegisteredCredential,
+    pub(crate) credential: RegisteredCredential<DefinitionRef<'id>, IconRef<'id>>,
 }
 
 /// The facts of `item`: a map of the time the facts hold at, the wallet's language, the
 /// diagnostics, the nym_auth systems, the `verifier_id` form, and the number of the wallet's
 /// icon in `icons`.
-pub(crate) fn facts(item: &Item<'_>, icons: &Table<IconsPart>) -> Result<Facts, FactsFault> {
+pub(crate) fn facts<'id>(
+    item: &Item<'_>,
+    icons: &Table<IconsPart>,
+) -> Result<Facts<IconRef<'id>>, FactsFault> {
     let fields = Map::of(item).map_err(|_| FactsFault::NotMap)?;
     if let Some(unknown) = fields.unknown(&FACTS_MEMBERS) {
         return Err(FactsFault::MemberUnknown(unknown));
@@ -86,25 +90,25 @@ pub(crate) fn facts(item: &Item<'_>, icons: &Table<IconsPart>) -> Result<Facts, 
     let verifier_id =
         wire::verifier_id_form(form).ok_or_else(|| FactsFault::VerifierIdForm(form.to_owned()))?;
     let icon = fields.read(Member::DefaultIcon, wire::unsigned)?;
-    let icon = icons.entry(icon).map_err(FactsFault::DefaultIcon)?;
+    let (number, icon) = icons.entry(icon).map_err(FactsFault::DefaultIcon)?;
     Ok(Facts {
         registered_at,
         language,
         diagnostics,
         systems,
         verifier_id,
-        default_icon: IconRef::of(icon),
+        default_icon: IconRef::of(number, icon),
     })
 }
 
 /// The record of `item`, a credential of `credential_type`: a map of its position, entry,
 /// holder-key presence, claims, card, labels, presentability, issuer facts and served types,
 /// its icon and its definitions numbered in `tables`.
-pub(crate) fn credential(
+pub(crate) fn credential<'id>(
     item: &Item<'_>,
     credential_type: &RegisteredType,
     tables: &Tables,
-) -> Result<Positioned, CredentialFault> {
+) -> Result<Positioned<'id>, CredentialFault> {
     let fields = Map::of(item).map_err(|_| CredentialFault::NotMap)?;
     if let Some(unknown) = fields.unknown(&RECORD_MEMBERS) {
         return Err(CredentialFault::MemberUnknown(unknown));
@@ -139,7 +143,10 @@ pub(crate) fn credential(
 }
 
 /// The card of `item`: its title, its issuer line, and the number of its icon in `icons`.
-fn card(item: &Item<'_>, icons: &Table<IconsPart>) -> Result<RegisteredCard, CredentialFault> {
+fn card<'id>(
+    item: &Item<'_>,
+    icons: &Table<IconsPart>,
+) -> Result<RegisteredCard<IconRef<'id>>, CredentialFault> {
     let fields = Map::of(item).map_err(|fault| CredentialFault::Member(Member::Card, fault))?;
     if let Some(unknown) = fields.unknown(&[Member::Title, Member::Issuer, Member::Icon]) {
         return Err(CredentialFault::MemberUnknown(unknown));
@@ -149,22 +156,22 @@ fn card(item: &Item<'_>, icons: &Table<IconsPart>) -> Result<RegisteredCard, Cre
         CardText::new(text).map_err(CredentialFault::Text)
     };
     let icon = fields.read(Member::Icon, wire::unsigned)?;
-    let icon = icons
+    let (number, icon) = icons
         .entry(icon)
         .map_err(|error| CredentialFault::Unlisted(Member::Icon, error))?;
     Ok(RegisteredCard {
         title: text(Member::Title)?,
         issuer: text(Member::Issuer)?,
-        icon: IconRef::of(icon),
+        icon: IconRef::of(number, icon),
     })
 }
 
 /// What `item` records the sources serve: `{served: [[type, definition number or reason], …],
 /// otherwise: reason}`, each number in `definitions`.
-fn transactions(
+fn transactions<'id>(
     item: &Item<'_>,
     definitions: &Table<DefinitionsPart>,
-) -> Result<ServedTypes<DefinitionRef>, CredentialFault> {
+) -> Result<ServedTypes<DefinitionRef<'id>>, CredentialFault> {
     let malformed = || CredentialFault::Member(Member::ServedTypes, MemberFault::WrongType);
     let fields =
         Map::of(item).map_err(|fault| CredentialFault::Member(Member::Transactions, fault))?;
@@ -183,7 +190,7 @@ fn transactions(
             let served = match wire::unsigned(served) {
                 Some(number) => Ok(definitions
                     .entry(number)
-                    .map(DefinitionRef::of)
+                    .map(|(number, span)| DefinitionRef::of(number, span))
                     .map_err(|error| CredentialFault::Unlisted(Member::ServedTypes, error))?),
                 None => Err(wire::unserved(served)?),
             };

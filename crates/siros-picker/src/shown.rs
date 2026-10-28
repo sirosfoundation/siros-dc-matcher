@@ -15,22 +15,22 @@ use crate::fields::TransactionShown;
 use crate::matching::NoChoice;
 
 /// The matching an offer shows from.
-pub(crate) struct Matched<'a, 'r> {
-    pub(crate) answered: &'a Answered<'r, &'a Requested, NoChoice>,
+pub(crate) struct Matched<'a, 'r, 'id> {
+    pub(crate) answered: &'a Answered<'r, &'a Requested<'id>, NoChoice>,
     pub(crate) transactions: &'a Transactions<Deferral>,
 }
 
 /// One credential of an offer as its entry shows it.
-pub(crate) struct Presented<'a> {
-    pub(crate) credential: &'a Requested,
+pub(crate) struct Presented<'a, 'id> {
+    pub(crate) credential: &'a Requested<'id>,
     pub(crate) query: QueryId,
     pub(crate) fields: Vec<Field>,
     pub(crate) transaction: TransactionShown,
 }
 
 /// A credential of an offer as its entry shows it, with the icon read from the registration.
-pub(crate) struct Emitted<'a> {
-    pub(crate) presented: Presented<'a>,
+pub(crate) struct Emitted<'a, 'id> {
+    pub(crate) presented: Presented<'a, 'id>,
     pub(crate) icon: Icon,
 }
 
@@ -41,7 +41,7 @@ pub(crate) struct ShownOffer<'o, C> {
     pub(crate) credentials: Vec<C>,
 }
 
-impl<'o, 'a> ShownOffer<'o, Presented<'a>> {
+impl<'o, 'a, 'id> ShownOffer<'o, Presented<'a, 'id>> {
     /// The offer with the icon of each credential's card, read from `registration`.
     ///
     /// # Errors
@@ -49,8 +49,8 @@ impl<'o, 'a> ShownOffer<'o, Presented<'a>> {
     /// [`RegistrationError`] when the source fails.
     pub(crate) fn with_icons<R: Read + Seek>(
         self,
-        registration: &mut Registration<R>,
-    ) -> Result<ShownOffer<'o, Emitted<'a>>, RegistrationError> {
+        registration: &mut Registration<'id, R>,
+    ) -> Result<ShownOffer<'o, Emitted<'a, 'id>>, RegistrationError> {
         let credentials = self
             .credentials
             .into_iter()
@@ -66,7 +66,7 @@ impl<'o, 'a> ShownOffer<'o, Presented<'a>> {
     }
 }
 
-impl<'a> Matched<'a, '_> {
+impl<'a, 'id> Matched<'a, '_, 'id> {
     /// Each candidate of each member of `offer`, the matching's offer at `index`, as its entry
     /// shows it, with the transaction entry bound to it (T4).
     ///
@@ -89,7 +89,7 @@ impl<'a> Matched<'a, '_> {
         &self,
         index: OfferIndex,
         offer: &Offer,
-    ) -> Result<Vec<Presented<'a>>, Unshown> {
+    ) -> Result<Vec<Presented<'a, 'id>>, Unshown> {
         // The presentation component's guarantee. `let … else` keeps the error's `Debug`
         // formatting out of the module.
         let Ok(bindings) = self.transactions.bind(self.answered, offer.members()) else {
@@ -99,7 +99,7 @@ impl<'a> Matched<'a, '_> {
         for member in offer.members() {
             let (answers, candidates) = self.candidates(member);
             for candidate in candidates {
-                let credential: &'a Requested = candidate.credential();
+                let credential: &'a Requested<'id> = candidate.credential();
                 let transaction = match bindings.iter().find(|b| b.binds(answers, candidate)) {
                     Some(binding) => TransactionShown::of(binding.taken())
                         .map_err(|error| Unshown::Display(index, error.code()))?,
@@ -140,8 +140,8 @@ impl<'a> Matched<'a, '_> {
         &self,
         member: &siros_presentation::Member,
     ) -> (
-        &'a Answers<'a, &'a Requested, NoChoice>,
-        Vec<&'a Candidate<&'a Requested>>,
+        &'a Answers<'a, &'a Requested<'id>, NoChoice>,
+        Vec<&'a Candidate<&'a Requested<'id>>>,
     ) {
         // The presentation component's guarantee: an offer's members name queries and
         // candidates of the matching it was built from.
@@ -180,8 +180,8 @@ impl<'a> Matched<'a, '_> {
 )]
 fn fields(
     index: OfferIndex,
-    answers: &Answers<'_, &Requested, NoChoice>,
-    credential: &Requested,
+    answers: &Answers<'_, &Requested<'_>, NoChoice>,
+    credential: &Requested<'_>,
     answer: &Answer,
 ) -> Result<Vec<Field>, Unshown> {
     match answer {

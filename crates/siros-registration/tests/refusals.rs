@@ -182,8 +182,10 @@ fn find(haystack: &[u8], needle: &[u8]) -> usize {
 
 /// The refusal of `blob`: when it opens, of reading the credentials of `types`.
 fn refusal(blob: &[u8], types: &[RegisteredType]) -> RegistrationError {
-    let read = Registration::open(Cursor::new(blob))
-        .and_then(|mut registration| registration.credentials(types).map(drop));
+    let read = Registration::open(Cursor::new(blob), |mut registration| {
+        registration.credentials(types).map(drop)
+    })
+    .and_then(|read| read);
     read.expect_err("the reader refuses the registration")
 }
 
@@ -193,11 +195,10 @@ fn each_rule_refuses_with_its_cause() {
     let pid = RegisteredType::new(Format::SdJwtVc, TypeName::new(PID).unwrap());
     let mdl = RegisteredType::new(Format::Mdoc, TypeName::new(MDL).unwrap());
     assert_eq!(
-        Registration::open(Cursor::new(&honest))
-            .unwrap()
-            .credentials(&[pid.clone(), mdl])
-            .unwrap()
-            .len(),
+        Registration::open(Cursor::new(&honest), |mut registration| {
+            registration.credentials(&[pid.clone(), mdl]).unwrap().len()
+        })
+        .unwrap(),
         3,
         "the honest registration reads"
     );

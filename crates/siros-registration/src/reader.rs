@@ -3,6 +3,7 @@
 //! for, read through `Read + Seek` when asked.
 
 use std::io::{Read, Seek, SeekFrom};
+use std::marker::PhantomData;
 
 use siros_codec::{cbor, json};
 use siros_transaction_data::Projected;
@@ -18,23 +19,26 @@ use crate::layout::{
 };
 use crate::record::{self, Positioned};
 use crate::registration::{
-    DefinitionRef, Facts, Icon, IconRef, Projection, RegisteredCredential, RegisteredType, Version,
+    Brand, DefinitionRef, Facts, Icon, IconRef, Projection, RegisteredCredential, RegisteredType,
+    Version,
 };
 use crate::table::{CountWords, Table, TableEntryWords, Tables};
 
-/// A registration the wallet wrote, open for reading. Opening reads its header, its directory,
-/// its index, its names, the tables of its definitions and its icons, and its facts; each other
-/// part is read when a caller asks for it, and a definition or an icon once.
+/// A registration the wallet wrote, open for reading, of the brand `'id`: the icons and the
+/// definitions it gives name parts of this registration alone. Opening reads its header, its
+/// directory, its index, its names, the tables of its definitions and its icons, and its facts;
+/// each other part is read when a caller asks for it, and a definition or an icon once.
 #[derive(Debug)]
-pub struct Registration<R> {
+pub struct Registration<'id, R> {
     blob: Blob<R>,
     version: Version,
     directory: Directory,
     index: Index,
     tables: Tables,
-    facts: Facts,
-    definitions: Vec<Cached<DefinitionRef, Projected>>,
-    icons: Vec<Cached<IconRef, Icon>>,
+    facts: Facts<IconRef<'id>>,
+    definitions: Vec<Cached<DefinitionRef<'id>, Projected>>,
+    icons: Vec<Cached<IconRef<'id>, Icon>>,
+    brand: Brand<'id>,
 }
 
 /// A part read, and where it lies.
@@ -51,15 +55,61 @@ struct Blob<R> {
     length: u64,
 }
 
-impl<R: Read + Seek> Registration<R> {
-    /// The registration of `source`: [`Version::CURRENT`] of the layout of
+impl<R: Read + Seek> Registration<'_, R> {
+    /// What `read` gives of the registration of `source`: [`Version::CURRENT`] of the layout of
     /// `docs/registration.md`. Reads the header, the directory, the index, the names, the
-    /// tables of the definitions and the icons, and the facts.
+    /// tables of the definitions and the icons, and the facts, then hands the registration to
+    /// `read` under a brand of its own.
+    ///
+    /// An icon or a definition names a part of the registration that gave it, and the compiler
+    /// refuses it on another. This reads the wallet's icon of `first` from `first`:
+    ///
+    /// ```
+    /// # use std::io::Cursor;
+    /// # use siros_registration::Registration;
+    /// fn icons(first: &[u8], second: &[u8]) -> bool {
+    ///     let read = Registration::open(Cursor::new(first), |mut first| {
+    ///         let opened = Registration::open(Cursor::new(second), |mut second| {
+    ///             let icon = *first.facts().default_icon();
+    ///             first.icon(icon).is_ok() && second.icon(*second.facts().default_icon()).is_ok()
+    ///         });
+    ///         opened.unwrap_or(false)
+    ///     });
+    ///     read.unwrap_or(false)
+    /// }
+    /// ```
+    ///
+    /// and this, which reads it from `second`, does not build (E0521: the brands differ):
+    ///
+    /// ```compile_fail,E0521
+    /// # use std::io::Cursor;
+    /// # use siros_registration::Registration;
+    /// fn icons(first: &[u8], second: &[u8]) -> bool {
+    ///     let read = Registration::open(Cursor::new(first), |mut first| {
+    ///         let opened = Registration::open(Cursor::new(second), |mut second| {
+    ///             let icon = *first.facts().default_icon();
+    ///             second.icon(icon).is_ok() && second.icon(*second.facts().default_icon()).is_ok()
+    ///         });
+    ///         opened.unwrap_or(false)
+    ///     });
+    ///     read.unwrap_or(false)
+    /// }
+    /// ```
     ///
     /// # Errors
     ///
-    /// [`RegistrationError`]: the first rule they break, the magic number first.
-    pub fn open(source: R) -> Result<Self, RegistrationError> {
+    /// [`RegistrationError`]: the first rule the parts it reads break, the magic number first.
+    pub fn open<T>(
+        source: R,
+        read: impl for<'id> FnOnce(Registration<'id, R>) -> T,
+    ) -> Result<T, RegistrationError> {
+        Ok(read(Registration::read(source)?))
+    }
+}
+
+impl<'id, R: Read + Seek> Registration<'id, R> {
+    /// The registration of `source`, of the brand `'id`, which [`Registration::open`] chooses.
+    fn read(source: R) -> Result<Self, RegistrationError> {
         let mut blob = Blob::of(source)?;
         let header: HeaderWords = blob.words(0)?;
         let [first, second, version] = header;
@@ -92,6 +142,7 @@ impl<R: Read + Seek> Registration<R> {
             facts,
             definitions: Vec::new(),
             icons: Vec::new(),
+            brand: PhantomData,
         })
     }
 
@@ -101,7 +152,7 @@ impl<R: Read + Seek> Registration<R> {
     }
 
     /// The facts every request reads.
-    pub fn facts(&self) -> &Facts {
+    pub fn facts(&self) -> &Facts<IconRef<'id>> {
         &self.facts
     }
 
@@ -115,7 +166,8 @@ impl<R: Read + Seek> Registration<R> {
     pub fn credentials(
         &mut self,
         types: &[RegisteredType],
-    ) -> Result<Vec<RegisteredCredential>, RegistrationError> {
+    ) -> Result<Vec<RegisteredCredential<DefinitionRef<'id>, IconRef<'id>>>, RegistrationError>
+    {
         let mut runs = Vec::new();
         for (at, key) in types.iter().enumerate() {
             if types.iter().take(at).any(|earlier| earlier == key) {
@@ -136,14 +188,14 @@ impl<R: Read + Seek> Registration<R> {
     /// [`RegistrationError::Definition`]: no UTF-8, no projection, or another language;
     /// [`RegistrationError::TooLong`]: a definition longer than the JSON reader reads; or an
     /// entry past the blob.
-    pub fn definition(&mut self, at: DefinitionRef) -> Result<Projected, RegistrationError> {
+    pub fn definition(&mut self, at: DefinitionRef<'id>) -> Result<Projected, RegistrationError> {
         if let Some(read) = self.definitions.iter().find(|read| read.at == at) {
             return Ok(read.part.clone());
         }
         let bytes =
             self.blob
                 .read_at_most(&self.directory.definitions, at.span(), json::MAX_TEXT)?;
-        let refused = |fault| RegistrationError::Definition(at, fault);
+        let refused = |fault| RegistrationError::Definition(at.number(), fault);
         let text = std::str::from_utf8(&bytes).map_err(|e| refused(DefinitionFault::Utf8(e)))?;
         let definition =
             Projected::parse(text).map_err(|e| refused(DefinitionFault::Projection(e)))?;
@@ -164,7 +216,7 @@ impl<R: Read + Seek> Registration<R> {
     ///
     /// [`RegistrationError`]: an entry past the blob, an icon longer than a buffer holds, or a
     /// source that fails.
-    pub fn icon(&mut self, at: IconRef) -> Result<Icon, RegistrationError> {
+    pub fn icon(&mut self, at: IconRef<'id>) -> Result<Icon, RegistrationError> {
         if let Some(read) = self.icons.iter().find(|read| read.at == at) {
             return Ok(read.part.clone());
         }
@@ -181,7 +233,7 @@ impl<R: Read + Seek> Registration<R> {
         &mut self,
         key: &RegisteredType,
         span: Span<RecordsPart>,
-    ) -> Result<Vec<Positioned>, RegistrationError> {
+    ) -> Result<Vec<Positioned<'id>>, RegistrationError> {
         records_of(&mut self.blob, &self.directory, &self.tables, key, span)
     }
 
@@ -220,17 +272,17 @@ impl<R: Read + Seek> Registration<R> {
 /// The credentials the records of `key` at `span` in `blob` hold, in the sections of
 /// `directory`, their icons and definitions numbered in `tables`: a CBOR sequence of records,
 /// in the wallet's order.
-fn records_of<R: Read + Seek>(
+fn records_of<'id, R: Read + Seek>(
     blob: &mut Blob<R>,
     directory: &Directory,
     tables: &Tables,
     key: &RegisteredType,
     span: Span<RecordsPart>,
-) -> Result<Vec<Positioned>, RegistrationError> {
+) -> Result<Vec<Positioned<'id>>, RegistrationError> {
     let bytes = blob.read_at_most(&directory.records, span, cbor::MAX_INPUT)?;
     let items = cbor::decode_sequence(&bytes)
         .map_err(|error| RegistrationError::Records(key.clone(), error))?;
-    let mut records: Vec<Positioned> = Vec::new();
+    let mut records: Vec<Positioned<'id>> = Vec::new();
     for (at, item) in items.iter().enumerate() {
         let record = RecordIndex::new(at);
         let read = record::credential(item, key, tables).map_err(|fault| {
@@ -308,11 +360,8 @@ impl<R: Read + Seek> Blob<R> {
         bounds: &Bounds<S>,
         span: Span<S>,
     ) -> Result<Vec<u8>, RegistrationError> {
-        let at = bounds.start_of(span);
-        let length = span.length();
-        self.within(at, length.into())?;
-        let mut bytes = vec![0; self.buffer(length)?];
-        self.fill(at, &mut bytes)?;
+        let mut bytes = vec![0; self.buffer(span.length())?];
+        self.fill(bounds.start_of(span), &mut bytes)?;
         Ok(bytes)
     }
 
@@ -359,8 +408,8 @@ impl<R: Read + Seek> Blob<R> {
         Ok(())
     }
 
-    /// Checks that the `length` bytes at `at` lie within the blob: a span another
-    /// registration gave may lie past it.
+    /// Checks that the `length` bytes at `at` lie within the blob: the header and the directory
+    /// of a shorter blob lie past it.
     fn within(&self, at: u64, length: u64) -> Result<(), RegistrationError> {
         match at.checked_add(length) {
             Some(end) if end <= self.length => Ok(()),
@@ -401,10 +450,10 @@ impl Words for DirectoryWords {
 /// # Errors
 ///
 /// [`RegistrationError::PositionRepeated`] and [`RegistrationError::EntryRepeated`].
-fn in_wallet_order(
-    runs: Vec<Vec<Positioned>>,
-) -> Result<Vec<RegisteredCredential>, RegistrationError> {
-    let mut ordered: Vec<RegisteredCredential> = Vec::new();
+fn in_wallet_order<'id>(
+    runs: Vec<Vec<Positioned<'id>>>,
+) -> Result<Vec<RegisteredCredential<DefinitionRef<'id>, IconRef<'id>>>, RegistrationError> {
+    let mut ordered: Vec<RegisteredCredential<DefinitionRef<'id>, IconRef<'id>>> = Vec::new();
     let mut previous: Option<CredentialIndex> = None;
     for record in runs.into_iter().fold(Vec::new(), merge) {
         if previous == Some(record.position) {
@@ -424,7 +473,7 @@ fn in_wallet_order(
 }
 
 /// `first` and `second`, each in the wallet's order, as one run in that order.
-fn merge(first: Vec<Positioned>, second: Vec<Positioned>) -> Vec<Positioned> {
+fn merge<'id>(first: Vec<Positioned<'id>>, second: Vec<Positioned<'id>>) -> Vec<Positioned<'id>> {
     let mut first = first.into_iter().peekable();
     let mut second = second.into_iter().peekable();
     let mut merged = Vec::new();

@@ -13,7 +13,7 @@ use siros_trust::KeyIdentifierError;
 
 use crate::ids::{CredentialIndex, KeyIndex, RecordIndex, TableIndex};
 use crate::layout::SectionKind;
-use crate::registration::{DefinitionRef, RegisteredType};
+use crate::registration::RegisteredType;
 
 /// A member of a registration's facts, or of a credential record.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -350,8 +350,8 @@ pub enum RegistrationError {
     /// The credential at this position has the `credentialId` or the batch of a credential read
     /// with it.
     EntryRepeated(CredentialIndex),
-    /// The definition of this entry of the definitions table breaks a rule.
-    Definition(DefinitionRef, #[source] DefinitionFault),
+    /// The definition of this number in the definitions table breaks a rule.
+    Definition(TableIndex, #[source] DefinitionFault),
     /// A part of this many bytes, more than the reader holds: an icon past `isize::MAX`, the
     /// most a buffer of the platform holds, the facts or the records of a type past
     /// [`siros_codec::cbor::MAX_INPUT`], and a definition past

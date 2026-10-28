@@ -65,10 +65,11 @@ fn a_nym_registration_holds_no_secret_and_no_undisclosable_attribute() {
         now: DateTime::from_unix(NOW).unwrap(),
     })
     .unwrap();
-    let projection = Registration::open(Cursor::new(registration.as_slice()))
-        .unwrap()
-        .projection()
-        .unwrap();
+    let projection = Registration::open(Cursor::new(registration.as_slice()), |mut opened| {
+        opened.projection()
+    })
+    .unwrap()
+    .unwrap();
     let mut found = Vec::new();
     for credential in projection.credentials() {
         texts(&credential.claims().to_cbor(), &mut found);

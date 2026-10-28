@@ -5,12 +5,14 @@ use std::io::{Read, Seek};
 
 use siros_dcql::QueryId;
 use siros_presentation::{QueryTypes, RequestEntries};
-use siros_registration::{RegisteredCredential, RegisteredType, Registration, RegistrationError};
+use siros_registration::{
+    IconRef, RegisteredCredential, RegisteredType, Registration, RegistrationError,
+};
 use siros_transaction_data::{Projected, TypeId};
 
 /// A credential a request asks for, with the definitions its sources serve for the types the
-/// request's entries name for it.
-pub(crate) type Requested = RegisteredCredential<Projected>;
+/// request's entries name for it, and its icon in the registration of the brand `'id`.
+pub(crate) type Requested<'id> = RegisteredCredential<Projected, IconRef<'id>>;
 
 /// The credentials of the types `asked` gives each query, in the wallet's order, each with the
 /// definitions read that its sources serve for the types of [`named_types`].
@@ -18,11 +20,11 @@ pub(crate) type Requested = RegisteredCredential<Projected>;
 /// # Errors
 ///
 /// [`RegistrationError`]: a part read that breaks a rule of the registration.
-pub(crate) fn read<R: Read + Seek>(
-    registration: &mut Registration<R>,
+pub(crate) fn read<'id, R: Read + Seek>(
+    registration: &mut Registration<'id, R>,
     asked: &[QueryTypes],
     entries: Option<&RequestEntries>,
-) -> Result<Vec<Requested>, RegistrationError> {
+) -> Result<Vec<Requested<'id>>, RegistrationError> {
     // The writer registers no type of an empty name: a query that asks for one has no
     // credential to read.
     let types: Vec<RegisteredType> = asked

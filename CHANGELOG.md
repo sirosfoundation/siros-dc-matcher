@@ -696,26 +696,28 @@ binaryen version_116.
   whether the wallet presents it without its UI, the TR5 facts, and for each transaction data type
   the projected definition that serves it or why none does. The facts hold the time of registration,
   the language, the diagnostics flag, the system ids the wallet proves, the form of the nym_auth
-  `verifier_id` and the wallet's default icon. `Registration<R: Read + Seek>` reads the header, the
-  directory, the index, the names, the tables and the facts when it opens, then `credentials` of the
-  types asked, `definition` and `icon` of a table entry, each definition and icon once, and
-  `projection` the whole. It refuses every version but `Version::CURRENT` (1), every offset or
-  length past its part, an index whose types do not sort strictly or whose names and records do not
-  tile their sections, a table whose entries do not tile its section, a number that names no entry
-  of its table, the records of a type out of the wallet's order, an icon longer than a buffer of the
-  platform holds, facts or records of a type longer than `cbor::MAX_INPUT`, a definition longer than
-  `json::MAX_TEXT`, and every unexpected member, with a `RegistrationError` that names the part and
-  its cause. The reader and the writer give an error for every input. The writer (feature `wallet`):
-  `project` takes the parsed credentials, the presentation records, the display cache and language,
-  the held transaction metadata and the configuration, the trust store, the systems, the
-  `verifier_id` form, the credentials presented without the wallet's UI, the card wording, the
-  icons, the default icon and the time, and gives the `Projection`, or `WriteError::TypeEmpty` for a
-  credential of an empty `vct` or `docType`: a registered type's name is a `TypeName` of at least
-  one byte. `encode` lays the projection out, equal projections in equal bytes; `write` does both.
-  An icon is a `RasterIcon`: a PNG or JPEG of 64 to 256 pixels in each direction, read from its
-  header (`IconFault` otherwise). The host rasterises an SVG and resizes an image before it passes
-  it; a credential without an icon of its own gets the default icon. `Unverified` is the picker's
-  transaction data source. It builds with Rust 1.82.
+  `verifier_id` and the wallet's default icon. `Registration::open` reads, through `Read + Seek`,
+  the header, the directory, the index, the names, the tables and the facts, and hands the
+  `Registration<'id, R>` to a closure under a lifetime of its own; then `credentials` of the types
+  asked, `definition` and `icon` of a table entry, each definition and icon once, and `projection`
+  the whole. An `IconRef<'id>` or a `DefinitionRef<'id>` carries the lifetime, and the compiler
+  refuses it on another registration. It refuses every version but `Version::CURRENT` (1), every
+  offset or length past its part, an index whose types do not sort strictly or whose names and
+  records do not tile their sections, a table whose entries do not tile its section, a number that
+  names no entry of its table, the records of a type out of the wallet's order, an icon longer than
+  a buffer of the platform holds, facts or records of a type longer than `cbor::MAX_INPUT`, a
+  definition longer than `json::MAX_TEXT`, and every unexpected member, with a `RegistrationError`
+  that names the part and its cause. The reader and the writer give an error for every input. The
+  writer (feature `wallet`): `project` takes the parsed credentials, the presentation records, the
+  display cache and language, the held transaction metadata and the configuration, the trust store,
+  the systems, the `verifier_id` form, the credentials presented without the wallet's UI, the card
+  wording, the icons, the default icon and the time, and gives the `Projection`, or
+  `WriteError::TypeEmpty` for a credential of an empty `vct` or `docType`: a registered type's name
+  is a `TypeName` of at least one byte. `encode` lays the projection out, equal projections in equal
+  bytes; `write` does both. An icon is a `RasterIcon`: a PNG or JPEG of 64 to 256 pixels in each
+  direction, read from its header (`IconFault` otherwise). The host rasterises an SVG and resizes an
+  image before it passes it; a credential without an icon of its own gets the default icon.
+  `Unverified` is the picker's transaction data source. It builds with Rust 1.82.
 - `scripts/gen_unicode_tables.py` writes the refused-character ranges of siros-display and the
   grapheme break runs of siros-transaction-data from their oracles' tables.
 - siros-registration's example `sample_registration` writes the registration of a sample

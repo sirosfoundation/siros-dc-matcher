@@ -77,16 +77,15 @@ impl<S: Part> Table<S> {
         Ok(Self { entries })
     }
 
-    /// The entry numbered `index`.
+    /// The entry numbered `index`, and its number.
     ///
     /// # Errors
     ///
     /// [`Unlisted`] for a number at or past the count.
-    pub(crate) fn entry(&self, index: u64) -> Result<Span<S>, Unlisted> {
+    pub(crate) fn entry(&self, index: u64) -> Result<(TableIndex, Span<S>), Unlisted> {
         usize::try_from(index)
             .ok()
-            .and_then(|at| self.entries.get(at))
-            .copied()
+            .and_then(|at| Some((TableIndex::new(at), *self.entries.get(at)?)))
             .ok_or(Unlisted {
                 index,
                 // The count is a u32 word.

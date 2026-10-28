@@ -90,7 +90,7 @@ impl OfferEntries<'_> {
     pub(crate) fn emit(
         &self,
         at: OfferIndex,
-        shown: &ShownOffer<'_, Emitted<'_>>,
+        shown: &ShownOffer<'_, Emitted<'_, '_>>,
         sets: &mut impl SetSink,
     ) {
         let offer = shown.offer;
@@ -127,7 +127,7 @@ impl OfferEntries<'_> {
     fn delegation(
         &self,
         offer: &Offer,
-        emitted: &[Emitted<'_>],
+        emitted: &[Emitted<'_, '_>],
         entries: &[SetEntry<'_, AnyEntry<'_>>],
     ) -> DelegationType {
         let presented = emitted.iter().map(|credential| &credential.presented);
@@ -156,7 +156,7 @@ impl OfferEntries<'_> {
 impl<'a> HostEntry<'a> {
     /// The host strings of `emitted`, a credential of the offer shown at `at`, under the
     /// verifier's purpose `disclaimer`.
-    fn of(at: OfferIndex, emitted: &'a Emitted<'_>, disclaimer: Option<&str>) -> Self {
+    fn of(at: OfferIndex, emitted: &'a Emitted<'_, '_>, disclaimer: Option<&str>) -> Self {
         let shown = &emitted.presented;
         let credential = Instance::entry(&shown.credential).credential_id();
         let pick = Pick::new(at, shown.query.clone(), credential);

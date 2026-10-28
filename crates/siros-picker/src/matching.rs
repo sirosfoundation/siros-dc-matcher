@@ -35,7 +35,7 @@ pub(crate) struct NoChoice;
 /// the wallet's form as the plan applies them.
 pub(crate) fn pick<R: Read + Seek>(
     input: &Input<'_>,
-    registration: &mut Registration<R>,
+    registration: &mut Registration<'_, R>,
     sets: &mut impl SetSink,
 ) -> Vec<Unshown> {
     let known = |label: &str| Protocol::from_label(label).is_some();
@@ -48,7 +48,7 @@ pub(crate) fn pick<R: Read + Seek>(
         Ok(credentials) => credentials,
         Err(error) => return vec![Unshown::Registration(error.code())],
     };
-    let credentials: Vec<&Requested> = credentials.iter().collect();
+    let credentials: Vec<&Requested<'_>> = credentials.iter().collect();
     let facts = registration.facts();
     let matching = Matching::new(
         asked,

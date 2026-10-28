@@ -109,12 +109,16 @@ A definition is the JSON text of `siros_transaction_data::Projected`, in the fac
 
 ## Reading
 
+`Registration::open` hands the registration to a closure under a lifetime of its own, `'id`. An
+icon or a definition it gives, `IconRef<'id>` or `DefinitionRef<'id>`, carries that lifetime, and
+the compiler refuses it on another registration.
+
 The reader refuses, with a `RegistrationError` that names the part and the cause:
 
 - a blob that does not start with the magic number;
 - every version but 1;
-- a header, directory or section that ends past the blob, a directory that breaks its order or
-  leaves bytes after the last section, and a read that ends past the blob;
+- a header, directory or section that ends past the blob, and a directory that breaks its order
+  or leaves bytes after the last section;
 - an index whose length is no multiple of 20, an unknown format code, a name of no UTF-8, an
   entry whose type does not sort after the type of the entry before it, and names or records
   that do not tile their section: a span that starts after or before the end of the span before

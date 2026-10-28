@@ -2,6 +2,7 @@
 //! shows them.
 
 use std::cmp::Ordering;
+use std::marker::PhantomData;
 
 use serde_json::Value;
 use siros_codec::date::DateTime;
@@ -14,6 +15,7 @@ use siros_trust::{Admission, FactRefusal, IssuerFacts, QueryAuthorities, Unadmit
 use siros_zkp_req_nym_auth::system::NymAuthSystem;
 use siros_zkp_req_nym_auth::verifier_id::VerifierIdForm;
 
+use crate::ids::TableIndex;
 use crate::layout::{format_code, DefinitionsPart, IconsPart, Span};
 
 /// The format version of a registration: the one this crate reads and writes.
@@ -89,37 +91,62 @@ impl Icon {
     }
 }
 
-/// An icon of the registration: an entry of the table of its icons section, which holds a byte
-/// at least.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct IconRef(Span<IconsPart>);
+/// The brand of one open registration: a lifetime it shares with the references it gives and
+/// with no other registration. It is invariant, so no reference of another brand converts to it.
+pub(crate) type Brand<'id> = PhantomData<fn(&'id ()) -> &'id ()>;
 
-impl IconRef {
-    /// The icon `entry` locates.
-    pub(crate) fn of(entry: Span<IconsPart>) -> Self {
-        Self(entry)
+/// An icon of the registration of the brand `'id`: an entry of the table of its icons section,
+/// which holds a byte at least.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct IconRef<'id> {
+    number: TableIndex,
+    span: Span<IconsPart>,
+    brand: Brand<'id>,
+}
+
+impl IconRef<'_> {
+    /// The icon numbered `number`, at `span`.
+    pub(crate) fn of(number: TableIndex, span: Span<IconsPart>) -> Self {
+        Self {
+            number,
+            span,
+            brand: PhantomData,
+        }
     }
 
     /// Where the icon lies in its section.
     pub(crate) fn span(self) -> Span<IconsPart> {
-        self.0
+        self.span
     }
 }
 
-/// A projected definition of the registration: an entry of the table of its definitions
-/// section.
+/// A projected definition of the registration of the brand `'id`: an entry of the table of its
+/// definitions section.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct DefinitionRef(Span<DefinitionsPart>);
+pub struct DefinitionRef<'id> {
+    number: TableIndex,
+    span: Span<DefinitionsPart>,
+    brand: Brand<'id>,
+}
 
-impl DefinitionRef {
-    /// The definition `entry` locates.
-    pub(crate) fn of(entry: Span<DefinitionsPart>) -> Self {
-        Self(entry)
+impl DefinitionRef<'_> {
+    /// The definition numbered `number`, at `span`.
+    pub(crate) fn of(number: TableIndex, span: Span<DefinitionsPart>) -> Self {
+        Self {
+            number,
+            span,
+            brand: PhantomData,
+        }
+    }
+
+    /// The definition's number in its table.
+    pub(crate) fn number(self) -> TableIndex {
+        self.number
     }
 
     /// Where the definition lies in its section.
     pub(crate) fn span(self) -> Span<DefinitionsPart> {
-        self.0
+        self.span
     }
 }
 
@@ -127,7 +154,7 @@ impl DefinitionRef {
 /// language, the diagnostics, the nym_auth systems, the `verifier_id` form, and the wallet's
 /// icon, as `I`: an [`IconRef`] as the registration holds it, an [`Icon`] read.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Facts<I = IconRef> {
+pub struct Facts<I> {
     pub(crate) registered_at: DateTime,
     pub(crate) language: Locale,
     pub(crate) diagnostics: Diagnostics,
@@ -284,7 +311,7 @@ impl PartialEq<AskedType> for RegisteredType {
 /// sources serve, `I` how it holds its card's icon: a [`DefinitionRef`] and an [`IconRef`] as
 /// the registration holds them, a [`Projected`] and an [`Icon`] read.
 #[derive(Debug, PartialEq)]
-pub struct RegisteredCredential<D = DefinitionRef, I = IconRef> {
+pub struct RegisteredCredential<D, I> {
     pub(crate) entry: EntryRef,
     pub(crate) credential_type: RegisteredType,
     pub(crate) key: KeyHolding,
@@ -299,7 +326,7 @@ pub struct RegisteredCredential<D = DefinitionRef, I = IconRef> {
 /// What shows a credential in the picker: its title and issuer line in the wallet's language,
 /// and its icon.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RegisteredCard<I = IconRef> {
+pub struct RegisteredCard<I> {
     pub(crate) title: CardText,
     pub(crate) issuer: CardText,
     pub(crate) icon: I,
