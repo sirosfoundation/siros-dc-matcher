@@ -1,4 +1,4 @@
-//! The projection a registration carries (K2): it reads back to itself, whatever the member
+//! The projection a registration carries (K1): it reads back to itself, whatever the member
 //! order of its source, and its reader refuses what is no projection, a row per rule.
 
 use serde_json::{json, Value};

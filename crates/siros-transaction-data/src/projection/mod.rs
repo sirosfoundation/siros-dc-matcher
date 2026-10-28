@@ -1,7 +1,7 @@
 //! A definition projected to the wallet's language: one entry per localised array, the one the
 //! locale function takes (PaSO View, Section 4), with the source and the payload rulebook that
 //! serve it. The other locales are stripped; everything else stays. A projection writes as JSON
-//! and reads back ([`Projected::parse`]), for the credential picker's registration (K2).
+//! and reads back ([`Projected::parse`]), for the credential picker's registration (K1).
 
 mod read;
 mod write;
