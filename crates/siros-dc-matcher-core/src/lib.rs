@@ -1,14 +1,27 @@
-//! The parts of the matcher that are not the DCQL engine and not the WASM
-//! binary: the credential blob we register with the platform, the match
-//! profile that makes the rules configurable, and the sink that emits picker
-//! entries.
-//!
-//! # Status
-//!
-//! Phase 0 scaffolding. See the repository's `docs/plan.md`.
+//! The parts of the matcher outside the DCQL engine and the WASM binary: the
+//! credential blob a wallet registers with the platform ([`db`]), the match
+//! profile and its evaluator ([`profile`], [`evaluator`]), the DC API request
+//! ([`request`]), purpose lines ([`purpose`]), and the `zkp_req` planner,
+//! response check, proof time and circuit capabilities ([`zkp_req`],
+//! [`zkp_req_response`], [`proof_time`], [`circuit_capabilities`]).
 
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
+// Nothing panics outside the tests. scripts/check_panic_sites.py refuses an
+// allow of these lints there and finds the panics they cannot see.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::panic,
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::unreachable,
+        clippy::todo,
+        clippy::unimplemented,
+        clippy::indexing_slicing,
+        clippy::disallowed_methods
+    )
+)]
 
 pub mod base64url;
 pub mod circuit_capabilities;
@@ -23,4 +36,3 @@ pub mod profile;
 pub mod proof_time;
 pub mod purpose;
 pub mod request;
-pub mod sink;

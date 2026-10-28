@@ -1,7 +1,7 @@
 [package]
 name = "siros-dc-matcher-core"
 version = "0.11.0"
-description = "Credential database, match profile and picker emission for the SIROS DC API matcher"
+description = "The credential blob, match profile, request reading and zkp_req planner of the SIROS DC API matcher"
 publish = false
 edition.workspace = true
 license.workspace = true
@@ -19,7 +19,9 @@ siros-dcql = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 ciborium = { workspace = true }
+rustc-hash = { workspace = true }
 serde_bytes = "0.11.19"
+thiserror = { workspace = true }
 
 [dev-dependencies]
 # This crate, on itself, to switch on `test-fixtures` for its own integration
@@ -28,3 +30,6 @@ serde_bytes = "0.11.19"
 # siros-dc-matcher-core` alone would fail while `--workspace` passed.
 siros-dc-matcher-core = { path = ".", features = ["test-fixtures"] }
 serde_json.workspace = true
+
+[lints]
+workspace = true

@@ -35,11 +35,9 @@
 //! The module runs inside the WASM matcher, where a trap is indistinguishable
 //! from "no matching credential", so it must not panic on any input.
 
-#![deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 #![deny(missing_docs)]
 
-use std::collections::HashSet;
-use std::fmt;
+use rustc_hash::FxHashSet;
 
 use serde::Serialize;
 use serde_json::{Map, Number, Value};
@@ -227,23 +225,28 @@ pub struct Plan {
 ///
 /// Every variant is a defect in the request's shape. None of them says a
 /// well-formed request cannot be satisfied.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum InvalidRequest {
     /// The credential query is not JSON, or not a JSON object.
+    #[error("credential query is not a JSON object")]
     QueryNotParseable,
     /// `_req` is missing, not an array, or empty.
+    #[error("`_req` is missing or empty")]
     ReqMissingOrEmpty,
     /// A `_req` item has no function identifier (`fn_id`).
+    #[error("_req item {index} has no `fn_id`")]
     ItemMissingFunctionId {
         /// Position of the item in the array.
         index: usize,
     },
     /// A `_req` item has no output handle (`return`).
+    #[error("_req item {index} has no `return`")]
     ItemMissingHandle {
         /// Position of the item in the array.
         index: usize,
     },
     /// A parameter, or `params` itself, has the wrong JSON type.
+    #[error("`{param}` of `{handle}` has the wrong type")]
     ParamWrongType {
         /// The handle of the item.
         handle: String,
@@ -251,6 +254,7 @@ pub enum InvalidRequest {
         param: String,
     },
     /// A date parameter is not a valid RFC 3339 `full-date`.
+    #[error("`{param}` of `{handle}` is not an RFC 3339 full-date")]
     ParamInvalidFullDate {
         /// The handle of the item.
         handle: String,
@@ -258,21 +262,27 @@ pub enum InvalidRequest {
         param: String,
     },
     /// Two items share an output handle.
+    #[error("handle `{handle}` is used twice")]
     DuplicateHandle {
         /// The repeated handle.
         handle: String,
     },
     /// `claims` is present: `zkp_req` does not use it.
+    #[error("`claims` is not used by zkp_req")]
     ClaimsPresent,
     /// `claim_sets` is present.
+    #[error("`claim_sets` is not used by zkp_req")]
     ClaimSetsPresent,
     /// `_req_sets` is present; this version does not define it.
+    #[error("`_req_sets` is not defined")]
     ReqSetsPresent,
     /// `meta` is missing, not an object, has no string `source_format`, or has
     /// a type value of the wrong type.
+    #[error("`meta` has the wrong shape")]
     InvalidMeta,
     /// `client_metadata` is not parseable, or its `zkp_req` object has the
     /// wrong shape.
+    #[error("`client_metadata` has the wrong shape")]
     InvalidClientMetadata,
 }
 
@@ -297,33 +307,6 @@ impl InvalidRequest {
         }
     }
 }
-
-impl fmt::Display for InvalidRequest {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::QueryNotParseable => f.write_str("credential query is not a JSON object"),
-            Self::ReqMissingOrEmpty => f.write_str("`_req` is missing or empty"),
-            Self::ItemMissingFunctionId { index } => {
-                write!(f, "_req item {index} has no `fn_id`")
-            }
-            Self::ItemMissingHandle { index } => write!(f, "_req item {index} has no `return`"),
-            Self::ParamWrongType { handle, param } => {
-                write!(f, "`{param}` of `{handle}` has the wrong type")
-            }
-            Self::ParamInvalidFullDate { handle, param } => {
-                write!(f, "`{param}` of `{handle}` is not an RFC 3339 full-date")
-            }
-            Self::DuplicateHandle { handle } => write!(f, "handle `{handle}` is used twice"),
-            Self::ClaimsPresent => f.write_str("`claims` is not used by zkp_req"),
-            Self::ClaimSetsPresent => f.write_str("`claim_sets` is not used by zkp_req"),
-            Self::ReqSetsPresent => f.write_str("`_req_sets` is not defined"),
-            Self::InvalidMeta => f.write_str("`meta` has the wrong shape"),
-            Self::InvalidClientMetadata => f.write_str("`client_metadata` has the wrong shape"),
-        }
-    }
-}
-
-impl std::error::Error for InvalidRequest {}
 
 /// Parse and normalise a `zkp_req` credential query.
 ///
@@ -417,7 +400,7 @@ fn read_items(req: &Value) -> Result<Vec<PlannedFunction>, InvalidRequest> {
         _ => return Err(InvalidRequest::ReqMissingOrEmpty),
     };
 
-    let mut seen: HashSet<&str> = HashSet::new();
+    let mut seen: FxHashSet<&str> = FxHashSet::default();
     let mut functions = Vec::with_capacity(items.len());
     for (index, item) in items.iter().enumerate() {
         let function_id = item
@@ -594,7 +577,8 @@ fn string_list(value: Option<&Value>) -> Result<Option<Vec<String>>, InvalidRequ
 /// Only rules decidable from the request alone are here. Whether a
 /// particular system supports a configuration, or the holder's attestation
 /// satisfies a predicate, is not.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("unsatisfiable request ({})", self.code())]
 pub enum Unsatisfiable {
     /// `source_format` is not one this version defines (`mso_mdoc`, `bbs_cd`).
     SourceFormatUnsupported,
@@ -655,14 +639,6 @@ impl Unsatisfiable {
         }
     }
 }
-
-impl fmt::Display for Unsatisfiable {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "unsatisfiable request ({})", self.code())
-    }
-}
-
-impl std::error::Error for Unsatisfiable {}
 
 /// Pseudonym configurations the rulebook defines, with whether `bbs_cd`
 /// defines them.

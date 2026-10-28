@@ -7,7 +7,7 @@
 //! recognise — a wallet that refuses tomorrow's extension is worse than one
 //! that ignores it.
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -130,10 +130,11 @@ fn is_true(b: &bool) -> bool {
 /// *not* enforced. They carry no meaning for matching, and rejecting a
 /// verifier over a dot in an identifier would fail a request that is perfectly
 /// well understood.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum QueryError {
     /// Not well-formed JSON, or not shaped like a DCQL query.
-    Json(serde_json::Error),
+    #[error("not a DCQL query: {0}")]
+    Json(#[from] serde_json::Error),
     /// A credential query `id` is empty. "MUST be a non-empty string" (§6.1).
     ///
     /// Rejected rather than read past because an identifier that identifies
@@ -141,54 +142,24 @@ pub enum QueryError {
     /// behalf — not because a reference to it would fail to resolve, since
     /// `""` is a perfectly good JSON string and `credential_sets` could name
     /// it.
+    #[error("a credential query has an empty id (§6.1)")]
     EmptyCredentialId,
     /// Two credential queries share this `id`. §6.1 requires it to "be unique
     /// across all Credential Query objects": a reference from
     /// `credential_sets` to a duplicated id names two different requests, and
     /// answering the first silently drops the second.
+    #[error("two credential queries share the id {0:?} (§6.1)")]
     DuplicateCredentialId(String),
     /// Two claims queries within one credential query share this `id`. §6.3
     /// requires uniqueness "within the particular claims array", for the same
     /// reason one level down: `claim_sets` refers to claims by id.
+    #[error("credential query {credential:?} has two claims with the id {claim:?} (§6.3)")]
     DuplicateClaimId {
         /// The `id` of the credential query holding the duplicate.
         credential: String,
         /// The duplicated claims query `id`.
         claim: String,
     },
-}
-
-impl core::fmt::Display for QueryError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::Json(e) => write!(f, "not a DCQL query: {e}"),
-            Self::EmptyCredentialId => {
-                write!(f, "a credential query has an empty id (§6.1)")
-            }
-            Self::DuplicateCredentialId(id) => {
-                write!(f, "two credential queries share the id {id:?} (§6.1)")
-            }
-            Self::DuplicateClaimId { credential, claim } => write!(
-                f,
-                "credential query {credential:?} has two claims with the id {claim:?} (§6.3)"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for QueryError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Json(e) => Some(e),
-            _ => None,
-        }
-    }
-}
-
-impl From<serde_json::Error> for QueryError {
-    fn from(e: serde_json::Error) -> Self {
-        Self::Json(e)
-    }
 }
 
 impl DcqlQuery {
@@ -219,7 +190,8 @@ impl DcqlQuery {
     /// [`QueryError`], excluding [`QueryError::Json`] which only parsing can
     /// produce.
     pub fn validate(&self) -> Result<(), QueryError> {
-        let mut seen: HashSet<&str> = HashSet::with_capacity(self.credentials.len());
+        let mut seen: FxHashSet<&str> =
+            FxHashSet::with_capacity_and_hasher(self.credentials.len(), Default::default());
         for credential in &self.credentials {
             if credential.id.is_empty() {
                 return Err(QueryError::EmptyCredentialId);
@@ -249,7 +221,8 @@ impl CredentialQuery {
 
     /// §6.3 claim id uniqueness, within this credential query's `claims`.
     fn validate_claim_ids(&self) -> Result<(), QueryError> {
-        let mut seen: HashSet<&str> = HashSet::with_capacity(self.claims.len());
+        let mut seen: FxHashSet<&str> =
+            FxHashSet::with_capacity_and_hasher(self.claims.len(), Default::default());
         for id in self.claims.iter().filter_map(|c| c.id.as_deref()) {
             if !seen.insert(id) {
                 return Err(QueryError::DuplicateClaimId {

@@ -24,6 +24,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e9d4ee0d472d1cd2e28c97dfa124b3d8d992e10eb0a035f33f5d12e3a177ba3b"
 
 [[package]]
+name = "android-credman"
+version = "0.1.0"
+dependencies = [
+ "android-credman-sys",
+ "c8str",
+]
+
+[[package]]
+name = "android-credman-sys"
+version = "0.1.0"
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -220,6 +232,12 @@ name = "bytes"
 version = "1.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
+
+[[package]]
+name = "c8str"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "97a407440c9adcc134ae4dc48cfd082fc5d5e8742c8876b55149071d349b9905"
 
 [[package]]
 name = "camino"
@@ -1735,11 +1753,13 @@ name = "siros-dc-matcher-core"
 version = "0.11.0"
 dependencies = [
  "ciborium",
+ "rustc-hash",
  "serde",
  "serde_bytes",
  "serde_json",
  "siros-dc-matcher-core",
  "siros-dcql",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -1768,6 +1788,7 @@ dependencies = [
 name = "siros-dc-matcher-wasm"
 version = "0.1.0"
 dependencies = [
+ "android-credman",
  "serde_json",
  "siros-dc-matcher-core",
  "siros-dcql",
@@ -1777,8 +1798,10 @@ dependencies = [
 name = "siros-dcql"
 version = "0.11.0"
 dependencies = [
+ "rustc-hash",
  "serde",
  "serde_json",
+ "thiserror 2.0.20",
 ]
 
 [[package]]

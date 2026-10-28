@@ -28,10 +28,9 @@
 //!
 //! Nothing here is wired into matching, the FFI or the WASM picker.
 
-#![deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 #![deny(missing_docs)]
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 use std::fmt;
 
 use serde::de::{self, Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
@@ -56,7 +55,8 @@ pub const CBOR_MAX_DEPTH: usize = 16;
 /// Why a `zkp_req` response was refused.
 ///
 /// `index` is the position of the presentation in the entry's array.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("zkp_req response refused: {}", self.code())]
 pub enum InvalidResponse {
     /// The `vp_token` is not a JSON object.
     ResponseNotParseable,
@@ -274,14 +274,6 @@ impl InvalidResponse {
     }
 }
 
-impl fmt::Display for InvalidResponse {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "zkp_req response refused: {}", self.code())
-    }
-}
-
-impl std::error::Error for InvalidResponse {}
-
 // ---------------------------------------------------------------------------
 // The vp_token: JSON that keeps duplicate members.
 
@@ -355,11 +347,15 @@ enum Cbor {
     Other(Vec<u8>),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 enum CborError {
+    #[error("malformed CBOR")]
     Malformed,
+    #[error("CBOR item of indefinite length")]
     Indefinite,
+    #[error("bytes after the CBOR item")]
     Trailing,
+    #[error("CBOR map with a repeated key")]
     DuplicateKey,
 }
 
@@ -369,10 +365,7 @@ struct Reader<'a> {
 
 impl<'a> Reader<'a> {
     fn take(&mut self, n: usize) -> Result<&'a [u8], CborError> {
-        if n > self.rest.len() {
-            return Err(CborError::Malformed);
-        }
-        let (head, tail) = self.rest.split_at(n);
+        let (head, tail) = self.rest.split_at_checked(n).ok_or(CborError::Malformed)?;
         self.rest = tail;
         Ok(head)
     }
@@ -542,7 +535,7 @@ pub fn parse_response(
     let Json::Object(token) = token else {
         return Err(InvalidResponse::ResponseNotParseable);
     };
-    let mut seen = HashSet::new();
+    let mut seen = FxHashSet::default();
     for (k, _) in &token {
         if !seen.insert(k.as_str()) {
             return Err(InvalidResponse::DuplicateMember { member: k.clone() });
@@ -732,7 +725,7 @@ fn check_results(
         };
         named.push((handle.as_str(), v));
     }
-    let wanted: HashSet<&str> = plan.functions.iter().map(|f| f.handle.as_str()).collect();
+    let wanted: FxHashSet<&str> = plan.functions.iter().map(|f| f.handle.as_str()).collect();
     if let Some((handle, _)) = named.iter().find(|(h, _)| !wanted.contains(h)) {
         return Err(InvalidResponse::ResultHandleUnexpected {
             handle: (*handle).to_owned(),

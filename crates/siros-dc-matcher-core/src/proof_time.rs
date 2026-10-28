@@ -13,10 +13,7 @@
 //! The recommended defaults are 60 s into the future and 600 s into the past.
 //! They are recommendations, not protocol constants: pass your own.
 
-#![deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 #![deny(missing_docs)]
-
-use std::fmt;
 
 /// Length in bytes of the exact form.
 pub const LEN: usize = 20;
@@ -31,7 +28,8 @@ pub const RECOMMENDED_SKEW_SECS: i64 = 60;
 pub const RECOMMENDED_MAX_AGE_SECS: i64 = 600;
 
 /// Why a `proof_time` was refused.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum InvalidProofTime {
     /// Not exactly `YYYY-MM-DDThh:mm:ssZ`: wrong length, separators, digits,
     /// a lowercase `t` or `z`, an offset, or fractional seconds.
@@ -60,14 +58,6 @@ impl InvalidProofTime {
         }
     }
 }
-
-impl fmt::Display for InvalidProofTime {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.code())
-    }
-}
-
-impl std::error::Error for InvalidProofTime {}
 
 /// Render seconds since the Unix epoch (UTC) as the 20-byte form.
 ///

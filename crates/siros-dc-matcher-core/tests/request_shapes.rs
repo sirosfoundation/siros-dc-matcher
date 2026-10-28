@@ -288,7 +288,7 @@ fn each_failure_is_named_separately() {
             Err(expected.clone()),
             "for {protocol} {data}"
         );
-        assert!(!expected.reason().is_empty());
+        assert!(!expected.to_string().is_empty());
     }
 }
 

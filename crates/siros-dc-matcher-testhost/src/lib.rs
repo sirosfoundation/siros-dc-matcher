@@ -8,20 +8,39 @@
 //! This crate implements the same ABI over wasmtime, so the real `.wasm`
 //! binary runs against fixtures in ordinary `cargo test`. It also lets the
 //! same fixtures be replayed against another implementation for differential
-//! testing — see `CONTRIBUTING.md` on how that oracle is obtained, and why it
-//! is never vendored into this repository.
+//! testing — see `CONTRIBUTING.md` on why that oracle is never vendored into
+//! this repository.
 
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
+// std's HashMap and HashSet are safe outside matcher.wasm.
+#![allow(clippy::disallowed_types)]
+// Nothing panics outside the tests. scripts/check_panic_sites.py refuses an
+// allow of these lints there and finds the panics they cannot see.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::panic,
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::unreachable,
+        clippy::todo,
+        clippy::unimplemented,
+        clippy::indexing_slicing,
+        clippy::disallowed_methods
+    )
+)]
+
+use std::num::NonZeroUsize;
 
 use anyhow::{Context, Result};
 use wasmtime::{Caller, Engine, Extern, Linker, Memory, Module, Store};
+use wasmtime_wasi::pipe::MemoryOutputPipe;
 use wasmtime_wasi::preview1::{self, WasiP1Ctx};
 use wasmtime_wasi::WasiCtxBuilder;
 
-/// Environment variable naming a local matcher binary to use as a
-/// differential-testing oracle. Tests skip when it is unset.
-pub const ORACLE_ENV: &str = "MULTIPAZ_MATCHER_WASM";
+/// The most a matcher may write to stderr in one run.
+const STDERR_CAPACITY: usize = 1 << 20;
 
 /// What the host offers a matcher on one invocation.
 #[derive(Debug, Clone, Default)]
@@ -36,6 +55,42 @@ pub struct Invocation {
     pub origin: String,
     /// Host ABI version reported through `GetWasmVersion`.
     pub wasm_version: u32,
+    /// How the host answers each `ReadCredentialsBuffer` call.
+    pub credential_reads: CredentialReads,
+}
+
+/// How the host answers `ReadCredentialsBuffer`: copy from the blob at the
+/// offset asked, at most the length asked, and report the count copied.
+/// The last two variants break that contract.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum CredentialReads {
+    /// Each call copies all the bytes asked for that the blob holds.
+    #[default]
+    Whole,
+    /// Each call copies at most this many bytes.
+    Chunks(NonZeroUsize),
+    /// Each call copies what [`CredentialReads::Whole`] copies and reports
+    /// one byte more.
+    OverReport,
+    /// Each call copies nothing and reports 0, before the end of the blob
+    /// too.
+    Stall,
+}
+
+impl CredentialReads {
+    /// The bytes one call copies from `blob` at `offset`, at most `len` of
+    /// them, and the count it reports. Past the end it copies nothing.
+    fn answer(self, blob: &[u8], offset: usize, len: usize) -> (&[u8], usize) {
+        let remaining = blob.get(offset..).unwrap_or_default();
+        let most = match self {
+            Self::Whole | Self::OverReport => len,
+            Self::Chunks(chunk) => len.min(chunk.get()),
+            Self::Stall => 0,
+        };
+        let copied = remaining.get(..most).unwrap_or(remaining);
+        let reported = copied.len() + usize::from(self == Self::OverReport);
+        (copied, reported)
+    }
 }
 
 /// One credential the matcher offered to the picker.
@@ -67,15 +122,23 @@ pub struct CapturedEntry {
     pub warning: Option<String>,
     /// Display fields attached to this entry, in emission order.
     pub fields: Vec<(String, String)>,
+    /// The delegation type sent at level 7.
+    pub delegation: Option<i32>,
+    /// The second disclaimer, link text and link target sent at level 6.
+    pub link: Option<(String, String, String)>,
+    /// The display text sent at level 5.
+    pub metadata_display_text: Option<String>,
 }
 
 /// Everything a matcher emitted during one run.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Captured {
     /// Sets declared, as `(set_id, declared_length)`.
     pub sets: Vec<(String, i32)>,
     /// Entries emitted, in order.
     pub entries: Vec<CapturedEntry>,
+    /// What the matcher wrote to stderr.
+    pub stderr: Vec<u8>,
 }
 
 impl Captured {
@@ -107,14 +170,21 @@ struct State {
 /// # Errors
 ///
 /// Returns an error if the module fails to compile, fails to instantiate
-/// (typically a host import it needs and we do not provide), or traps.
+/// (typically a host import it needs and we do not provide), or traps. The
+/// error of a trap carries what the matcher wrote to stderr, where a
+/// panicking matcher writes its panic message.
 pub fn run(wasm: &[u8], input: Invocation) -> Result<Captured> {
     let (engine, module) = compiled(wasm)?;
 
+    let stderr = MemoryOutputPipe::new(STDERR_CAPACITY);
     let mut store = Store::new(
         &engine,
         State {
-            wasi: WasiCtxBuilder::new().inherit_stdio().build_p1(),
+            wasi: WasiCtxBuilder::new()
+                .inherit_stdin()
+                .inherit_stdout()
+                .stderr(stderr.clone())
+                .build_p1(),
             input,
             out: Captured::default(),
         },
@@ -124,18 +194,31 @@ pub fn run(wasm: &[u8], input: Invocation) -> Result<Captured> {
     preview1::add_to_linker_sync(&mut linker, |s: &mut State| &mut s.wasi)
         .context("linking WASI preview 1")?;
     add_credman(&mut linker)?;
+    // The real host links a module whose imports it lacks and traps when one
+    // is called (ABI.md §3). The calls this host does not record behave the
+    // same way.
+    linker
+        .define_unknown_imports_as_traps(&module)
+        .context("defining the unrecorded imports")?;
 
-    let instance = linker.instantiate(&mut store, &module).context(
-        "instantiating matcher — a missing import means the host lacks a function it needs",
-    )?;
+    let instance = linker
+        .instantiate(&mut store, &module)
+        .context("instantiating matcher")?;
 
-    instance
+    let ran = instance
         .get_typed_func::<(), ()>(&mut store, "_start")
         .context("matcher has no _start export")?
-        .call(&mut store, ())
-        .context("matcher trapped — in a real picker this shows the user nothing at all")?;
-
-    Ok(store.into_data().out)
+        .call(&mut store, ());
+    let mut out = store.into_data().out;
+    out.stderr = stderr.contents().to_vec();
+    ran.with_context(|| {
+        format!(
+            "matcher trapped — in a real picker this shows the user nothing at all; \
+             its stderr:\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        )
+    })?;
+    Ok(out)
 }
 
 /// Compile a module once per process, reusing it across runs.
@@ -171,7 +254,7 @@ fn compiled(wasm: &[u8]) -> Result<(Engine, Module)> {
     Ok((engine, module))
 }
 
-/// Register the `credman` and `credman_v2` imports the matcher links against.
+/// Register the `credman` to `credman_v7` imports a matcher links against.
 fn add_credman(linker: &mut Linker<State>) -> Result<()> {
     linker.func_wrap(
         "credman",
@@ -209,18 +292,20 @@ fn add_credman(linker: &mut Linker<State>) -> Result<()> {
         },
     )?;
 
-    // Returns how many bytes were actually read, which is not necessarily the
-    // number asked for — a matcher may request past the end of the blob.
+    // The offset and the length are `size_t`, unsigned on wasm32. Returns the
+    // count the host reports, as `Invocation::credential_reads` answers.
     linker.func_wrap(
         "credman",
         "ReadCredentialsBuffer",
-        |mut c: Caller<'_, State>, ptr: i32, offset: i32, len: i32| -> Result<i32> {
-            let blob = c.data().input.credentials.clone();
-            let start = (offset.max(0) as usize).min(blob.len());
-            let end = start.saturating_add(len.max(0) as usize).min(blob.len());
-            let slice = blob.get(start..end).unwrap_or_default().to_vec();
-            write_bytes(&mut c, ptr, &slice)?;
-            Ok(slice.len() as i32)
+        |mut c: Caller<'_, State>, ptr: i32, offset: u32, len: u32| -> Result<i32> {
+            let input = &c.data().input;
+            let (copied, reported) =
+                input
+                    .credential_reads
+                    .answer(&input.credentials, offset as usize, len as usize);
+            let copied = copied.to_vec();
+            write_bytes(&mut c, ptr, &copied)?;
+            i32::try_from(reported).context("a read count beyond i32")
         },
     )?;
 
@@ -234,9 +319,9 @@ fn add_credman(linker: &mut Linker<State>) -> Result<()> {
                 let i = &c.data().input;
                 (i.calling_package.clone(), i.origin.clone())
             };
-            let mut buf = vec![0u8; 256 + 512];
-            write_padded(&mut buf, 0, 256, &pkg);
-            write_padded(&mut buf, 256, 512, &origin);
+            let mut buf = Vec::with_capacity(256 + 512);
+            buf.extend_from_slice(&padded::<256>(&pkg));
+            buf.extend_from_slice(&padded::<512>(&origin));
             write_bytes(&mut c, ptr, &buf)
         },
     )?;
@@ -282,6 +367,9 @@ fn add_credman(linker: &mut Linker<State>) -> Result<()> {
                 disclaimer: read_cstr_opt(&mut c, disclaimer)?,
                 warning: read_cstr_opt(&mut c, warning)?,
                 fields: Vec::new(),
+                delegation: None,
+                link: None,
+                metadata_display_text: None,
             };
             c.data_mut().out.entries.push(entry);
             Ok(())
@@ -304,39 +392,127 @@ fn add_credman(linker: &mut Linker<State>) -> Result<()> {
                 read_cstr(&mut c, name)?,
                 read_cstr(&mut c, value)?,
             );
-            // A field for an entry that was never added is a matcher bug, and
-            // silently dropping it would hide exactly that bug.
-            let out = &mut c.data_mut().out;
-            let Some(entry) = out
-                .entries
-                .iter_mut()
-                .find(|e| e.set_id == set_id && e.index == index)
-            else {
-                return Err(anyhow::anyhow!(
-                    "field {name:?} added to unknown entry {set_id}[{index}]"
-                ));
-            };
-
-            // The credential id is checked, not ignored. The platform keys
-            // fields by credential id as well as set position, so a guest
-            // passing the wrong one — or an empty one — produces fields that
-            // never attach in a real picker. A host that accepted any id
-            // would let that ship while every test stayed green, which is the
-            // one failure mode a test host exists to prevent.
-            if cred_id != entry.credential_id {
-                return Err(anyhow::anyhow!(
-                    "field {name:?} for entry {set_id}[{index}] carries credential id {cred_id:?}, \
-                     but the entry was added as {:?}",
-                    entry.credential_id
-                ));
-            }
-
+            let entry = entry_at(&mut c.data_mut().out, &set_id, index, &cred_id)?;
             entry.fields.push((name, value));
             Ok(())
         },
     )?;
 
+    linker.func_wrap(
+        "credman_v5",
+        "AddMetadataDisplayTextToEntrySet",
+        |mut c: Caller<'_, State>,
+         cred_id: i32,
+         text: i32,
+         set_id: i32,
+         index: i32|
+         -> Result<()> {
+            reached(&c, 5, "AddMetadataDisplayTextToEntrySet")?;
+            let (cred_id, text, set_id) = (
+                read_cstr(&mut c, cred_id)?,
+                read_cstr(&mut c, text)?,
+                read_cstr(&mut c, set_id)?,
+            );
+            entry_at(&mut c.data_mut().out, &set_id, index, &cred_id)?.metadata_display_text =
+                Some(text);
+            Ok(())
+        },
+    )?;
+
+    linker.func_wrap(
+        "credman_v6",
+        "SetAdditionalDisclaimerAndUrlForVerificationEntryInCredentialSet",
+        |mut c: Caller<'_, State>,
+         cred_id: i32,
+         disclaimer: i32,
+         url_text: i32,
+         url: i32,
+         set_id: i32,
+         index: i32|
+         -> Result<()> {
+            reached(
+                &c,
+                6,
+                "SetAdditionalDisclaimerAndUrlForVerificationEntryInCredentialSet",
+            )?;
+            let (cred_id, link, set_id) = (
+                read_cstr(&mut c, cred_id)?,
+                (
+                    read_cstr(&mut c, disclaimer)?,
+                    read_cstr(&mut c, url_text)?,
+                    read_cstr(&mut c, url)?,
+                ),
+                read_cstr(&mut c, set_id)?,
+            );
+            entry_at(&mut c.data_mut().out, &set_id, index, &cred_id)?.link = Some(link);
+            Ok(())
+        },
+    )?;
+
+    linker.func_wrap(
+        "credman_v7",
+        "SetDelegationTypeForEntryInSet",
+        |mut c: Caller<'_, State>,
+         cred_id: i32,
+         delegation: i32,
+         set_id: i32,
+         index: i32|
+         -> Result<()> {
+            reached(&c, 7, "SetDelegationTypeForEntryInSet")?;
+            let (cred_id, set_id) = (read_cstr(&mut c, cred_id)?, read_cstr(&mut c, set_id)?);
+            entry_at(&mut c.data_mut().out, &set_id, index, &cred_id)?.delegation =
+                Some(delegation);
+            Ok(())
+        },
+    )?;
+
     Ok(())
+}
+
+/// A call above the reported level traps on a real host.
+fn reached(c: &Caller<'_, State>, level: u32, function: &str) -> Result<()> {
+    let reported = c.data().input.wasm_version;
+    if reported < level {
+        return Err(anyhow::anyhow!(
+            "{function} is level {level}, called on a level-{reported} host"
+        ));
+    }
+    Ok(())
+}
+
+/// The entry a field or a level-5 to level-7 call names.
+///
+/// The platform keys these calls by set, position and credential id: the
+/// alternatives at one position differ in their credential id alone. A call
+/// for an entry that was never added is a matcher bug, and silently dropping
+/// it would hide exactly that bug; a call with a credential id no alternative
+/// carries never attaches in a real picker.
+fn entry_at<'o>(
+    out: &'o mut Captured,
+    set_id: &str,
+    index: i32,
+    cred_id: &str,
+) -> Result<&'o mut CapturedEntry> {
+    let at_position = |e: &CapturedEntry| e.set_id == set_id && e.index == index;
+    let added: Vec<String> = out
+        .entries
+        .iter()
+        .filter(|e| at_position(e))
+        .map(|e| e.credential_id.clone())
+        .collect();
+    out.entries
+        .iter_mut()
+        .find(|e| at_position(e) && e.credential_id == cred_id)
+        .ok_or_else(|| {
+            if added.is_empty() {
+                anyhow::anyhow!("call for unknown entry {set_id}[{index}]")
+            } else {
+                anyhow::anyhow!(
+                    "call for entry {set_id}[{index}] carries credential id {cred_id:?}, \
+                     but the entries there were added as {added:?}"
+                )
+            }
+        })
 }
 
 /// The guest's linear memory.
@@ -402,11 +578,13 @@ fn read_cstr(c: &mut Caller<'_, State>, ptr: i32) -> Result<String> {
     Ok(String::from_utf8_lossy(tail.get(..end).unwrap_or_default()).into_owned())
 }
 
-/// Write `value` NUL-padded into a fixed-width ABI field.
-fn write_padded(buf: &mut [u8], offset: usize, width: usize, value: &str) {
-    let src = value.as_bytes();
-    let n = src.len().min(width.saturating_sub(1));
-    if let (Some(dst), Some(src)) = (buf.get_mut(offset..offset + n), src.get(..n)) {
-        dst.copy_from_slice(src);
+/// `value` NUL-padded into a fixed-width ABI field, cut to leave the last
+/// byte NUL.
+fn padded<const WIDTH: usize>(value: &str) -> [u8; WIDTH] {
+    let mut field = [0u8; WIDTH];
+    let room = WIDTH.saturating_sub(1);
+    for (slot, byte) in field.iter_mut().zip(value.bytes().take(room)) {
+        *slot = byte;
     }
+    field
 }

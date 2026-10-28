@@ -5,6 +5,7 @@ description = "Digital Credentials Query Language (DCQL) engine, as defined by O
 keywords = ["dcql", "openid4vp", "credentials", "mdoc", "sd-jwt"]
 categories = ["authentication", "parser-implementations", "encoding"]
 readme = "README.md"
+publish = ["crates-io"]
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -14,5 +15,10 @@ rust-version.workspace = true
 # This crate is published to crates.io and MUST NOT depend on any other crate
 # in this workspace. CI enforces it with `cargo publish --dry-run`.
 [dependencies]
+rustc-hash = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

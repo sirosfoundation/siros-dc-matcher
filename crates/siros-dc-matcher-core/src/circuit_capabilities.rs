@@ -37,10 +37,7 @@
 //! The module runs inside the WASM matcher, where a trap is indistinguishable
 //! from "no matching credential", so it must not panic on any input.
 
-#![deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 #![deny(missing_docs)]
-
-use std::fmt;
 
 use serde_json::{Map, Value};
 
@@ -48,22 +45,26 @@ use serde_json::{Map, Value};
 pub const SCHEMA: u64 = 1;
 
 /// A capabilities object that could not be used.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CapabilitiesError {
+#[derive(Debug, thiserror::Error)]
+pub enum CapabilitiesError {
+    /// The text is not JSON.
+    #[error("the circuit capabilities are not JSON")]
+    Json(#[source] serde_json::Error),
+    /// The JSON breaks the capabilities schema.
+    #[error(transparent)]
+    Schema(#[from] SchemaViolation),
+}
+
+/// A capabilities object that breaks the schema.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("invalid circuit capabilities: {reason}")]
+pub struct SchemaViolation {
     /// What is wrong with it.
     pub reason: String,
 }
 
-impl fmt::Display for CapabilitiesError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "invalid circuit capabilities: {}", self.reason)
-    }
-}
-
-impl std::error::Error for CapabilitiesError {}
-
-fn invalid(reason: impl Into<String>) -> CapabilitiesError {
-    CapabilitiesError {
+fn invalid(reason: impl Into<String>) -> SchemaViolation {
+    SchemaViolation {
         reason: reason.into(),
     }
 }
@@ -110,7 +111,7 @@ fn object<'v>(
     value: &'v Value,
     what: &str,
     allowed: &[&str],
-) -> Result<&'v Map<String, Value>, CapabilitiesError> {
+) -> Result<&'v Map<String, Value>, SchemaViolation> {
     let map = value
         .as_object()
         .ok_or_else(|| invalid(format!("{what} is not an object")))?;
@@ -124,7 +125,7 @@ fn required_text(
     map: &Map<String, Value>,
     key: &str,
     what: &str,
-) -> Result<String, CapabilitiesError> {
+) -> Result<String, SchemaViolation> {
     match map.get(key).and_then(Value::as_str) {
         Some(text) if !text.is_empty() => Ok(text.to_owned()),
         _ => Err(invalid(format!("{what}{key} is required"))),
@@ -132,7 +133,7 @@ fn required_text(
 }
 
 impl Constraint {
-    fn read(value: &Value) -> Result<Self, CapabilitiesError> {
+    fn read(value: &Value) -> Result<Self, SchemaViolation> {
         let map = object(value, "a constraint", &["enum", "type"])?;
         match (map.get("enum"), map.get("type")) {
             (Some(Value::Null) | None, Some(Value::Null) | None) => Err(invalid(
@@ -190,7 +191,7 @@ impl Constraint {
 }
 
 impl FunctionCap {
-    fn read(value: &Value) -> Result<Self, CapabilitiesError> {
+    fn read(value: &Value) -> Result<Self, SchemaViolation> {
         let map = object(value, "a function", &["id", "max", "always", "params"])?;
         let id = required_text(map, "id", "function ")?;
         let max = match map.get("max") {
@@ -252,9 +253,13 @@ impl Capabilities {
     /// [`CapabilitiesError`] for anything the catalog's validator would reject.
     /// See the module docs.
     pub fn parse(text: &str) -> Result<Self, CapabilitiesError> {
-        let value: Value = serde_json::from_str(text).map_err(|e| invalid(e.to_string()))?;
+        let value: Value = serde_json::from_str(text).map_err(CapabilitiesError::Json)?;
+        Ok(Self::read(&value)?)
+    }
+
+    fn read(value: &Value) -> Result<Self, SchemaViolation> {
         let map = object(
-            &value,
+            value,
             "capabilities",
             &["schema", "presentation", "credential", "functions"],
         )?;
