@@ -138,7 +138,9 @@ binaryen version_116.
   the facts, the index entries its search visits, the records of the types the request's
   queries ask for, the definitions its transaction data entries name, and the icons of the
   entries it emits. Each read runs until complete; a short `ReadCredentialsBuffer` read used to
-  leave the blob's tail zeroed.
+  leave the blob's tail zeroed. A header, directory or facts that break a rule give no entry. A
+  part the request reads after them that breaks a rule gives no offer, and a registration with
+  its diagnostics shown names the error's code in one entry (`registration: <code>`).
 - `siros-dc-matcher-core`'s unused `sink` module is removed.
 - Entry metadata is the standard object
   `{"display_skipped":bool,"host_level":n,"data":{…}}`. The matcher's own
