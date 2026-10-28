@@ -225,22 +225,22 @@ binaryen version_116.
 ### Added
 
 - `siros-codec`, the encodings every wallet core crate shares: a strict CBOR reader (definite
-  lengths, no duplicate keys, no trailing bytes, at most `cbor::MAX_DEPTH` (32) levels), of one
-  item or of a CBOR sequence (`cbor::decode_sequence`, RFC 8742), and a deterministic writer; unpadded base64url and the padded base64 of `x5c` certificates (RFC
-  4648, Sections 4 and 5); the calendar dates and UTC times of CBOR's `full-date` and `tdate`;
-  the ES256 signature value (`signature::Es256Signature`); an `https` URL (`url::HttpsUrl`);
-  and `json::JsonTextError`, what
+  lengths, no duplicate keys, no trailing bytes, at most `cbor::MAX_DEPTH` (32) levels), of one item
+  or of a CBOR sequence (`cbor::decode_sequence`, RFC 8742), and a deterministic writer; unpadded
+  base64url and the padded base64 of `x5c` certificates (RFC 4648, Sections 4 and 5); the calendar
+  dates and UTC times of CBOR's `full-date` and `tdate`; the ES256 signature value
+  (`signature::Es256Signature`); an `https` URL (`url::HttpsUrl`); and `json::JsonTextError`, what
   serde_json reports of text that is no JSON. With the feature `json` it holds the strict JSON
   reader, `Json::parse_unique`: one value, members in document order, each member name once per
-  object, every number with the text its writer chose (`JsonNumber`), at most `json::MAX_DEPTH`
-  (64) levels. It refuses with a `JsonFault`: a text fault anywhere in the bytes comes first,
-  then the first, in document order, of a number beyond binary64, nesting too deep and a member
-  name an object repeats. `siros-wallet-state`
-  reads the wallet state with its own reader, where a repeated name keeps its last value, as
-  `JSON.parse` in `wallet-frontend` does. The crate holds the internals the components share:
-  `member::MemberFault` with its `ArrayIndex`, `chain::CertificateChain` (the DER chain an mdoc
-  `x5chain` and an `x5c` carry), the `position!` and `text_value!` macros that declare value
-  newtypes, and `display_code!`, which shows an error by its stable code.
+  object, every number with the text its writer chose (`JsonNumber`), at most `json::MAX_DEPTH` (64)
+  levels. It refuses with a `JsonFault`: a text fault anywhere in the bytes comes first, then the
+  first, in document order, of a number beyond binary64, nesting too deep and a member name an
+  object repeats. `siros-wallet-state` reads the wallet state with its own reader, where a repeated
+  name keeps its last value, as `JSON.parse` in `wallet-frontend` does. The crate holds the
+  internals the components share: `member::MemberFault` with its `ArrayIndex`,
+  `chain::CertificateChain` (the DER chain an mdoc `x5chain` and an `x5c` carry), the `position!`
+  and `text_value!` macros that declare value newtypes, and `display_code!`, which shows an error by
+  its stable code.
 - `siros-mdoc`, ISO/IEC 18013-5 mdocs: the stored credential, element selection, the
   `DeviceResponse`, and the device signature's signing input (`device_signing_input`, a
   `SigStructure` whose `digest` the device key signs). Names and values are types: `DocType`
@@ -544,16 +544,16 @@ binaryen version_116.
     and a background fulfilment of an offer that needs the wallet's display, give
     `access_denied`.
   - Positions and identifiers are their own types (`QueryIndex`, `CandidateIndex`, `SetIndex`,
-    `OfferIndex`, `AdditionIndex`, `EntryPosition`, `PlanDigest`, `SignId`, and DCQL's
-    `QueryId`), and so are A9's facts. The plan fetches nothing: the host gives it every input
-    beforehand. Without the default feature `wallet` it holds the
-    matching the picker runs, over `MatchCredential`, links no chain validation or response
-    crypto, and builds with Rust 1.82: `Asked::of` takes an `UnverifiedRequest` or a
-    `VerifiedRequest` (`MatchRequest`), and `Asked::types` gives the credential types each
-    query's matching reads (`QueryTypes`, `AskedType`); `Transactions` selects transaction
-    data over a `TransactionSource` from the request's `RequestEntries` and gives the offers or
-    why there are none (`NoOffer`); and `Pick` is what a picker entry carries (K3). The feature `test-fixtures` holds the wallet, verifier,
-    host and PaSO fixtures (`testing`).
+    `OfferIndex`, `AdditionIndex`, `EntryPosition`, `PlanDigest`, `SignId`, and DCQL's `QueryId`),
+    and so are A9's facts. The plan fetches nothing: the host gives it every input beforehand.
+    Without the default feature `wallet` it holds the matching the picker runs, over
+    `MatchCredential`, links no chain validation or response crypto, and builds with Rust 1.82:
+    `Asked::of` takes an `UnverifiedRequest` or a `VerifiedRequest` (`MatchRequest`), and
+    `Asked::types` gives the credential types each query's matching reads (`QueryTypes`,
+    `AskedType`); `Transactions` selects transaction data over a `TransactionSource` from the
+    request's `RequestEntries` and gives the offers or why there are none (`NoOffer`); and `Pick` is
+    what a picker entry carries (K3). The feature `test-fixtures` holds the wallet, verifier, host
+    and PaSO fixtures (`testing`).
 - The `proving/` workspace: `siros-zkp-backend-longfellow` and `siros-zkp-backend-vega`
   implement the prover and verifier of each system over zk-cred-longfellow and zk-cred-vega,
   and check the circuit artifact the host fetched against its pin. CI runs real proofs of both
@@ -583,32 +583,31 @@ binaryen version_116.
   of the layers, written by `scripts/gen_ecosystem_svg.py`.
 - `scripts/vectors_digest.sh --digest` gives the vector set digest stated under Changed. The
   capability vectors (`circuit_capabilities/match.json`) are unchanged.
-- `siros-registration`, the registration the wallet writes for the picker (K1, TR5): a binary
-  layout of version 1 for reads at offsets (`docs/registration.md`). A header with a magic
-  number and the version, a directory of six sections, an index of the credential types sorted
-  for binary search, the records of each type as one CBOR sequence, and the definitions and
-  icons the records name by span, each stored once. Per credential a record holds the entry
-  reference, holder-key presence, the typed claim tree without nym_auth's undisclosable
-  attributes, the card's title, issuer line and icon, the claim labels in the wallet's
-  language, whether the wallet presents it without its UI, the TR5 facts, and for each
-  transaction data type the projected definition that serves it or why none does. The facts
-  hold the time of registration, the language, the diagnostics flag, the system ids the wallet
-  proves, the form of the nym_auth `verifier_id` and the wallet's default icon.
-  `Registration<R: Read + Seek>` reads the header, the directory and the facts when it opens,
-  then `credentials` of the types asked, `definition` and `icon` by span, each definition and
-  icon once, and `projection` the whole. It refuses every version but `Version::CURRENT` (1),
-  every offset or length past its part, an index entry out of order on a search's path, the
-  records of a type out of the wallet's order, a part longer than a buffer of the platform
-  holds, and every unexpected member, with a `RegistrationError` that names the part and its
-  cause. Neither the reader nor the writer panics. The writer (feature `wallet`): `project` takes the parsed credentials, the presentation records,
-  the display cache and language, the held transaction metadata and the configuration, the
-  trust store, the systems, the `verifier_id` form, the credentials presented without the
-  wallet's UI, the card wording, the icons, the default icon and the time, and gives the
-  `Projection`; `encode` lays it out, equal projections in equal bytes; `write` does both. An
-  icon is a `RasterIcon`: a PNG or JPEG of 64 to 256 pixels in each direction, read from its
-  header (`IconFault` otherwise). The host rasterises an SVG and resizes an image before it
-  passes it; a credential without an icon of its own gets the default icon. `Unverified` is the
-  picker's transaction data source. It builds with Rust 1.82.
+- `siros-registration`, the registration the wallet writes for the picker (K1, TR5): a binary layout
+  of version 1 for reads at offsets (`docs/registration.md`). A header with a magic number and the
+  version, a directory of six sections, an index of the credential types sorted for binary search,
+  the records of each type as one CBOR sequence, and the definitions and icons the records name by
+  span, each stored once. Per credential a record holds the entry reference, holder-key presence,
+  the typed claim tree without nym_auth's undisclosable attributes, the card's title, issuer line
+  and icon, the claim labels in the wallet's language, whether the wallet presents it without its
+  UI, the TR5 facts, and for each transaction data type the projected definition that serves it or
+  why none does. The facts hold the time of registration, the language, the diagnostics flag, the
+  system ids the wallet proves, the form of the nym_auth `verifier_id` and the wallet's default
+  icon. `Registration<R: Read + Seek>` reads the header, the directory and the facts when it opens,
+  then `credentials` of the types asked, `definition` and `icon` by span, each definition and icon
+  once, and `projection` the whole. It refuses every version but `Version::CURRENT` (1), every
+  offset or length past its part, an index entry out of order on a search's path, the records of a
+  type out of the wallet's order, a part longer than a buffer of the platform holds, and every
+  unexpected member, with a `RegistrationError` that names the part and its cause. The reader and
+  the writer give an error for every input. The writer (feature `wallet`): `project` takes the
+  parsed credentials, the presentation records, the display cache and language, the held transaction
+  metadata and the configuration, the trust store, the systems, the `verifier_id` form, the
+  credentials presented without the wallet's UI, the card wording, the icons, the default icon and
+  the time, and gives the `Projection`; `encode` lays it out, equal projections in equal bytes;
+  `write` does both. An icon is a `RasterIcon`: a PNG or JPEG of 64 to 256 pixels in each direction,
+  read from its header (`IconFault` otherwise). The host rasterises an SVG and resizes an image
+  before it passes it; a credential without an icon of its own gets the default icon. `Unverified`
+  is the picker's transaction data source. It builds with Rust 1.82.
 - `scripts/gen_unicode_tables.py` writes the refused-character ranges of siros-display and the
   grapheme break runs of siros-transaction-data from their oracles' tables.
 - siros-registration's example `sample_registration` writes the registration of a sample
