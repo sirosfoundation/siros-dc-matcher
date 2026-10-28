@@ -113,7 +113,7 @@ CI also enforces three things a green build does not imply:
   table and the WASI functions the host provides.
 - **A 409,600-byte (400 KiB) size budget** for `matcher.wasm`, which runs in someone else's
   process. The picker runs the wallet's matching and transaction data selection over the
-  registration (K2): with images passed through and `wasm-opt -Oz` it measures 359,635 bytes,
+  registration (K2): with images passed through and `wasm-opt -Oz` it measures 369,973 bytes,
   and the measured alternatives that drop parts of K2 were declined. Raising the budget takes a
   line in `.github/workflows/ci.yml` and a reason.
 - **Browser imports.** The browser presenter's module imports only wasm-bindgen's modules, the
