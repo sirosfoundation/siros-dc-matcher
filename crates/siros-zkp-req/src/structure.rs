@@ -35,7 +35,7 @@ pub enum StructureRejection {
     #[error("results keys differ from the option's return handles")]
     ResultKeys,
     /// Step 5: an item whose function has no result has a value other than `true`.
-    #[error("a function without a result has a value other than true")]
+    #[error("`_req` item {item} has a function without a result and a value other than true")]
     ResultNotTrue {
         /// The item's `_req` index.
         item: ItemIndex,

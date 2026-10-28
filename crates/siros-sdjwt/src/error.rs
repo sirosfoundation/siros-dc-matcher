@@ -24,7 +24,7 @@ pub enum EncodedJsonFault {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum IssuerJwtFault {
     /// It has this many `.`-separated segments, where a JWS has three.
-    #[error("it has this many `.`-separated segments, where a JWS has three")]
+    #[error("it has {0} `.`-separated segments, where a JWS has three")]
     Segments(usize),
     /// The signature segment is empty.
     #[error("the signature segment is empty")]
@@ -56,7 +56,7 @@ pub enum DisclosureFault {
     #[error("the value is not a JSON array")]
     NotArray,
     /// The array has this many elements, where a disclosure has two or three.
-    #[error("the array has this many elements, where a disclosure has two or three")]
+    #[error("the array has {0} elements, where a disclosure has two or three")]
     Length(usize),
     /// The salt is not a string.
     #[error("the salt is not a string")]
@@ -73,7 +73,7 @@ pub enum SdAlgFault {
     #[error("it is not a string")]
     NotString,
     /// It names this algorithm, outside `sha-256`, `sha-384` and `sha-512`.
-    #[error("it names this algorithm, outside `sha-256`, `sha-384` and `sha-512`")]
+    #[error("it names the algorithm {0:?}, outside `sha-256`, `sha-384` and `sha-512`")]
     Unknown(String),
 }
 
@@ -93,7 +93,7 @@ pub enum ReservedFault {
     #[error("an object below the payload's top level has an `_sd_alg` member")]
     NestedSdAlg,
     /// A disclosure names this reserved claim: `_sd`, `...` or `_sd_alg`.
-    #[error("a disclosure names this reserved claim: `_sd`, `...` or `_sd_alg`")]
+    #[error("a disclosure names the reserved claim {0:?}: `_sd`, `...` or `_sd_alg`")]
     Disclosed(String),
     /// An array element holds `...` beside another member.
     #[error("an array element holds `...` beside another member")]
@@ -170,10 +170,10 @@ pub enum X5cError {
     #[error("the array is empty")]
     Empty,
     /// The certificate at this position is not a string.
-    #[error("the certificate at this position is not a string")]
+    #[error("the certificate at position {0} is not a string")]
     NotString(X5cIndex),
     /// The certificate at this position is not base64 with padding.
-    #[error("the certificate at this position is not base64 with padding")]
+    #[error("the certificate at position {0} is not base64 with padding")]
     Base64(X5cIndex, #[source] Base64Error),
 }
 

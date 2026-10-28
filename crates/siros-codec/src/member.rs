@@ -18,6 +18,6 @@ pub enum MemberFault {
     #[error("the member is an empty string, array or map")]
     Empty,
     /// The array entry at this position breaks the rule of the entries.
-    #[error("the array entry at this position breaks the rule of the entries")]
+    #[error("the array entry at position {0} breaks the rule of the entries")]
     Entry(ArrayIndex),
 }

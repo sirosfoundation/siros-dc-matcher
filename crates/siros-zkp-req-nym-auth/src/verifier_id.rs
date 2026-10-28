@@ -130,7 +130,7 @@ macro_rules! bytes32 {
 
 /// Bytes of this length, where the value has 32.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
-#[error("bytes of this length, where the value has 32")]
+#[error("{0} bytes, where the value has 32")]
 pub struct LengthError(pub usize);
 
 bytes32!(
