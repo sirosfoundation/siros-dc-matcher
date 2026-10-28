@@ -201,17 +201,13 @@ impl CredentialDatabase {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use crate::profile::{FormatRule, MetaRule, Op, Requirement};
+    use crate::profile::{FormatRule, MetaRule, Op, ZKP_REQ_FORMAT};
 
     fn sample() -> CredentialDatabase {
         let mut profile = MatchProfile::default();
         profile.formats.push(FormatRule {
-            query_format: "mso_mdoc_zk".into(),
+            query_format: ZKP_REQ_FORMAT.into(),
             stored_formats: vec!["mso_mdoc".into()],
-            requires: vec![Requirement {
-                capability: "zk_system".into(),
-                from_meta: "zk_system_type".into(),
-            }],
         });
         profile.meta_rules.push(MetaRule {
             meta_key: "doctype_value".into(),

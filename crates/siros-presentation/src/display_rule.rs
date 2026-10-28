@@ -25,7 +25,7 @@ pub enum Presentability {
     OnWalletUi,
 }
 
-/// Whether the request carries `transaction_data`, which its type renders in the wallet (T2).
+/// Whether the request carries `transaction_data`, which its type renders in the wallet (T5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TransactionData {
     /// No `transaction_data`.

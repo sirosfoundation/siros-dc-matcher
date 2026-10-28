@@ -93,8 +93,8 @@ fn no_query_but_zkp_req_reaches_a_nym_auth_attestation() {
         json!({"id": "q", "format": "mso_mdoc", "meta": {"doctype_value": ns},
             "claims": [{"path": [ns, "ssc"]}]}),
         json!({"id": "q", "format": "mso_mdoc", "meta": {"doctype_value": ns}}),
-        json!({"id": "q", "format": "mso_mdoc_zk", "meta": {"doctype_value": ns},
-            "claims": [{"path": [ns, "birth_date"]}]}),
+        json!({"id": "q", "format": "jwt_vc_json", "meta": {"type_values": [[ns]]},
+            "claims": [{"path": ["credentialSubject", "birth_date"]}]}),
     ];
     for query in queries {
         let request = request(json!({"credentials": [query.clone()]}));

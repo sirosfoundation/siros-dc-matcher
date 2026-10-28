@@ -124,6 +124,13 @@ binaryen version_116.
   (16 before).
 - **BREAKING (FFI):** `zkp_req_plan` and `ZkpReqPlanError` are removed. Bindings are
   regenerated.
+- **BREAKING (FFI):** `SirosBlobBuilder.add_zk_system` is removed with the mdoc ZK path. An
+  `mso_mdoc_zk` query matches nothing, and the matching ignores the `meta` members
+  `zk_system_type`, `zk_required` and `ppid_context`. Bindings are regenerated.
+- **BREAKING (FFI):** `FfiMatchedCredential.capabilities` is removed: it held the ZK system
+  an `mso_mdoc_zk` or `zk_system_type` query chose.
+- **BREAKING (FFI):** `FfiMatchedCredential.meta` is removed: it carried the query's `meta`
+  scalars, `ppid_context` among them, to the wallet.
 - The matcher calls the host through the new `android-credman-sys` and
   `android-credman` crates (MIT OR Apache-2.0, from
   APTITUDE-Consortium/dcapi-matcher). `crates/android-credman-sys/ABI.md`
@@ -783,6 +790,11 @@ binaryen version_116.
 
 ### Removed
 
+- From `siros-dc-matcher-core`, the mdoc ZK path: the `mso_mdoc_zk` format rule,
+  `FormatRule::requires` and `Requirement`, `MetaTrigger` and `MatchProfile::meta_triggers`,
+  `ZK_CAPABILITY`, the `ppid_context` meta rule, `Resolved::capabilities` and `Resolved::meta`,
+  `fixtures::longfellow`, their tests, and the golden blob of a profile before the `zkp_req`
+  rule.
 - From `siros-dc-matcher-core`: the v0.4 planner (`zkp_req`), the response validator
   (`zkp_req_response`), `proof_time`, their vectors (`zkp_req`, `zkp_req_response`,
   `zkp_req_unsat`, `proof_time`) and `scripts/gen_zkp_req_response_vectors.py`.

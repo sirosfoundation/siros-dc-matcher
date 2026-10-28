@@ -896,14 +896,6 @@ public protocol SirosBlobBuilderProtocol : AnyObject {
     func addIcon(id: String, bytes: Data) 
     
     /**
-     * Declare a ZK proof system this wallet can actually produce.
-     *
-     * Without this, a `mso_mdoc_zk` request matches nothing — which is the
-     * correct outcome for a wallet that cannot produce the proof.
-     */
-    func addZkSystem(capability: FfiCapability) 
-    
-    /**
      * Register a `zkp_req` circuit this wallet can prove with.
      *
      * `system` is the proof system (for example `longfellow-libzk-v1`). The
@@ -1058,19 +1050,6 @@ open func addIcon(id: String, bytes: Data) {try! rustCall() {
 }
     
     /**
-     * Declare a ZK proof system this wallet can actually produce.
-     *
-     * Without this, a `mso_mdoc_zk` request matches nothing — which is the
-     * correct outcome for a wallet that cannot produce the proof.
-     */
-open func addZkSystem(capability: FfiCapability) {try! rustCall() {
-    uniffi_siros_dc_matcher_ffi_fn_method_sirosblobbuilder_add_zk_system(self.uniffiClonePointer(),
-        FfiConverterTypeFfiCapability.lower(capability),$0
-    )
-}
-}
-    
-    /**
      * Register a `zkp_req` circuit this wallet can prove with.
      *
      * `system` is the proof system (for example `longfellow-libzk-v1`). The
@@ -1199,22 +1178,15 @@ public func FfiConverterTypeSirosBlobBuilder_lower(_ value: SirosBlobBuilder) ->
 
 
 /**
- * Something this wallet can produce beyond what it stores, such as a ZK proof
- * over an mdoc.
+ * A `zkp_req` circuit this wallet can prove with.
  */
 public struct FfiCapability {
     /**
-     * System identifier, e.g. `longfellow-libzk-v1`.
+     * Proof system, e.g. `longfellow-libzk-v1`.
      */
     public var system: String
     /**
-     * Parameters that must also agree for the capability to apply.
-     *
-     * Supply the real ones. A ZK circuit is built for a fixed attribute
-     * count, so a request naming the right system with the wrong
-     * `num_attributes` is one this wallet cannot satisfy — and omitting the
-     * parameter turns that into a failure after the user has consented,
-     * rather than an entry that was never offered.
+     * The circuit's parameters, which [`SirosBlobBuilder::add_zkp_req_system`] describes.
      */
     public var params: [String: String]
 
@@ -1222,16 +1194,10 @@ public struct FfiCapability {
     // declare one manually.
     public init(
         /**
-         * System identifier, e.g. `longfellow-libzk-v1`.
+         * Proof system, e.g. `longfellow-libzk-v1`.
          */system: String, 
         /**
-         * Parameters that must also agree for the capability to apply.
-         *
-         * Supply the real ones. A ZK circuit is built for a fixed attribute
-         * count, so a request naming the right system with the wrong
-         * `num_attributes` is one this wallet cannot satisfy — and omitting the
-         * parameter turns that into a failure after the user has consented,
-         * rather than an entry that was never offered.
+         * The circuit's parameters, which [`SirosBlobBuilder::add_zkp_req_system`] describes.
          */params: [String: String]) {
         self.system = system
         self.params = params
@@ -1851,22 +1817,6 @@ public struct FfiMatchedCredential {
      */
     public var claims: [[String]]
     /**
-     * The capability chosen to satisfy this query, if its format needed one.
-     *
-     * Returned rather than left to the caller because the engine has already
-     * decided. Working it out again means parsing the request a second time,
-     * in a second implementation, and possibly reaching a different answer.
-     */
-    public var capabilities: [FfiCapability]
-    /**
-     * `meta` entries the wallet needs at presentation time but which do not
-     * affect matching — `ppid_context` above all, which both SDKs read today.
-     *
-     * A pseudonym context changes what is produced, not which credential can
-     * produce it, so it is carried rather than matched on.
-     */
-    public var meta: [String: String]
-    /**
      * For a `zkp_req` query: a JSON object `{"circuit": {...},
      * "proof_backend": "...", "req_set": n, "items": [...]}` holding the
      * circuit this wallet chose (its registered capability: `system` and
@@ -1897,20 +1847,6 @@ public struct FfiMatchedCredential {
          * Each is a path: for ISO mdoc, `[namespace, element_identifier]`.
          */claims: [[String]], 
         /**
-         * The capability chosen to satisfy this query, if its format needed one.
-         *
-         * Returned rather than left to the caller because the engine has already
-         * decided. Working it out again means parsing the request a second time,
-         * in a second implementation, and possibly reaching a different answer.
-         */capabilities: [FfiCapability], 
-        /**
-         * `meta` entries the wallet needs at presentation time but which do not
-         * affect matching — `ppid_context` above all, which both SDKs read today.
-         *
-         * A pseudonym context changes what is produced, not which credential can
-         * produce it, so it is carried rather than matched on.
-         */meta: [String: String], 
-        /**
          * For a `zkp_req` query: a JSON object `{"circuit": {...},
          * "proof_backend": "...", "req_set": n, "items": [...]}` holding the
          * circuit this wallet chose (its registered capability: `system` and
@@ -1927,8 +1863,6 @@ public struct FfiMatchedCredential {
         self.queryId = queryId
         self.credentialId = credentialId
         self.claims = claims
-        self.capabilities = capabilities
-        self.meta = meta
         self.zkpReq = zkpReq
     }
 }
@@ -1946,12 +1880,6 @@ extension FfiMatchedCredential: Equatable, Hashable {
         if lhs.claims != rhs.claims {
             return false
         }
-        if lhs.capabilities != rhs.capabilities {
-            return false
-        }
-        if lhs.meta != rhs.meta {
-            return false
-        }
         if lhs.zkpReq != rhs.zkpReq {
             return false
         }
@@ -1962,8 +1890,6 @@ extension FfiMatchedCredential: Equatable, Hashable {
         hasher.combine(queryId)
         hasher.combine(credentialId)
         hasher.combine(claims)
-        hasher.combine(capabilities)
-        hasher.combine(meta)
         hasher.combine(zkpReq)
     }
 }
@@ -1979,8 +1905,6 @@ public struct FfiConverterTypeFfiMatchedCredential: FfiConverterRustBuffer {
                 queryId: FfiConverterString.read(from: &buf), 
                 credentialId: FfiConverterString.read(from: &buf), 
                 claims: FfiConverterSequenceSequenceString.read(from: &buf), 
-                capabilities: FfiConverterSequenceTypeFfiCapability.read(from: &buf), 
-                meta: FfiConverterDictionaryStringString.read(from: &buf), 
                 zkpReq: FfiConverterOptionString.read(from: &buf)
         )
     }
@@ -1989,8 +1913,6 @@ public struct FfiConverterTypeFfiMatchedCredential: FfiConverterRustBuffer {
         FfiConverterString.write(value.queryId, into: &buf)
         FfiConverterString.write(value.credentialId, into: &buf)
         FfiConverterSequenceSequenceString.write(value.claims, into: &buf)
-        FfiConverterSequenceTypeFfiCapability.write(value.capabilities, into: &buf)
-        FfiConverterDictionaryStringString.write(value.meta, into: &buf)
         FfiConverterOptionString.write(value.zkpReq, into: &buf)
     }
 }
@@ -3289,31 +3211,6 @@ fileprivate struct FfiConverterSequenceData: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-fileprivate struct FfiConverterSequenceTypeFfiCapability: FfiConverterRustBuffer {
-    typealias SwiftType = [FfiCapability]
-
-    public static func write(_ value: [FfiCapability], into buf: inout [UInt8]) {
-        let len = Int32(value.count)
-        writeInt(&buf, len)
-        for item in value {
-            FfiConverterTypeFfiCapability.write(item, into: &buf)
-        }
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [FfiCapability] {
-        let len: Int32 = try readInt(&buf)
-        var seq = [FfiCapability]()
-        seq.reserveCapacity(Int(len))
-        for _ in 0 ..< len {
-            seq.append(try FfiConverterTypeFfiCapability.read(from: &buf))
-        }
-        return seq
-    }
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
 fileprivate struct FfiConverterSequenceTypeFfiClaim: FfiConverterRustBuffer {
     typealias SwiftType = [FfiClaim]
 
@@ -3722,9 +3619,6 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_add_icon() != 3617) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_add_zk_system() != 50234) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_siros_dc_matcher_ffi_checksum_method_sirosblobbuilder_add_zkp_req_system() != 42284) {

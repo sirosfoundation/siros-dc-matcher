@@ -432,23 +432,6 @@ fn without_a_context_zkp_req_matches_nothing() {
     assert!(!result.query("nym").expect("query").is_satisfied());
 }
 
-/// An older wallet's blob, registered before the `zkp_req` rule existed,
-/// still decodes and still declines the format.
-#[test]
-fn a_blob_from_before_the_zkp_req_rule_declines_the_format() {
-    let bytes = std::fs::read(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/golden/credential_database_v1_before_circuit_zk.cbor"
-    ))
-    .expect("old golden");
-    let mut db = CredentialDatabase::from_cbor(&bytes).expect("decodes");
-    assert!(db.profile.format_rule("zkp_req").is_none());
-    db.credentials = wallet().credentials;
-    assert!(run(&db, &envelope(normative(json!([age()])), accepting()))
-        .ids
-        .is_empty());
-}
-
 /// The committed blob carries the rule and round-trips through the matcher.
 #[test]
 fn the_committed_blob_routes_zkp_req_to_mdoc_storage() {
@@ -460,5 +443,4 @@ fn the_committed_blob_routes_zkp_req_to_mdoc_storage() {
     let db = CredentialDatabase::from_cbor(&bytes).expect("decodes");
     let rule = db.profile.format_rule("zkp_req").expect("rule");
     assert_eq!(rule.stored_formats, ["mso_mdoc"]);
-    assert!(rule.requires.is_empty());
 }

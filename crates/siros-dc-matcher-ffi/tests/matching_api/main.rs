@@ -7,20 +7,15 @@
 // UniFFI's records hold std's HashMap; the crate never links into matcher.wasm.
 #![allow(clippy::disallowed_types)]
 
-use std::collections::HashMap;
-
 use serde_json::json;
 use siros_codec::base64url;
 use siros_dc_matcher_core::fixtures;
-use siros_dc_matcher_core::profile::Capability;
 use siros_dc_matcher_ffi::matching::{match_dc_api_request, match_dcql, MatchError};
 
 mod zkp_req;
 
-fn wallet(zk: Option<Capability>) -> Vec<u8> {
-    fixtures::wallet(zk.into_iter().collect())
-        .to_cbor()
-        .expect("encoding")
+fn wallet() -> Vec<u8> {
+    fixtures::wallet().to_cbor().expect("encoding")
 }
 
 /// An inline request object, as `openid4vp-v1-unsigned` carries it.
@@ -40,7 +35,7 @@ fn age_claim() -> serde_json::Value {
 /// this one, and the presentation would then fail after the user consented.
 #[test]
 fn a_credential_missing_a_requested_claim_is_not_offered() {
-    let blob = wallet(None);
+    let blob = wallet();
     let query = dcql(
         "mso_mdoc",
         json!([{"path": ["org.iso.18013.5.1", "portrait"]}]),
@@ -56,7 +51,7 @@ fn a_credential_missing_a_requested_claim_is_not_offered() {
 /// credential holds. The caller discloses exactly this set.
 #[test]
 fn only_the_requested_claims_come_back() {
-    let blob = wallet(None);
+    let blob = wallet();
     let query = dcql(
         "mso_mdoc",
         age_claim(),
@@ -72,69 +67,10 @@ fn only_the_requested_claims_come_back() {
     );
 }
 
-/// The ZK path, across the boundary: a mso_mdoc_zk request reaches an ordinary
-/// stored mdoc, and the chosen system comes back so the caller does not have
-/// to work it out again.
-#[test]
-fn a_zk_request_returns_the_chosen_system() {
-    let blob = wallet(Some(fixtures::longfellow(None)));
-    let query = dcql(
-        "mso_mdoc_zk",
-        age_claim(),
-        json!({
-            "doctype_value": "org.iso.18013.5.1.mDL",
-            "zk_system_type": [{"id": "1", "system": "longfellow-libzk-v1", "num_attributes": "2"}]
-        }),
-    );
-
-    let out = match_dcql(blob, query).expect("matched");
-    let member = &out.combinations[0].members[0];
-    assert_eq!(member.credential_id, "mdl-1");
-    assert_eq!(member.capabilities[0].system, "longfellow-libzk-v1");
-}
-
-/// A wallet that cannot prove is not offered for a ZK request.
-#[test]
-fn a_zk_request_without_a_capability_offers_nothing() {
-    let blob = wallet(None);
-    let query = dcql(
-        "mso_mdoc_zk",
-        age_claim(),
-        json!({
-            "doctype_value": "org.iso.18013.5.1.mDL",
-            "zk_system_type": [{"id": "1", "system": "longfellow-libzk-v1"}]
-        }),
-    );
-    assert!(!match_dcql(blob, query).expect("matched").satisfiable);
-}
-
-/// `ppid_context` is carried, not matched on — a pseudonym context changes
-/// what is produced, not which credential can produce it. Both SDKs read it
-/// today, so losing it here would be a functional regression.
-#[test]
-fn ppid_context_is_carried_through() {
-    let blob = wallet(None);
-    let query = dcql(
-        "mso_mdoc",
-        age_claim(),
-        json!({
-            "doctype_value": "org.iso.18013.5.1.mDL",
-            "ppid_context": "https://rp.example/ctx"
-        }),
-    );
-
-    let out = match_dcql(blob, query).expect("matched");
-    let meta: &HashMap<String, String> = &out.combinations[0].members[0].meta;
-    assert_eq!(
-        meta.get("ppid_context").map(String::as_str),
-        Some("https://rp.example/ctx")
-    );
-}
-
 /// The DC API envelope picks the first protocol the profile answers.
 #[test]
 fn the_envelope_selects_a_supported_protocol() {
-    let blob = wallet(None);
+    let blob = wallet();
     let request = json!({"requests": [
         {"protocol": "some-future-thing", "data": {}},
         {"protocol": "openid4vp-v1-unsigned", "data": {
@@ -159,7 +95,7 @@ fn the_envelope_selects_a_supported_protocol() {
 /// to look at its protocol list.
 #[test]
 fn a_malformed_request_under_a_supported_protocol_is_a_request_error() {
-    let blob = wallet(None);
+    let blob = wallet();
     // A header and a signature the picker reads, around a payload that is no base64url.
     let header = base64url::encode(br#"{"alg":"ES256","typ":"oauth-authz-req+jwt"}"#);
     let jws = format!("{header}.@@@@.{}", base64url::encode(&[7; 64]));
@@ -181,7 +117,7 @@ fn a_malformed_request_under_a_supported_protocol_is_a_request_error() {
 /// the protocol it was asked in.
 #[test]
 fn an_unspeakable_protocol_is_its_own_error() {
-    let blob = wallet(None);
+    let blob = wallet();
     let request = json!({"requests": [{"protocol": "some-future-thing", "data": {}}]}).to_string();
 
     match match_dc_api_request(blob, request) {
@@ -199,7 +135,7 @@ fn an_unspeakable_protocol_is_its_own_error() {
 /// boundary, and a panic there would take the host application with it.
 #[test]
 fn malformed_input_is_an_error_not_a_panic() {
-    let blob = wallet(None);
+    let blob = wallet();
 
     assert!(matches!(
         match_dcql(vec![0xff, 0xff], "{}".into()),
@@ -225,7 +161,7 @@ fn malformed_input_is_an_error_not_a_panic() {
 fn per_query_candidates_are_complete_when_combinations_are_capped() {
     // Two queries, forty credentials each: sixteen hundred combinations
     // against a cap of thirty-two.
-    let mut db = fixtures::wallet(Vec::new());
+    let mut db = fixtures::wallet();
     let template = db.credentials[0].clone();
     for i in 2..=40 {
         let mut extra = template.clone();
@@ -272,15 +208,12 @@ fn per_query_candidates_are_complete_when_combinations_are_capped() {
 
 /// The per-query view carries the same detail as a combination member.
 #[test]
-fn per_query_candidates_carry_claims_and_capabilities() {
-    let blob = wallet(Some(fixtures::longfellow(None)));
+fn per_query_candidates_carry_claims() {
+    let blob = wallet();
     let query = dcql(
-        "mso_mdoc_zk",
+        "mso_mdoc",
         age_claim(),
-        json!({
-            "doctype_value": "org.iso.18013.5.1.mDL",
-            "zk_system_type": [{"id": "1", "system": "longfellow-libzk-v1"}]
-        }),
+        json!({"doctype_value": "org.iso.18013.5.1.mDL"}),
     );
 
     let out = match_dcql(blob, query).expect("matched");
@@ -290,7 +223,6 @@ fn per_query_candidates_carry_claims_and_capabilities() {
         candidate.claims,
         vec![vec!["org.iso.18013.5.1", "age_over_18"]]
     );
-    assert_eq!(candidate.capabilities[0].system, "longfellow-libzk-v1");
 }
 
 /// `matches` is per-query and survives an unsatisfiable request; `satisfiable`
@@ -306,7 +238,7 @@ fn per_query_candidates_carry_claims_and_capabilities() {
 /// notice missing.
 #[test]
 fn matches_survives_an_unsatisfiable_request_but_combinations_do_not() {
-    let blob = wallet(None);
+    let blob = wallet();
     // Two queries, one of which the wallet cannot answer. Absent
     // `credential_sets` means the verifier asks for all of them (§6.4).
     let query = json!({"credentials": [
@@ -354,7 +286,7 @@ fn matches_survives_an_unsatisfiable_request_but_combinations_do_not() {
 /// their reason are exactly the ones that send an object.
 #[test]
 fn a_purpose_reaches_the_caller_as_a_display_string() {
-    let blob = wallet(None);
+    let blob = wallet();
     let query = json!({
         "credentials": [{
             "id": "q1", "format": "mso_mdoc",
@@ -377,7 +309,7 @@ fn a_purpose_reaches_the_caller_as_a_display_string() {
 /// An object purpose survives as JSON rather than vanishing.
 #[test]
 fn a_non_string_purpose_is_rendered_not_dropped() {
-    let blob = wallet(None);
+    let blob = wallet();
     let query = json!({
         "credentials": [{
             "id": "q1", "format": "mso_mdoc",
@@ -400,7 +332,7 @@ fn a_non_string_purpose_is_rendered_not_dropped() {
 /// different requests, and answering one of them drops the other.
 #[test]
 fn a_duplicated_credential_query_id_is_a_request_error() {
-    let blob = wallet(None);
+    let blob = wallet();
     let query = json!({"credentials": [
         {"id": "q1", "format": "mso_mdoc", "meta": {}, "claims": age_claim()},
         {"id": "q1", "format": "dc+sd-jwt", "meta": {}, "claims": age_claim()}
@@ -417,10 +349,9 @@ fn a_duplicated_credential_query_id_is_a_request_error() {
 
 /// A wallet holding `n` interchangeable licences.
 ///
-/// The canonical fixture holds exactly one, on purpose and shared by three
-/// suites, so this builds its own rather than changing what those assertions
-/// mean. Interchangeable is the point: every credential satisfies every query,
-/// which is what makes the combination count a full power.
+/// The canonical fixture holds exactly one, on purpose, so this builds its own.
+/// Interchangeable is the point: every credential satisfies every query, which
+/// is what makes the combination count a full power.
 fn identical_licences(n: usize) -> Vec<u8> {
     use siros_dc_matcher_core::db::{Claim, Credential, CredentialDatabase};
     use siros_dc_matcher_core::profile::MatchProfile;
