@@ -6,7 +6,7 @@ use std::marker::PhantomData;
 
 use siros_credential::Format;
 
-use crate::error::{DirectoryFault, IndexFault, OutOfBounds, Within};
+use crate::error::{ByteCount, DirectoryFault, IndexFault, OutOfBounds, Within};
 
 /// The bytes a registration starts with.
 pub(crate) const MAGIC: [[u8; 4]; 2] = [*b"\x89SRG", *b"\r\n\x1a\n"];
@@ -17,9 +17,15 @@ pub(crate) const HEADER_LENGTH: u64 = 12;
 /// The bytes of the directory: one entry of 12 bytes per section, its kind, offset and length.
 pub(crate) const DIRECTORY_LENGTH: u64 = 72;
 
+/// Where the first section starts: after the header and the directory.
+pub(crate) const SECTIONS_START: u32 = (HEADER_LENGTH + DIRECTORY_LENGTH) as u32;
+
 /// The bytes of an index entry: the format, the span of the type's name in the names section,
 /// and the span of its records in the records section.
 pub(crate) const INDEX_ENTRY_LENGTH: u64 = 20;
+
+/// [`INDEX_ENTRY_LENGTH`], for arithmetic on the index section's u32 offsets.
+const INDEX_ENTRY_WORDS: u32 = 20;
 
 /// The header as the blob holds it: the magic number's two words and the version.
 pub(crate) type HeaderWords = [[u8; 4]; 3];
@@ -182,9 +188,10 @@ impl<S: Part> Bounds<S> {
                 length: length as u32,
                 part: PhantomData,
             }),
-            end => Err(OutOfBounds::new(
+            _ => Err(OutOfBounds::new(
                 Within::Section(S::KIND),
-                end.unwrap_or(u64::MAX),
+                offset,
+                length,
                 limit,
             )),
         }
@@ -201,12 +208,7 @@ impl<S: Part> Bounds<S> {
 
     /// The position of `span` in the blob.
     pub(crate) fn start_of(&self, span: Span<S>) -> u64 {
-        u64::from(self.start) + u64::from(span.offset)
-    }
-
-    /// The section's length.
-    pub(crate) fn length(&self) -> u64 {
-        u64::from(self.length)
+        wide::sum(self.start, span.offset)
     }
 
     fn at(located: Located) -> Self {
@@ -254,7 +256,7 @@ impl Directory {
     ///
     /// [`DirectoryRefusal`]: the first section that breaks the rule.
     pub(crate) fn parse(words: &DirectoryWords, blob: u64) -> Result<Self, DirectoryRefusal> {
-        let mut end = HEADER_LENGTH + DIRECTORY_LENGTH;
+        let mut end = u64::from(SECTIONS_START);
         let mut sections = [Located::default(); 6];
         for ((kind, entry), section) in SectionKind::ALL.iter().zip(words).zip(&mut sections) {
             let [code, offset, length] = entry.map(u32::from_le_bytes);
@@ -270,11 +272,12 @@ impl Directory {
                     offset,
                 }));
             }
-            end += u64::from(length);
+            end = wide::sum(offset, length);
             if end > blob {
                 return Err(DirectoryRefusal::OutOfBlob(OutOfBounds::new(
                     Within::Blob,
-                    end,
+                    offset.into(),
+                    length.into(),
                     blob,
                 )));
             }
@@ -285,7 +288,7 @@ impl Directory {
         }
         if end != blob {
             return Err(DirectoryRefusal::Fault(DirectoryFault::Trailing {
-                end: crate::error::ByteCount::new(end),
+                end: ByteCount::new(end),
             }));
         }
         let [facts, index, names, records, definitions, icons] = sections;
@@ -304,23 +307,22 @@ impl Directory {
     /// # Errors
     ///
     /// The index section's length, back, when it is no multiple of an entry's.
-    pub(crate) fn index_entries(&self) -> Result<usize, u64> {
-        let length = self.index.length();
-        match length % INDEX_ENTRY_LENGTH {
-            // At most a u32's maximum over 20, which a usize holds.
-            0 => Ok((length / INDEX_ENTRY_LENGTH) as usize),
+    pub(crate) fn index_entries(&self) -> Result<u32, u32> {
+        let length = self.index.length;
+        match length % INDEX_ENTRY_WORDS {
+            0 => Ok(length / INDEX_ENTRY_WORDS),
             _ => Err(length),
         }
     }
 
-    /// The span of the index entry at `at`, which is below [`Directory::index_entries`].
-    pub(crate) fn index_entry(&self, at: usize) -> Span<IndexPart> {
-        Span {
-            // Below the count, the entry lies in the index section, whose length is a u32.
-            offset: (at as u64 * INDEX_ENTRY_LENGTH) as u32,
-            length: INDEX_ENTRY_LENGTH as u32,
-            part: PhantomData,
-        }
+    /// The span of the index entry at `at`.
+    ///
+    /// # Errors
+    ///
+    /// [`OutOfBounds`] for a position at or past [`Directory::index_entries`].
+    pub(crate) fn index_entry(&self, at: u32) -> Result<Span<IndexPart>, OutOfBounds> {
+        self.index
+            .span(wide::product(at, INDEX_ENTRY_WORDS), INDEX_ENTRY_LENGTH)
     }
 }
 
@@ -372,4 +374,22 @@ fn format_of(code: u32) -> Option<Format> {
     [Format::SdJwtVc, Format::Mdoc]
         .into_iter()
         .find(|format| format_code(*format) == code)
+}
+
+/// Arithmetic on u32 values widened to u64: no sum or product of two of them overflows a u64.
+mod wide {
+    #![expect(
+        clippy::arithmetic_side_effects,
+        reason = "two u32 values widened to u64 neither sum nor multiply past u64::MAX"
+    )]
+
+    /// `a + b`.
+    pub(crate) fn sum(a: u32, b: u32) -> u64 {
+        u64::from(a) + u64::from(b)
+    }
+
+    /// `a × b`.
+    pub(crate) fn product(a: u32, b: u32) -> u64 {
+        u64::from(a) * u64::from(b)
+    }
 }

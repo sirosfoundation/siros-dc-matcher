@@ -5,7 +5,7 @@
 use std::io::Cursor;
 
 use serde_json::json;
-use siros_codec::cbor::Value as Cbor;
+use siros_codec::cbor::{self, Value as Cbor};
 use siros_codec::date::DateTime;
 use siros_dcql::{DocType, Vct};
 use siros_presentation::testing::verifier::NOW;
@@ -27,8 +27,8 @@ fn icon() -> RasterIcon {
     RasterIcon::parse(png).unwrap()
 }
 
-/// The registration of a wallet of three types: two SD-JWT VCs, which the index lists first, and
-/// an mDL.
+/// The registration of a wallet of three types: two PIDs and a loyalty card, SD-JWT VCs, which
+/// the index lists first, and an mDL.
 fn registration() -> Vec<u8> {
     let name = [("given_name", json!("Erika"))];
     let wallet = Wallet::new(vec![
@@ -39,6 +39,7 @@ fn registration() -> Vec<u8> {
             "mso_mdoc",
             mdoc(MDL, MDL_NS, &[("age_over_18", Cbor::Bool(true))]),
         ),
+        Held::new(4, "dc+sd-jwt", sd_jwt(PID, &name)),
     ]);
     write(&RegistrationInput {
         credentials: &wallet.credentials,
@@ -92,7 +93,7 @@ fn each_rule_refuses_with_its_cause() {
             .credentials(&[pid.clone(), mdl])
             .unwrap()
             .len(),
-        2,
+        3,
         "the honest registration reads"
     );
     let changed = |change: &dyn Fn(&mut Vec<u8>)| {
@@ -111,17 +112,18 @@ fn each_rule_refuses_with_its_cause() {
     ));
 
     // The icons section, the last one, one byte longer than the blob holds.
-    let length = honest.len() as u64;
+    let (icons_at, icons) = section(&honest, 6);
     let past_the_blob = changed(&|blob| {
-        let (_, icons) = section(blob, 6);
         blob[80..84].copy_from_slice(&(icons as u32 + 1).to_le_bytes());
     });
     let error = refusal(&past_the_blob, &[]);
     assert!(
         matches!(
             error,
-            RegistrationError::OutOfBlob(OutOfBounds { within: Within::Blob, end, limit })
-                if end.value() == length + 1 && limit.value() == length
+            RegistrationError::OutOfBlob(OutOfBounds { within: Within::Blob, offset, length, limit })
+                if offset.value() == icons_at as u64
+                    && length.value() == icons as u64 + 1
+                    && limit.value() == honest.len() as u64
         ),
         "{error:?}"
     );
@@ -151,13 +153,32 @@ fn each_rule_refuses_with_its_cause() {
             .unwrap();
         section[at + 2] = b'X';
     });
-    let error = refusal(&unparsed, &[pid]);
+    let error = refusal(&unparsed, std::slice::from_ref(&pid));
     assert!(
         matches!(
             &error,
             RegistrationError::Credential { fault: CredentialFault::MemberUnknown(name), .. }
                 if name == "pXsition"
         ),
+        "{error:?}"
+    );
+
+    // The two PIDs' records swapped: the PID is the index's first entry.
+    let swapped = changed(&|blob| {
+        let (index, _) = section(blob, 2);
+        let (records, _) = section(blob, 4);
+        let at = records + number(blob, index + 12) as usize;
+        let end = at + number(blob, index + 16) as usize;
+        let items = cbor::decode_sequence(&blob[at..end]).unwrap();
+        let [first, second] = items.as_slice() else {
+            panic!("two PID records: {items:?}");
+        };
+        let reordered = [second.raw(), first.raw()].concat();
+        blob[at..end].copy_from_slice(&reordered);
+    });
+    let error = refusal(&swapped, &[pid]);
+    assert!(
+        matches!(&error, RegistrationError::RecordOrder { record, .. } if record.value() == 1),
         "{error:?}"
     );
 }

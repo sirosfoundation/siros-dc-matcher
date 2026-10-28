@@ -103,16 +103,19 @@ The reader refuses, with a `RegistrationError` that names the part and the cause
 - a blob that does not start with the magic number;
 - every version but 1;
 - a header, directory or section that ends past the blob, a directory that breaks its order or
-  leaves bytes after the last section, and a span that ends past its section;
+  leaves bytes after the last section, a span that ends past its section, and a read that ends
+  past the blob;
 - an index whose length is no multiple of 20, an unknown format code, a name of no byte or no
   UTF-8, and an index entry that a search finds out of order;
 - facts or a record that do not parse: no CBOR map, an absent or unknown member, a value of
   the wrong type;
-- two records read with one position, `credentialId` or batch;
-- a definition of no UTF-8, no projection, or another language than the facts'.
+- records of a type out of the wallet's order, and two records read with one position,
+  `credentialId` or batch;
+- a definition of no UTF-8, no projection, or another language than the facts';
+- a part the platform cannot allocate.
 
-The buffer the reader allocates for a part is the length of its span, which lies within its
-section, which lies within the blob.
+The buffer the reader allocates for a part is the length of its span, which lies within the
+blob.
 
 ## Writing
 

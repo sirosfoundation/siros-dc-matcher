@@ -69,7 +69,7 @@ pub enum Member {
     Otherwise,
 }
 
-/// A count of bytes: a length, or the position a span ends at.
+/// A count of bytes: a length, or an offset.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ByteCount(u64);
 
@@ -101,17 +101,20 @@ pub enum Within {
 pub struct OutOfBounds {
     /// The part.
     pub within: Within,
-    /// Where the span ends, from the part's start.
-    pub end: ByteCount,
+    /// Where the span starts, from the part's start.
+    pub offset: ByteCount,
+    /// The span's length.
+    pub length: ByteCount,
     /// The part's length.
     pub limit: ByteCount,
 }
 
 impl OutOfBounds {
-    pub(crate) fn new(within: Within, end: u64, limit: u64) -> Self {
+    pub(crate) fn new(within: Within, offset: u64, length: u64, limit: u64) -> Self {
         Self {
             within,
-            end: ByteCount::new(end),
+            offset: ByteCount::new(offset),
+            length: ByteCount::new(length),
             limit: ByteCount::new(limit),
         }
     }
@@ -251,6 +254,14 @@ pub enum RegistrationError {
     Index(KeyIndex, #[source] IndexFault),
     /// The records of this type are no CBOR sequence.
     Records(RegisteredType, #[source] CborError),
+    /// A record of a type has a position at or before the record ahead of it: the records of
+    /// a type follow the wallet's order.
+    RecordOrder {
+        /// The type the index files the record under.
+        credential_type: RegisteredType,
+        /// The record's position among the records of its type.
+        record: RecordIndex,
+    },
     /// A record of a type breaks a rule.
     Credential {
         /// The type the index files the record under.
@@ -268,6 +279,8 @@ pub enum RegistrationError {
     EntryRepeated(CredentialIndex),
     /// The definition of this span breaks a rule.
     Definition(DefinitionRef, #[source] DefinitionFault),
+    /// A part of this many bytes, which the platform cannot allocate.
+    Allocation(ByteCount),
 }
 
 impl RegistrationError {
@@ -284,10 +297,12 @@ impl RegistrationError {
             Self::IndexLength(_) => "registration_index_length",
             Self::Index(_, fault) => fault.code(),
             Self::Records(_, error) => error.code(),
+            Self::RecordOrder { .. } => "registration_record_order",
             Self::Credential { fault, .. } => fault.code(),
             Self::PositionRepeated(_) => "registration_position_repeated",
             Self::EntryRepeated(_) => "registration_entry_repeated",
             Self::Definition(_, fault) => fault.code(),
+            Self::Allocation(_) => "registration_allocation",
         }
     }
 }

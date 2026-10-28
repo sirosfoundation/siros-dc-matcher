@@ -29,11 +29,17 @@
 #![deny(unused_results)]
 #![deny(clippy::cognitive_complexity)]
 #![deny(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
+// Nothing here panics outside tests: the wallet's writer and the picker's reader give an error
+// for every input.
 #![deny(
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::indexing_slicing,
-    clippy::panic
+    clippy::panic,
+    clippy::unreachable,
+    clippy::todo,
+    clippy::unimplemented,
+    clippy::arithmetic_side_effects
 )]
 
 #[cfg(feature = "wallet")]

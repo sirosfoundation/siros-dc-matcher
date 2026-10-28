@@ -8,7 +8,7 @@ use siros_transaction_data::{Projected, ServedTypes};
 use siros_trust::IssuerFacts;
 
 use crate::error::Member;
-use crate::layout::{format_code, SectionKind, DIRECTORY_LENGTH, HEADER_LENGTH, MAGIC};
+use crate::layout::{format_code, SectionKind, MAGIC, SECTIONS_START};
 use crate::registration::{
     Diagnostics, Facts, Icon, Projection, RegisteredCredential, RegisteredType, Version,
 };
@@ -24,7 +24,8 @@ use crate::write::WriteError;
 ///
 /// # Errors
 ///
-/// [`WriteError::TooLarge`] for a section that ends past 4 GiB.
+/// [`WriteError::TooLarge`] for a section that ends past 4 GiB, [`WriteError::Allocation`] for
+/// a registration the platform cannot allocate.
 pub fn encode(projection: &Projection) -> Result<Vec<u8>, WriteError> {
     let mut icons = Pool::default();
     let mut definitions = Pool::default();
@@ -140,19 +141,21 @@ fn word(value: usize, kind: SectionKind) -> Result<u32, WriteError> {
 /// section where the one before it ends.
 fn lay_out(sections: [Vec<u8>; 6]) -> Result<Vec<u8>, WriteError> {
     let mut directory = Vec::new();
-    let mut offset = (HEADER_LENGTH + DIRECTORY_LENGTH) as usize;
+    let mut end = SECTIONS_START;
     for (kind, section) in SectionKind::ALL.iter().zip(&sections) {
-        let start = word(offset, *kind)?;
+        let start = end;
         let length = word(section.len(), *kind)?;
-        offset += section.len();
-        if u32::try_from(offset).is_err() {
-            return Err(WriteError::TooLarge(*kind));
-        }
+        end = start
+            .checked_add(length)
+            .ok_or(WriteError::TooLarge(*kind))?;
         for value in [kind.code(), start, length] {
             directory.extend(value.to_le_bytes());
         }
     }
-    let mut blob = Vec::with_capacity(offset);
+    let mut blob = Vec::new();
+    // A u32 fits the usize of every target the crate builds for.
+    blob.try_reserve_exact(end as usize)
+        .map_err(WriteError::Allocation)?;
     blob.extend_from_slice(MAGIC.as_flattened());
     blob.extend(Version::CURRENT.number().to_le_bytes());
     blob.extend(directory);
