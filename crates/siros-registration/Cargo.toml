@@ -49,5 +49,9 @@ name = "icon"
 required-features = ["wallet"]
 
 [[test]]
+name = "refusals"
+required-features = ["wallet"]
+
+[[test]]
 name = "secrets"
 required-features = ["wallet"]

@@ -2579,6 +2579,7 @@ dependencies = [
  "anyhow",
  "serde_json",
  "siros-codec",
+ "siros-credential",
  "siros-display",
  "siros-oid4vp",
  "siros-presentation",

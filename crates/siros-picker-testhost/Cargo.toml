@@ -22,6 +22,7 @@ wasmtime-wasi = "30.0.2"
 [dev-dependencies]
 android-credman = { workspace = true }
 siros-codec = { workspace = true }
+siros-credential = { workspace = true }
 siros-display = { workspace = true, features = ["credential"] }
 siros-oid4vp = { workspace = true, features = ["crypto"] }
 siros-presentation = { workspace = true, features = ["test-fixtures"] }
