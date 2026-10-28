@@ -11,7 +11,7 @@ use crate::client_id::ClientId;
 use crate::fetch::HttpsUrl;
 use crate::handover::ec_jwk_thumbprint;
 use crate::jose;
-use crate::parameters::{self, Carrier, DcApiEncoding, Encoding, Metadata, Plain};
+use crate::parameters::{self, Carrier, DcApiEncoding, Encoding, Metadata};
 use crate::protocol::Protocol;
 use crate::request::{TransactionDataInvalid, TransactionDataItem};
 use crate::values::{Kid, Origin};
@@ -40,12 +40,12 @@ pub(super) fn verified(
     arrival: Arrival<'_>,
 ) -> Result<VerifiedRequest, IntakeError> {
     let text = |name: &str| params.get(name).and_then(Value::as_str);
-    let carrier = match &arrival {
-        Arrival::Redirect(_) => Carrier::Redirect,
-        Arrival::DcApiSigned { .. } => Carrier::SignedObject,
-        Arrival::DcApiUnsigned { .. } => Carrier::UnsignedData,
+    let (carrier, state) = match &arrival {
+        Arrival::Redirect(_) => (Carrier::Redirect, parameters::state(params)?),
+        Arrival::DcApiSigned { .. } => (Carrier::SignedObject, None),
+        Arrival::DcApiUnsigned { .. } => (Carrier::UnsignedData, None),
     };
-    let Plain { nonce, state } = parameters::plain(params, carrier)?;
+    let nonce = parameters::nonce(params, carrier)?;
     let mode = text("response_mode");
     let (target, trusted, certificate, metadata) = match arrival {
         Arrival::Redirect(verifier) => {

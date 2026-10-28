@@ -17,7 +17,7 @@ use siros_codec::Base64Error;
 use siros_dcql::{DcqlQuery, QueryError};
 
 use crate::client_id::{ClientId, ClientIdError, ClientIdPrefix};
-use crate::parameters::{self, Carrier, DcApiEncoding, Metadata, Nonce, ParameterFault, Plain};
+use crate::parameters::{self, Carrier, DcApiEncoding, Metadata, Nonce, ParameterFault};
 use crate::protocol::Protocol;
 use crate::request::{
     AttestationFormat, RequestSignature, ResponseMode, TransactionDataInvalid, TransactionDataItem,
@@ -195,7 +195,7 @@ impl UnverifiedRequest {
             Protocol::Unsigned => Carrier::UnsignedData,
             Protocol::Signed | Protocol::Multisigned => Carrier::SignedObject,
         };
-        let Plain { nonce, .. } = parameters::plain(members, carrier).map_err(parameter)?;
+        let nonce = parameters::nonce(members, carrier).map_err(parameter)?;
         let mode = members.get("response_mode").and_then(Value::as_str);
         let encoding = DcApiEncoding::of(mode).map_err(parameter)?;
         let Client {

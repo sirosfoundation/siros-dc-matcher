@@ -135,6 +135,7 @@ impl State {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Carrier {
     /// The request of a redirect: its parameters, or its Request Object.
+    #[cfg(feature = "crypto")]
     Redirect,
     /// The Request Object of a signed DC API request.
     SignedObject,
@@ -142,26 +143,19 @@ pub(crate) enum Carrier {
     UnsignedData,
 }
 
-/// The parameters of every request: its `nonce`, and its `state` over redirects.
-pub(crate) struct Plain {
-    pub(crate) nonce: Nonce,
-    pub(crate) state: Option<State>,
-}
-
-/// The `nonce` and `state` of the request parameters `params`, which `carrier` brought.
+/// The `nonce` of the request parameters `params`, which `carrier` brought.
 ///
 /// `response_type` is `vp_token` (Section 5.6). A Request Object, and the parameters of a
 /// redirect, hold no `request` or `request_uri` (RFC 9101, Section 4); in the `data` of an
 /// unsigned DC API request they are unrecognized parameters, which the Wallet ignores (A.2).
-/// `state` is a parameter of redirects; the DC API defines none, so the Wallet ignores it there.
 ///
 /// # Errors
 ///
 /// [`ParameterFault`]: the first rule `params` breaks.
-pub(crate) fn plain(
+pub(crate) fn nonce(
     params: &Map<String, Value>,
     carrier: Carrier,
-) -> Result<Plain, ParameterFault> {
+) -> Result<Nonce, ParameterFault> {
     let text = |name: &str| params.get(name).and_then(Value::as_str);
     let nested = params.contains_key("request") || params.contains_key("request_uri");
     if nested && carrier != Carrier::UnsignedData {
@@ -170,22 +164,28 @@ pub(crate) fn plain(
     if text("response_type") != Some("vp_token") {
         return Err(ParameterFault::ResponseTypeUnsupported);
     }
-    let nonce = text("nonce")
+    text("nonce")
         .and_then(Nonce::parse)
-        .ok_or(ParameterFault::NonceInvalid)?;
-    let state = match carrier {
-        Carrier::Redirect => params
-            .get("state")
-            .map(|state| {
-                state
-                    .as_str()
-                    .and_then(State::parse)
-                    .ok_or(ParameterFault::StateInvalid)
-            })
-            .transpose()?,
-        Carrier::SignedObject | Carrier::UnsignedData => None,
-    };
-    Ok(Plain { nonce, state })
+        .ok_or(ParameterFault::NonceInvalid)
+}
+
+/// The `state` of a redirect's request parameters `params`. The DC API defines no `state`, and
+/// the Wallet ignores one there (A.2).
+///
+/// # Errors
+///
+/// [`ParameterFault::StateInvalid`] for a `state` of other than ASCII URL-safe characters.
+#[cfg(feature = "crypto")]
+pub(crate) fn state(params: &Map<String, Value>) -> Result<Option<State>, ParameterFault> {
+    params
+        .get("state")
+        .map(|state| {
+            state
+                .as_str()
+                .and_then(State::parse)
+                .ok_or(ParameterFault::StateInvalid)
+        })
+        .transpose()
 }
 
 /// The body a redirect Response Mode names.
