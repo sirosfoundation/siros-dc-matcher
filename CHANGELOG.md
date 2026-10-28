@@ -130,9 +130,10 @@ binaryen version_116.
   returns, and `SetEntry::shown` whether the host shows an entry whole (`Shown`).
 - Below host level 2 the matcher emits nothing; it used to call the
   `credman_v2` functions regardless.
-- On level 2 and above, the matcher emits nothing when the host's inputs are
-  malformed: a read that reports more bytes than it wrote. It used to emit
-  entries from such inputs.
+- On level 2 and above, the matcher traps when the host breaks its ABI: a
+  credential read that reports more bytes than it was asked for, or one that
+  copies nothing before the reported size. It used to emit entries from the
+  first. Release and debug builds trap alike.
 - The matcher reads the registration through `android-credman`'s `CredentialReader`, at the
   offsets of the parts a request needs (`docs/registration.md`): the header, the directory and
   the facts, the index entries its search visits, the records of the types the request's
@@ -215,6 +216,138 @@ binaryen version_116.
   `[]`, the matcher at `1b0fe3d` emitted the one entry of set `siros-0` for the mDL fixture. A
   registration with its diagnostics shown names the parse error in one entry, in set
   `siros-debug-0`.
+- Every error type derives `Display` and `Error` with `thiserror` and keeps its text; an error
+  type that had none takes its code, or the first sentence of each variant's documentation.
+- **BREAKING (Rust API):** `siros-codec`'s `display_code!` macro is gone.
+- `source()` returns the cause a variant holds. These errors returned `None` for the variants
+  named, and return the cause now:
+  - `siros-codec`: `CborError` (`Unsupported`); `JsonTextError`.
+  - `siros-credential`: `CredentialError` (`Vct`); `HolderKeyError` (`Coordinate`).
+  - `siros-dcql`: `QueryError` (`Form`).
+  - `siros-display`: `DisplayError` (`ClaimPath`, `Claims`, `Colour`, `Display`, `Locale`,
+    `Logo`, `Pointer`, `Text`).
+  - `siros-mdoc`: `MdocError` (`Algorithm`, `DeviceKey`, `DigestAlgorithm`, `DocType`,
+    `Envelope`, `IssuerAuth`, `Item`, `KeyAuthorizations`, `NameSpaces`, `Payload`,
+    `Validity`, `ValueDigests`, `X5chain`).
+  - `siros-oid4vp`: `HandoverInvalid` (`Cbor`); `IntakeError` (`AttestationInvalid`,
+    `CertificateChainInvalid`, `EncryptionKeyInvalid`, `JwsMalformed`,
+    `NotAnAuthorizationRequest`, `ResolvedKeyInvalid`); `NoQuery` (`NotACompactJws`,
+    `PayloadNotBase64url`); `ResponseError` (`EncryptionFailed`, `ReplyNotObject`);
+    `SemanticIdError` (`Encoding`, `Policies`).
+  - `siros-presentation`: `ChoiceError` (`Pair`); `DigestError` (`Encoding`); `PickFault`
+    (`Member`); `PresentationError` (`NoOffer`); `QueryRefusal` (`Authorities`, `Zkp`);
+    `Unproven` (`Seed`, `Unreadable`); `ZkpRefusal` (`Catalogue`, `ClientMetadata`,
+    `Policy`, `Query`).
+  - `siros-registration`: `CredentialFault` (`Member`); `RegistrationError` (`Member`).
+  - `siros-sdjwt`: `ParseError` (`Disclosure`, `IssuerJwt`, `ReservedClaimName`,
+    `UnsupportedSdAlg`, `X5c`).
+  - `siros-transaction-data`: `ConfigurationError` (`Entry`, `Json`);
+    `CredentialMetadataFault` (`Invalid`); `DefinitionError` (`Claim`, `Member`,
+    `UiElement`); `EntryRefusal` (`HashesAlg`, `Member`, `NotBase64url`, `NotJson`,
+    `NotUtf8`); `Incompatibility` (`Ts12Value`); `JwsFault` (`Encoding`, `Json`);
+    `KeySetFault` (`Json`, `Key`); `PayloadFault` (`Path`, `Text`, `Value`);
+    `ProjectionError` (`Definition`, `EntryCount`, `Json`, `Language`, `Member`,
+    `Unmatched`); `RenderFault` (`Label`, `Template`, `Value`); `SignedFault` (`Chain`,
+    `Claim`, `CredentialUntrusted`, `Jws`, `KeySet`, `Untrusted`); `TemplateFault`
+    (`Value`); `TransactionDataError` (`CredentialSets`, `Entry`); `Ts12Fault`
+    (`Definition`, `Integrity`, `Member`, `NotJson`, `NotUtf8`, and `PinPath` and `PinValue`,
+    which replace `Pin`); `Ts12PayloadFault` (`Member`); `WantedFault` (`KeySet`,
+    `TypeMetadata`).
+  - `siros-trust`: `AkiError` (`Base64url`, `KeyIdentifier`); `AuthorityError` (`Aki`);
+    `CertificateError` (`BasicConstraints`, `ExtendedKeyUsage`, `KeyUsage`, `Name`,
+    `PublicKey`, `SubjectKeyIdentifier`); `ChainRefusal` (`Path`); `EntryError`
+    (`Certificates`, `Type`, `Value`).
+  - `siros-wallet-state`: `WalletStateError` (`CredentialEntry`, `CredentialMember`,
+    `Credentials`, `Keypairs`, `Malformed`, `Metadata`, `Presentations`).
+  - `siros-zkp-req`: `EncodingError` (`Cbor`); `RequestRule` (`FnIdInvalid`,
+    `FormatsMissing`, `OptionInvalid`, `ProofBackendValuesInvalid`, `ReqInvalid`,
+    `ReqSetsInvalid`, `ReturnInvalid`, `SourceFormatInvalid`, `SystemIdValuesInvalid`,
+    `TypeValueInvalid`).
+  - `siros-zkp-req-nym-auth`: `CatalogueRule` (`ConfigInvalid`, `PrfInvalid`, `RangeSyntax`,
+    `SchemaIdInvalid`, `VerInvalid`, `VerifierContextInvalid`); `DocumentSignerError`
+    (`Certificate`, `Key`); `FormError` (`BirthDate`, `Psc`, `Signature`, `Ssc`);
+    `InvalidRequest` (`Catalogue`, `Protocol`); `PolicyRule` (`ClientId`); `ProveError`
+    (`NotUsable`, `Prover`); `Rejection` (`IssuerKeySet`, `Presentation`, `Proof`,
+    `ProofEncoding`, `ProofTime`, `Request`, `Results`, `Structure`, `Unsupported`);
+    `RequestRefusal` (`Policy`, `VerifierId`); `Unusable` (`Unreadable`); `VerifierIdRule`
+    (`SemanticId`).
+- These faults and refusals implement `Error` and return the cause each named variant holds:
+  - `siros-credential`: `CoordinateFault` (`Base64`).
+  - `siros-dcql`: `ClaimPathRefusal`.
+  - `siros-mdoc`: `AlgorithmFault` (`Header`); `ItemFault` (`Cbor`);
+    `KeyAuthorizationsFault` (`DataElements`, `Elements`, `NameSpaces`); `NameFault`
+    (`Member`); `NameSpacesFault` (`Items`, `Member`); `NamesFault` (`Member`);
+    `PayloadFault` (`Cbor`, `Mso`); `ValueDigestsFault` (`Digests`, `Member`).
+  - `siros-oid4vp`: `AttestationFault` (`Claims`, `Jws`); `ChainFault` (`Encoding`,
+    `LeafKey`, `LeafNotCertificate`, `SubjectAltName`); `ClaimsFault` (`Claim`, `Key`,
+    `NotObject`); `FormFault` (`NotUtf8`); `JwkFault` (`CoordinateEncoding`); `JwsError`
+    (`Malformed`); `JwsFault` (`Encoding`, `NotUtf8`); `LeafKeyFault` (`Curve`);
+    `PayloadFault` (`Encoding`).
+  - `siros-presentation`: `Exclusion` (`ClaimPath`, `Unadmitted`, `Unproven`); `Failure`
+    (`Refused`); `OptionRefusal` (`Choice`, `Unanswerable`).
+  - `siros-sdjwt`: `DisclosureFault` (`Encoding`); `EncodedJsonFault` (`Base64`, `Json`);
+    `IssuerJwtFault` (`Header`, `Payload`, `Signature`); `X5cError` (`Base64`).
+  - `siros-transaction-data`: `ClaimFault` (`Display`, `Member`, `Path`); `ConfiguredFault`
+    (`Definition`, `Member`); `EntryFault` (`Locale`, `Member`, `Text`); `LabelsFault`
+    (`Entry`); `ValueFault` (`Image`, `Text`).
+  - `siros-trust`: `KeyIdentifierFault` (`Der`, `KeyIdentifier`); `Refusal` (`Issuer`).
+  - `siros-wallet-state`: `ArrayFault` (`NotArray`); `MetadataFault` (`EntryNotObject`,
+    `NotArray`, `Type`); `PresentationsFault` (`NotArray`, `Record`); `TypeFault`
+    (`NotString`).
+  - `siros-zkp-req`: `IdentifierFault` (`Syntax`); `PairRefusal` (`Unsupported`);
+    `ReturnFault` (`Syntax`); `TypeValueFault` (`List`, `Member`).
+  - `siros-zkp-req-nym-auth`: `ContextFault` (`Invalid`); `ElementFault` (`Form`);
+    `IssuerKeySetError` (`Certificate`, `Untrusted`); `KeyError` (`Point`); `OwnQueryFault`
+    (`Dcql`, `Invalid`); `ProofEncodingFault` (`Envelope`); `ResultsFault` (`Length`);
+    `Unreadable` (`Form`, `Signer`).
+- A variant that wraps one error is transparent, its text and source those of the error:
+  `siros-codec`'s `ReadFault::Text` and `JsonFault::Read`, `siros-dcql`'s
+  `QueryTextError::Query`, `siros-presentation`'s `NoOffer::Unmatched` and `siros-zkp-req`'s
+  `EncodingError::Cbor`.
+- Only the DC API matcher panics: `android-credman-sys`, `android-credman` and `siros-picker`,
+  each panic with the reason it cannot recover. Every other crate returns an error where a
+  broken contract panicked, or a type rules the state out:
+  - `siros-presentation`: `PresentationError::Inconsistent` with `Inconsistency` (`Query`,
+    `Candidate`, `Entry`, `ZkpQuery`, `NymAuthRequest`; `plan_query_unknown`,
+    `plan_candidate_unknown`, `plan_entry_unknown`, `plan_zkp_query_missing`,
+    `plan_nym_auth_request_refused`) for a plan that contradicts the matching it was built
+    from, which `Transactions::bind` returns too; `ChoiceError::OptionUnknown`
+    (`choice_option_unknown`) for a proof choice of another query; `Unproven::Issuer` for an
+    admission of another issuer; `PresentationError::Pointer` and `Disclosure` for a claims
+    pointer or a disclosure the credential refuses, `Disclosure` in place of `ElementRepeated`;
+    `KeyFactorsMissing` for a signing key without its authentication factors; and
+    `SignatureError::Unknown` and `Repeated` for a signature of no `Sign` effect and a second
+    one.
+  - `siros-oid4vp`: `IntakeError::AnswerMismatch`, `UnexpectedTrustKey` and `UnusedAnswer`
+    for a host that breaks intake's effect protocol, and `EncryptionFault::EphemeralKey`,
+    `KdfLength` and `Seal` for an encryption the core cannot complete.
+  - `siros-zkp-req-nym-auth`: `OtherIssuer::Certificate` and `Query`
+    (`admission_other_certificate`, `admission_other_query`) for an admission of another
+    certificate or query; `Unanswerable::OtherQuery` and `ProveError::OtherQuery`
+    (`other_query`) for an attestation usable for another query than its pair's, and
+    `Unanswerable::ProofDate` and `ProveError::ProofDate` (`proof_date`) for one tested at
+    another date; `KeyNotInRequest` from `CheckedRequest::handover`, which the FFI's
+    `zkp_req_session` returns as `ZkpReqError::Host` with `thumbprint_not_in_request`.
+    Bindings are regenerated.
+  - `siros-display`: `DisplayError::OptionItemUnknown` (`option_item_unknown`) for an option of
+    another query.
+  - `siros-mdoc`'s `P256Key::sec1`, `siros-transaction-data`'s member lookup, payload and
+    template splits and sorted helpers, `siros-presentation`'s seed opening,
+    `siros-dc-matcher-core`'s `ZkpReqSelection::to_json` and the test host's calling-app
+    fields and entry lookup have no panic path.
+- **BREAKING (Rust API):** `Prepared::finish` takes the host's signatures as
+  `Es256Signature`, which `Es256Signature::parse` reads from the 64 bytes of `r ‖ s`.
+- The picker panics, with its reason, on an `Inconsistency` or a `ChoiceError` the
+  presentation component returns for an offer: no entry is right for it.
+- **BREAKING (Rust API):** `android-credman` panics on a host that breaks its ABI; its
+  `CredentialsError` and `CallingAppError` are gone. `Host::calling_app` returns the
+  `CallingApp`. `Host::credentials` is removed: `CredentialReader` reads the blob at the offsets
+  a matcher asks for.
+- `CapabilitiesError` is an enum: `Json` holds the `serde_json::Error` as its source, and
+  `Schema` holds the `SchemaViolation` with the reason the text carried before.
+- The proof backends' `ArtifactError` holds its cause as its source: `Decompress` zstd's
+  `io::Error`, `Circuits` and `Shapes` the zk-cred-longfellow and zk-cred-vega errors; it
+  drops `Clone`, `PartialEq` and `Eq`.
 - Vector set digest: `db62a22cfaccb912bf717c63d2a107e41e5437caa72e21594ceb3bb395eab431`.
 
 ### Fixed
@@ -619,6 +752,12 @@ binaryen version_116.
   exports. CI and the release job run it.
 - `clippy.toml` forbids std's `HashMap`, `HashSet` and `RandomState` in the
   crates that link into `matcher.wasm`.
+- Each crate root but the matcher's and the test host's denies clippy's panic
+  lints outside the tests, and `clippy.toml` names the std methods that panic on an argument
+  and share their name with a method that does not.
+  `scripts/check_panic_sites.py` fails on a root without the lints and on an
+  `allow` of them outside the tests, and finds the panics no lint covers. CI
+  runs both.
 
 ### Removed
 

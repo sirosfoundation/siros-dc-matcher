@@ -2,8 +2,6 @@
 //! encrypted-response policy of nym_auth (nym_auth catalogue, "Binding" and "Response
 //! confidentiality"), and the session it gives.
 
-use std::fmt;
-
 use serde_json::Value;
 use siros_oid4vp::{ec_jwk_thumbprint, ClientId, Handover, JwkThumbprint, Nonce, Origin};
 
@@ -108,16 +106,9 @@ pub fn check_request(
 }
 
 /// The host chose an encryption key that is not one of the request's.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("the JWK thumbprint is of no key in client_metadata.jwks")]
 pub struct KeyNotInRequest;
-
-impl fmt::Display for KeyNotInRequest {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("the JWK thumbprint is of no key in client_metadata.jwks")
-    }
-}
-
-impl std::error::Error for KeyNotInRequest {}
 
 impl CheckedRequest {
     /// `client_id`, with its Client Identifier Prefix.

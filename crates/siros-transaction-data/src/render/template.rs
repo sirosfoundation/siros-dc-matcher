@@ -11,7 +11,8 @@ use crate::projection::ProjectedClaim;
 use crate::view::Segment;
 
 /// Why a template does not interpolate. The entry is then not compatible.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum TemplateFault {
     /// The placeholder names the claim at this position, which is an `image`, a `label_only`
     /// or a `template:` claim.
@@ -21,7 +22,7 @@ pub enum TemplateFault {
     /// The claim at this position has no value type, and its value is no string.
     NotString(ClaimIndex),
     /// The string of the claim at this position, which has no value type, breaks a rule.
-    Value(ClaimIndex, ValueFault),
+    Value(ClaimIndex, #[source] ValueFault),
     /// The claim at this position is absent from the payload: the locale entry is discarded,
     /// and no other locale is left.
     Absent(ClaimIndex),
@@ -40,10 +41,6 @@ impl TemplateFault {
         }
     }
 }
-
-siros_codec::display_code!(TemplateFault);
-
-impl std::error::Error for TemplateFault {}
 
 /// What a template reads: the claims, the payload and its typed values.
 pub(super) struct Sources<'s> {
@@ -67,17 +64,9 @@ pub(super) fn interpolate(
     let mut segments: Vec<Segment> = Vec::new();
     let mut text = String::new();
     let mut rest = template;
-    while let Some(open) = rest.find('{') {
-        let (before, from) = rest.split_at(open);
+    while let Some((before, tail)) = rest.split_once('{') {
         text.push_str(before);
-        let placeholder = from.get(1..).and_then(|tail| {
-            let digits = tail.bytes().take_while(u8::is_ascii_digit).count();
-            let index: usize = tail.get(..digits)?.parse().ok()?;
-            tail.get(digits..)?
-                .strip_prefix('}')
-                .map(|after| (index, after))
-        });
-        match placeholder.filter(|(index, _)| *index < sources.claims.len()) {
+        match placeholder(tail).filter(|(index, _)| *index < sources.claims.len()) {
             Some((index, after)) => {
                 let value = value(ClaimIndex::new(index), wildcards, sources)?;
                 segments
@@ -87,13 +76,23 @@ pub(super) fn interpolate(
             }
             None => {
                 text.push('{');
-                rest = from.get(1..).unwrap_or_default();
+                rest = tail;
             }
         }
     }
     text.push_str(rest);
     segments.extend((!text.is_empty()).then_some(Segment::Text(text)));
     Ok(segments)
+}
+
+/// The claim index of the placeholder `tail` starts with, after its `{`, and the text after
+/// its `}`: decimal digits, then `}`.
+fn placeholder(tail: &str) -> Option<(usize, &str)> {
+    let digits = tail.bytes().take_while(u8::is_ascii_digit).count();
+    let index: usize = tail.get(..digits)?.parse().ok()?;
+    tail.get(digits..)?
+        .strip_prefix('}')
+        .map(|after| (index, after))
 }
 
 /// The value of the claim at `index`, its `null`s resolved to `wildcards`: a typed value, or the

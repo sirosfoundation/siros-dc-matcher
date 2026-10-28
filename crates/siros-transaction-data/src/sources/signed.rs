@@ -64,10 +64,11 @@ impl MetadataClaim {
 }
 
 /// Why a metadata JWT is invalid (Sections 5.3 and 7).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum SignedFault {
     /// The text is no JWS this wallet verifies.
-    Jws(JwsFault),
+    Jws(#[source] JwsFault),
     /// `typ` is absent or other than the JWT's type (step 1).
     Typ,
     /// The header names its key by neither `x5c` nor `kid`.
@@ -80,17 +81,17 @@ pub enum SignedFault {
     /// `x5c` is no non-empty array of base64 certificates.
     X5c,
     /// A certificate of `x5c` does not parse.
-    Chain(ChainError),
+    Chain(#[source] ChainError),
     /// The leaf key is no P-256 or P-384 key.
     LeafKey,
     /// The `x5c` chain has no path to the trust store (step 3).
-    Untrusted(Unanchored),
+    Untrusted(#[source] Unanchored),
     /// The issuer's key set gives no key of the `kid` (step 3).
-    KeySet(KeySetFault),
+    KeySet(#[source] KeySetFault),
     /// The signature does not verify (step 2).
     Signature,
     /// A claim is absent or of the wrong type.
-    Claim(MetadataClaim, MemberFault),
+    Claim(MetadataClaim, #[source] MemberFault),
     /// `iss` is not the credential's Credential Issuer Identifier, or the wallet does not know
     /// it (step 4).
     Issuer,
@@ -102,7 +103,7 @@ pub enum SignedFault {
     Format,
     /// The credential's own chain has no path to the trust store, so it names no root (step
     /// 6).
-    CredentialUntrusted(Unanchored),
+    CredentialUntrusted(#[source] Unanchored),
     /// The JWT's chain ends at another root than the credential's (step 6).
     Root,
     /// The JWT's leaf has another Subject than the credential's leaf (step 6).
@@ -139,10 +140,6 @@ impl SignedFault {
         }
     }
 }
-
-siros_codec::display_code!(SignedFault);
-
-impl std::error::Error for SignedFault {}
 
 /// What a verification reads with: the trust store, the metadata the host holds, and the time.
 #[derive(Clone, Copy)]

@@ -14,7 +14,8 @@ use crate::json;
 const WELL_KNOWN: &str = "/.well-known/jwt-vc-issuer";
 
 /// Why the issuer's key set gives no key that verifies.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum KeySetFault {
     /// The Credential Issuer Identifier is no `https` URL.
     IssuerNotHttps,
@@ -23,7 +24,7 @@ pub enum KeySetFault {
     /// The host records the document of this URL as absent.
     Absent(HttpsUrl),
     /// A document is no JSON document the strict reader holds.
-    Json(JsonFault),
+    Json(#[source] JsonFault),
     /// The issuer metadata names another `issuer`, or names its keys by both `jwks` and
     /// `jwks_uri` or by neither, or one of them is malformed.
     Metadata,
@@ -32,7 +33,7 @@ pub enum KeySetFault {
     /// No key of the set has the `kid`.
     KidUnknown,
     /// The key of the `kid` is no EC key this wallet verifies with.
-    Key(JwkFault),
+    Key(#[source] JwkFault),
 }
 
 impl KeySetFault {
@@ -49,10 +50,6 @@ impl KeySetFault {
         }
     }
 }
-
-siros_codec::display_code!(KeySetFault);
-
-impl std::error::Error for KeySetFault {}
 
 /// The key of the key set of `issuer` that `kid` identifies.
 pub(crate) fn key(

@@ -50,12 +50,15 @@ pub enum Ts12Member {
 }
 
 /// Why TS12 type metadata gives no definition of a type (Sections 3.2, 3.3 and 4.1).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum Ts12Fault {
+    /// The claims path processing of the credential's `vct#integrity` or a
+    /// `transaction_data_types[…]#integrity` claim gives this error.
+    PinPath(#[source] PathError),
     /// The credential's `vct#integrity` or a `transaction_data_types[…]#integrity` claim is no
-    /// integrity metadata this wallet reads (SD-JWT VC, Section 7): its claims path processing
-    /// gives this error, or its value does not read.
-    Pin(Result<IntegrityFault, PathError>),
+    /// integrity metadata this wallet reads (SD-JWT VC, Section 7).
+    PinValue(#[source] IntegrityFault),
     /// The credential's `vct#integrity` pins Type Metadata at a `vct` that is no `https` URL,
     /// which no host holds.
     VctNotHttps,
@@ -66,13 +69,13 @@ pub enum Ts12Fault {
     /// entry references.
     Absent(HttpsUrl),
     /// A document's bytes are no UTF-8 text.
-    NotUtf8(Utf8Error),
+    NotUtf8(#[source] Utf8Error),
     /// A document's text is no JSON document the strict reader holds.
-    NotJson(JsonFault),
+    NotJson(#[source] JsonFault),
     /// A document does not match its `#integrity` claim (SD-JWT VC, Section 7).
-    Integrity(IntegrityFault),
+    Integrity(#[source] IntegrityFault),
     /// A member breaks its rule.
-    Member(Ts12Member, MemberFault),
+    Member(Ts12Member, #[source] MemberFault),
     /// The document describes another `vct` than the credential's (SD-JWT VC, Section 6.3).
     VctMismatch,
     /// An entry gives both or neither of a member and its `_uri` form (Section 4.1).
@@ -91,7 +94,7 @@ pub enum Ts12Fault {
     /// The catalogue has no `affirmative_action_label` (Section 3.3.3).
     AffirmativeAbsent,
     /// The mapped definition breaks PaSO Proof Metadata, Section 3.
-    Definition(DefinitionError),
+    Definition(#[source] DefinitionError),
 }
 
 impl Ts12Fault {
@@ -99,7 +102,7 @@ impl Ts12Fault {
     #[must_use]
     pub fn code(&self) -> &'static str {
         match self {
-            Self::Pin(_) => "type_metadata_pin_malformed",
+            Self::PinPath(_) | Self::PinValue(_) => "type_metadata_pin_malformed",
             Self::VctNotHttps => "type_metadata_vct_not_https",
             Self::NotHeld(_) => "type_metadata_not_held",
             Self::Absent(_) => "type_metadata_absent",
@@ -118,10 +121,6 @@ impl Ts12Fault {
         }
     }
 }
-
-siros_codec::display_code!(Ts12Fault);
-
-impl std::error::Error for Ts12Fault {}
 
 /// The transaction metadata of a credential's type metadata: its `transaction_data_types`
 /// entries, every type the credential supports (Section 3.2, steps 1 and 2). Type metadata of
@@ -237,7 +236,7 @@ impl TypeMetadata {
 ///
 /// # Errors
 ///
-/// [`Ts12Fault::Pin`] for a pin that does not read, and [`Ts12Fault::VctNotHttps`] for a pin
+/// [`Ts12Fault::PinPath`] or [`Ts12Fault::PinValue`] for a pin that does not read, and [`Ts12Fault::VctNotHttps`] for a pin
 /// of a `vct` that is no `https` URL.
 fn located(credential: &Credential) -> Result<Option<(HttpsUrl, Option<Integrity>)>, Ts12Fault> {
     match credential.format() {
@@ -352,10 +351,10 @@ fn document_of(body: &[u8], pin: Option<&Integrity>) -> Result<Json, Ts12Fault> 
 fn pin(credential: &Credential, name: &str) -> Result<Option<Integrity>, Ts12Fault> {
     match credential.claims(&ClaimPath::key(name)).as_deref() {
         Err(PathError::Empty) => Ok(None),
-        Err(error) => Err(Ts12Fault::Pin(Err(error.clone()))),
+        Err(error) => Err(Ts12Fault::PinPath(error.clone())),
         Ok([TypedValue::Text(text)]) => Integrity::parse(text)
             .map(Some)
-            .map_err(|fault| Ts12Fault::Pin(Ok(fault))),
-        Ok(_) => Err(Ts12Fault::Pin(Ok(IntegrityFault::Malformed))),
+            .map_err(Ts12Fault::PinValue),
+        Ok(_) => Err(Ts12Fault::PinValue(IntegrityFault::Malformed)),
     }
 }

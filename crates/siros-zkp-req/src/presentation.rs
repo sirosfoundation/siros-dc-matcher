@@ -1,8 +1,6 @@
 //! The presentation (`zkp_req`, Section 4), the `Proof` its proof backends share, and the
 //! `vp_token` (Section 6.1).
 
-use std::fmt;
-
 use siros_codec::base64url;
 use siros_codec::cbor::{self, CborError, Item, Kind, Value};
 use siros_dcql::QueryId;
@@ -44,41 +42,26 @@ impl Member {
 }
 
 /// Why bytes are not a [`ZkpPresentation`] or a [`ProofEnvelope`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum EncodingError {
     /// Not one CBOR item the strict reader accepts.
-    Cbor(CborError),
+    #[error(transparent)]
+    Cbor(#[from] CborError),
     /// The item is not a map.
+    #[error("not a CBOR map")]
     NotMap,
     /// A map key is not a text string, or a member this structure does not define.
+    #[error("unknown member")]
     UnknownMember,
     /// A required member is absent.
+    #[error("{} is missing", .0.name())]
     Missing(Member),
     /// A member has the wrong CBOR type.
+    #[error("{} has the wrong type", .0.name())]
     WrongType(Member),
     /// An unsigned member exceeds the indexes this platform holds.
+    #[error("{} is out of range", .0.name())]
     OutOfRange(Member),
-}
-
-impl fmt::Display for EncodingError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Cbor(e) => e.fmt(f),
-            Self::NotMap => f.write_str("not a CBOR map"),
-            Self::UnknownMember => f.write_str("unknown member"),
-            Self::Missing(m) => write!(f, "{} is missing", m.name()),
-            Self::WrongType(m) => write!(f, "{} has the wrong type", m.name()),
-            Self::OutOfRange(m) => write!(f, "{} is out of range", m.name()),
-        }
-    }
-}
-
-impl std::error::Error for EncodingError {}
-
-impl From<CborError> for EncodingError {
-    fn from(e: CborError) -> Self {
-        Self::Cbor(e)
-    }
 }
 
 /// Declares bytes whose meaning a specification other than `zkp_req` defines.

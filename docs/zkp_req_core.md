@@ -56,9 +56,10 @@ Verifier: verify(query, client_metadata, session, presentation, now, tolerance,
                  trust_anchors, NymAuthProofVerifier) → system, results
 ```
 
-`Answer::new` refuses an attestation usable for another query, `job` verifies the device
-signature under the MSO's device key, and `assemble` accepts only the catalogue's pseudonym and
-a `zk_proof` of the backend's length.
+`Answer::new` refuses an attestation usable for another query and panics on one tested at
+another date, a bug of the caller; `job` verifies the device signature under the MSO's device
+key, and `assemble` accepts only the catalogue's pseudonym and a `zk_proof` of the backend's
+length.
 
 ## The prover interface
 
@@ -152,11 +153,13 @@ artifacts from their reference copies.
   Clauses 5.1.3 and 5.1.5; TS 119 411-8).
 * `presenter::Answer::new(pair, attestation, secret_seed)` (feature `request`) holds when the
   attestation is usable for the pair's query, the seed opens `ssc` and the option's assertions
-  hold; `Prepared::new(answer, &NymAuthRequest)` gives the `Prepared` of the answer in the
-  request's session: `data_to_sign`, `statement`, `job(device_signature)`,
-  `assemble(&ProofOutput)`, and `prove(device_signature, prover)` for a linked prover.
+  hold, for an attestation tested at the pair's date; `Prepared::new(answer, &NymAuthRequest)`
+  gives the `Prepared` of the answer in the request's session: `data_to_sign`, `statement`,
+  `job(device_signature)`, `assemble(&ProofOutput)`, and `prove(device_signature, prover)` for a
+  linked prover.
 * `request_object::check_request(request_object, signing, channel)` and
-  `CheckedRequest::handover(jwk_thumbprint)`, with `VerifierId::x509_san_dns(&ClientId, Intermediary)` or
+  `CheckedRequest::handover(jwk_thumbprint)`, which panics on a thumbprint of no key in the
+  request, with `VerifierId::x509_san_dns(&ClientId, Intermediary)` or
   `VerifierId::semantic(&SemanticIdentifier)`, give the Verifier's `Session`.
 * `LongfellowProver::load(circuits_zst)`, `LongfellowVerifier::load(circuits_zst)` and
   `VegaNymAuth::load(shapes_zst)` are the backends.

@@ -31,11 +31,20 @@
 
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
-#![deny(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::panic
+// Nothing panics outside the tests. scripts/check_panic_sites.py refuses an
+// allow of these lints there and finds the panics they cannot see.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::panic,
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::unreachable,
+        clippy::todo,
+        clippy::unimplemented,
+        clippy::indexing_slicing,
+        clippy::disallowed_methods
+    )
 )]
 
 /// Declares a position in a list of the query or a pointer: a number from 0.
@@ -68,22 +77,6 @@ macro_rules! position {
 }
 
 pub(crate) use position;
-
-/// Implements `Display` for each type, showing its stable code: what its `code()` returns.
-/// siros-codec's macro of the same name serves the other crates; this crate depends on none.
-macro_rules! display_code {
-    ($($name:ty),+ $(,)?) => {
-        $(
-            impl ::core::fmt::Display for $name {
-                fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-                    f.write_str(self.code())
-                }
-            }
-        )+
-    };
-}
-
-pub(crate) use display_code;
 
 pub mod authority;
 mod combinations;

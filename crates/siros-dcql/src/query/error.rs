@@ -1,7 +1,5 @@
 //! Why a document is no DCQL query (§6), each with a stable code and its cause.
 
-use core::fmt;
-
 use crate::authority::TrustedAuthorityError;
 use crate::id::{ClaimId, ClaimIdError, QueryId, QueryIdError};
 use crate::path::ClaimPathError;
@@ -74,49 +72,62 @@ pub enum Member {
 }
 
 /// What breaks the form of a member.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum FormFault {
     /// It is absent.
+    #[error("it is absent")]
     Absent,
     /// It has another JSON type than §6 gives it.
+    #[error("it has another JSON type than §6 gives it")]
     WrongType,
     /// It is an empty array.
+    #[error("it is an empty array")]
     Empty,
     /// The entry at this position has another JSON type than §6 gives it.
+    #[error("the entry at this position has another JSON type than §6 gives it")]
     Entry(Position),
 }
 
 /// Why a JSON value is no usable DCQL query.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum QueryError {
     /// A member breaks the form §6 gives it.
+    #[error("{code}: {member:?} {fault:?}", code = self.code())]
     Form {
         /// The member.
         member: Member,
         /// What breaks its form.
+        #[source]
         fault: FormFault,
     },
     /// A credential query `id`, or one a `credential_sets` option names, breaks §6.1.
-    Id(QueryIdError),
+    #[error("{}", self.code())]
+    Id(#[source] QueryIdError),
     /// A claims query `id`, or one a `claim_sets` option names, breaks §6.3.
+    #[error("{code}: {credential}", code = self.code())]
     ClaimId {
         /// The `id` of the credential query holding it.
         credential: QueryId,
         /// Why.
+        #[source]
         error: ClaimIdError,
     },
     /// `trusted_authorities` breaks §6.1.1.
+    #[error("{code}: {credential}", code = self.code())]
     TrustedAuthorities {
         /// The `id` of the credential query holding it.
         credential: QueryId,
         /// Why.
+        #[source]
         error: TrustedAuthorityError,
     },
     /// Two credential queries share this `id`, which §6.1 requires to "be unique across all
     /// Credential Query objects".
+    #[error("{code}: {0}", code = self.code())]
     DuplicateCredentialId(QueryId),
     /// Two claims queries within one credential query share this `id`, which §6.3 requires to be
     /// unique "within the particular claims array".
+    #[error("{code}: {credential}", code = self.code())]
     DuplicateClaimId {
         /// The `id` of the credential query holding the duplicate.
         credential: QueryId,
@@ -124,16 +135,19 @@ pub enum QueryError {
         claim: ClaimId,
     },
     /// The `path` of a claims query is no claims path pointer (§7).
+    #[error("{code}: {credential}", code = self.code())]
     ClaimPath {
         /// The `id` of the credential query holding it.
         credential: QueryId,
         /// The claims query's position.
         claim: Position,
         /// Why.
+        #[source]
         error: ClaimPathError,
     },
     /// A `claim_sets` option names this id, which no claims query of the credential query has
     /// (§6.1).
+    #[error("{code}: {credential}", code = self.code())]
     UnknownClaimId {
         /// The `id` of the credential query.
         credential: QueryId,
@@ -142,11 +156,14 @@ pub enum QueryError {
     },
     /// The Credential Query of this `id` has `claim_sets` and no claims: "`claim_sets` MUST NOT
     /// be present if `claims` is absent" (§6.4.1).
+    #[error("{code}: {0}", code = self.code())]
     ClaimSetsWithoutClaims(QueryId),
     /// A `credential_sets` option names this id, which no Credential Query has (§6.2).
+    #[error("{code}: {0}", code = self.code())]
     UnknownCredentialId(QueryId),
     /// A claims query of an `mso_mdoc` Credential Query has a `path` other than a namespace and
     /// an element identifier, two strings (§7.2.1).
+    #[error("{code}: {credential}", code = self.code())]
     MdocPath {
         /// The `id` of the credential query.
         credential: QueryId,
@@ -175,48 +192,14 @@ impl QueryError {
     }
 }
 
-impl fmt::Display for QueryError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Form { member, fault } => write!(f, "{}: {member:?} {fault:?}", self.code()),
-            Self::Id(_) => f.write_str(self.code()),
-            Self::DuplicateCredentialId(credential)
-            | Self::UnknownCredentialId(credential)
-            | Self::ClaimSetsWithoutClaims(credential)
-            | Self::ClaimId { credential, .. }
-            | Self::TrustedAuthorities { credential, .. }
-            | Self::ClaimPath { credential, .. }
-            | Self::DuplicateClaimId { credential, .. }
-            | Self::UnknownClaimId { credential, .. }
-            | Self::MdocPath { credential, .. } => write!(f, "{}: {credential}", self.code()),
-        }
-    }
-}
-
-impl std::error::Error for QueryError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Id(e) => Some(e),
-            Self::ClaimId { error, .. } => Some(error),
-            Self::TrustedAuthorities { error, .. } => Some(error),
-            Self::ClaimPath { error, .. } => Some(error),
-            Self::Form { .. }
-            | Self::DuplicateCredentialId(_)
-            | Self::DuplicateClaimId { .. }
-            | Self::UnknownClaimId { .. }
-            | Self::ClaimSetsWithoutClaims(_)
-            | Self::UnknownCredentialId(_)
-            | Self::MdocPath { .. } => None,
-        }
-    }
-}
-
 /// Why JSON text is no usable DCQL query.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum QueryTextError {
     /// The text is no JSON.
-    Json(serde_json::Error),
+    #[error("{code}: {0}", code = self.code())]
+    Json(#[source] serde_json::Error),
     /// The JSON value is no usable DCQL query.
+    #[error(transparent)]
     Query(QueryError),
 }
 
@@ -227,24 +210,6 @@ impl QueryTextError {
         match self {
             Self::Json(_) => "dcql_malformed",
             Self::Query(error) => error.code(),
-        }
-    }
-}
-
-impl fmt::Display for QueryTextError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Json(e) => write!(f, "{}: {e}", self.code()),
-            Self::Query(e) => e.fmt(f),
-        }
-    }
-}
-
-impl std::error::Error for QueryTextError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Json(e) => Some(e),
-            Self::Query(e) => Some(e),
         }
     }
 }

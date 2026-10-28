@@ -25,14 +25,14 @@ use siros_transaction_data::EntryPosition;
 #[error("{}", self.code())]
 pub enum PresentationError {
     /// The wallet has no offer for the request, and why.
-    NoOffer(Failure<Unadmitted<ChainRefusal>, Unproven>),
+    NoOffer(#[from] Failure<Unadmitted<ChainRefusal>, Unproven>),
     /// An entry of `transaction_data`, or its binding to an offer, breaks a rule. The code is
     /// its own.
-    TransactionData(#[source] TransactionDataError),
+    TransactionData(#[from] TransactionDataError),
     /// The consent view cannot show a credential. The code is the display's.
-    Display(#[source] DisplayError),
+    Display(#[from] DisplayError),
     /// The selection's plan digest does not read.
-    Digest(#[source] DigestError),
+    Digest(#[from] DigestError),
     /// The selection was made on another plan (A4).
     DigestMismatch,
     /// The selection names an offer the plan lacks (A4).
@@ -51,7 +51,7 @@ pub enum PresentationError {
     /// The selection names two subsets for the member of this query (A3).
     SubsetRepeated(QueryId),
     /// A subset of a member's credentials is refused (A3).
-    Subset(#[source] SubsetError),
+    Subset(#[from] SubsetError),
     /// The selection leaves out the credential the transaction entry at `entry` binds to (T4).
     BoundCredentialOmitted {
         /// The entry's position in `transaction_data`.
@@ -60,7 +60,7 @@ pub enum PresentationError {
         credential: EntryRef,
     },
     /// The picked credential picker entries make no selection (K3).
-    Pick(#[source] PickError),
+    Pick(#[from] PickError),
     /// A fulfilment without the wallet's UI chose an offer that needs it (A9).
     WalletDisplayNeeded,
     /// A member's credential names no key pair.
@@ -74,26 +74,26 @@ pub enum PresentationError {
     Time,
     /// The request names its audience neither by an origin nor by a Client Identifier.
     AudienceMissing,
-    /// The plan contradicts itself.
-    Inconsistent(#[source] Inconsistency),
+    /// The plan contradicts the matching it was built from.
+    Inconsistent(#[from] Inconsistency),
     /// A proof choice gives no option or usable pair of its query.
-    Choice(#[source] ChoiceError),
+    Choice(#[from] ChoiceError),
     /// A nym_auth credential no longer passes its tests, or its seed does not open.
-    Unproven(#[source] Unproven),
+    Unproven(#[from] Unproven),
     /// A nym_auth credential does not answer its option.
-    Unanswerable(#[source] Unanswerable),
+    Unanswerable(#[from] Unanswerable),
     /// A claims path pointer of the plan selects nothing. The code is its own.
-    Pointer(#[source] PathError),
+    Pointer(#[from] PathError),
     /// The KB-JWT claims collide (S4). The code is its own.
-    KeyBinding(#[source] KeyBindingError),
+    KeyBinding(#[from] KeyBindingError),
     /// The mdoc elements are no disclosure (M2, M3). The code is its own.
-    Disclosure(#[source] DisclosureError),
+    Disclosure(#[from] DisclosureError),
     /// The nym_auth proof failed. The code is its own.
-    Prove(#[source] ProveError),
+    Prove(#[from] ProveError),
     /// The host's signatures do not answer the `Sign` effects (A5).
-    Signature(#[source] SignatureError),
+    Signature(#[from] SignatureError),
     /// The `vp_token` or its submission could not be built. The code is its own.
-    Response(#[source] ResponseError),
+    Response(#[from] ResponseError),
 }
 
 impl PresentationError {
@@ -182,36 +182,4 @@ fn oid4vp_code(code: siros_zkp_req::ErrorCode) -> ErrorCode {
         siros_zkp_req::ErrorCode::VpFormatsNotSupported => ErrorCode::VpFormatsNotSupported,
         siros_zkp_req::ErrorCode::AccessDenied => ErrorCode::AccessDenied,
     }
-}
-
-/// Each cause that is its own variant converts into it, so `?` carries it.
-macro_rules! causes {
-    ($($cause:ty => $variant:ident),* $(,)?) => {
-        $(
-            impl From<$cause> for PresentationError {
-                fn from(cause: $cause) -> Self {
-                    Self::$variant(cause)
-                }
-            }
-        )*
-    };
-}
-
-causes! {
-    Failure<Unadmitted<ChainRefusal>, Unproven> => NoOffer,
-    TransactionDataError => TransactionData,
-    DisplayError => Display,
-    DigestError => Digest,
-    SubsetError => Subset,
-    PickError => Pick,
-    Inconsistency => Inconsistent,
-    ChoiceError => Choice,
-    Unproven => Unproven,
-    Unanswerable => Unanswerable,
-    PathError => Pointer,
-    KeyBindingError => KeyBinding,
-    DisclosureError => Disclosure,
-    ProveError => Prove,
-    SignatureError => Signature,
-    ResponseError => Response,
 }

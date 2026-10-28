@@ -112,7 +112,7 @@ impl<C: MatchCredential, R> Offered<'_, '_, C, R> {
 ///
 /// # Errors
 ///
-/// [`Inconsistency`] for a member or a candidate the matching lacks.
+/// [`Inconsistency`]: a member names a query or a candidate `answered` lacks.
 pub(crate) fn offered<'w, 'a, C: MatchCredential, R>(
     answered: &'w Answered<'a, C, R>,
     members: &[Member],
@@ -126,12 +126,12 @@ pub(crate) fn offered<'w, 'a, C: MatchCredential, R>(
                 .candidates()
                 .iter()
                 .map(|&index| {
-                    let candidate = answers
+                    answers
                         .candidate(index)
-                        .ok_or(Inconsistency::Candidate(query, index))?;
-                    Ok((index, candidate))
+                        .map(|candidate| (index, candidate))
+                        .ok_or(Inconsistency::Candidate(query, index))
                 })
-                .try_collect()?;
+                .collect::<Result<_, _>>()?;
             Ok(Offered {
                 query,
                 answers,
@@ -175,12 +175,17 @@ pub struct Transactions<D = Infallible> {
 }
 
 /// Why a request has no offer: its transaction data, or the matching.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum NoOffer<U, R> {
     /// The queries the request's entries target have no candidate: the referenced credentials
     /// are not available (OpenID4VP 1.0, Section 8.5).
+    #[error(
+        "the queries the request's entries target have no candidate: the referenced \
+         credentials are not available (OpenID4VP 1.0, Section 8.5)"
+    )]
     CredentialUnavailable,
     /// Why the matching gives no offer.
+    #[error(transparent)]
     Unmatched(Failure<U, R>),
 }
 
@@ -356,8 +361,8 @@ impl<D> Transactions<D> {
     ///
     /// # Errors
     ///
-    /// [`Inconsistency`] for a member or a candidate the matching lacks, or an entry the
-    /// request lacks.
+    /// [`Inconsistency`]: a member names a query or a candidate `answered` lacks, or a candidate
+    /// takes an entry these transactions lack.
     pub fn bind<'t, C: MatchCredential, R>(
         &'t self,
         answered: &Answered<'_, C, R>,
@@ -386,7 +391,7 @@ impl<D> Transactions<D> {
             let entry = self
                 .entries
                 .get(taken.entry().value())
-                .ok_or(Inconsistency::Entry)?;
+                .ok_or(Inconsistency::Entry(taken.entry()))?;
             let rank = |query: &QueryId| entry.credential_ids().iter().position(|id| id == query);
             let first = presented
                 .iter()

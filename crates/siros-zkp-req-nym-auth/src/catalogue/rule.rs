@@ -5,35 +5,45 @@ use siros_zkp_req::{ItemIndex, ReqSetIndex};
 use super::{Prf, VerifierContextError};
 
 /// What breaks the rule of a parameter or a `meta` member.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum ParamFault {
     /// It is absent.
+    #[error("it is absent")]
     Absent,
     /// It has another JSON type than the catalogue gives it.
+    #[error("it has another JSON type than the catalogue gives it")]
     WrongType,
     /// Its value is none the catalogue defines, or breaks the syntax the catalogue gives it.
+    #[error(
+        "its value is none the catalogue defines, or breaks the syntax the catalogue gives it"
+    )]
     Value,
 }
 
 /// What breaks the rule of `verifier_context`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum ContextFault {
     /// `account-recovery-ssc` has no `verifier_context`.
+    #[error("`account-recovery-ssc` has no `verifier_context`")]
     Absent,
     /// Another configuration has a `verifier_context`.
+    #[error("another configuration has a `verifier_context`")]
     Forbidden,
     /// It is not a string.
+    #[error("it is not a string")]
     WrongType,
     /// The string is no `verifier_context`.
-    Invalid(VerifierContextError),
+    #[error("the string is no `verifier_context`")]
+    Invalid(#[source] VerifierContextError),
 }
 
 /// A rule of the catalogue that a query breaks, with what breaks it. Each makes the query
 /// invalid.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum CatalogueRule {
     /// `meta` names the `bbs_cd` form without a string `schema_id_value`.
-    SchemaIdInvalid(ParamFault),
+    SchemaIdInvalid(#[source] ParamFault),
     /// `require_cryptographic_holder_binding` is `false`.
     HolderBindingWaived,
     /// `fn_id` is not in the catalogue.
@@ -56,6 +66,7 @@ pub enum CatalogueRule {
         /// The item's index.
         item: ItemIndex,
         /// What breaks the rule.
+        #[source]
         fault: ParamFault,
     },
     /// `ver` is absent, not an unsigned integer, or not 1.
@@ -63,6 +74,7 @@ pub enum CatalogueRule {
         /// The item's index.
         item: ItemIndex,
         /// What breaks the rule.
+        #[source]
         fault: ParamFault,
     },
     /// `prf` is absent, not a string or not a PRF.
@@ -70,6 +82,7 @@ pub enum CatalogueRule {
         /// The item's index.
         item: ItemIndex,
         /// What breaks the rule.
+        #[source]
         fault: ParamFault,
     },
     /// `prf` names a PRF the catalogue does not define for the source format and
@@ -86,6 +99,7 @@ pub enum CatalogueRule {
         /// The item's index.
         item: ItemIndex,
         /// What breaks the rule.
+        #[source]
         fault: ContextFault,
     },
     /// `range` is absent, not a string, or breaks the syntax.
@@ -93,6 +107,7 @@ pub enum CatalogueRule {
         /// The item's index.
         item: ItemIndex,
         /// What breaks the rule.
+        #[source]
         fault: ParamFault,
     },
     /// `range` is `A-B` with A greater than B.
@@ -133,7 +148,3 @@ impl CatalogueRule {
         }
     }
 }
-
-siros_codec::display_code!(CatalogueRule);
-
-impl std::error::Error for CatalogueRule {}

@@ -309,8 +309,12 @@ impl Directory {
     /// The index section's length, back, when it is no multiple of an entry's.
     pub(crate) fn index_entries(&self) -> Result<u32, u32> {
         let length = self.index.length;
-        match length % INDEX_ENTRY_WORDS {
-            0 => Ok(length / INDEX_ENTRY_WORDS),
+        let whole = (
+            length.checked_div(INDEX_ENTRY_WORDS),
+            length.checked_rem(INDEX_ENTRY_WORDS),
+        );
+        match whole {
+            (Some(entries), Some(0)) => Ok(entries),
             _ => Err(length),
         }
     }

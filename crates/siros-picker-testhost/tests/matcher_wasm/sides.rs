@@ -258,6 +258,7 @@ pub fn picker_run(request: &[u8], registration: Vec<u8>, level: u32) -> Captured
             calling_package: "com.android.chrome".into(),
             origin: ORIGIN.into(),
             wasm_version: level,
+            ..Default::default()
         },
     )
     .unwrap()

@@ -188,6 +188,12 @@ fn each_type_metadata_rule_is_refused_alone() {
             fault(Ts12Fault::NotHeld(HttpsUrl::parse(VCT).unwrap())),
         ),
         (
+            "a vct#integrity that is no integrity metadata (SD-JWT VC, Section 7)",
+            json!({"vct#integrity": "sha256-short"}),
+            served(&honest),
+            fault(Ts12Fault::PinValue(IntegrityFault::Malformed)),
+        ),
+        (
             "no document held",
             none.clone(),
             vec![],

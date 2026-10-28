@@ -12,7 +12,8 @@ siros_codec::position!(
 );
 
 /// Why the credential sets of a request break PaSO Core, Section 7.4.1.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum SetsFault {
     /// This targeted Credential Query appears in the options of no credential set, or of
     /// another set than the first targeted query's.
@@ -35,10 +36,6 @@ impl SetsFault {
         }
     }
 }
-
-siros_codec::display_code!(SetsFault);
-
-impl std::error::Error for SetsFault {}
 
 /// Checks the credential sets of `query` against the queries `entries` target: without
 /// `credential_sets` every query is required together, which holds. With them, one set's
@@ -137,12 +134,16 @@ fn transposable(alternatives: Vec<Vec<&str>>) -> bool {
 
 /// `items` in order, each once.
 fn sorted_set<T: Ord>(items: impl IntoIterator<Item = T>) -> Vec<T> {
-    let mut set = Vec::new();
+    let mut set: Vec<T> = Vec::new();
     for item in items {
-        if let Err(at) = set.binary_search(&item) {
-            // `Vec::insert` panics past the end; `binary_search` gives a position up to it.
-            set.insert(at, item);
+        let (mut before, after): (Vec<T>, Vec<T>) =
+            set.into_iter().partition(|other| *other < item);
+        // `after` starts with the least member not below `item`: `item` itself, when present.
+        if after.first() != Some(&item) {
+            before.push(item);
         }
+        before.extend(after);
+        set = before;
     }
     set
 }

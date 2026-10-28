@@ -1,8 +1,6 @@
 //! A credential's issuer chain (TR2): the certificates the credential carries for its issuer,
 //! the signer's first.
 
-use std::fmt;
-
 use siros_codec::chain::CertificateChain;
 
 use crate::authority::KeyIdentifier;
@@ -18,9 +16,11 @@ pub struct IssuerChain {
 }
 
 /// Why a certificate of an issuer chain does not parse.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("{error} at {position}")]
 pub struct ChainError {
     position: ChainIndex,
+    #[source]
     error: CertificateError,
 }
 
@@ -41,18 +41,6 @@ impl ChainError {
     #[must_use]
     pub fn code(self) -> &'static str {
         self.error.code()
-    }
-}
-
-impl fmt::Display for ChainError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} at {}", self.error, self.position)
-    }
-}
-
-impl std::error::Error for ChainError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(&self.error)
     }
 }
 

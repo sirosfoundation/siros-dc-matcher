@@ -24,21 +24,24 @@ pub struct DocumentSigner {
 }
 
 /// Why a certificate's key is no P-256 key in the systems' form.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum KeyError {
     /// The key is not `id-ecPublicKey` on `prime256v1`.
+    #[error("the key is not `id-ecPublicKey` on `prime256v1`")]
     NotP256,
     /// The key is not an uncompressed point.
-    Point(PointError),
+    #[error("the key is not an uncompressed point")]
+    Point(#[source] PointError),
 }
 
 /// Why bytes are no Document Signer certificate.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum DocumentSignerError {
     /// The certificate does not parse.
-    Certificate(CertificateError),
+    Certificate(#[source] CertificateError),
     /// Its key.
-    Key(KeyError),
+    Key(#[source] KeyError),
 }
 
 impl DocumentSignerError {
@@ -52,10 +55,6 @@ impl DocumentSignerError {
         }
     }
 }
-
-siros_codec::display_code!(DocumentSignerError);
-
-impl std::error::Error for DocumentSignerError {}
 
 impl DocumentSigner {
     /// The Document Signer of the DER certificate `der`, whose key is an uncompressed P-256
@@ -105,12 +104,13 @@ impl Credential {
 }
 
 /// Why a credential cannot be read in the nym_auth form: `credential_form`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum Unreadable {
     /// The mdoc.
-    Form(FormError),
+    Form(#[source] FormError),
     /// The Document Signer.
-    Signer(DocumentSignerError),
+    Signer(#[source] DocumentSignerError),
 }
 
 impl Unreadable {
@@ -144,12 +144,13 @@ impl Failures {
 }
 
 /// Why an mdoc is no tested attestation at the proof time.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum Unusable {
     /// An mdoc of another `docType`: it does not match the query.
     OtherDocType,
     /// The credential cannot be read in the nym_auth form: `credential_form`.
-    Unreadable(Unreadable),
+    Unreadable(#[source] Unreadable),
     /// The credential reads and fails the tests of [`Failures::codes`].
     Fails(Box<Failures>),
 }
@@ -182,10 +183,6 @@ impl Unusable {
         }
     }
 }
-
-siros_codec::display_code!(Unusable);
-
-impl std::error::Error for Unusable {}
 
 /// A credential that passes the credential tests at a proof time (N3): the nym_auth form, the
 /// issuer signature under the Document Signer's key, and the validity. A parsed [`Mdoc`] lists
@@ -249,7 +246,8 @@ impl TestedAttestation {
 }
 
 /// Why an admitted issuer does not make a tested attestation usable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum OtherIssuer {
     /// The admission names another certificate than the attestation's Document Signer.
     Certificate,
@@ -268,10 +266,6 @@ impl OtherIssuer {
         }
     }
 }
-
-siros_codec::display_code!(OtherIssuer);
-
-impl std::error::Error for OtherIssuer {}
 
 /// A tested attestation whose Document Signer the query's `trusted_authorities` admit (N3,
 /// TR3). Proving requires it.
@@ -322,7 +316,8 @@ impl UsableAttestation {
 }
 
 /// `SHA-256(secret_seed)` is not the credential's `ssc`: `seed_mismatch`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub struct SeedMismatch;
 
 impl SeedMismatch {
@@ -332,10 +327,6 @@ impl SeedMismatch {
         "seed_mismatch"
     }
 }
-
-siros_codec::display_code!(SeedMismatch);
-
-impl std::error::Error for SeedMismatch {}
 
 /// The 16-byte `secret_seed` an issuer delivered with a credential (privatedata, Section 5A).
 /// It is zeroed on drop.

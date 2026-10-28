@@ -14,7 +14,8 @@ pub struct IssuerFacts {
 }
 
 /// Why the facts give an authority no admission.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum FactRefusal {
     /// No certificate of the chain names the key.
     KeyIdentifierAbsent,
@@ -32,10 +33,6 @@ impl FactRefusal {
         }
     }
 }
-
-siros_codec::display_code!(FactRefusal);
-
-impl std::error::Error for FactRefusal {}
 
 impl IssuerFacts {
     /// The facts of a credential whose chain names `key_identifiers` and whose chain the store

@@ -13,13 +13,12 @@ use crate::error_code::ErrorCode;
 use crate::jws_rules::JwsRule;
 use crate::parameters::ParameterFault;
 
-/// A rule of OpenID4VP 1.0 (or of RFC 9101, RFC 7515, RFC 5280) that a request breaks, or a
-/// host answer that does not fit the effect it answers.
+/// A rule of OpenID4VP 1.0 (or of RFC 9101, RFC 7515, RFC 5280) that a request breaks.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{}", self.code())]
 pub enum IntakeError {
     /// The authorization request URI has no query of form-encoded parameters, each once.
-    NotAnAuthorizationRequest(FormFault),
+    NotAnAuthorizationRequest(#[source] FormFault),
     /// `client_id` is missing or not a string (Section 5.2; A.2 for signed DC API requests).
     ClientIdMissing,
     /// Both `request` and `request_uri` are present (RFC 9101, Section 5).
@@ -38,7 +37,7 @@ pub enum IntakeError {
     /// The Request URI answered with more bytes than the fetch allowed.
     FetchTooLarge,
     /// A JWS breaks its serialization.
-    JwsMalformed(JwsFault),
+    JwsMalformed(#[source] JwsFault),
     /// The JWS `alg` is not `ES256`.
     AlgorithmUnsupported,
     /// The JWS header has `crit` (RFC 7515, Section 4.1.11).
@@ -54,13 +53,13 @@ pub enum IntakeError {
     /// The Request Object does not echo the `wallet_nonce` the wallet posted (Section 5.10.1).
     WalletNonceMismatch,
     /// The `client_id` is not one this wallet supports (Section 5.9).
-    ClientId(#[source] ClientIdError),
+    ClientId(#[from] ClientIdError),
     /// A signed request uses the `redirect_uri` prefix (Section 5.9.3).
     SignedRedirectUri,
     /// An unsigned request uses a prefix other than `redirect_uri` (Section 5.9.3).
     UnsignedNeedsRedirectUri,
     /// `x5c` breaks its rules.
-    CertificateChainInvalid(ChainFault),
+    CertificateChainInvalid(#[source] ChainFault),
     /// No dNSName SAN of the leaf certificate is the `x509_san_dns` value.
     SanMismatch,
     /// The SHA-256 of the leaf certificate is not the `x509_hash` value.
@@ -70,9 +69,9 @@ pub enum IntakeError {
     /// The host's trust answer carries no JWK for a key it was asked to resolve.
     KeyNotResolved,
     /// The JWK of the host's trust answer is no P-256 key.
-    ResolvedKeyInvalid(JwkFault),
+    ResolvedKeyInvalid(#[source] JwkFault),
     /// The `jwt` Header Parameter is not a Verifier Attestation JWT (Section 12).
-    AttestationInvalid(AttestationFault),
+    AttestationInvalid(#[source] AttestationFault),
     /// The attestation's `sub` is not the `verifier_attestation` value.
     AttestationSubjectMismatch,
     /// The attestation's `exp` has passed, or its `nbf` has not come.
@@ -118,12 +117,12 @@ pub enum IntakeError {
     /// `transaction_data` is not a non-empty array of strings (Section 5.1).
     TransactionDataInvalid,
     /// A parameter breaks a rule that needs no key: the rule.
-    Parameter(#[source] ParameterFault),
+    Parameter(#[from] ParameterFault),
     /// An encrypted Response Mode, and no key of `jwks` is a P-256 `ECDH-ES` encryption key.
     EncryptionKeyMissing,
     /// No key of `jwks` is a usable P-256 `ECDH-ES` encryption key, and the first that names
     /// P-256 is no P-256 key: its fault.
-    EncryptionKeyInvalid(JwkFault),
+    EncryptionKeyInvalid(#[source] JwkFault),
     /// `encrypted_response_enc_values_supported` names no `enc` of the Response Mode's
     /// envelope: `A128GCM` or `A256GCM` for a JWE, these or `A192GCM` for a `COSE_Encrypt`.
     EncryptionUnsupported,
@@ -136,80 +135,106 @@ pub enum IntakeError {
 }
 
 /// Why an authorization request URI has no query of form-encoded parameters (Section 5).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum FormFault {
     /// The URI has no query.
+    #[error("the URI has no query")]
     NoQuery,
     /// A parameter name repeats.
+    #[error("a parameter name repeats")]
     RepeatedName,
     /// A `%` is not followed by two hexadecimal digits.
+    #[error("a `%` is not followed by two hexadecimal digits")]
     Escape,
     /// A decoded name or value is not UTF-8.
-    NotUtf8(Utf8Error),
+    #[error("a decoded name or value is not UTF-8")]
+    NotUtf8(#[source] Utf8Error),
 }
 
 /// The rule a JWS breaks (RFC 7515, Sections 7.1 and 7.2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum JwsFault {
     /// A Compact Serialization is not three segments.
+    #[error("a Compact Serialization is not three segments")]
     Segments,
     /// A segment is not unpadded base64url.
-    Encoding(Base64Error),
+    #[error("a segment is not unpadded base64url")]
+    Encoding(#[source] Base64Error),
     /// The protected header is not a JSON object.
+    #[error("the protected header is not a JSON object")]
     Header,
     /// The signature is not the 64 bytes of an ES256 `r ‖ s`.
+    #[error("the signature is not the 64 bytes of an ES256 `r ‖ s`")]
     Signature,
     /// A JSON Serialization lacks a string `payload` or an array `signatures`, or a signature
     /// lacks a string `protected` or `signature`.
+    #[error("a JSON Serialization lacks a string `payload` or an array `signatures`, or a signature lacks a string `protected` or `signature`")]
     Serialization,
     /// The `trust_chain` Header Parameter is not an array of strings.
+    #[error("the `trust_chain` Header Parameter is not an array of strings")]
     TrustChain,
     /// The fetched Request Object is not UTF-8 text.
-    NotUtf8(Utf8Error),
+    #[error("the fetched Request Object is not UTF-8 text")]
+    NotUtf8(#[source] Utf8Error),
 }
 
 /// Why a JWS is refused: its serialization, its algorithm, or a critical extension.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum JwsError {
     /// The serialization breaks a rule.
-    Malformed(JwsFault),
+    #[error("the serialization breaks a rule")]
+    Malformed(#[source] JwsFault),
     /// `alg` is not `ES256`.
+    #[error("`alg` is not `ES256`")]
     AlgorithmUnsupported,
     /// The header has `crit` (RFC 7515, Section 4.1.11).
+    #[error("the header has `crit` (RFC 7515, Section 4.1.11)")]
     CriticalHeader,
 }
 
 /// The rule an `x5c` Header Parameter breaks (RFC 7515, Section 4.1.6).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum ChainFault {
     /// `x5c` is absent, not an array, or empty.
+    #[error("`x5c` is absent, not an array, or empty")]
     Absent,
     /// A certificate is not a string.
+    #[error("a certificate is not a string")]
     NotString,
     /// A certificate is not base64 with padding.
-    Encoding(Base64Error),
+    #[error("a certificate is not base64 with padding")]
+    Encoding(#[source] Base64Error),
     /// The leaf is not a DER X.509 certificate.
-    LeafNotCertificate(der::Error),
+    #[error("the leaf is not a DER X.509 certificate")]
+    LeafNotCertificate(#[source] der::Error),
     /// The leaf's key is not a P-256 key.
-    LeafKey(LeafKeyFault),
+    #[error("the leaf's key is not a P-256 key")]
+    LeafKey(#[source] LeafKeyFault),
     /// The leaf's SubjectAltName extension does not decode.
-    SubjectAltName(der::Error),
+    #[error("the leaf's SubjectAltName extension does not decode")]
+    SubjectAltName(#[source] der::Error),
 }
 
 /// Why a leaf certificate's key is no P-256 key (RFC 5480).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum LeafKeyFault {
     /// The key's algorithm is this one, where the wallet takes `id-ecPublicKey`.
+    #[error("the key's algorithm is this one, where the wallet takes `id-ecPublicKey`")]
     Algorithm(ObjectIdentifier),
     /// The `id-ecPublicKey` parameters are absent.
+    #[error("the `id-ecPublicKey` parameters are absent")]
     CurveAbsent,
     /// The parameters are no OBJECT IDENTIFIER.
-    Curve(der::Error),
+    #[error("the parameters are no OBJECT IDENTIFIER")]
+    Curve(#[source] der::Error),
     /// The named curve is this one, where the wallet takes `prime256v1`.
+    #[error("the named curve is this one, where the wallet takes `prime256v1`")]
     OtherCurve(ObjectIdentifier),
     /// The subjectPublicKey BIT STRING has unused bits.
+    #[error("the subjectPublicKey BIT STRING has unused bits")]
     Unaligned,
     /// The point is not on the curve.
+    #[error("the point is not on the curve")]
     Point,
 }
 
@@ -223,17 +248,22 @@ pub enum Coordinate {
 }
 
 /// Why a JWK is no public P-256 key (RFC 7518, Section 6.2.1).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum JwkFault {
     /// `kty` is not `EC`, or `crv` is not `P-256`.
+    #[error("`kty` is not `EC`, or `crv` is not `P-256`")]
     OtherKey,
     /// The coordinate is absent or not a string.
+    #[error("the coordinate is absent or not a string")]
     CoordinateAbsent(Coordinate),
     /// The coordinate is not unpadded base64url.
-    CoordinateEncoding(Coordinate, Base64Error),
+    #[error("the coordinate is not unpadded base64url")]
+    CoordinateEncoding(Coordinate, #[source] Base64Error),
     /// The coordinate has this many bytes, where P-256 takes 32.
+    #[error("the coordinate has this many bytes, where P-256 takes 32")]
     CoordinateLength(Coordinate, usize),
     /// The point is not on the curve.
+    #[error("the point is not on the curve")]
     Point,
 }
 
@@ -255,27 +285,34 @@ pub enum AttestationClaim {
 }
 
 /// Why the claims of a Verifier Attestation JWT are refused (Section 12).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum ClaimsFault {
     /// The payload is no JSON object.
-    NotObject(JsonTextError),
+    #[error("the payload is no JSON object")]
+    NotObject(#[source] JsonTextError),
     /// The claim breaks its rule.
-    Claim(AttestationClaim, MemberFault),
+    #[error("the claim breaks its rule")]
+    Claim(AttestationClaim, #[source] MemberFault),
     /// `cnf.jwk` is no P-256 key.
-    Key(JwkFault),
+    #[error("`cnf.jwk` is no P-256 key")]
+    Key(#[source] JwkFault),
 }
 
 /// The rule the `jwt` Header Parameter of a `verifier_attestation` request breaks (Section 12).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum AttestationFault {
     /// The request has no string `jwt` Header Parameter.
+    #[error("the request has no string `jwt` Header Parameter")]
     Absent,
     /// `jwt` is not a JWS this wallet reads.
-    Jws(JwsError),
+    #[error("`jwt` is not a JWS this wallet reads")]
+    Jws(#[source] JwsError),
     /// The attestation's `typ` is not `verifier-attestation+jwt`.
+    #[error("the attestation's `typ` is not `verifier-attestation+jwt`")]
     Typ,
     /// The attestation's claims break a rule.
-    Claims(ClaimsFault),
+    #[error("the attestation's claims break a rule")]
+    Claims(#[source] ClaimsFault),
 }
 
 /// A request parameter that holds JSON (Section 5.1).
@@ -426,12 +463,6 @@ impl IntakeError {
     }
 }
 
-impl From<ClientIdError> for IntakeError {
-    fn from(error: ClientIdError) -> Self {
-        Self::ClientId(error)
-    }
-}
-
 impl From<JwsError> for IntakeError {
     fn from(error: JwsError) -> Self {
         match error {
@@ -457,11 +488,5 @@ impl From<JwsRule> for JwsError {
 impl From<JwsRule> for IntakeError {
     fn from(rule: JwsRule) -> Self {
         JwsError::from(rule).into()
-    }
-}
-
-impl From<ParameterFault> for IntakeError {
-    fn from(fault: ParameterFault) -> Self {
-        Self::Parameter(fault)
     }
 }

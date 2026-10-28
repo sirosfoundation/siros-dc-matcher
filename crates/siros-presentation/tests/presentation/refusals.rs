@@ -6,6 +6,7 @@ use p256::ecdsa::Signature;
 use serde_json::json;
 use siros_codec::base64url;
 use siros_codec::cbor::Value as Cbor;
+use siros_codec::signature::Es256Signature;
 use siros_presentation::{
     AdditionIndex, DigestError, Fulfilment, OfferIndex, PlanDigest, PresentationError, Selection,
     Sign, SignId, SignatureError,
@@ -122,35 +123,30 @@ fn selections_and_signatures_parse_against_the_plan() {
 
     // A5: (case, the signatures from the honest ones, refusal); the first effect is 0, the
     // second 1.
-    type Edit = fn(&[Sign], &mut Vec<(SignId, Vec<u8>)>);
+    type Edit = fn(&[Sign], &mut Vec<(SignId, Es256Signature)>);
     let first = SignId::new(0);
-    let signatures: [(&str, Edit, Option<SignatureError>); 6] = [
+    let signatures: [(&str, Edit, Option<SignatureError>); 5] = [
         ("every signature once", |_, _| {}, None),
         (
             "the second missing",
-            |_, s| drop(s.pop()),
+            |_, s| s.truncate(1),
             Some(SignatureError::Missing(SignId::new(1))),
         ),
         (
             "the first twice",
-            |_, s| s.push(s[0].clone()),
+            |_, s| s.push(s[0]),
             Some(SignatureError::Repeated(first)),
         ),
         (
             "one of no effect",
-            |_, s| s.push((SignId::new(2), s[0].1.clone())),
+            |_, s| s.push((SignId::new(2), s[0].1)),
             Some(SignatureError::Unknown(SignId::new(2))),
-        ),
-        (
-            "the first of 63 bytes",
-            |_, s| s[0].1.truncate(63),
-            Some(SignatureError::Length(first, 63)),
         ),
         (
             "the first under another key",
             |signs, s| {
                 let other: Signature = testing::key(0x55).sign(signs[0].input());
-                s[0].1 = other.to_bytes().to_vec();
+                s[0].1 = Es256Signature::new(other.to_bytes().into());
             },
             Some(SignatureError::Invalid(first)),
         ),

@@ -29,7 +29,8 @@ pub struct Subset {
 }
 
 /// Why the credentials a subset names are refused (A3).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum SubsetError {
     /// The subset names no credential.
     Empty,
@@ -49,10 +50,6 @@ impl SubsetError {
         }
     }
 }
-
-siros_codec::display_code!(SubsetError);
-
-impl std::error::Error for SubsetError {}
 
 impl Subset {
     /// The credentials `credentials` for the member of the query `query`.
@@ -225,26 +222,23 @@ impl<'a> Planned<'a> {
             .ok_or_else(|| PresentationError::SubsetQuery(id.clone()))
     }
 
-    /// Each candidate of `member` with the `credentialId` of its credential.
+    /// Each candidate of `member`, a member of an offer of this plan, with the `credentialId`
+    /// of its credential.
+    ///
+    /// # Errors
+    ///
+    /// [`Inconsistency`]: `member` names a query or a candidate the plan's matching lacks.
     pub(super) fn held(
         &self,
         member: &Member,
     ) -> Result<Vec<(CandidateIndex, CredentialId)>, Inconsistency> {
-        let query = member.query();
-        let answers = self
-            .answered
-            .answers(query)
-            .ok_or(Inconsistency::Query(query))?;
-        member
-            .candidates()
-            .iter()
-            .map(|&index| {
-                answers
-                    .candidate(index)
-                    .map(|c| (index, c.credential().credential().entry().credential_id()))
-                    .ok_or(Inconsistency::Candidate(query, index))
-            })
-            .collect()
+        Ok(
+            crate::transactions::offered(&self.answered, std::slice::from_ref(member))?
+                .into_iter()
+                .flat_map(|offered| offered.candidates)
+                .map(|(index, c)| (index, c.credential().credential().entry().credential_id()))
+                .collect(),
+        )
     }
 
     /// Checks that `chosen` keep every credential a transaction entry binds to among `planned`,
@@ -273,7 +267,11 @@ impl<'a> Planned<'a> {
         Ok(())
     }
 
-    /// The `id` of the Credential Query at `index`.
+    /// The `id` of the Credential Query at `index`, a query of an offer of this plan.
+    ///
+    /// # Errors
+    ///
+    /// [`Inconsistency::Query`] when the plan's matching has no query at `index`.
     pub(super) fn query_id(&self, index: QueryIndex) -> Result<QueryId, Inconsistency> {
         self.answered
             .answers(index)

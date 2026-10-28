@@ -10,6 +10,24 @@
 
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
+// std's HashMap and HashSet are safe outside matcher.wasm, and UniFFI's records
+// expose std's HashMap to Kotlin and Swift.
+#![allow(clippy::disallowed_types)]
+// Nothing panics outside the tests. scripts/check_panic_sites.py refuses an
+// allow of these lints there and finds the panics they cannot see.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::panic,
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::unreachable,
+        clippy::todo,
+        clippy::unimplemented,
+        clippy::indexing_slicing,
+        clippy::disallowed_methods
+    )
+)]
 
 use std::collections::BTreeMap;
 use std::sync::Mutex;

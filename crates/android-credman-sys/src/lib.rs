@@ -16,6 +16,9 @@
 // Links to the wasm32-only functions resolve on wasm32, where rustdoc checks
 // them.
 #![cfg_attr(not(target_arch = "wasm32"), allow(rustdoc::broken_intra_doc_links))]
+// A panicking std method that clippy.toml names takes an #[expect] with the
+// reason it cannot recover, as each panic of the matcher does.
+#![cfg_attr(not(test), deny(clippy::disallowed_methods))]
 
 pub use core::ffi::c_char;
 
@@ -40,8 +43,17 @@ impl CallingAppInfo {
     };
 }
 
-const _: () = assert!(core::mem::size_of::<CallingAppInfo>() == 256 + 512);
-const _: () = assert!(core::mem::align_of::<CallingAppInfo>() == 1);
+// Evaluated at compile time. GetCallingAppInfo writes the C struct
+// `{ char package_name[256]; char origin[512]; }` through the pointer; any
+// other layout lets the host write outside the value, so the build fails.
+const _: () = assert!(
+    core::mem::size_of::<CallingAppInfo>() == 256 + 512,
+    "CallingAppInfo must be the host's 768-byte struct"
+);
+const _: () = assert!(
+    core::mem::align_of::<CallingAppInfo>() == 1,
+    "CallingAppInfo must have the host struct's byte alignment"
+);
 
 /// Functions every host provides: the inputs, the level probe, and the
 /// standalone entries a matcher adds on a host below level 2.
@@ -128,12 +140,11 @@ pub mod credman {
         pub fn GetRequestSize(size: *mut u32);
 
         /// Copies up to `len` bytes of the credential blob, from byte
-        /// `offset`, into `buffer`, and returns the count copied. A matcher
-        /// reads the whole blob once at start.
+        /// `offset`, into `buffer`, and returns the count copied.
         ///
         /// `buffer` holds `len` bytes. The count can be lower than `len` and
-        /// is 0 past the end, so a matcher reads until it has the
-        /// [`GetCredentialsSize`] length or a read returns 0.
+        /// is 0 past the end, so a matcher reads until it has the bytes it
+        /// asked for, within the [`GetCredentialsSize`] length.
         pub fn ReadCredentialsBuffer(buffer: *mut c_void, offset: usize, len: usize) -> usize;
 
         /// Writes the length in bytes of the credential blob to `size`. The

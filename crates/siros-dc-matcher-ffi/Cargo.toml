@@ -43,3 +43,6 @@ thiserror = { workspace = true }
 siros-dc-matcher-core = { workspace = true, features = ["test-fixtures"] }
 siros-zkp-req-nym-auth = { workspace = true, features = ["test-fixtures"] }
 p256 = { version = "0.13.2", default-features = false, features = ["ecdsa", "std"] }
+
+[lints]
+workspace = true

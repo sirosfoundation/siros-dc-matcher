@@ -92,7 +92,14 @@ this file.
   `FxHashMap`.
 - `QueryResult::combinations` walks the candidates of each query as an odometer, the first
   query turning fastest: the order of the combinations is unchanged.
-- The crate depends on `rustc-hash`, `serde` and `serde_json` only.
+- The crate depends on `rustc-hash`, `serde`, `serde_json` and `thiserror` only.
+- Every error type derives `Display` and `Error` with `thiserror`, a new dependency, and keeps
+  its text: `PathError`, `QueryIdError`, `ClaimIdError`, `ClaimPathError`,
+  `TrustedAuthorityError`, `QueryError` and `QueryTextError`. `FormFault` and
+  `ClaimPathRefusal` implement `Error`, with the first sentence of their documentation as text.
+  `QueryError::Form` returns its `FormFault` from `source()`, and `ClaimPathRefusal` its
+  `PathError`. `QueryTextError::Query` is transparent: its text and source are its
+  `QueryError`'s.
 
 ### Added
 
@@ -112,6 +119,7 @@ this file.
   `ClaimSetsWithoutClaims` and `MdocPath`.
 - `resolve`, the §7.1.1 processing over any claim tree that implements `ClaimNode` (with
   `Lookup`); `resolve_json` runs on it. `PathError::code`.
+- `PathError` implements `std::error::Error`.
 
 ### Fixed
 

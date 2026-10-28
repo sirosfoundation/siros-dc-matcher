@@ -35,7 +35,7 @@ pub enum PickFault {
     /// The value is no object.
     NotObject,
     /// A member is absent or of the wrong type.
-    Member(PickMember, MemberFault),
+    Member(PickMember, #[source] MemberFault),
     /// `query` is no Credential Query id.
     QueryId(#[source] QueryIdError),
     /// The object has this member, which a pick does not define.

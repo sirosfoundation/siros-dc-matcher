@@ -48,11 +48,13 @@ pub enum Form {
 pub struct VerifierContext(String);
 
 /// Why a text is no `verifier_context`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum VerifierContextError {
     /// The text is empty.
+    #[error("the text is empty")]
     Empty,
     /// The text has this many bytes, more than 64.
+    #[error("the text has this many bytes, more than 64")]
     TooLong(usize),
 }
 
@@ -470,11 +472,14 @@ fn ver_invalid(item: ItemIndex, fault: ParamFault) -> CatalogueRule {
 }
 
 /// Why `config` and `verifier_context` name no configuration.
+#[derive(Debug, thiserror::Error)]
 enum ConfigFault {
     /// `config` names none.
+    #[error("`config` names none")]
     Name,
     /// `verifier_context` breaks its rule for the configuration.
-    Context(ContextFault),
+    #[error("`verifier_context` breaks its rule for the configuration")]
+    Context(#[from] ContextFault),
 }
 
 /// The configuration named `name`. `verifier_context` is required for account recovery and
@@ -497,12 +502,6 @@ fn read_config(name: &str, context: Option<&Value>) -> Result<Config, ConfigFaul
     match context {
         None => Ok(config),
         Some(_) => Err(ConfigFault::Context(ContextFault::Forbidden)),
-    }
-}
-
-impl From<ContextFault> for ConfigFault {
-    fn from(fault: ContextFault) -> Self {
-        Self::Context(fault)
     }
 }
 

@@ -16,17 +16,21 @@ pub trait System {
 }
 
 /// Why a system and a proof backend do not form a usable pair for an option (Section 1.3).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PairRefusal<U> {
     /// The Verifier does not list the system in `system_id_values`.
+    #[error("the Verifier does not list the system in `system_id_values`")]
     SystemNotListed,
     /// The system runs on no proof backend of `proof_backend_values`.
+    #[error("the system runs on no proof backend of `proof_backend_values`")]
     NoListedBackend,
     /// The system proves over another source format or type than `meta` allows.
+    #[error("the system proves over another source format or type than `meta` allows")]
     CredentialType,
     /// The system does not support the option's functions or parameter values. The system
     /// rulebook names this outcome `unsupported`.
-    Unsupported(U),
+    #[error("the system does not support the option's functions or parameter values")]
+    Unsupported(#[source] U),
 }
 
 /// The proof backend of a usable pair of `system` for an option, or why there is none.

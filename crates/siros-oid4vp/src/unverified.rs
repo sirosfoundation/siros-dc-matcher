@@ -44,9 +44,9 @@ pub enum NoQuery {
     /// signed one: the label and the shape disagree.
     ShapeDoesNotMatchProtocol,
     /// `data.request` of a signed request is no compact JWS.
-    NotACompactJws(CompactFault),
+    NotACompactJws(#[source] CompactFault),
     /// The payload segment is no unpadded base64url the picker decodes.
-    PayloadNotBase64url(PayloadFault),
+    PayloadNotBase64url(#[source] PayloadFault),
     /// The payload decoded, but is not JSON.
     PayloadNotJson(#[source] JsonTextError),
     /// The payload is JSON but carries no `dcql_query`.
@@ -150,25 +150,31 @@ impl NoQuery {
 }
 
 /// How `data.request` of an `openid4vp-v1-signed` request fails to be a compact JWS.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum CompactFault {
     /// `request` is absent or not a string.
+    #[error("`request` is absent or not a string")]
     NotString,
     /// The string has other than three segments (RFC 7515, Section 7.1).
+    #[error("the string has other than three segments (RFC 7515, Section 7.1)")]
     Segments,
     /// The header segment is empty.
+    #[error("the header segment is empty")]
     EmptyHeader,
     /// The payload segment is empty.
+    #[error("the payload segment is empty")]
     EmptyPayload,
 }
 
 /// Why a JWS payload segment yields no bytes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum PayloadFault {
     /// The segment is longer than the picker decodes.
+    #[error("the segment is longer than the picker decodes")]
     TooLong,
     /// The segment is not unpadded base64url.
-    Encoding(Base64Error),
+    #[error("the segment is not unpadded base64url")]
+    Encoding(#[source] Base64Error),
 }
 
 /// One DC API request entry, read without verification (OpenID4VP 1.0, Appendix A).

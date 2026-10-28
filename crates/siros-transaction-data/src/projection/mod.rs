@@ -43,7 +43,8 @@ pub struct ProjectedClaim {
 }
 
 /// The localised array no entry of which the locale function takes for the wallet's language.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum Unmatched {
     /// The `display` array of the claim at this position.
     Claim(ClaimIndex),
@@ -58,10 +59,6 @@ impl Unmatched {
         "language_unmatched"
     }
 }
-
-siros_codec::display_code!(Unmatched);
-
-impl std::error::Error for Unmatched {}
 
 impl Definition {
     /// The definition in `language`, served by `source` under `rulebook`: every claim `display`

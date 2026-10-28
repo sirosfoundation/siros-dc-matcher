@@ -3,6 +3,8 @@
 Patch a wasm32-wasip1 binary to stub out the wasi_snapshot_preview1
 environ_get / environ_sizes_get imports as local no-op functions.
 
+    python3 scripts/strip_wasi_environ.py IN.wasm OUT.wasm
+
 These two imports come from Rust's WASI command-model CRT startup
 (crt1-command.o), unconditionally, regardless of user code. If the host
 does not provide them, a call to either traps
@@ -16,314 +18,228 @@ This rewrites:
     imports)
   - every function-index reference elsewhere (export section, start
     section, element section, and every `call`/`ref.func` instruction in
-    every function body) via a byte-exact instruction walk - not a blind
-    byte search.
+    every function body), found by decoding each instruction.
 
 Both stubs share the same (i32,i32)->i32 signature: (errno) environ_get
 writes nothing and returns 0; environ_sizes_get writes 0 to both output
 pointers and returns 0 (0 env vars, 0 bytes of env data).
+
+Both files are `.wasm` files inside this repository. Exits 1 on a module
+that breaks the binary format or lacks the two imports, and 2 on a refused
+argument.
 """
+from __future__ import annotations
+
+import argparse
 import sys
+from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass
+from enum import Enum, auto
+
+from repo_paths import PathRefused, existing_file, new_file
+from wasm_binary import (
+    MAGIC_AND_VERSION, ExternKind, FunctionImport, Reader, Section, SectionId, WasmFormatError,
+    encode_name, encode_section, encode_u32, encode_vector, read_export, read_import,
+    read_sections, read_signature, read_valtype, section_items,
+)
 
 TARGET_MODULE = "wasi_snapshot_preview1"
 TARGET_FIELDS = ("environ_get", "environ_sizes_get")
 
 
-def check(cond, message):
-    """Input validation that survives `python -O`. `assert` is stripped under
-    optimisation, and a patcher that then carries on with a malformed module
-    would write a corrupt binary without a word - the one failure mode this
-    whole script exists to avoid."""
-    if not cond:
-        raise ValueError(message)
+class StripError(ValueError):
+    """A module outside the shape this script rewrites."""
 
 
-def read_uleb128(buf, off):
-    result = 0
-    shift = 0
-    while True:
-        b = buf[off]
-        off += 1
-        result |= (b & 0x7F) << shift
-        if b & 0x80 == 0:
-            return result, off
-        shift += 7
+# ---- instructions -------------------------------------------------------
+
+class Immediate(Enum):
+    """How an instruction encodes one immediate operand."""
+
+    U32 = auto()  # an index, a label, an alignment or an offset
+    FUNCTION = auto()  # a function index, renumbered by the rewrite
+    S32 = auto()
+    S33 = auto()  # a block type
+    S64 = auto()
+    BYTE = auto()  # a reference type
+    F32 = auto()
+    F64 = auto()
+    LABELS = auto()  # br_table's vector of labels
+    VALTYPES = auto()  # select's vector of value types
 
 
-def read_sleb128(buf, off):
-    result = 0
-    shift = 0
-    while True:
-        b = buf[off]
-        off += 1
-        result |= (b & 0x7F) << shift
-        shift += 7
-        if b & 0x80 == 0:
-            if shift < 64 and (b & 0x40):
-                result |= -(1 << shift)
-            return result, off
+U32, FUNCTION, S32, S33, S64 = Immediate.U32, Immediate.FUNCTION, Immediate.S32, Immediate.S33, Immediate.S64
+BYTE, F32, F64 = Immediate.BYTE, Immediate.F32, Immediate.F64
+LABELS, VALTYPES = Immediate.LABELS, Immediate.VALTYPES
+
+# The bytes each immediate occupies, other than a function index.
+STEP_OVER: dict[Immediate, Callable[[Reader], object]] = {
+    U32: Reader.u32,
+    S32: Reader.s32,
+    S33: Reader.s33,
+    S64: Reader.s64,
+    BYTE: read_valtype,
+    F32: lambda reader: reader.raw(4),
+    F64: lambda reader: reader.raw(8),
+    LABELS: lambda reader: reader.vector(Reader.u32),
+    VALTYPES: lambda reader: reader.vector(read_valtype),
+}
 
 
-def uleb128(n):
-    out = bytearray()
-    while True:
-        b = n & 0x7F
-        n >>= 7
-        if n:
-            out.append(b | 0x80)
+def opcodes(codes: Iterable[int], *immediates: Immediate) -> dict[int, tuple[Immediate, ...]]:
+    return dict.fromkeys(codes, immediates)
+
+
+OPCODES = {
+    # unreachable, nop, else, end, return, drop, select, ref.is_null, then
+    # the comparisons, arithmetic, conversions and sign extensions
+    **opcodes([0x00, 0x01, 0x05, 0x0B, 0x0F, 0x1A, 0x1B, 0xD1, *range(0x45, 0xC5)]),
+    **opcodes([0x02, 0x03, 0x04], S33),  # block, loop, if
+    **opcodes([0x0C, 0x0D], U32),  # br, br_if
+    0x0E: (LABELS, U32),  # br_table
+    0x10: (FUNCTION,),  # call
+    0x11: (U32, U32),  # call_indirect: type, table
+    0x1C: (VALTYPES,),  # select t*
+    **opcodes(range(0x20, 0x27), U32),  # local.get/set/tee, global.get/set, table.get/set
+    **opcodes(range(0x28, 0x3F), U32, U32),  # loads and stores: alignment, offset
+    **opcodes([0x3F, 0x40], U32),  # memory.size, memory.grow
+    0x41: (S32,),  # i32.const
+    0x42: (S64,),  # i64.const
+    0x43: (F32,),  # f32.const
+    0x44: (F64,),  # f64.const
+    0xD0: (BYTE,),  # ref.null
+    0xD2: (FUNCTION,),  # ref.func
+}
+
+PREFIX_FC = 0xFC
+FC_OPCODES = {
+    **opcodes(range(0x00, 0x08)),  # trunc_sat
+    **opcodes([0x08, 0x0A, 0x0C, 0x0E], U32, U32),  # memory.init/copy, table.init/copy
+    **opcodes([0x09, 0x0B, 0x0D, 0x0F, 0x10, 0x11], U32),  # data.drop, memory.fill, elem.drop, table.grow/size/fill
+}
+
+END = 0x0B
+# The opcodes a constant expression may hold, its final `end` aside.
+CONSTANT_OPCODES = {0x41, 0x42, 0x43, 0x44, 0x23, 0xD0, 0xD2}
+
+
+@dataclass(frozen=True)
+class Renumbering:
+    """The function indices after the rewrite. The two removed imports, at
+    `removed` in ascending order, become the first two defined functions; the
+    imports after them move down."""
+
+    imported: int  # function imports before the rewrite
+    removed: tuple[int, int]
+
+    def __call__(self, index: int) -> int:
+        if index in self.removed:
+            return self.imported - 2 + self.removed.index(index)
+        if index < self.imported:
+            return index - sum(1 for gone in self.removed if gone < index)
+        return index
+
+
+def immediates_of(reader: Reader, opcode: int, start: int) -> tuple[Immediate, ...]:
+    """The immediates of the instruction `opcode` starts, reading a 0xFC sub-opcode."""
+    if opcode == PREFIX_FC:
+        sub_start = reader.offset
+        sub = reader.u32()
+        if sub not in FC_OPCODES:
+            raise WasmFormatError(sub_start, f"unhandled 0xfc sub-opcode {sub:#x}")
+        return FC_OPCODES[sub]
+    if opcode not in OPCODES:
+        raise WasmFormatError(start, f"unhandled opcode {opcode:#04x}")
+    return OPCODES[opcode]
+
+
+def copy_instruction(reader: Reader, renumber: Renumbering, out: bytearray) -> int:
+    """Copies one instruction into `out`, renumbering its function index.
+    Returns its opcode."""
+    start = reader.offset
+    opcode = reader.byte()
+    immediates = immediates_of(reader, opcode, start)
+    out.extend(reader.since(start))
+    for immediate in immediates:
+        if immediate is FUNCTION:
+            out.extend(encode_u32(renumber(reader.u32())))
         else:
-            out.append(b)
-            return bytes(out)
+            operand_start = reader.offset
+            STEP_OVER[immediate](reader)
+            out.extend(reader.since(operand_start))
+    return opcode
 
 
-def read_name(buf, off):
-    n, off = read_uleb128(buf, off)
-    s = buf[off:off + n].decode("utf-8")
-    return s, off + n
-
-
-def name_bytes(s):
-    b = s.encode("utf-8")
-    return uleb128(len(b)) + b
-
-
-def split_sections(data):
-    off = 8
-    secs = []
-    while off < len(data):
-        sec_id = data[off]
-        start = off
-        off += 1
-        size, off = read_uleb128(data, off)
-        payload_start = off
-        secs.append({"id": sec_id, "start": start, "payload_start": payload_start,
-                     "payload": data[payload_start:payload_start + size]})
-        off += size
-    return secs
-
-
-def encode_section(sec_id, payload):
-    return bytes([sec_id]) + uleb128(len(payload)) + payload
-
-
-# ---- instruction walker -----------------------------------------------
-# Opcode -> immediate-decoding rule. Every entry consumes exactly the
-# right number of bytes for that opcode's immediates (not its operand
-# stack effects, which we don't need). `call` and `ref.func` are the only
-# two that carry a function index we must remap.
-
-NOARG = set(
-    [0x00, 0x01, 0x05, 0x0B, 0x0F, 0x1A, 0x1B, 0xD1]
-    + list(range(0x45, 0x50))  # i32 comparisons
-    + list(range(0x50, 0x5B))  # i64 comparisons
-    + list(range(0x5B, 0x61))  # f32 comparisons
-    + list(range(0x61, 0x67))  # f64 comparisons
-    + list(range(0x67, 0x79))  # i32 unop/binop
-    + list(range(0x79, 0x8B))  # i64 unop/binop
-    + list(range(0x8B, 0x99))  # f32 unop/binop
-    + list(range(0x99, 0xA7))  # f64 unop/binop
-    + list(range(0xA7, 0xC0))  # conversions
-    + list(range(0xC0, 0xC5))  # sign extension
-)
-
-MEMARG_OPS = set(range(0x28, 0x3F))  # i32.load .. i64.store32
-
-
-def walk_and_remap(code, remap):
-    """Walk one function body's instruction stream, remapping every
-    call/ref.func operand via `remap`. Returns the rewritten bytes.
-    Raises on any opcode this walker doesn't recognise, rather than
-    silently miscounting."""
+def rewrite_expression(reader: Reader, renumber: Renumbering) -> bytes:
+    """Every instruction up to the end of `reader`."""
     out = bytearray()
-    i = 0
-    n = len(code)
-    while i < n:
-        op = code[i]
-        out.append(op)
-        i += 1
-        if op in NOARG:
-            continue
-        if op in (0x02, 0x03, 0x04):  # block/loop/if: blocktype (sleb33)
-            start = i
-            _, i = read_sleb128(code, i)
-            out += code[start:i]
-        elif op == 0x0C or op == 0x0D:  # br / br_if: labelidx
-            start = i
-            _, i = read_uleb128(code, i)
-            out += code[start:i]
-        elif op == 0x0E:  # br_table: vec(labelidx) + labelidx
-            start = i
-            count, i = read_uleb128(code, i)
-            for _ in range(count):
-                _, i = read_uleb128(code, i)
-            _, i = read_uleb128(code, i)
-            out += code[start:i]
-        elif op == 0x10:  # call: funcidx -- REMAP
-            idx, i = read_uleb128(code, i)
-            out += uleb128(remap(idx))
-        elif op == 0x11:  # call_indirect: typeidx, tableidx
-            start = i
-            _, i = read_uleb128(code, i)
-            _, i = read_uleb128(code, i)
-            out += code[start:i]
-        elif op == 0x1C:  # select t*: vec(valtype byte)
-            start = i
-            count, i = read_uleb128(code, i)
-            i += count
-            out += code[start:i]
-        elif op in (0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26):
-            # local.get/set/tee, global.get/set, table.get/set: 1 idx
-            start = i
-            _, i = read_uleb128(code, i)
-            out += code[start:i]
-        elif op in MEMARG_OPS:  # loads/stores: align + offset
-            start = i
-            _, i = read_uleb128(code, i)
-            _, i = read_uleb128(code, i)
-            out += code[start:i]
-        elif op in (0x3F, 0x40):  # memory.size / memory.grow: reserved byte
-            start = i
-            _, i = read_uleb128(code, i)
-            out += code[start:i]
-        elif op == 0x41:  # i32.const: sleb32
-            start = i
-            _, i = read_sleb128(code, i)
-            out += code[start:i]
-        elif op == 0x42:  # i64.const: sleb64
-            start = i
-            _, i = read_sleb128(code, i)
-            out += code[start:i]
-        elif op == 0x43:  # f32.const: 4 raw bytes
-            out += code[i:i + 4]
-            i += 4
-        elif op == 0x44:  # f64.const: 8 raw bytes
-            out += code[i:i + 8]
-            i += 8
-        elif op == 0xD0:  # ref.null: reftype byte
-            out.append(code[i])
-            i += 1
-        elif op == 0xD2:  # ref.func: funcidx -- REMAP
-            idx, i = read_uleb128(code, i)
-            out += uleb128(remap(idx))
-        elif op == 0xFC:  # bulk-memory / sat-trunc secondary opcode
-            sub, i2 = read_uleb128(code, i)
-            start = i
-            i = i2
-            out += code[start:i]
-            if sub in (0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07):
-                pass  # trunc_sat: no immediates
-            elif sub == 0x08:  # memory.init: dataidx, memidx
-                start = i
-                _, i = read_uleb128(code, i)
-                _, i = read_uleb128(code, i)
-                out += code[start:i]
-            elif sub == 0x09:  # data.drop: dataidx
-                start = i
-                _, i = read_uleb128(code, i)
-                out += code[start:i]
-            elif sub == 0x0A:  # memory.copy: memidx, memidx
-                start = i
-                _, i = read_uleb128(code, i)
-                _, i = read_uleb128(code, i)
-                out += code[start:i]
-            elif sub == 0x0B:  # memory.fill: memidx
-                start = i
-                _, i = read_uleb128(code, i)
-                out += code[start:i]
-            elif sub == 0x0C:  # table.init: elemidx, tableidx
-                start = i
-                _, i = read_uleb128(code, i)
-                _, i = read_uleb128(code, i)
-                out += code[start:i]
-            elif sub == 0x0D:  # elem.drop: elemidx
-                start = i
-                _, i = read_uleb128(code, i)
-                out += code[start:i]
-            elif sub == 0x0E:  # table.copy: tableidx, tableidx
-                start = i
-                _, i = read_uleb128(code, i)
-                _, i = read_uleb128(code, i)
-                out += code[start:i]
-            elif sub in (0x0F, 0x10, 0x11):  # table.grow/size/fill: tableidx
-                start = i
-                _, i = read_uleb128(code, i)
-                out += code[start:i]
-            else:
-                raise ValueError(f"unhandled 0xFC sub-opcode {sub:#x} at {start:#x}")
-        else:
-            raise ValueError(f"unhandled opcode {op:#x} at byte {i-1:#x}")
+    while not reader.at_end():
+        copy_instruction(reader, renumber, out)
     return bytes(out)
 
 
-# ---- section-specific rewriting ---------------------------------------
+def rewrite_constant_expression(reader: Reader, renumber: Renumbering) -> bytes:
+    """A constant expression, up to and including its `end`."""
+    out = bytearray()
+    while True:
+        start = reader.offset
+        opcode = copy_instruction(reader, renumber, out)
+        if opcode == END:
+            return bytes(out)
+        if opcode not in CONSTANT_OPCODES:
+            raise WasmFormatError(start, f"opcode {opcode:#04x} in a constant expression")
 
-def rewrite_import_section(payload, target_module, target_fields):
-    count, p = read_uleb128(payload, 0)
-    kept = []
-    removed_func_indices = []
-    func_idx = 0
-    for _ in range(count):
-        entry_start = p
-        mod, p = read_name(payload, p)
-        field, p = read_name(payload, p)
-        kind = payload[p]
-        p += 1
-        if kind == 0:
-            type_idx, p = read_uleb128(payload, p)
-            is_target = mod == target_module and field in target_fields
-            if is_target:
-                removed_func_indices.append((func_idx, type_idx, field))
-            else:
-                kept.append(payload[entry_start:p])
-            func_idx += 1
-        elif kind == 1:
-            p += 1
-            flag = payload[p]
-            p += 1
-            _, p = read_uleb128(payload, p)
-            if flag == 1:
-                _, p = read_uleb128(payload, p)
-            kept.append(payload[entry_start:p])
-        elif kind == 2:
-            flag = payload[p]
-            p += 1
-            _, p = read_uleb128(payload, p)
-            if flag == 1:
-                _, p = read_uleb128(payload, p)
-            kept.append(payload[entry_start:p])
-        elif kind == 3:
-            p += 2
-            kept.append(payload[entry_start:p])
+
+# ---- sections -----------------------------------------------------------
+
+@dataclass(frozen=True)
+class RemovedImport:
+    index: int  # its function index
+    name: str
+
+
+@dataclass(frozen=True)
+class ImportRewrite:
+    """The import section without the two imports, and what they were."""
+
+    payload: bytes
+    imported: int  # function imports before the rewrite
+    removed: tuple[RemovedImport, RemovedImport]  # by function index
+    stub_type: int  # the type index both share
+
+
+def is_target(item: FunctionImport) -> bool:
+    return item.module == TARGET_MODULE and item.name in TARGET_FIELDS
+
+
+def rewrite_imports(section: Section, type_count: int) -> ImportRewrite:
+    reader = section.reader()
+    kept: list[bytes] = []
+    removed: list[tuple[RemovedImport, int]] = []
+    imported = 0
+    for _ in range(reader.u32()):
+        start = reader.offset
+        item = read_import(reader, type_count)
+        if isinstance(item, FunctionImport) and is_target(item):
+            removed.append((RemovedImport(imported, item.name), item.type_index))
         else:
-            raise ValueError(f"unknown import kind {kind}")
-    check(p == len(payload), "import section not fully consumed")
-    new_payload = uleb128(len(kept)) + b"".join(kept)
-    return new_payload, func_idx, removed_func_indices
+            kept.append(reader.since(start))
+        if isinstance(item, FunctionImport):
+            imported += 1
+    reader.expect_end("import section")
+    if len(removed) != 2:
+        wanted = " and ".join(f"{TARGET_MODULE}.{name}" for name in TARGET_FIELDS)
+        raise StripError(f"expected the imports {wanted}, found {len(removed)} of them")
+    (first, first_type), (second, second_type) = removed
+    if first_type != second_type:
+        raise StripError("expected both imports to share one type index")
+    return ImportRewrite(encode_vector(kept), imported, (first, second), first_type)
 
 
-def make_remap(total_imported_funcs_old, removed):
-    removed_sorted = sorted(idx for idx, _, _ in removed)
-    check(len(removed_sorted) == 2, f"expected 2 removed imports, got {len(removed_sorted)}")
-    idx_low, idx_high = removed_sorted
-    new_base = total_imported_funcs_old - 2
-
-    def remap(old_index):
-        if old_index == idx_low:
-            return new_base
-        if old_index == idx_high:
-            return new_base + 1
-        if old_index < total_imported_funcs_old:
-            shift = (1 if idx_low < old_index else 0) + (1 if idx_high < old_index else 0)
-            return old_index - shift
-        return old_index
-
-    return remap, idx_low, idx_high
-
-
-def stub_body(kind):
-    """Hand-encoded (i32,i32)->i32 no-op body bytes (locals decl + expr + end)."""
-    if kind == "environ_sizes_get":
-        expr = bytes([
+def stub_body(name: str) -> bytes:
+    """A hand-encoded (i32,i32)->i32 no-op body: no locals, then the expression."""
+    expressions = {
+        "environ_sizes_get": bytes([
             0x20, 0x00,        # local.get 0
             0x41, 0x00,        # i32.const 0
             0x36, 0x02, 0x00,  # i32.store align=2 offset=0
@@ -332,176 +248,151 @@ def stub_body(kind):
             0x36, 0x02, 0x00,  # i32.store align=2 offset=0
             0x41, 0x00,        # i32.const 0   (return value: errno 0)
             0x0B,              # end
-        ])
-    elif kind == "environ_get":
-        expr = bytes([
+        ]),
+        "environ_get": bytes([
             0x41, 0x00,  # i32.const 0  (return value: errno 0)
             0x0B,        # end
+        ]),
+    }
+    body = encode_u32(0) + expressions[name]
+    return encode_u32(len(body)) + body
+
+
+def read_local_group(reader: Reader) -> None:
+    reader.u32()
+    read_valtype(reader)
+
+
+def renumber_body(reader: Reader, renumber: Renumbering) -> bytes:
+    body = reader.take(reader.u32())
+    locals_start = body.offset
+    body.vector(read_local_group)
+    rewritten = body.since(locals_start) + rewrite_expression(body, renumber)
+    return encode_u32(len(rewritten)) + rewritten
+
+
+def renumber_element_segment(reader: Reader, renumber: Renumbering) -> bytes:
+    start = reader.offset
+    flags = reader.u32()
+    if flags != 0:
+        raise WasmFormatError(start, f"element segment flags {flags}; only 0 is handled")
+    offset = rewrite_constant_expression(reader, renumber)
+    functions = reader.vector(Reader.u32)
+    return encode_u32(flags) + offset + encode_vector([encode_u32(renumber(f)) for f in functions])
+
+
+@dataclass(frozen=True)
+class Rewrite:
+    """What every section rewrite shares."""
+
+    imports: ImportRewrite
+    renumber: Renumbering
+    type_count: int
+    function_count: int
+
+    def payload(self, section: Section) -> bytes:
+        match section.id:
+            case SectionId.IMPORT:
+                return self.imports.payload
+            case SectionId.FUNCTION:
+                return self.function_section(section)
+            case SectionId.EXPORT:
+                return self.export_section(section)
+            case SectionId.START:
+                return self.start_section(section)
+            case SectionId.ELEMENT:
+                return self.element_section(section)
+            case SectionId.CODE:
+                return self.code_section(section)
+            case _:
+                return section.payload
+
+    def function_section(self, section: Section) -> bytes:
+        """The stubs' type twice, ahead of the defined functions' types."""
+        reader = section.reader()
+        count = reader.u32()
+        types_start = reader.offset
+        for _ in range(count):
+            reader.index(self.type_count, "type")
+        reader.expect_end("function section")
+        stubs = encode_u32(self.imports.stub_type) * 2
+        return encode_u32(count + 2) + stubs + reader.since(types_start)
+
+    def export_section(self, section: Section) -> bytes:
+        exports = section.items(lambda reader: read_export(reader, self.function_count))
+        return encode_vector([
+            encode_name(export.name) + bytes([export.kind.value])
+            + encode_u32(self.renumber(export.index) if export.kind is ExternKind.FUNC else export.index)
+            for export in exports
         ])
-    else:
-        raise ValueError(kind)
-    body = uleb128(0) + expr  # 0 local-declaration groups
-    return uleb128(len(body)) + body
+
+    def start_section(self, section: Section) -> bytes:
+        reader = section.reader()
+        start = reader.index(self.function_count, "function")
+        reader.expect_end("start section")
+        return encode_u32(self.renumber(start))
+
+    def element_section(self, section: Section) -> bytes:
+        return encode_vector(section.items(lambda reader: renumber_element_segment(reader, self.renumber)))
+
+    def code_section(self, section: Section) -> bytes:
+        stubs = [stub_body(removed.name) for removed in self.imports.removed]
+        return encode_vector(stubs + section.items(lambda reader: renumber_body(reader, self.renumber)))
 
 
-def rewrite_function_section(payload, stub_type_idx):
-    count, p = read_uleb128(payload, 0)
-    rest = payload[p:]
-    new_count = count + 2
-    prefix = uleb128(stub_type_idx) + uleb128(stub_type_idx)
-    return uleb128(new_count) + prefix + rest
+def section_with(sections: Sequence[Section], section_id: SectionId) -> Section:
+    found = next((section for section in sections if section.id is section_id), None)
+    if found is None:
+        raise StripError(f"the module has no {section_id.name.lower()} section")
+    return found
 
 
-def rewrite_code_section(payload, remap, removed_order):
-    count, p = read_uleb128(payload, 0)
-    bodies = []
-    for _ in range(count):
-        size, p2 = read_uleb128(payload, p)
-        body = payload[p2:p2 + size]
-        bodies.append(body)
-        p = p2 + size
-    check(p == len(payload), "code section not fully consumed")
-
-    new_bodies = []
-    for _, _, field in removed_order:
-        new_bodies.append(stub_body(field))
-
-    for body in bodies:
-        nlocals, q = read_uleb128(body, 0)
-        head = body[:q]
-        for _ in range(nlocals):
-            _, q2 = read_uleb128(body, q)
-            q2 += 1  # valtype byte
-            head = body[:q2]
-            q = q2
-        expr = body[q:]
-        new_expr = walk_and_remap(expr, remap)
-        new_body = head + new_expr
-        new_bodies.append(uleb128(len(new_body)) + new_body)
-
-    return uleb128(len(new_bodies)) + b"".join(new_bodies)
+def plan_rewrite(sections: Sequence[Section]) -> Rewrite:
+    type_count = len(section_items(sections, SectionId.TYPE, read_signature))
+    imports = rewrite_imports(section_with(sections, SectionId.IMPORT), type_count)
+    defined = section_with(sections, SectionId.FUNCTION).reader().u32()
+    low, high = (removed.index for removed in imports.removed)
+    return Rewrite(imports, Renumbering(imports.imported, (low, high)), type_count,
+                   imports.imported + defined)
 
 
-def rewrite_export_section(payload, remap):
-    count, p = read_uleb128(payload, 0)
-    out = bytearray(uleb128(count))
-    for _ in range(count):
-        name, p = read_name(payload, p)
-        kind = payload[p]
-        p += 1
-        idx, p = read_uleb128(payload, p)
-        out += name_bytes(name)
-        out.append(kind)
-        if kind == 0:
-            out += uleb128(remap(idx))
-        else:
-            out += uleb128(idx)
-    return bytes(out)
+def strip(module: bytes) -> tuple[bytes, Rewrite]:
+    """The module with both imports replaced by stubs, and the rewrite that made it."""
+    sections = read_sections(module)
+    rewrite = plan_rewrite(sections)
+    rewritten = b"".join(encode_section(s.id, rewrite.payload(s)) for s in sections)
+    return MAGIC_AND_VERSION + rewritten, rewrite
 
 
-def rewrite_start_section(payload, remap):
-    """The start section (id 8) is a single funcidx - the function the host
-    runs at instantiation. wasi-libc's command model exports `_start` rather
-    than using this section, so the shipped build has none; but an input that
-    does have one would otherwise run the wrong function after the shift."""
-    idx, p = read_uleb128(payload, 0)
-    check(p == len(payload), "start section not fully consumed")
-    return uleb128(remap(idx))
-
-
-def const_expr_end(buf, off):
-    """Return the offset just past the `end` of the constant expression
-    starting at `off`. Walked instruction by instruction, never by scanning
-    for an 0x0B byte: that byte is a perfectly good LEB payload (`i32.const
-    11` is `41 0B`), and stopping there would truncate the expression and
-    desync everything after it. The spec limits const exprs to these
-    opcodes, so anything else is a malformed module, not a gap to paper
-    over."""
-    while True:
-        op = buf[off]
-        off += 1
-        if op == 0x0B:  # end
-            return off
-        if op in (0x41, 0x42):  # i32.const / i64.const: sleb
-            _, off = read_sleb128(buf, off)
-        elif op == 0x43:  # f32.const
-            off += 4
-        elif op == 0x44:  # f64.const
-            off += 8
-        elif op in (0x23, 0xD2):  # global.get globalidx / ref.func funcidx
-            _, off = read_uleb128(buf, off)
-        elif op == 0xD0:  # ref.null: reftype byte
-            off += 1
-        else:
-            raise ValueError(f"unexpected opcode {op:#x} in const expr at {off-1:#x}")
-
-
-def rewrite_element_section(payload, remap):
-    count, p = read_uleb128(payload, 0)
-    out = bytearray(uleb128(count))
-    for _ in range(count):
-        flags, p = read_uleb128(payload, p)
-        if flags != 0:
-            raise ValueError(f"unhandled element segment flags={flags}")
-        out += uleb128(flags)
-        start = p
-        p = const_expr_end(payload, p)
-        # The offset expr is an i32 const expr in practice, but a `ref.func`
-        # in it would carry a funcidx too, and walk_and_remap already knows
-        # every opcode a const expr may hold - so run it through the same
-        # walker rather than copying verbatim.
-        out += walk_and_remap(payload[start:p], remap)
-        n, p = read_uleb128(payload, p)
-        out += uleb128(n)
-        for _ in range(n):
-            idx, p = read_uleb128(payload, p)
-            out += uleb128(remap(idx))
-    check(p == len(payload), "element section not fully consumed")
-    return bytes(out)
-
-
-def main(in_path, out_path):
-    data = open(in_path, "rb").read()
-    check(data[:4] == b"\0asm", f"{in_path}: not a wasm module (bad magic)")
-    secs = split_sections(data)
-
-    import_sec = next(s for s in secs if s["id"] == 2)
-    new_import_payload, total_imported_funcs_old, removed = rewrite_import_section(
-        import_sec["payload"], TARGET_MODULE, TARGET_FIELDS)
-    check(len(removed) == 2, f"expected 2 targets, found {len(removed)}")
-    type_idxs = {t for _, t, _ in removed}
-    check(len(type_idxs) == 1, "expected both targets to share one type index")
-    stub_type_idx = type_idxs.pop()
-
-    removed_order = sorted(removed, key=lambda t: t[0])
-    remap, idx_low, idx_high = make_remap(total_imported_funcs_old, removed)
-    print(f"removing imports at old func idx {idx_low},{idx_high}; "
-          f"stubs land at new idx {total_imported_funcs_old-2},{total_imported_funcs_old-1}")
-
-    out_sections = []
-    for s in secs:
-        sid = s["id"]
-        payload = s["payload"]
-        if sid == 2:
-            payload = new_import_payload
-        elif sid == 3:
-            payload = rewrite_function_section(payload, stub_type_idx)
-        elif sid == 7:
-            payload = rewrite_export_section(payload, remap)
-        elif sid == 8:
-            payload = rewrite_start_section(payload, remap)
-        elif sid == 9:
-            payload = rewrite_element_section(payload, remap)
-        elif sid == 10:
-            payload = rewrite_code_section(payload, remap, removed_order)
-        out_sections.append(encode_section(sid, payload))
-
-    out_data = b"\0asm" + (1).to_bytes(4, "little") + b"".join(out_sections)
-    open(out_path, "wb").write(out_data)
-    print(f"wrote {out_path}: {len(out_data)} bytes (was {len(data)})")
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Replace the environ_get and environ_sizes_get imports of a wasm32-wasip1 "
+                    "binary with local no-op functions.")
+    parser.add_argument("source", metavar="IN.wasm", help="a .wasm file inside this repository")
+    parser.add_argument("target", metavar="OUT.wasm",
+                        help="the .wasm file to write, inside this repository")
+    arguments = parser.parse_args(argv)
+    try:
+        source = existing_file(arguments.source, ".wasm")
+        target = new_file(arguments.target, ".wasm")
+    except PathRefused as refused:
+        parser.error(str(refused))
+    with source.open("rb") as file:
+        module = file.read()
+    try:
+        stripped, rewrite = strip(module)
+    except (WasmFormatError, StripError) as error:
+        print(f"{arguments.source}: {error}", file=sys.stderr)
+        return 1
+    imported = rewrite.imports.imported
+    low, high = rewrite.renumber.removed
+    print(f"removing imports at old func idx {low},{high}; "
+          f"stubs land at new idx {imported - 2},{imported - 1}")
+    with target.open("wb") as file:
+        file.write(stripped)
+    print(f"wrote {arguments.target}: {len(stripped)} bytes (was {len(module)})")
+    return 0
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        sys.exit(f"usage: {sys.argv[0]} <in.wasm> <out.wasm>")
-    main(sys.argv[1], sys.argv[2])
+    sys.exit(main())

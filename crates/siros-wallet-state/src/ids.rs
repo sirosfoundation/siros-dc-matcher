@@ -179,16 +179,9 @@ impl TransactionId {
 }
 
 /// The empty string, where an identifier is never empty.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("identifier_empty")]
 pub struct EmptyIdentifier;
-
-impl fmt::Display for EmptyIdentifier {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("identifier_empty")
-    }
-}
-
-impl std::error::Error for EmptyIdentifier {}
 
 /// `text`, or `None` for the empty string the wallet writes when it does not know a value.
 pub(crate) fn known(text: String) -> Option<String> {

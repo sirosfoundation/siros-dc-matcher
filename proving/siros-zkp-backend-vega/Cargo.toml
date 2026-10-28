@@ -13,5 +13,9 @@ rust-version.workspace = true
 siros-codec = { workspace = true }
 siros-zkp-req = { workspace = true }
 siros-zkp-req-nym-auth = { workspace = true }
+thiserror = { workspace = true }
 zk-cred-vega = { workspace = true }
 zstd = { workspace = true }
+
+[lints]
+workspace = true

@@ -68,31 +68,33 @@ impl DefinitionMember {
 }
 
 /// Why a definition breaks Section 3.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum DefinitionError {
     /// The definition is no JSON object.
     NotObject,
     /// A member of the definition breaks its rule.
-    Member(DefinitionMember, MemberFault),
+    Member(DefinitionMember, #[source] MemberFault),
     /// `claims` holds this many claims, more than 100 (Section 3.3).
     TooManyClaims(usize),
     /// The claim at this position breaks a rule.
-    Claim(ClaimIndex, ClaimFault),
+    Claim(ClaimIndex, #[source] ClaimFault),
     /// The claim at this position has the `path` of an earlier one (Section 3.3).
     PathRepeated(ClaimIndex),
     /// The `ui_labels` array of this UI element breaks a rule.
-    UiElement(UiElementKey, LabelsFault),
+    UiElement(UiElementKey, #[source] LabelsFault),
 }
 
 /// Why a claim metadata object breaks Sections 3.1 and 3.3.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum ClaimFault {
     /// The claim is no JSON object.
     NotObject,
     /// A member of the claim breaks its rule.
-    Member(DefinitionMember, MemberFault),
+    Member(DefinitionMember, #[source] MemberFault),
     /// `path` is no claims path pointer.
-    Path(ClaimPathError),
+    Path(#[source] ClaimPathError),
     /// `value_type` names no value type of PaSO View, Section 3.
     ValueTypeUnknown(String),
     /// The claim has a `value_type` and no `display` (Section 3.1).
@@ -102,16 +104,17 @@ pub enum ClaimFault {
     /// `visualisation` is no integer from 1 to 4 (EC TS12 v1.0.1, Section 3.3.2).
     Visualisation,
     /// The `display` array breaks a rule.
-    Display(LabelsFault),
+    Display(#[source] LabelsFault),
 }
 
 /// Why a `display` array or a `ui_labels` entry array breaks Sections 3.1 to 3.3.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum LabelsFault {
     /// The array is no JSON array.
     NotArray,
     /// The entry at this position breaks a rule.
-    Entry(ArrayIndex, EntryFault),
+    Entry(ArrayIndex, #[source] EntryFault),
     /// Two entries have this locale (Section 3.3).
     LocaleRepeated(Locale),
     /// Two entries have no locale (Section 3.3).
@@ -119,16 +122,17 @@ pub enum LabelsFault {
 }
 
 /// Why an entry of a `display` or `ui_labels` array breaks Sections 3.1 to 3.3.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum EntryFault {
     /// The entry is no JSON object.
     NotObject,
     /// A member of the entry breaks its rule.
-    Member(DefinitionMember, MemberFault),
+    Member(DefinitionMember, #[source] MemberFault),
     /// `locale` is no language tag (RFC 5646).
-    Locale(LocaleError),
+    Locale(#[source] LocaleError),
     /// The label or the description breaks a character or length rule (Section 3.3).
-    Text(DefinitionMember, TextFault),
+    Text(DefinitionMember, #[source] TextFault),
     /// A `ui_labels` entry's `value_type` is none of `mini_markdown` and
     /// `template:mini_markdown` (Section 3.3). A `display` entry with such a `display_type` is
     /// left out of its array (PaSO View, Section 3).
@@ -196,7 +200,3 @@ impl EntryFault {
         }
     }
 }
-
-siros_codec::display_code!(DefinitionError, ClaimFault, LabelsFault, EntryFault);
-
-impl std::error::Error for DefinitionError {}

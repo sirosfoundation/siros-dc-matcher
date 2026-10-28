@@ -70,7 +70,7 @@ pub enum Incompatibility {
     /// The payload breaks the schema of its TS12 type.
     Ts12Payload(#[source] Ts12PayloadFault),
     /// A TS12 payload value at this location is no value of its type.
-    Ts12Value(Location, ValueFault),
+    Ts12Value(Location, #[source] ValueFault),
     /// The image at this location is refused.
     Image(Location, #[source] ImageFault),
     /// The entry does not render in full (PaSO View, Section 2).

@@ -48,33 +48,40 @@ pub enum ConfigurationMember {
 }
 
 /// Why a configuration does not read.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum ConfigurationError {
     /// The text is no JSON document the strict reader holds.
-    Json(JsonFault),
+    Json(#[source] JsonFault),
     /// The document is no JSON array.
     NotArray,
     /// The configured definition at this position breaks a rule.
-    Entry(ArrayIndex, ConfiguredFault),
+    Entry(ArrayIndex, #[source] ConfiguredFault),
     /// The entry at this position defines a type for a credential type an earlier entry
     /// defines it for.
     Repeated(ArrayIndex),
 }
 
 /// Why a configured definition breaks its rule.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ConfiguredFault {
     /// The entry is no JSON object.
+    #[error("the entry is no JSON object")]
     NotObject,
     /// A member breaks its rule.
-    Member(ConfigurationMember, MemberFault),
+    #[error("a member breaks its rule")]
+    Member(ConfigurationMember, #[source] MemberFault),
     /// `type` is the empty string.
+    #[error("`type` is the empty string")]
     TypeEmpty,
     /// The entry names no credential type.
+    #[error("the entry names no credential type")]
     NoCredentialType,
     /// The definition breaks PaSO Proof Metadata, Section 3.
-    Definition(DefinitionError),
+    #[error("the definition breaks PaSO Proof Metadata, Section 3")]
+    Definition(#[source] DefinitionError),
     /// The entry has a member other than its four.
+    #[error("the entry has a member other than its four")]
     MemberUnknown(String),
 }
 
@@ -90,10 +97,6 @@ impl ConfigurationError {
         }
     }
 }
-
-siros_codec::display_code!(ConfigurationError);
-
-impl std::error::Error for ConfigurationError {}
 
 impl Configuration {
     /// The configuration of the JSON text `text`: an array of entries `{type, vct_values,

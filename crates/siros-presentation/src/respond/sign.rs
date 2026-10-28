@@ -45,7 +45,8 @@ impl VerifiedSignature {
 }
 
 /// Why the host's signatures do not answer the `Sign` effects (A5).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum SignatureError {
     /// No signature answers this effect.
     Missing(SignId),
@@ -53,8 +54,6 @@ pub enum SignatureError {
     Repeated(SignId),
     /// A signature names this identifier, which no effect has.
     Unknown(SignId),
-    /// The signature of this effect has this many bytes; `r ‖ s` has 64.
-    Length(SignId, usize),
     /// The signature of this effect does not verify under its holder key.
     Invalid(SignId),
 }
@@ -66,15 +65,10 @@ impl SignatureError {
             Self::Missing(_) => "signature_missing",
             Self::Repeated(_) => "signature_repeated",
             Self::Unknown(_) => "signature_unknown",
-            Self::Length(..) => "signature_length",
             Self::Invalid(_) => "signature_invalid",
         }
     }
 }
-
-siros_codec::display_code!(SignatureError);
-
-impl std::error::Error for SignatureError {}
 
 impl Sign {
     /// The effect `id`: `credential`'s key pair signs `input`, and the signature verifies under
@@ -114,10 +108,8 @@ impl Sign {
         &self.input.0
     }
 
-    /// The signature `signature`, `r ‖ s`, when it verifies under the holder key (A5).
-    fn verified(&self, signature: Vec<u8>) -> Result<VerifiedSignature, SignatureError> {
-        let signature = Es256Signature::parse(&signature)
-            .map_err(|length| SignatureError::Length(self.id, length.0))?;
+    /// The signature `signature` when it verifies under the holder key (A5).
+    fn verified(&self, signature: Es256Signature) -> Result<VerifiedSignature, SignatureError> {
         if es256_verifies(&self.holder, &self.input.0, &signature) {
             Ok(VerifiedSignature(signature))
         } else {
@@ -143,11 +135,11 @@ pub(crate) fn key_id(credential: &Credential) -> Result<KeyId, PresentationError
 ///
 /// # Errors
 ///
-/// [`SignatureError`]: a signature of no effect, two for one effect, one that is not 64 bytes
-/// or does not verify, or an effect without one.
+/// [`SignatureError`]: a signature of no effect, two for one effect, one that does not verify,
+/// or an effect without one.
 pub(crate) fn verified(
     signs: &[Sign],
-    signatures: Vec<(SignId, Vec<u8>)>,
+    signatures: Vec<(SignId, Es256Signature)>,
 ) -> Result<Vec<VerifiedSignature>, SignatureError> {
     let mut by_id: Vec<Option<VerifiedSignature>> = vec![None; signs.len()];
     for (id, signature) in signatures {

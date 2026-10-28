@@ -15,41 +15,49 @@ use crate::catalogue::MDOC_DOCTYPE;
 
 /// Why an element of the nym_auth namespace is refused: `F` is why its value has another form
 /// than the catalogue gives it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum ElementFault<F> {
     /// The namespace lacks it.
+    #[error("the namespace lacks it")]
     Absent,
     /// Its value has another form.
-    Form(F),
+    #[error("its value has another form")]
+    Form(#[source] F),
 }
 
 /// Why a value is no `full-date = #6.1004(tstr)` (RFC 8943).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum FullDateFault {
     /// The value is not under tag 1004.
+    #[error("the value is not under tag 1004")]
     Tag,
     /// The tagged value is not a text string.
+    #[error("the tagged value is not a text string")]
     NotText,
     /// The text is no RFC 3339 `full-date`.
+    #[error("the text is no RFC 3339 `full-date`")]
     Date,
 }
 
 /// Why a value is no 32-byte commitment.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum CommitmentFault {
     /// The value is not a byte string.
+    #[error("the value is not a byte string")]
     NotBytes,
     /// The byte string has this many bytes.
+    #[error("the byte string has this many bytes")]
     Length(usize),
 }
 
 /// Why an mdoc is out of the nym_auth form.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("nym_auth mdoc: {}", self.code())]
 pub enum FormError {
     /// The issuer signs with this algorithm, where the form takes ES256 (`{1: -7}`).
     Algorithm(CoseAlgorithm),
     /// The issuer's signature is no ES256 signature.
-    Signature(SignatureLength),
+    Signature(#[source] SignatureLength),
     /// `digestAlgorithm` is this algorithm, where the form takes `SHA-256`.
     DigestAlgorithm(DigestAlgorithm),
     /// The nym_auth namespace is missing.
@@ -57,11 +65,11 @@ pub enum FormError {
     /// The namespace holds this element, other than `birth_date`, `ssc` and `psc`.
     Element(ElementIdentifier),
     /// `psc` is not a 32-byte string.
-    Psc(CommitmentFault),
+    Psc(#[source] CommitmentFault),
     /// `birth_date` is missing or not a tag-1004 `full-date`.
-    BirthDate(ElementFault<FullDateFault>),
+    BirthDate(#[source] ElementFault<FullDateFault>),
     /// `ssc` is missing or not a 32-byte string.
-    Ssc(ElementFault<CommitmentFault>),
+    Ssc(#[source] ElementFault<CommitmentFault>),
 }
 
 impl FormError {
@@ -79,14 +87,6 @@ impl FormError {
         }
     }
 }
-
-impl fmt::Display for FormError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "nym_auth mdoc: {}", self.code())
-    }
-}
-
-impl std::error::Error for FormError {}
 
 /// A salted commitment of the nym_auth namespace: `ssc` or `psc`, 32 bytes.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]

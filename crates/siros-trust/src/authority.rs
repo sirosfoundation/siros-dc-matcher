@@ -10,7 +10,8 @@ use siros_dcql::{AuthorityType, AuthorityValue, CredentialQuery, QueryId, Truste
 pub struct KeyIdentifier(Vec<u8>);
 
 /// Why bytes are no keyIdentifier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum KeyIdentifierError {
     /// The keyIdentifier is empty.
     Empty,
@@ -25,10 +26,6 @@ impl KeyIdentifierError {
         }
     }
 }
-
-siros_codec::display_code!(KeyIdentifierError);
-
-impl std::error::Error for KeyIdentifierError {}
 
 impl KeyIdentifier {
     /// The keyIdentifier `bytes`, as a certificate or a registration projection holds them.
@@ -167,12 +164,13 @@ pub struct QueryAuthorities {
 }
 
 /// Why an `aki` value encodes no keyIdentifier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum AkiError {
     /// The value is not base64url without padding.
-    Base64url(Base64Error),
+    Base64url(#[source] Base64Error),
     /// The bytes are no keyIdentifier.
-    KeyIdentifier(KeyIdentifierError),
+    KeyIdentifier(#[source] KeyIdentifierError),
 }
 
 impl AkiError {
@@ -186,19 +184,17 @@ impl AkiError {
     }
 }
 
-siros_codec::display_code!(AkiError);
-
-impl std::error::Error for AkiError {}
-
 /// Why a query's `trusted_authorities` cannot be read. The request is invalid
 /// (`invalid_request`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum AuthorityError {
     /// An `aki` value encodes no keyIdentifier.
     Aki {
         /// The value.
         value: AuthorityValue,
         /// Why.
+        #[source]
         error: AkiError,
     },
 }
@@ -212,10 +208,6 @@ impl AuthorityError {
         }
     }
 }
-
-siros_codec::display_code!(AuthorityError);
-
-impl std::error::Error for AuthorityError {}
 
 impl QueryAuthorities {
     /// The authorities `query` names: each value of its `trusted_authorities`, in their order.

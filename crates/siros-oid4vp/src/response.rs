@@ -47,7 +47,8 @@ impl Submission {
 }
 
 /// Why no response could be built or read.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum ResponseError {
     /// A `vp_token` key is not the `id` of a Credential Query of the request.
     UnknownQueryId,
@@ -60,13 +61,13 @@ pub enum ResponseError {
     /// A CBOR presentation is not one CBOR map.
     PresentationNotCborMap,
     /// The JWE or the `COSE_Encrypt` could not be produced.
-    EncryptionFailed(EncryptionFault),
+    EncryptionFailed(#[source] EncryptionFault),
     /// The Response URI answered with a status other than 200 (Section 8.2).
     ReplyStatus,
     /// The Response URI answered with a media type other than `application/json`.
     ReplyContentType,
     /// The reply is no JSON object the wallet reads.
-    ReplyNotObject(ReplyFault),
+    ReplyNotObject(#[source] ReplyFault),
     /// The reply's `redirect_uri` is not an absolute URI (RFC 3986, Section 4.3).
     RedirectUriInvalid,
 }
@@ -91,30 +92,32 @@ impl ResponseError {
 }
 
 /// The step of an encryption that failed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum EncryptionFault {
     /// The ephemeral public key has no affine coordinates.
+    #[error("the ephemeral public key has no affine coordinates")]
     EphemeralKey,
     /// A Concat KDF input is longer than a 32-bit length allows.
+    #[error("a Concat KDF input is longer than a 32-bit length allows")]
     KdfInput,
     /// The KDF cannot give a key of the length of `enc`.
+    #[error("the KDF cannot give a key of the length of `enc`")]
     KdfLength,
     /// The cipher refused the key or the plaintext.
+    #[error("the cipher refused the key or the plaintext")]
     Seal,
 }
 
 /// Why a reply to a direct post is no JSON object the wallet reads.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum ReplyFault {
     /// The reply is longer than the fetch allowed.
+    #[error("the reply is longer than the fetch allowed")]
     TooLarge,
     /// The reply is not a JSON object.
+    #[error("the reply is not a JSON object")]
     NotObject,
 }
-
-siros_codec::display_code!(ResponseError);
-
-impl std::error::Error for ResponseError {}
 
 impl VerifiedRequest {
     /// The submission refusing this request with `code` (P5: the response target is

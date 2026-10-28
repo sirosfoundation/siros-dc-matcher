@@ -29,17 +29,31 @@
 #![deny(unused_results)]
 #![deny(clippy::cognitive_complexity)]
 #![deny(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
-// Nothing here panics outside tests: the wallet's writer and the picker's reader give an error
-// for every input.
-#![deny(
+// Nothing panics outside the tests. scripts/check_panic_sites.py refuses an
+// allow of these lints there and finds the panics they cannot see.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::panic,
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::unreachable,
+        clippy::todo,
+        clippy::unimplemented,
+        clippy::indexing_slicing,
+        clippy::disallowed_methods,
+        clippy::arithmetic_side_effects
+    )
+)]
+// No attribute can allow these lints, in the tests either.
+#![forbid(
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::indexing_slicing,
     clippy::panic,
     clippy::unreachable,
     clippy::todo,
-    clippy::unimplemented,
-    clippy::arithmetic_side_effects
+    clippy::unimplemented
 )]
 
 #[cfg(feature = "wallet")]

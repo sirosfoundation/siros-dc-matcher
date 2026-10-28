@@ -9,8 +9,6 @@
 //! error*, and [`resolve`] keeps that distinction. Any claim tree that implements
 //! [`ClaimNode`] walks it, a JSON value and an SD-JWT claim tree alike.
 
-use core::fmt;
-
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
@@ -48,7 +46,8 @@ crate::position!(
 pub struct ClaimPath(Vec<PathComponent>);
 
 /// Why a value is no claims path pointer (§7).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum ClaimPathError {
     /// The value is no array.
     NotArray,
@@ -69,10 +68,6 @@ impl ClaimPathError {
         }
     }
 }
-
-crate::display_code!(ClaimPathError);
-
-impl std::error::Error for ClaimPathError {}
 
 impl ClaimPath {
     /// The pointer of `components`.
@@ -141,31 +136,23 @@ impl<'de> Deserialize<'de> for ClaimPath {
 /// §7.1.1 aborts on a component of the wrong *type*, while a *missing* key or index removes
 /// that element from the selection. Step 3 gives an error for an empty selection, which
 /// ordinarily means the credential lacks the claim.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PathError {
     /// A component was applied to an element of the wrong kind: a string component to a
     /// non-object, or a null or integer to a non-array (§7.1.1, steps 2.1 to 2.3).
+    #[error("{} at component {at}", self.code())]
     TypeMismatch {
         /// The component.
         at: ComponentIndex,
     },
     /// Nothing is selected once the pointer is processed (§7.1.1, step 3).
+    #[error("{}", self.code())]
     Empty,
     /// An mdoc pointer "does not contain exactly two components or one of the components is
     /// not a string" (§7.2.1, step 1).
+    #[error("{}", self.code())]
     MdocElement,
 }
-
-impl fmt::Display for PathError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::TypeMismatch { at } => write!(f, "{} at component {at}", self.code()),
-            Self::Empty | Self::MdocElement => f.write_str(self.code()),
-        }
-    }
-}
-
-impl std::error::Error for PathError {}
 
 impl PathError {
     /// A stable identifier.

@@ -49,20 +49,21 @@ impl EntryMember {
 }
 
 /// Why an entry of `transaction_data` does not read (T1).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum EntryRefusal {
     /// The entry is not base64url without padding (OpenID4VP 1.0, Sections 1.2 and 5.1).
-    NotBase64url(Base64Error),
+    NotBase64url(#[source] Base64Error),
     /// The entry's bytes are no UTF-8 text.
-    NotUtf8(Utf8Error),
+    NotUtf8(#[source] Utf8Error),
     /// The entry's text is no JSON document the strict reader holds: no JSON, a number beyond
     /// binary64, nesting deeper than [`MAX_DEPTH`](siros_codec::json::MAX_DEPTH), or an object
     /// that repeats a member name.
-    NotJson(JsonFault),
+    NotJson(#[source] JsonFault),
     /// The entry's JSON value is no object.
     NotJsonObject,
     /// A member breaks its rule.
-    Member(EntryMember, MemberFault),
+    Member(EntryMember, #[source] MemberFault),
     /// `type` is the empty string.
     TypeEmpty,
     /// `credential_ids` is empty.
@@ -73,7 +74,7 @@ pub enum EntryRefusal {
     /// `require_cryptographic_holder_binding` to `false` (OpenID4VP 1.0, B.3).
     HolderBindingNotRequired(QueryId),
     /// `transaction_data_hashes_alg` is refused (B.3.3.1).
-    HashesAlg(HashesAlgFault),
+    HashesAlg(#[source] HashesAlgFault),
     /// The entry holds this member, which no specification of transaction data defines.
     MemberUnknown(String),
 }
@@ -103,12 +104,13 @@ impl EntryRefusal {
 }
 
 /// Why transaction data refuses a request.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum TransactionDataError {
     /// The entry at this position does not read.
-    Entry(EntryPosition, EntryRefusal),
+    Entry(EntryPosition, #[source] EntryRefusal),
     /// The credential sets break a rule of PaSO Core, Section 7.4.1.
-    CredentialSets(SetsFault),
+    CredentialSets(#[source] SetsFault),
     /// The entry at this position has a type the wallet knows from no source for any candidate
     /// credential, and the first match leaves a credential it targets unserved: each such
     /// credential with why it takes no entry (OpenID4VP 1.0, Section 5.1; PaSO Core, Section
@@ -153,9 +155,3 @@ impl TransactionDataError {
         }
     }
 }
-
-siros_codec::display_code!(EntryRefusal, TransactionDataError);
-
-impl std::error::Error for EntryRefusal {}
-
-impl std::error::Error for TransactionDataError {}

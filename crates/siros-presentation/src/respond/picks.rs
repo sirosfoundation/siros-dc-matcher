@@ -1,6 +1,5 @@
 //! The selection the user makes by picking credential picker entries (K3).
 
-use itertools::Itertools;
 use siros_dcql::{Multiplicity, QueryId};
 use siros_wallet_state::CredentialId;
 
@@ -213,16 +212,19 @@ impl Planned<'_> {
     }
 
     /// The `credentialId`s of the candidates of `members`.
+    ///
+    /// # Errors
+    ///
+    /// [`Inconsistency`]: a member names a query or a candidate the plan's matching lacks.
     fn ids<'m>(
         &self,
         members: impl IntoIterator<Item = &'m Member>,
     ) -> Result<Vec<CredentialId>, Inconsistency> {
-        members
-            .into_iter()
-            .map(|member| self.held(member))
-            .flatten_ok()
-            .map_ok(|(_, id)| id)
-            .try_collect()
+        let mut ids = Vec::new();
+        for member in members {
+            ids.extend(self.held(member)?.into_iter().map(|(_, id)| id));
+        }
+        Ok(ids)
     }
 
     /// Checks that the members of `additions` that answer the query of `picks` hold each of its
@@ -245,6 +247,10 @@ impl Planned<'_> {
 
     /// Whether the picks `left` name a credential of each member of `addition`, and only
     /// credentials the member holds for its query.
+    ///
+    /// # Errors
+    ///
+    /// [`Inconsistency`]: a member names a query or a candidate the plan's matching lacks.
     fn fits(&self, addition: &Addition, left: &[&Picked]) -> Result<bool, Inconsistency> {
         for member in addition.members() {
             let Some(picks) = left.iter().find(|picked| picked.query == member.query()) else {
@@ -258,6 +264,10 @@ impl Planned<'_> {
     }
 
     /// The subset of `picks` when they answer a `multiple` Credential Query.
+    ///
+    /// # Errors
+    ///
+    /// [`Inconsistency::Query`] when the plan's matching has no query at `picks.query`.
     fn subset(&self, picks: &Picked) -> Result<Option<Subset>, Inconsistency> {
         let answers = self
             .answered

@@ -1,19 +1,22 @@
 //! Why display refuses an input. Each error has a stable code.
 
 use siros_dcql::{ClaimPathError, PathError};
+use siros_zkp_req::ItemIndex;
 
 use crate::locale::LocaleError;
 use crate::text::TextError;
 
 /// Why display refuses an input.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum DisplayError {
     /// Text to show is unsafe or too long. The code is its own.
-    Text(TextError),
+    Text(#[source] TextError),
     /// A `locale` is no language tag. The code is its own.
-    Locale(LocaleError),
-    /// A `zkp_req` option names this `_req` index, which its query lacks.
-    OptionItemUnknown(usize),
+    Locale(#[source] LocaleError),
+    /// A `zkp_req` option names this `_req` index, which its query lacks: the option is
+    /// another query's.
+    OptionItemUnknown(ItemIndex),
     /// A metadata document, or one of its members, is no JSON object.
     NotObject,
     /// `credential_issuer` is absent, no string, or empty.
@@ -33,17 +36,17 @@ pub enum DisplayError {
     /// `credential_metadata_uri` is no `https` URL (PaSO Proof Metadata, Section 2).
     CredentialMetadataUri,
     /// A `display` array or one of its entries breaks its rules.
-    Display(EntryFault),
+    Display(#[source] EntryFault),
     /// Two `display` entries of one array have the same locale.
     DisplayLocaleRepeated,
     /// A `logo` breaks its rules.
-    Logo(LogoFault),
+    Logo(#[source] LogoFault),
     /// A colour is no numerical colour value of CSS Color Module Level 3.
-    Colour(ColourFault),
+    Colour(#[source] ColourFault),
     /// A `claims` array, a claim description or one of its `display` entries breaks its rules.
-    Claims(EntryFault),
+    Claims(#[source] EntryFault),
     /// A claim `path` is no claims path pointer.
-    ClaimPath(ClaimPathError),
+    ClaimPath(#[source] ClaimPathError),
     /// Two claims descriptions address the same claim (OpenID4VCI 1.0, Appendix B.3).
     ClaimRepeated,
     /// Two claims descriptions disagree on whether a claim is an object or an array, or address
@@ -69,7 +72,7 @@ pub enum DisplayError {
     /// A chain of `extends` returns to its start (SD-JWT VC, Section 7.4).
     ExtendsCycle,
     /// A claims path pointer selects nothing in the credential. The code is its own.
-    Pointer(PathError),
+    Pointer(#[source] PathError),
     /// A claims path pointer without `null` selects several claims.
     PointerSelectsSeveral,
     /// A claim has no label in the metadata and its path has no key.
@@ -79,45 +82,60 @@ pub enum DisplayError {
 }
 
 /// Why text is no numerical colour value of CSS Color Module Level 3, Section 4.2.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum ColourFault {
     /// The member is no string.
+    #[error("the member is no string")]
     NotString,
     /// The text after `#` is other than three or six hexadecimal digits.
+    #[error("the text after `#` is other than three or six hexadecimal digits")]
     Hexadecimal,
     /// The text has no `(`, or does not end with `)`.
+    #[error("the text has no `(`, or does not end with `)`")]
     Notation,
     /// The function is none of `rgb`, `rgba`, `hsl` and `hsla` with its number of arguments; it
     /// has this many.
+    #[error("the function is none of `rgb`, `rgba`, `hsl` and `hsla` with its number of arguments; it has this many")]
     Function(usize),
     /// The argument at this position is no `<integer>`, `<number>` or `<percentage>` as its
     /// place takes.
+    #[error("the argument at this position is no `<integer>`, `<number>` or `<percentage>` as its place takes")]
     Argument(usize),
 }
 
 /// The rule an array of metadata entries, or one of its entries, breaks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum EntryFault {
     /// The member is no array, or an empty one where it must hold an entry.
+    #[error("the member is no array, or an empty one where it must hold an entry")]
     NotArray,
     /// An entry is no JSON object.
+    #[error("an entry is no JSON object")]
     EntryNotObject,
     /// An entry lacks a member it requires.
+    #[error("an entry lacks a member it requires")]
     MemberMissing,
     /// A member of an entry has the wrong JSON type.
+    #[error("a member of an entry has the wrong JSON type")]
     MemberType,
 }
 
 /// The rule a `logo` breaks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum LogoFault {
     /// The logo is no JSON object.
+    #[error("the logo is no JSON object")]
     NotObject,
     /// `uri` is absent, or no `https:` URL with an authority or `data:` URI of visible ASCII.
+    #[error(
+        "`uri` is absent, or no `https:` URL with an authority or `data:` URI of visible ASCII"
+    )]
     Uri,
     /// `uri#integrity` is no non-empty string of visible ASCII and spaces.
+    #[error("`uri#integrity` is no non-empty string of visible ASCII and spaces")]
     Integrity,
     /// `alt_text` is no string.
+    #[error("`alt_text` is no string")]
     AltText,
 }
 
@@ -160,7 +178,3 @@ impl DisplayError {
         }
     }
 }
-
-siros_codec::display_code!(DisplayError);
-
-impl std::error::Error for DisplayError {}

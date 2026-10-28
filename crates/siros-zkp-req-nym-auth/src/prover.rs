@@ -111,7 +111,8 @@ pub struct ProofOutput {
 }
 
 /// Why a prover made no proof.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum ProverFailure {
     /// The credential lies outside the form the system reads (Section 2): `credential_form`.
     CredentialForm,
@@ -146,15 +147,19 @@ pub trait NymAuthProver {
 }
 
 /// Why a verifier refused a proof (system rulebooks, Section 9).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum ProofFailure {
     /// `zk_proof` breaks the format of the proof backend: `proof_encoding`.
+    #[error("`zk_proof` breaks the format of the proof backend")]
     Encoding,
     /// A circuit's proof fails: `proof_invalid`.
+    #[error("a circuit's proof fails")]
     Invalid,
     /// The proof's public values differ from the statement: `public_input`.
+    #[error("the proof's public values differ from the statement")]
     PublicInput,
     /// The verifier failed on its own inputs, artifacts or code, and judged nothing.
+    #[error("the verifier failed on its own inputs, artifacts or code, and judged nothing")]
     Internal,
 }
 

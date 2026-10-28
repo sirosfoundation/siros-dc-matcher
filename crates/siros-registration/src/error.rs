@@ -154,7 +154,7 @@ pub enum FactsFault {
     /// The item is no map.
     NotMap,
     /// A member is absent or of the wrong type.
-    Member(Member, MemberFault),
+    Member(Member, #[source] MemberFault),
     /// The facts have this member, which they do not define.
     MemberUnknown(String),
     /// `registered_at` is no `tdate`.
@@ -195,7 +195,7 @@ pub enum CredentialFault {
     /// The record is no map.
     NotMap,
     /// A member is absent or of the wrong type.
-    Member(Member, MemberFault),
+    Member(Member, #[source] MemberFault),
     /// The record has this member, which it does not define.
     MemberUnknown(String),
     /// `claims` is no claim tree.

@@ -5,20 +5,28 @@
 //!
 //! It also holds the internals several components share: [`MemberFault`](member::MemberFault),
 //! the member fault of a decoded structure; the [`position!`] and [`text_value!`] macros that
-//! declare value newtypes; the [`display_code!`] macro that shows an error by its code; and
-//! [`CertificateChain`](chain::CertificateChain), the DER certificate chain an mdoc `x5chain`
-//! and an `x5c` carry.
+//! declare value newtypes; and [`CertificateChain`](chain::CertificateChain), the DER
+//! certificate chain an mdoc `x5chain` and an `x5c` carry.
 //!
 //! Nothing here panics on any input: the matcher runs this code inside the credential picker,
 //! where a trap reads as "no matching credential".
 
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
-#![deny(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::panic
+// Nothing panics outside the tests. scripts/check_panic_sites.py refuses an
+// allow of these lints there and finds the panics they cannot see.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::panic,
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::unreachable,
+        clippy::todo,
+        clippy::unimplemented,
+        clippy::indexing_slicing,
+        clippy::disallowed_methods
+    )
 )]
 
 mod value;

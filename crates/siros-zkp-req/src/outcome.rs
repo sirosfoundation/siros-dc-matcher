@@ -37,65 +37,80 @@ impl fmt::Display for ErrorCode {
 }
 
 /// What breaks the `meta` member a source format defines (Section 1.1).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum TypeValueFault {
     /// The member breaks its rule.
-    Member(MemberFault),
+    #[error("the member breaks its rule")]
+    Member(#[source] MemberFault),
     /// The `type_values` list at this position breaks the rule of a non-empty array of
     /// strings.
-    List(ArrayIndex, MemberFault),
+    #[error(
+        "the `type_values` list at this position breaks the rule of a non-empty array of strings"
+    )]
+    List(ArrayIndex, #[source] MemberFault),
 }
 
 /// Why a member does not hold an identifier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum IdentifierFault<E> {
     /// The member is absent.
+    #[error("the member is absent")]
     Absent,
     /// The member is not a string.
+    #[error("the member is not a string")]
     NotString,
     /// The string breaks the identifier's syntax.
-    Syntax(E),
+    #[error("the string breaks the identifier's syntax")]
+    Syntax(#[source] E),
 }
 
 /// Why a `return` member holds no handle. An absent `return` marks an assertion.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum ReturnFault {
     /// The member is not a string.
+    #[error("the member is not a string")]
     NotString,
     /// The string breaks the handle's syntax.
-    Syntax(ReturnHandleError),
+    #[error("the string breaks the handle's syntax")]
+    Syntax(#[source] ReturnHandleError),
 }
 
 /// Why an entry of `_req_sets` is no option (Section 2.1).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum OptionFault {
     /// The option is not an array.
+    #[error("the option is not an array")]
     NotArray,
     /// The option is empty.
+    #[error("the option is empty")]
     Empty,
     /// The entry at this position is not an unsigned integer.
+    #[error("the entry at this position is not an unsigned integer")]
     NotInteger(ArrayIndex),
     /// The entry at this position is no index of `_req`.
+    #[error("the entry at this position is no index of `_req`")]
     OutOfRange(ArrayIndex),
     /// The option names this `_req` item a second time.
+    #[error("the option names this `_req` item a second time")]
     Repeated(ItemIndex),
 }
 
 /// A rule of `zkp_req` that a request breaks, with what breaks it. Each one makes the request
 /// invalid ([`ErrorCode::InvalidRequest`]). The rules of OpenID4VP 1.0, Section 6 are DCQL's,
 /// which parses the query first.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum RequestRule {
     /// `format` is not `zkp_req`.
     FormatNotZkpReq,
     /// `claims` is present (Section 1.1). DCQL refuses `claim_sets` without `claims`.
     ClaimsPresent,
     /// `meta.source_format` is absent, not a string or empty (Section 1.1).
-    SourceFormatInvalid(MemberFault),
+    SourceFormatInvalid(#[source] MemberFault),
     /// The `meta` member the source format defines breaks its rule (Section 1.1).
-    TypeValueInvalid(TypeValueFault),
+    TypeValueInvalid(#[source] TypeValueFault),
     /// `_req` is absent, not an array or empty (Section 2).
-    ReqInvalid(MemberFault),
+    ReqInvalid(#[source] MemberFault),
     /// A `_req` item is not an object (Section 2).
     ItemNotObject {
         /// The item's index.
@@ -111,6 +126,7 @@ pub enum RequestRule {
         /// The item's index.
         item: ItemIndex,
         /// What breaks the rule.
+        #[source]
         fault: IdentifierFault<FnIdError>,
     },
     /// `params` is not an object (Section 2).
@@ -123,6 +139,7 @@ pub enum RequestRule {
         /// The item's index.
         item: ItemIndex,
         /// What breaks the rule.
+        #[source]
         fault: ReturnFault,
     },
     /// `return` repeats the handle of an earlier item (Section 2).
@@ -131,20 +148,21 @@ pub enum RequestRule {
         item: ItemIndex,
     },
     /// `_req_sets` is not a non-empty array (Section 2.1).
-    ReqSetsInvalid(MemberFault),
+    ReqSetsInvalid(#[source] MemberFault),
     /// An option is not a non-empty array of `_req` indexes, each at most once (Section 2.1).
     OptionInvalid {
         /// The option's index.
         option: ReqSetIndex,
         /// What breaks the rule.
+        #[source]
         fault: OptionFault,
     },
     /// `client_metadata` has no `vp_formats_supported.zkp_req` object (Section 1.2).
-    FormatsMissing(MemberFault),
+    FormatsMissing(#[source] MemberFault),
     /// `proof_backend_values` is not a non-empty array of strings (Section 1.2).
-    ProofBackendValuesInvalid(MemberFault),
+    ProofBackendValuesInvalid(#[source] MemberFault),
     /// `system_id_values` is not a non-empty array of strings (Section 1.2).
-    SystemIdValuesInvalid(MemberFault),
+    SystemIdValuesInvalid(#[source] MemberFault),
 }
 
 impl RequestRule {
@@ -171,7 +189,3 @@ impl RequestRule {
         }
     }
 }
-
-siros_codec::display_code!(RequestRule);
-
-impl std::error::Error for RequestRule {}

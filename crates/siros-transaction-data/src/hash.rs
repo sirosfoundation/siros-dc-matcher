@@ -93,7 +93,8 @@ pub(crate) enum Accepted {
 }
 
 /// Why an entry's `transaction_data_hashes_alg` is refused.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum HashesAlgFault {
     /// The member is neither an array nor a string.
     WrongType,
@@ -117,10 +118,6 @@ impl HashesAlgFault {
         }
     }
 }
-
-siros_codec::display_code!(HashesAlgFault);
-
-impl std::error::Error for HashesAlgFault {}
 
 /// Whether a KB-JWT carries `transaction_data_hashes_alg` (B.3.3.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

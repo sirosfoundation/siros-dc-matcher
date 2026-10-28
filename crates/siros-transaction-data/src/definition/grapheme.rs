@@ -7,8 +7,6 @@ use runs::RUNS;
 /// The first Hangul syllable, and how many there are.
 const HANGUL_FIRST: u32 = 0xAC00;
 const HANGUL_SYLLABLES: u32 = 11_172;
-/// The syllables of one leading consonant: an LV syllable, then its LVT syllables.
-const HANGUL_PER_LEAD: u32 = 28;
 
 /// The grapheme break property of a character, with its Indic conjunct break where GB9c reads
 /// it.
@@ -68,7 +66,8 @@ impl Property {
             .checked_sub(HANGUL_FIRST)
             .filter(|&syllable| syllable < HANGUL_SYLLABLES)
         {
-            return if syllable % HANGUL_PER_LEAD == 0 {
+            // The 28 syllables of one leading consonant: an LV syllable, then its LVT syllables.
+            return if syllable % 28 == 0 {
                 Self::Lv
             } else {
                 Self::Lvt

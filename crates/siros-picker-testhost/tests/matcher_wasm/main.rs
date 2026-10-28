@@ -20,6 +20,7 @@ use siros_picker_testhost::{run, Invocation};
 
 mod bytes_read;
 mod corpus;
+mod credential_reads;
 mod differential;
 mod families;
 mod key_free;

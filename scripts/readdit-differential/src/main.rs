@@ -9,6 +9,11 @@ use siros_zkp_req_nym_auth::testing::{
 const PROOF_TIME: &str = "2026-10-09T12:00:00Z";
 const PROOF: [u8; 64] = [7; 64];
 
+#[expect(
+    clippy::expect_used,
+    reason = "the inputs are this file's fixed credential, session and presentation; a refusal \
+              by readdit means its pinned code changed, and no vector can be recorded from it"
+)]
 fn longfellow(credential: &str, thumbprint: &[u8; 32]) -> Value {
     use nym_longfellow::{circuit, handover, mdoc, presentation, witness, x509};
     let transcript = handover::session_transcript(CLIENT_ID, NONCE, Some(thumbprint), RESPONSE_URI);
@@ -56,6 +61,11 @@ fn longfellow(credential: &str, thumbprint: &[u8; 32]) -> Value {
     })
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the inputs are this file's fixed credential, session and presentation; a refusal \
+              by readdit means its pinned code changed, and no vector can be recorded from it"
+)]
 fn vega(credential: &str, thumbprint: &[u8; 32]) -> Value {
     use nym_vega::{circuit, handover, mdoc, x509};
     use vega_age::pseudonym;
@@ -91,6 +101,11 @@ fn vega(credential: &str, thumbprint: &[u8; 32]) -> Value {
     })
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "the inputs are this file's fixed credential, session and presentation; a refusal \
+              by readdit means its pinned code changed, and no vector can be recorded from it"
+)]
 fn main() {
     let ds = Issuer::root(0x11, "Test Document Signer");
     let credential = issue(&ds, &Spec::default());

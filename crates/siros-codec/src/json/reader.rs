@@ -68,60 +68,28 @@ impl JsonNumber {
 }
 
 /// Why bytes are no JSON value this reader holds.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum ReadFault {
     /// The bytes are no JSON text.
+    #[error(transparent)]
     Text(JsonTextError),
     /// A number has no finite binary64 value.
+    #[error("a number beyond binary64")]
     NumberUnrepresentable,
     /// Objects and arrays nest deeper than [`MAX_DEPTH`].
+    #[error("nested deeper than {MAX_DEPTH}")]
     TooDeep,
 }
 
-impl fmt::Display for ReadFault {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Text(error) => error.fmt(f),
-            Self::NumberUnrepresentable => f.write_str("a number beyond binary64"),
-            Self::TooDeep => write!(f, "nested deeper than {MAX_DEPTH}"),
-        }
-    }
-}
-
-impl std::error::Error for ReadFault {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Text(error) => Some(error),
-            Self::NumberUnrepresentable | Self::TooDeep => None,
-        }
-    }
-}
-
 /// Why bytes are no JSON value whose objects name each member once.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum JsonFault {
     /// The bytes are no JSON value this reader holds.
+    #[error(transparent)]
     Read(ReadFault),
     /// An object repeats this member name.
+    #[error("member {0:?} repeated")]
     RepeatedMember(String),
-}
-
-impl fmt::Display for JsonFault {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Read(fault) => fault.fmt(f),
-            Self::RepeatedMember(name) => write!(f, "member {name:?} repeated"),
-        }
-    }
-}
-
-impl std::error::Error for JsonFault {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Read(fault) => Some(fault),
-            Self::RepeatedMember(_) => None,
-        }
-    }
 }
 
 impl Json {

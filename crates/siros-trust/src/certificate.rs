@@ -95,53 +95,59 @@ pub enum NameField {
 }
 
 /// Why a subject key declared on P-256 or P-384 is no key of its curve.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum PublicKeyFault {
     /// `subjectPublicKey` is a BIT STRING of a partial byte.
+    #[error("`subjectPublicKey` is a BIT STRING of a partial byte")]
     Bits,
     /// The bytes are no SEC 1 point of P-256.
+    #[error("the bytes are no SEC 1 point of P-256")]
     P256,
     /// The bytes are no SEC 1 point of P-384.
+    #[error("the bytes are no SEC 1 point of P-384")]
     P384,
 }
 
 /// Why a key identifier extension gives no keyIdentifier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum KeyIdentifierFault {
     /// The extension does not decode.
-    Der(der::Error),
+    #[error("the extension does not decode")]
+    Der(#[source] der::Error),
     /// The keyIdentifier is no keyIdentifier.
-    KeyIdentifier(KeyIdentifierError),
+    #[error("the keyIdentifier is no keyIdentifier")]
+    KeyIdentifier(#[source] KeyIdentifierError),
 }
 
 /// Why bytes are no certificate issuer trust reads.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum CertificateError {
     /// The bytes are not one DER X.509 certificate.
-    Der(der::Error),
+    Der(#[source] der::Error),
     /// `signatureAlgorithm` differs from the `signature` field of `tbsCertificate` (RFC 5280,
     /// Section 4.1.1.2).
     AlgorithmMismatch,
     /// The signature is not a BIT STRING of whole bytes.
     Signature,
     /// This name does not encode.
-    Name(NameField, der::Error),
+    Name(NameField, #[source] der::Error),
     /// This time of the validity period lies outside 0000 to 9999.
     Validity(ValidityTime),
     /// The subject's key is declared P-256 or P-384 and is no key of that curve.
-    PublicKey(PublicKeyFault),
+    PublicKey(#[source] PublicKeyFault),
     /// The certificate holds the extension of this identifier twice (RFC 5280, Section 4.2).
     ExtensionRepeated(ObjectIdentifier),
     /// basicConstraints does not decode.
-    BasicConstraints(der::Error),
+    BasicConstraints(#[source] der::Error),
     /// keyUsage does not decode.
-    KeyUsage(der::Error),
+    KeyUsage(#[source] der::Error),
     /// extKeyUsage does not decode.
-    ExtendedKeyUsage(der::Error),
+    ExtendedKeyUsage(#[source] der::Error),
     /// The AuthorityKeyIdentifier extension gives no keyIdentifier.
-    AuthorityKeyIdentifier(KeyIdentifierFault),
+    AuthorityKeyIdentifier(#[source] KeyIdentifierFault),
     /// The SubjectKeyIdentifier extension gives no keyIdentifier.
-    SubjectKeyIdentifier(KeyIdentifierFault),
+    SubjectKeyIdentifier(#[source] KeyIdentifierFault),
 }
 
 impl CertificateError {
@@ -165,31 +171,9 @@ impl CertificateError {
     }
 }
 
-siros_codec::display_code!(CertificateError);
-
-impl std::error::Error for CertificateError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Der(e)
-            | Self::Name(_, e)
-            | Self::BasicConstraints(e)
-            | Self::KeyUsage(e)
-            | Self::ExtendedKeyUsage(e)
-            | Self::AuthorityKeyIdentifier(KeyIdentifierFault::Der(e))
-            | Self::SubjectKeyIdentifier(KeyIdentifierFault::Der(e)) => Some(e),
-            Self::AuthorityKeyIdentifier(KeyIdentifierFault::KeyIdentifier(e))
-            | Self::SubjectKeyIdentifier(KeyIdentifierFault::KeyIdentifier(e)) => Some(e),
-            Self::AlgorithmMismatch
-            | Self::Signature
-            | Self::Validity(_)
-            | Self::PublicKey(_)
-            | Self::ExtensionRepeated(_) => None,
-        }
-    }
-}
-
 /// Why a certificate is not issued by another.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum IssuanceRefusal {
     /// The certificate names another issuer than the other's subject.
     IssuerName,
@@ -218,10 +202,6 @@ impl IssuanceRefusal {
         }
     }
 }
-
-siros_codec::display_code!(IssuanceRefusal);
-
-impl std::error::Error for IssuanceRefusal {}
 
 impl Certificate {
     /// The certificate `der`.

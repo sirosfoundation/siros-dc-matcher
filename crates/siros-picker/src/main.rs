@@ -14,7 +14,9 @@
 //! than merely discouraged, and why the release profile aborts instead of
 //! unwinding. An input that does not read is a diagnostic. A broken guarantee
 //! of another component is a bug that no entry set recovers from: it panics,
-//! each site under an `#[expect]` that names the guarantee.
+//! each site under an `#[expect]` that names the guarantee. The host's
+//! guarantees are among them: `android-credman` turns a host that breaks its
+//! ABI into a panic, and an input too large to allocate traps.
 //!
 //! # Two host behaviours every emitter must respect
 //!
@@ -28,6 +30,9 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 #![deny(clippy::indexing_slicing)]
+// A panicking std method that clippy.toml names takes an #[expect] with the
+// reason it cannot recover, as each panic of the matcher does.
+#![cfg_attr(not(test), deny(clippy::disallowed_methods))]
 // Off the wasm target there is no host, and nothing reaches the decision path:
 // the test host runs it in the built module. The wasm build, which CI lints,
 // keeps dead code an error.

@@ -56,11 +56,13 @@ pub enum AgeRange {
 }
 
 /// Why a `range` is invalid.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum RangeError {
     /// The text breaks the syntax `age "-" age / age "+" / age "-"`.
+    #[error("the text breaks the syntax `age \"-\" age / age \"+\" / age \"-\"`")]
     Syntax,
     /// `A-B` with A greater than B.
+    #[error("`A-B` with A greater than B")]
     Inverted,
 }
 

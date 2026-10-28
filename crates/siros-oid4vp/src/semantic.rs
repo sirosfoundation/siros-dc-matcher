@@ -44,11 +44,12 @@ impl Person {
 pub struct SemanticIdentifier(String);
 
 /// Why a certificate gives no semantics identifier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum SemanticIdError {
     /// The certificate policies extension does not decode.
     #[cfg(feature = "crypto")]
-    Policies(der::Error),
+    Policies(#[source] der::Error),
     /// No certificate policy says whether the subject is a natural or a legal person.
     Unclassified,
     /// The certificate policies say both.
@@ -60,7 +61,7 @@ pub enum SemanticIdError {
     /// A `serialNumber` that is not a `PrintableString`, or an `organizationIdentifier` that is
     /// no `DirectoryString` of UTF-8 or printable text.
     #[cfg(feature = "crypto")]
-    Encoding(der::Error),
+    Encoding(#[source] der::Error),
     /// The value starts with no identity type reference of the person.
     TypeReference,
     /// The country code is not two uppercase letters.
@@ -95,10 +96,6 @@ impl SemanticIdError {
         }
     }
 }
-
-siros_codec::display_code!(SemanticIdError);
-
-impl std::error::Error for SemanticIdError {}
 
 impl SemanticIdentifier {
     /// The semantics identifier `text` of a `person`.

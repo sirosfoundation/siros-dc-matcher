@@ -14,7 +14,8 @@ use crate::path::PathRefusal;
 use crate::store::TrustStore;
 
 /// Why an authority does not admit a credential's issuer, from its chain and the store.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum ChainRefusal {
     /// The credential carries no issuer chain: an SD-JWT VC without `x5c`.
     NoChain,
@@ -23,7 +24,7 @@ pub enum ChainRefusal {
     /// The store has no entry of the authority's type and value.
     NoStoreEntry,
     /// The chain has no path to a certificate of the entry.
-    Path(PathRefusal),
+    Path(#[source] PathRefusal),
 }
 
 impl ChainRefusal {
@@ -38,10 +39,6 @@ impl ChainRefusal {
         }
     }
 }
-
-siros_codec::display_code!(ChainRefusal);
-
-impl std::error::Error for ChainRefusal {}
 
 /// A credential's issuer chain and the trust store, at a time.
 struct ChainAt<'a> {

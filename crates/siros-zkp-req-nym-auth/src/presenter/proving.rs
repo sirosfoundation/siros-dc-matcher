@@ -25,44 +25,20 @@ use crate::request::NymAuthRequest;
 use crate::system::{pair_code, Unsupported};
 use crate::verifier_id::{pseudonym_sha256, verifier_input, ProverInput, PseudonymValue};
 
-/// A host input this presenter cannot use. It is a defect of the host, never of the request.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum HostError {
-    /// The attestation was tested at another date than the pair's proof date.
-    Time,
-}
-
-impl HostError {
-    /// A stable identifier.
-    #[must_use]
-    pub fn code(self) -> &'static str {
-        match self {
-            Self::Time => "time",
-        }
-    }
-}
-
-impl fmt::Display for HostError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "host input: {}", self.code())
-    }
-}
-
-impl std::error::Error for HostError {}
-
 /// Why no presentation was made.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum ProveError {
-    /// An input of the host.
-    Host(HostError),
     /// The attestation is usable for another query than the answer's.
     OtherQuery,
+    /// The attestation was tested at another date than the pair's proof date.
+    ProofDate,
     /// The pair is no longer usable for its option.
-    NotUsable(PairRefusal<Unsupported>),
+    NotUsable(#[source] PairRefusal<Unsupported>),
     /// The credential fails for the option.
     Rejected(Vec<ZkpError>),
     /// The prover made no proof.
-    Prover(ProverFailure),
+    Prover(#[source] ProverFailure),
     /// The prover's pseudonym differs from the catalogue's.
     PseudonymMismatch,
     /// The prover's `zk_proof` breaks the proof backend's length rules.
@@ -76,13 +52,13 @@ impl ProveError {
         siros_zkp_req::ErrorCode::AccessDenied
     }
 
-    /// A stable identifier: the code of the host input, the pair refusal or the prover;
-    /// `credential` for a credential that fails, with its codes in the variant.
+    /// A stable identifier: the code of the pair refusal or the prover; `credential` for a
+    /// credential that fails, with its codes in the variant.
     #[must_use]
     pub fn code(&self) -> &'static str {
         match self {
-            Self::Host(e) => e.code(),
             Self::OtherQuery => "other_query",
+            Self::ProofDate => "proof_date",
             Self::NotUsable(refusal) => pair_code(refusal),
             Self::Rejected(_) => "credential",
             Self::Prover(e) => e.code(),
@@ -92,23 +68,13 @@ impl ProveError {
     }
 }
 
-siros_codec::display_code!(ProveError);
-
-impl std::error::Error for ProveError {}
-
 impl From<Unanswerable> for ProveError {
     fn from(e: Unanswerable) -> Self {
         match e {
             Unanswerable::OtherQuery => Self::OtherQuery,
-            Unanswerable::ProofDate => Self::Host(HostError::Time),
+            Unanswerable::ProofDate => Self::ProofDate,
             Unanswerable::Failed(errors) => Self::Rejected(errors),
         }
-    }
-}
-
-impl From<HostError> for ProveError {
-    fn from(e: HostError) -> Self {
-        Self::Host(e)
     }
 }
 

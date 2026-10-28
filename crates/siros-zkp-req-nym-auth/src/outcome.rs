@@ -6,12 +6,13 @@ use siros_zkp_req::{ItemIndex, ReqSetIndex, RequestRule};
 use crate::catalogue::CatalogueRule;
 
 /// A rule a request breaks: `zkp_req`'s or the catalogue's (`invalid_request`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum InvalidRequest {
     /// A rule of `zkp_req`.
-    Protocol(RequestRule),
+    Protocol(#[from] RequestRule),
     /// A rule of the nym_auth catalogue.
-    Catalogue(CatalogueRule),
+    Catalogue(#[from] CatalogueRule),
 }
 
 impl InvalidRequest {
@@ -21,22 +22,6 @@ impl InvalidRequest {
             Self::Protocol(rule) => rule.code(),
             Self::Catalogue(rule) => rule.code(),
         }
-    }
-}
-
-siros_codec::display_code!(InvalidRequest);
-
-impl std::error::Error for InvalidRequest {}
-
-impl From<RequestRule> for InvalidRequest {
-    fn from(rule: RequestRule) -> Self {
-        Self::Protocol(rule)
-    }
-}
-
-impl From<CatalogueRule> for InvalidRequest {
-    fn from(rule: CatalogueRule) -> Self {
-        Self::Catalogue(rule)
     }
 }
 
@@ -86,7 +71,8 @@ impl CredentialCode {
 
 /// Why a credential cannot answer an option. For the User only: the Verifier receives
 /// `access_denied` without a description.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum ZkpError {
     /// An item fails.
     Item {
@@ -110,5 +96,3 @@ impl ZkpError {
         }
     }
 }
-
-siros_codec::display_code!(ZkpError);

@@ -16,7 +16,8 @@ pub struct Answer<'q> {
 }
 
 /// Why an attestation does not answer an option.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum Unanswerable {
     /// The attestation is usable for the authorities of another query than the pair's: another
     /// `id`, or other `trusted_authorities`.
@@ -38,10 +39,6 @@ impl Unanswerable {
         }
     }
 }
-
-siros_codec::display_code!(Unanswerable);
-
-impl std::error::Error for Unanswerable {}
 
 impl<'q> Answer<'q> {
     /// The answer of `pair`'s option by `attestation`, whose `ssc` `secret_seed` opens. The

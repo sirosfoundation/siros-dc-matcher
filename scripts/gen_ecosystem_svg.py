@@ -1,9 +1,18 @@
 """Writes docs/ecosystem.svg: the layers of the wallet core, its artifacts and its host.
 
-Run from the repository root: python3 scripts/gen_ecosystem_svg.py docs/ecosystem.svg
+    python3 scripts/gen_ecosystem_svg.py docs/ecosystem.svg
+
+The output is an `.svg` path inside this repository, in a directory that
+exists. Exits 2 on a refused argument.
 """
+from __future__ import annotations
+
+import argparse
 import sys
+from collections.abc import Sequence
 from html import escape
+
+from repo_paths import PathRefused, new_file
 
 W = 1440
 LABEL_X, CONTENT_X, CONTENT_W = 32, 210, 956
@@ -112,20 +121,27 @@ STYLE = """
 """
 
 
-def chip(out, key, x, y, w, name, desc):
-    out.append(f'<rect class="chip chip-{key}" x="{x}" y="{y}" width="{w}" height="{CHIP_H}" rx="9"/>')
+def chip(out: list[str], key: str, x: float, y: float, w: float, name: str, desc: str) -> None:
     cx = x + w / 2
-    out.append(f'<text class="name" x="{cx}" y="{y + 21}" text-anchor="middle">{escape(name)}</text>')
-    out.append(f'<text class="desc" x="{cx}" y="{y + 38}" text-anchor="middle">{escape(desc)}</text>')
+    out.extend([
+        f'<rect class="chip chip-{key}" x="{x}" y="{y}" width="{w}" height="{CHIP_H}" rx="9"/>',
+        f'<text class="name" x="{cx}" y="{y + 21}" text-anchor="middle">{escape(name)}</text>',
+        f'<text class="desc" x="{cx}" y="{y + 38}" text-anchor="middle">{escape(desc)}</text>',
+    ])
 
 
-def band(out, key, label, caption, rows, top):
+Row = list[tuple[str, str]]
+
+
+def band(out: list[str], key: str, label: str, caption: str, rows: list[Row], top: float) -> float:
     pad = 14
     height = pad * 2 + len(rows) * CHIP_H + (len(rows) - 1) * 10
-    out.append(f'<rect class="band-{key}" x="16" y="{top}" width="{BAND_RIGHT - 16}" height="{height}" rx="14"/>')
     mid = top + height / 2
-    out.append(f'<text class="layer" x="{LABEL_X}" y="{mid - 2}">{escape(label)}</text>')
-    out.append(f'<text class="caption" x="{LABEL_X}" y="{mid + 18}">{escape(caption)}</text>')
+    out.extend([
+        f'<rect class="band-{key}" x="16" y="{top}" width="{BAND_RIGHT - 16}" height="{height}" rx="14"/>',
+        f'<text class="layer" x="{LABEL_X}" y="{mid - 2}">{escape(label)}</text>',
+        f'<text class="caption" x="{LABEL_X}" y="{mid + 18}">{escape(caption)}</text>',
+    ])
     for i, row in enumerate(rows):
         y = top + pad + i * (CHIP_H + 10)
         columns = 4 if len(row) > 1 else 1
@@ -135,10 +151,10 @@ def band(out, key, label, caption, rows, top):
     return top + height
 
 
-def main(path):
-    out = []
-    y = 92
-    tops = {}
+def render() -> str:
+    out: list[str] = []
+    y: float = 92
+    tops: dict[str, float] = {}
     for key, label, caption, rows in BANDS:
         tops[key] = y
         bottom = band(out, key, label, caption, rows, y)
@@ -148,22 +164,28 @@ def main(path):
 
     # The host, beside the core layers.
     host_top, host_bottom = tops["l4"], tops["l0_end"]
-    out.append(f'<rect class="host" x="{HOST_X}" y="{host_top}" width="{HOST_W}" height="{host_bottom - host_top}" rx="14"/>')
-    out.append(f'<text class="layer" x="{HOST_X + 18}" y="{host_top + 34}">Host</text>')
-    out.append(f'<text class="caption" x="{HOST_X + 18}" y="{host_top + 54}">each platform</text>')
+    out.extend([
+        f'<rect class="host" x="{HOST_X}" y="{host_top}" width="{HOST_W}" height="{host_bottom - host_top}" rx="14"/>',
+        f'<text class="layer" x="{HOST_X + 18}" y="{host_top + 34}">Host</text>',
+        f'<text class="caption" x="{HOST_X + 18}" y="{host_top + 54}">each platform</text>',
+    ])
     step = (host_bottom - host_top - 120) / (len(HOST_ITEMS) - 1)
     for i, (name, desc) in enumerate(HOST_ITEMS):
         iy = host_top + 92 + i * step
-        out.append(f'<text class="name" x="{HOST_X + 18}" y="{iy}">{escape(name)}</text>')
-        out.append(f'<text class="desc" x="{HOST_X + 18}" y="{iy + 17}">{escape(desc)}</text>')
+        out.extend([
+            f'<text class="name" x="{HOST_X + 18}" y="{iy}">{escape(name)}</text>',
+            f'<text class="desc" x="{HOST_X + 18}" y="{iy + 17}">{escape(desc)}</text>',
+        ])
 
     # Inputs and effects between the core and the host.
     ay = (host_top + host_bottom) / 2
     x1, x2 = BAND_RIGHT + 8, HOST_X - 8
-    out.append(f'<path class="arrow" d="M {x1} {ay - 6} H {x2}"/>')
-    out.append(f'<path class="head" d="M {x2 + 4} {ay - 6} l -8 -4 v 8 z"/>')
-    out.append(f'<path class="arrow" d="M {x2} {ay + 6} H {x1}"/>')
-    out.append(f'<path class="head" d="M {x1 - 4} {ay + 6} l 8 -4 v 8 z"/>')
+    out.extend([
+        f'<path class="arrow" d="M {x1} {ay - 6} H {x2}"/>',
+        f'<path class="head" d="M {x2 + 4} {ay - 6} l -8 -4 v 8 z"/>',
+        f'<path class="arrow" d="M {x2} {ay + 6} H {x1}"/>',
+        f'<path class="head" d="M {x1 - 4} {ay + 6} l 8 -4 v 8 z"/>',
+    ])
 
     note = ("Dependencies point down the layers. The core is sans-IO: the host supplies its inputs "
             "and answers its Fetch, Sign and Trust effects.")
@@ -180,9 +202,23 @@ def main(path):
         '<text class="title" x="32" y="48">SIROS wallet core</text>',
         '<text class="subtitle" x="32" y="72">The Rust workspace in layers, what it ships, and what each platform provides</text>',
     ]
-    with open(path, "w", encoding="utf-8") as f:
-        f.write("\n".join(head + out + ["</svg>", ""]))
+    return "\n".join(head + out + ["</svg>", ""])
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Write the diagram of the wallet core's layers, artifacts and host.")
+    parser.add_argument("output", metavar="OUT.svg",
+                        help="the .svg file to write, inside this repository")
+    arguments = parser.parse_args(argv)
+    try:
+        path = new_file(arguments.output, ".svg")
+    except PathRefused as refused:
+        parser.error(str(refused))
+    with path.open("w", encoding="utf-8") as svg:
+        svg.write(render())
+    return 0
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    sys.exit(main())

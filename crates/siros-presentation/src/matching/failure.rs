@@ -9,12 +9,13 @@ use super::{Answered, Exclusion, ZkpRefusal};
 use crate::credential::MatchCredential;
 
 /// Why a Credential Query has no candidate whatever the wallet holds.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum QueryRefusal {
     /// `trusted_authorities` holds an `aki` value that encodes no keyIdentifier (TR3).
-    Authorities(AuthorityError),
+    Authorities(#[source] AuthorityError),
     /// The `zkp_req` query is refused.
-    Zkp(ZkpRefusal),
+    Zkp(#[source] ZkpRefusal),
 }
 
 impl QueryRefusal {
@@ -35,19 +36,17 @@ impl QueryRefusal {
     }
 }
 
-siros_codec::display_code!(QueryRefusal);
-
-impl std::error::Error for QueryRefusal {}
-
 /// Why a request has no offer. `U` is why a query's authorities refuse an issuer, `R` why a
 /// `zkp_req` candidate answers no option.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum Failure<U, R> {
     /// A Credential Query is refused.
     Refused {
         /// The query.
         query: QueryId,
         /// Why.
+        #[source]
         refusal: QueryRefusal,
     },
     /// Credentials of a query's format and type exist, and the query excludes each.

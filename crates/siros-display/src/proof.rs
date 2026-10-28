@@ -21,7 +21,9 @@ const UNVERIFIED: &str = "(unverified request)";
 ///
 /// # Errors
 ///
-/// [`DisplayError::OptionItemUnknown`] when `option` names an item `query` lacks.
+/// - [`DisplayError::OptionItemUnknown`] when `option` names an item `query` lacks: it is
+///   another query's option.
+/// - [`DisplayError::Text`] when a label or a detail is unsafe to show.
 // `inline` makes the matcher compile this function with its own copies of the std functions it
 // calls. Compiled here, it brings a second copy of each into matcher.wasm.
 #[inline]
@@ -43,6 +45,10 @@ pub fn rows(query: &ZkpReqQuery, option: &QueryOption) -> Result<Vec<Field>, Dis
 }
 
 /// The `_req` items `option` names, in the Verifier's order.
+///
+/// # Errors
+///
+/// [`DisplayError::OptionItemUnknown`] for an item `query` lacks.
 #[inline]
 fn items<'q>(
     query: &'q ZkpReqQuery,
@@ -51,7 +57,7 @@ fn items<'q>(
     option.items().iter().map(move |&index| {
         query
             .item(index)
-            .ok_or(DisplayError::OptionItemUnknown(index.value()))
+            .ok_or(DisplayError::OptionItemUnknown(index))
     })
 }
 
@@ -108,7 +114,8 @@ impl ProofRow {
 ///
 /// # Errors
 ///
-/// - [`DisplayError::OptionItemUnknown`] when `option` names an item `query` lacks.
+/// - [`DisplayError::OptionItemUnknown`] when `option` names an item `query` lacks: it is
+///   another query's option.
 /// - [`DisplayError::Text`] when a label or a detail is unsafe to show or too long.
 pub fn verified_rows(
     query: &ZkpReqQuery,

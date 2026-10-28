@@ -47,7 +47,8 @@ impl ClientIdPrefix {
 }
 
 /// Why a `client_id` is not one this wallet supports (Section 5.9).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum ClientIdError {
     /// The `client_id` has no `:`: a pre-registered client.
     Unprefixed,
@@ -74,10 +75,6 @@ impl ClientIdError {
         }
     }
 }
-
-siros_codec::display_code!(ClientIdError);
-
-impl std::error::Error for ClientIdError {}
 
 /// A `client_id` with a supported prefix and a non-empty value.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

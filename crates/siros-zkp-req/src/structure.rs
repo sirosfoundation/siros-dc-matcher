@@ -2,8 +2,6 @@
 //! `zkp_req`, Section 4.1. Steps 6 to 8 build the statement and verify the proof; the system
 //! defines them.
 
-use std::fmt;
-
 use siros_codec::cbor::Value;
 
 use crate::formats::ZkpFormats;
@@ -13,45 +11,36 @@ use crate::query::{QueryOption, ReqItem, ReqSets, ZkpReqQuery};
 use crate::select::System;
 
 /// Why a presentation breaks steps 1 to 5 of Section 4.1.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum StructureRejection {
     /// Step 1: the Verifier did not list `system_id`.
+    #[error("system_id is not listed")]
     SystemNotListed,
     /// Step 1: the Verifier did not list `proof_backend`.
+    #[error("proof_backend is not listed")]
     BackendNotListed,
     /// Step 2: the system does not run on the proof backend.
+    #[error("the system does not run on the proof backend")]
     SystemNotOnBackend,
     /// Step 3: the query has `_req_sets` and the presentation has no `req_set`.
+    #[error("req_set is missing")]
     ReqSetMissing,
     /// Step 3: the query has no `_req_sets` and the presentation has a `req_set`.
+    #[error("req_set is present for a query without _req_sets")]
     ReqSetExtra,
     /// Step 3: `req_set` names no option.
+    #[error("req_set names no option")]
     ReqSetUnknown,
     /// Step 4: the keys of `results` differ from the option's `return` handles.
+    #[error("results keys differ from the option's return handles")]
     ResultKeys,
     /// Step 5: an item whose function has no result has a value other than `true`.
+    #[error("a function without a result has a value other than true")]
     ResultNotTrue {
         /// The item's `_req` index.
         item: ItemIndex,
     },
 }
-
-impl fmt::Display for StructureRejection {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::SystemNotListed => "system_id is not listed",
-            Self::BackendNotListed => "proof_backend is not listed",
-            Self::SystemNotOnBackend => "the system does not run on the proof backend",
-            Self::ReqSetMissing => "req_set is missing",
-            Self::ReqSetExtra => "req_set is present for a query without _req_sets",
-            Self::ReqSetUnknown => "req_set names no option",
-            Self::ResultKeys => "results keys differ from the option's return handles",
-            Self::ResultNotTrue { .. } => "a function without a result has a value other than true",
-        })
-    }
-}
-
-impl std::error::Error for StructureRejection {}
 
 /// The answered option of `presentation` and its system, after steps 1 to 5 of Section 4.1.
 ///

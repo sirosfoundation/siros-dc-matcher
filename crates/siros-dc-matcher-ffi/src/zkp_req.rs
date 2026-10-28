@@ -120,7 +120,7 @@ fn invalid(code: &str) -> ZkpReqError {
 /// # Errors
 ///
 /// [`ZkpReqError::InvalidRequest`] for a rule of the policy or of the verifier identity, and
-/// [`ZkpReqError::Host`] for a thumbprint of no key in the request.
+/// [`ZkpReqError::Host`] for a thumbprint that is not 32 bytes or of no key in the request.
 #[uniffi::export]
 pub fn zkp_req_session(
     request_object_json: String,

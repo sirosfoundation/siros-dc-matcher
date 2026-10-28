@@ -16,7 +16,8 @@ use crate::verifier_id::{Intermediary, VerifierId, VerifierIdForm, VerifierIdRul
 const REGISTRATION_CERTIFICATE: &str = "registration_cert";
 
 /// A rule of the policy that a request breaks. Each makes the request invalid.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum PolicyRule {
     /// The request is not signed.
     Unsigned,
@@ -31,7 +32,7 @@ pub enum PolicyRule {
     /// `client_id` is missing or no string.
     ClientIdMissing,
     /// `client_id` is no Client Identifier this wallet supports (OpenID4VP 1.0, Section 5.9).
-    ClientId(ClientIdError),
+    ClientId(#[source] ClientIdError),
     /// `nonce` is missing or no string.
     NonceMissing,
     /// `nonce` is empty or holds a character outside the ASCII URL-safe ones (OpenID4VP 1.0,
@@ -69,18 +70,15 @@ impl PolicyRule {
     }
 }
 
-siros_codec::display_code!(PolicyRule);
-
-impl std::error::Error for PolicyRule {}
-
 /// Why a verified request is no nym_auth request: a rule of the policy, or of the Verifier
 /// identity. Each makes a nym_auth query invalid.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum RequestRefusal {
     /// A rule of the signed-request and encrypted-response policy.
-    Policy(PolicyRule),
+    Policy(#[source] PolicyRule),
     /// A rule of the `verifier_id` of the trust framework's form.
-    VerifierId(VerifierIdRule),
+    VerifierId(#[source] VerifierIdRule),
 }
 
 impl RequestRefusal {
@@ -93,10 +91,6 @@ impl RequestRefusal {
         }
     }
 }
-
-siros_codec::display_code!(RequestRefusal);
-
-impl std::error::Error for RequestRefusal {}
 
 /// What the policy reads of a request: the wallet's verified request, or the credential
 /// picker's unverified one.

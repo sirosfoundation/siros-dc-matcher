@@ -1,7 +1,5 @@
 //! Why a credential or a validity witness is refused. Each error has a stable code.
 
-use std::fmt;
-
 use siros_codec::Base64Error;
 use siros_mdoc::MdocError;
 use siros_sdjwt::ParseError;
@@ -60,34 +58,39 @@ impl RegisteredClaim {
 }
 
 /// Why a claim is refused.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum ClaimFault {
     /// It is absent.
+    #[error("it is absent")]
     Absent,
     /// It has another JSON type than its rule gives it.
+    #[error("it has another JSON type than its rule gives it")]
     WrongType,
 }
 
 /// Why a wallet state entry is no credential the core reads.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum CredentialError {
     /// `format` is none of `dc+sd-jwt`, `vc+sd-jwt` and `mso_mdoc`.
     UnsupportedFormat,
     /// `data` is no SD-JWT [`siros_sdjwt::SdJwt::parse`] reads. The code is its own.
-    SdJwt(ParseError),
+    SdJwt(#[from] ParseError),
     /// `data` is no mdoc [`siros_mdoc::Mdoc::parse`] reads. The code is its own.
-    Mdoc(MdocError),
+    Mdoc(#[from] MdocError),
     /// The SD-JWT VC has no `vct`, or its `vct` is not a string (SD-JWT VC, Section 2.2.2.3).
-    Vct(ClaimFault),
+    Vct(#[source] ClaimFault),
     /// The SD-JWT VC discloses this registered claim, or one of its sub-claims, selectively
     /// (SD-JWT VC, Section 2.2.2.3).
+    #[error("{code}: {claim}", code = self.code(), claim = .0.name())]
     SelectivelyDisclosed(RegisteredClaim),
     /// The SD-JWT VC's `cnf` is not a JSON object (RFC 7800, Section 3.1).
     Cnf,
     /// The SD-JWT VC's `cnf` holds no P-256 `jwk`. The code is its own.
-    HolderKey(HolderKeyError),
+    HolderKey(#[source] HolderKeyError),
     /// The SD-JWT VC's `nbf` or `exp` is not a NumericDate of years 0000 to 9999 (RFC 7519,
     /// Section 2).
+    #[error("{code}: {claim}", code = self.code(), claim = .0.name())]
     NumericDate(RegisteredClaim),
     /// An mdoc value holds this tag, other than 0 (`tdate`) and 1004 (`full-date`).
     Tag(CborTag),
@@ -102,7 +105,7 @@ pub enum CredentialError {
     Undefined,
     #[cfg(feature = "chain")]
     /// The issuer chain does not parse (TR2). The code is its own.
-    IssuerChain(ChainError),
+    IssuerChain(#[from] ChainError),
 }
 
 impl CredentialError {
@@ -129,58 +132,6 @@ impl CredentialError {
     }
 }
 
-impl fmt::Display for CredentialError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::SelectivelyDisclosed(claim) | Self::NumericDate(claim) => {
-                write!(f, "{}: {}", self.code(), claim.name())
-            }
-            _ => f.write_str(self.code()),
-        }
-    }
-}
-
-impl std::error::Error for CredentialError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::SdJwt(e) => Some(e),
-            Self::Mdoc(e) => Some(e),
-            Self::HolderKey(e) => Some(e),
-            #[cfg(feature = "chain")]
-            Self::IssuerChain(e) => Some(e),
-            Self::UnsupportedFormat
-            | Self::Vct(_)
-            | Self::SelectivelyDisclosed(_)
-            | Self::Cnf
-            | Self::NumericDate(_)
-            | Self::Tag(_)
-            | Self::Tdate
-            | Self::FullDate
-            | Self::MapKey
-            | Self::Undefined => None,
-        }
-    }
-}
-
-impl From<ParseError> for CredentialError {
-    fn from(e: ParseError) -> Self {
-        Self::SdJwt(e)
-    }
-}
-
-#[cfg(feature = "chain")]
-impl From<ChainError> for CredentialError {
-    fn from(e: ChainError) -> Self {
-        Self::IssuerChain(e)
-    }
-}
-
-impl From<MdocError> for CredentialError {
-    fn from(e: MdocError) -> Self {
-        Self::Mdoc(e)
-    }
-}
-
 /// The number of a CBOR tag (RFC 8949, Section 3.4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CborTag(u64);
@@ -200,7 +151,8 @@ impl CborTag {
 }
 
 /// Why a credential is not usable at a given time.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum ValidityError {
     /// The time precedes `not_before`.
     NotYetValid,
@@ -219,10 +171,6 @@ impl ValidityError {
     }
 }
 
-siros_codec::display_code!(ValidityError);
-
-impl std::error::Error for ValidityError {}
-
 /// A coordinate of a JWK of an EC key (RFC 7518, Section 6.2.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Coordinate {
@@ -233,18 +181,22 @@ pub enum Coordinate {
 }
 
 /// Why a coordinate of the `jwk` is no 32 bytes of base64url.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum CoordinateFault {
     /// It is absent or not a string.
+    #[error("it is absent or not a string")]
     NotString,
     /// The string is not base64url.
-    Base64(Base64Error),
+    #[error("the string is not base64url")]
+    Base64(#[source] Base64Error),
     /// The bytes number this many, where a P-256 coordinate has 32.
+    #[error("the bytes number this many, where a P-256 coordinate has 32")]
     Length(usize),
 }
 
 /// Why an SD-JWT VC's `cnf` gives no P-256 holder key.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum HolderKeyError {
     /// `cnf` has no `jwk` object (RFC 7800, Section 3.2).
     Jwk,
@@ -253,7 +205,7 @@ pub enum HolderKeyError {
     /// The `jwk`'s `crv` is not `P-256` (RFC 7518, Section 6.2.1).
     Curve,
     /// The `jwk`'s `x` or `y` is not 32 bytes of base64url.
-    Coordinate(Coordinate, CoordinateFault),
+    Coordinate(Coordinate, #[source] CoordinateFault),
 }
 
 impl HolderKeyError {
@@ -267,7 +219,3 @@ impl HolderKeyError {
         }
     }
 }
-
-siros_codec::display_code!(HolderKeyError);
-
-impl std::error::Error for HolderKeyError {}

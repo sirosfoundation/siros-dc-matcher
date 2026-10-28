@@ -29,39 +29,32 @@ use android_credman::{
 use siros_presentation::OfferIndex;
 use siros_registration::{Diagnostics as Shown, Facts, IconRef, Registration};
 
-/// Why the picker shows less than a request asks for.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Why the picker shows less than a request asks for. Its text is one line for the diagnostic
+/// entry's subtitle.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum Unshown {
     /// No entry of the DC API request reads: why, entry by entry.
+    #[error("request: {0}")]
     Request(String),
     /// A Credential Query makes the request invalid: the refusal's code.
+    #[error("refused: {0}")]
     Refused(&'static str),
     /// The request's transaction data is refused: the refusal's code.
+    #[error("transaction data: {0}")]
     TransactionData(&'static str),
     /// The queries the transaction data targets have no candidate.
+    #[error("transaction data: credential_unavailable")]
     CredentialUnavailable,
     /// The matching gives no offer: the failure's code.
+    #[error("no offer: {0}")]
     Unmatched(&'static str),
     /// The rows of the matching's offer at this position do not show, which leaves it out:
     /// the error's code.
+    #[error("offer {0}: {1}")]
     Display(OfferIndex, &'static str),
     /// A part of the registration the request needs breaks a rule: the error's code.
+    #[error("registration: {0}")]
     Registration(&'static str),
-}
-
-impl Unshown {
-    /// One line for the diagnostic entry's subtitle.
-    fn message(&self) -> String {
-        match self {
-            Self::Request(why) => format!("request: {why}"),
-            Self::Refused(code) => format!("refused: {code}"),
-            Self::TransactionData(code) => format!("transaction data: {code}"),
-            Self::CredentialUnavailable => "transaction data: credential_unavailable".to_owned(),
-            Self::Unmatched(code) => format!("no offer: {code}"),
-            Self::Display(offer, code) => format!("offer {offer}: {code}"),
-            Self::Registration(code) => format!("registration: {code}"),
-        }
-    }
 }
 
 /// Whether the wallet registered with its diagnostics shown, and the icon they show.
@@ -100,7 +93,7 @@ impl Diagnostics {
             let title = C8String::from_str_lossy("[SIROS DEBUG] no match");
             // Picker subtitles are typically single-line and short. The message is written
             // terse and passed whole, so nothing important silently falls off the end.
-            let subtitle = C8String::from_str_lossy(&reason.message());
+            let subtitle = C8String::from_str_lossy(&reason.to_string());
             let entry = SetEntry::new(
                 &cred_id,
                 AnyEntry::Verification(VerificationDisplay {

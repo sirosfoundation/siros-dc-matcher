@@ -15,10 +15,11 @@ use zeroize::Zeroizing;
 const SSC: [&str; 2] = [MDOC_DOCTYPE, "ssc"];
 
 /// Why a credential gives no `secret_seed`. A credential without one answers no nym_auth query.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum NoSeed {
     /// The strict reader refuses an `auxiliary_data` value.
-    Entries(JsonFault),
+    Entries(#[source] JsonFault),
     /// An `auxiliary_data` value is no JSON array.
     EntriesNotArray,
     /// No `hash_commitment` entry names `ssc`.
@@ -34,7 +35,7 @@ pub enum NoSeed {
     /// The entry's `opening` is not a string.
     OpeningNotString,
     /// The entry's `opening` is not unpadded base64url.
-    OpeningNotBase64url(Base64Error),
+    OpeningNotBase64url(#[source] Base64Error),
     /// The entry's `opening` decodes to this many bytes, where a seed has 16.
     OpeningLength(usize),
 }
@@ -52,25 +53,6 @@ impl NoSeed {
             | Self::OpeningNotString
             | Self::OpeningNotBase64url(_)
             | Self::OpeningLength(_) => "seed_opening",
-        }
-    }
-}
-
-siros_codec::display_code!(NoSeed);
-
-impl std::error::Error for NoSeed {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Entries(fault) => Some(fault),
-            Self::OpeningNotBase64url(error) => Some(error),
-            Self::EntriesNotArray
-            | Self::Missing
-            | Self::Repeated
-            | Self::Algorithm
-            | Self::Encoding
-            | Self::OpeningAbsent
-            | Self::OpeningNotString
-            | Self::OpeningLength(_) => None,
         }
     }
 }
@@ -139,6 +121,8 @@ fn opening(entry: &Json) -> Result<SecretSeed, NoSeed> {
     if decoded.len() != seed.len() {
         return Err(NoSeed::OpeningLength(decoded.len()));
     }
-    seed.copy_from_slice(&decoded);
+    for (slot, byte) in seed.iter_mut().zip(decoded.iter()) {
+        *slot = *byte;
+    }
     Ok(SecretSeed::new(seed))
 }

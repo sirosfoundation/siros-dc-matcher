@@ -86,17 +86,3 @@ macro_rules! text_value {
         }
     };
 }
-
-/// Implements `Display` for each type, showing its stable code: what its `code()` returns.
-#[macro_export]
-macro_rules! display_code {
-    ($($name:ty),+ $(,)?) => {
-        $(
-            impl ::core::fmt::Display for $name {
-                fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-                    f.write_str(self.code())
-                }
-            }
-        )+
-    };
-}

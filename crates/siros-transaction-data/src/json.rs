@@ -16,8 +16,19 @@ impl Fields {
 
     /// Takes member `name`.
     pub(crate) fn take(&mut self, name: &str) -> Option<Json> {
-        let at = self.0.iter().position(|(n, _)| n == name)?;
-        Some(self.0.remove(at).1)
+        let mut taken = None;
+        self.0 = std::mem::take(&mut self.0)
+            .into_iter()
+            .filter_map(|(n, value)| {
+                if taken.is_none() && n == name {
+                    taken = Some(value);
+                    None
+                } else {
+                    Some((n, value))
+                }
+            })
+            .collect();
+        taken
     }
 
     /// Takes member `name`, which must be present.
@@ -146,14 +157,15 @@ pub(crate) fn canonical(value: &Json) -> Json {
 pub(crate) fn canonical_members(members: &[(String, Json)]) -> Vec<(String, Json)> {
     // An allocation that fails aborts: the members already fit in memory, and a wallet that
     // cannot hold their copy has nothing to fall back to.
-    let mut sorted: Vec<(String, Json)> = Vec::with_capacity(members.len());
+    let mut sorted: Vec<(String, Json)> = Vec::new();
     for (name, value) in members {
         // After the members that sort before or equal to it: equal names keep their order.
-        let at = sorted.partition_point(|(other, _)| {
+        let (mut before, after): (Vec<_>, Vec<_>) = sorted.into_iter().partition(|(other, _)| {
             other.encode_utf16().cmp(name.encode_utf16()) != std::cmp::Ordering::Greater
         });
-        // `Vec::insert` panics past the end; `partition_point` gives a position up to it.
-        sorted.insert(at, (name.clone(), canonical(value)));
+        before.push((name.clone(), canonical(value)));
+        before.extend(after);
+        sorted = before;
     }
     sorted
 }

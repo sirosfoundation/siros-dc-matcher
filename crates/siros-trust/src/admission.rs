@@ -2,8 +2,6 @@
 //! credential's issuer. The wallet applies it to the issuer chain and the trust store, the
 //! picker to the facts the wallet recorded (TR5).
 
-use std::fmt;
-
 use siros_dcql::{AuthorityType, QueryId};
 
 use crate::authority::{Authority, KeyIdentifier, QueryAuthorities, StoreAuthority};
@@ -42,16 +40,19 @@ pub enum Ground {
 }
 
 /// Why one authority of a query does not admit an issuer.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum Refusal<R> {
     /// The authority's `type` is none of `aki`, `etsi_tl` and `openid_federation`.
+    #[error("the authority's `type` is none of `aki`, `etsi_tl` and `openid_federation`")]
     Type(AuthorityType),
     /// The issuer's reason.
-    Issuer(R),
+    #[error("the issuer's reason")]
+    Issuer(#[source] R),
 }
 
 /// Why no authority of a query admits an issuer: the refusal of each, in the Verifier's order.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("issuer_not_admitted")]
 pub struct Unadmitted<R> {
     refusals: Vec<Refusal<R>>,
 }
@@ -63,14 +64,6 @@ impl<R> Unadmitted<R> {
         &self.refusals
     }
 }
-
-impl<R> fmt::Display for Unadmitted<R> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("issuer_not_admitted")
-    }
-}
-
-impl<R: fmt::Debug> std::error::Error for Unadmitted<R> {}
 
 /// An issuer the authorities of a query admit, as the picker learns it from the recorded facts
 /// (TR5).

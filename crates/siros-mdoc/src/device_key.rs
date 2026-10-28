@@ -5,7 +5,8 @@ use siros_codec::cbor::Item;
 use crate::error::DeviceKeyFault;
 
 /// Why bytes are no P-256 key.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum PointError {
     /// The bytes are not an uncompressed SEC 1 point of 32-byte coordinates.
     NotUncompressed,
@@ -20,10 +21,6 @@ impl PointError {
         }
     }
 }
-
-siros_codec::display_code!(PointError);
-
-impl std::error::Error for PointError {}
 
 /// A P-256 public key: its coordinates, big-endian.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -70,12 +67,10 @@ impl P256Key {
     /// The uncompressed SEC 1 point.
     #[must_use]
     pub fn sec1(&self) -> [u8; 65] {
-        let mut point = [0u8; 65];
-        let (prefix, coordinates) = point.split_at_mut(1);
-        let (x, y) = coordinates.split_at_mut(32);
-        prefix.copy_from_slice(&[0x04]);
-        x.copy_from_slice(&self.x);
-        y.copy_from_slice(&self.y);
+        let mut point = [0x04; 65];
+        for (to, from) in point.iter_mut().skip(1).zip(self.x.iter().chain(&self.y)) {
+            *to = *from;
+        }
         point
     }
 

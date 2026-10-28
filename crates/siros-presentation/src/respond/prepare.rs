@@ -71,8 +71,9 @@ impl<'p, 'a> Chosen<'p, 'a> {
     /// # Errors
     ///
     /// [`PresentationError`]: a member whose credential names no key pair or holder key, a key
-    /// without the factors a transaction requires, a nym_auth credential that no longer passes
-    /// its tests, or a presentation its format refuses.
+    /// whose KB-JWT carries `amr` without the factors the host reported (H3), a nym_auth
+    /// credential that no longer passes its tests, a presentation its format refuses, or a plan
+    /// that contradicts the matching it was built from.
     pub fn prepare(
         self,
         rng: &mut impl CryptoRngCore,
@@ -217,6 +218,12 @@ impl<'p, 'a> Chosen<'p, 'a> {
 
     /// The mdoc's selected elements, and the DeviceAuthentication its device key signs over the
     /// SessionTranscript of the request's `Handover` (A7).
+    ///
+    /// # Errors
+    ///
+    /// [`PresentationError::Pointer`] when a pointer of `claims` names no namespace and
+    /// element, and [`PresentationError::Disclosure`] when the elements are no disclosure of
+    /// `mdoc`: the claims select one element twice.
     fn mdoc(
         &self,
         mdoc: &'p Mdoc,
@@ -233,7 +240,7 @@ impl<'p, 'a> Chosen<'p, 'a> {
                     identifier,
                 })
             })
-            .try_collect()?;
+            .collect::<Result<_, PresentationError>>()?;
         let disclosure = mdoc.disclose(&elements, Vec::new())?;
         let transcript =
             SessionTranscript::new(self.planned.input.request.handover().session_transcript());
@@ -243,6 +250,11 @@ impl<'p, 'a> Chosen<'p, 'a> {
 
     /// The nym_auth statement of `choice` by `candidate`'s credential, admitted as the candidate
     /// carries it, in the request's session.
+    ///
+    /// # Errors
+    ///
+    /// [`Inconsistency::NymAuthRequest`] when the nym_auth policy refuses the request, and
+    /// [`Inconsistency::ZkpQuery`] when `member`'s query has no nym_auth query.
     fn proof(
         &self,
         member: &Offered<'p, 'a>,
@@ -255,7 +267,7 @@ impl<'p, 'a> Chosen<'p, 'a> {
             .planned
             .nym_auth
             .as_ref()
-            .map_err(|refusal| Inconsistency::NymAuthRequest(*refusal))?;
+            .map_err(|_| Inconsistency::NymAuthRequest)?;
         let zkp = member
             .answers
             .zkp()

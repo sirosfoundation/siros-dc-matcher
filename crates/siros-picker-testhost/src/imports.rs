@@ -43,21 +43,21 @@ pub(crate) fn add_credman(linker: &mut Linker<State>) -> Result<()> {
         },
     )?;
 
-    // Returns how many bytes were actually read, which is not necessarily the
-    // number asked for — a matcher may request past the end of the blob.
+    // The offset and the length are `size_t`, unsigned on wasm32. Returns the
+    // count the host reports, as `Invocation::credential_reads` answers.
     linker.func_wrap(
         "credman",
         "ReadCredentialsBuffer",
-        |mut c: Caller<'_, State>, ptr: i32, offset: i32, len: i32| -> Result<i32> {
-            let blob = c.data().input.credentials.clone();
-            let offset = usize::try_from(offset).context("matcher read at a negative offset")?;
-            let len = usize::try_from(len).context("matcher read a negative length")?;
-            let start = offset.min(blob.len());
-            let end = start.saturating_add(len).min(blob.len());
-            let slice = blob.get(start..end).unwrap_or_default().to_vec();
-            write_bytes(&mut c, ptr, &slice)?;
-            c.data_mut().out.credential_bytes += slice.len();
-            Ok(slice.len() as i32)
+        |mut c: Caller<'_, State>, ptr: i32, offset: u32, len: u32| -> Result<i32> {
+            let input = &c.data().input;
+            let (copied, reported) =
+                input
+                    .credential_reads
+                    .answer(&input.credentials, offset as usize, len as usize);
+            let copied = copied.to_vec();
+            write_bytes(&mut c, ptr, &copied)?;
+            c.data_mut().out.credential_bytes += copied.len();
+            i32::try_from(reported).context("a read count beyond i32")
         },
     )?;
 
@@ -71,9 +71,9 @@ pub(crate) fn add_credman(linker: &mut Linker<State>) -> Result<()> {
                 let i = &c.data().input;
                 (i.calling_package.clone(), i.origin.clone())
             };
-            let mut buf = vec![0u8; 256 + 512];
-            write_padded(&mut buf, 0, 256, &pkg);
-            write_padded(&mut buf, 256, 512, &origin);
+            let mut buf = Vec::with_capacity(256 + 512);
+            buf.extend_from_slice(&padded::<256>(&pkg));
+            buf.extend_from_slice(&padded::<512>(&origin));
             write_bytes(&mut c, ptr, &buf)
         },
     )?;
@@ -350,30 +350,37 @@ fn reached(c: &Caller<'_, State>, level: u32, function: &str) -> Result<()> {
 
 /// The entry a field or a level-5 to level-7 call names.
 ///
-/// A call for an entry that was never added is a matcher bug, and silently
-/// dropping it would hide exactly that bug. The credential id is checked as
-/// well: the platform keys these calls by credential id as well as set
-/// position, so a guest passing the wrong one produces calls that never
-/// attach in a real picker.
+/// The platform keys these calls by set, position and credential id: the
+/// alternatives at one position differ in their credential id alone. A call
+/// for an entry that was never added is a matcher bug, and silently dropping
+/// it would hide exactly that bug; a call with a credential id no alternative
+/// carries never attaches in a real picker.
 fn entry_at<'o>(
     out: &'o mut Captured,
     set_id: &str,
     index: i32,
     cred_id: &str,
 ) -> Result<&'o mut CapturedEntry> {
-    let entry = out
+    let at_position = |e: &CapturedEntry| e.set_id == set_id && e.index == index;
+    let added: Vec<String> = out
         .entries
+        .iter()
+        .filter(|e| at_position(e))
+        .map(|e| e.credential_id.clone())
+        .collect();
+    out.entries
         .iter_mut()
-        .find(|e| e.set_id == set_id && e.index == index)
-        .ok_or_else(|| anyhow::anyhow!("call for unknown entry {set_id}[{index}]"))?;
-    if cred_id != entry.credential_id {
-        return Err(anyhow::anyhow!(
-            "call for entry {set_id}[{index}] carries credential id {cred_id:?}, \
-             but the entry was added as {:?}",
-            entry.credential_id
-        ));
-    }
-    Ok(entry)
+        .find(|e| at_position(e) && e.credential_id == cred_id)
+        .ok_or_else(|| {
+            if added.is_empty() {
+                anyhow::anyhow!("call for unknown entry {set_id}[{index}]")
+            } else {
+                anyhow::anyhow!(
+                    "call for entry {set_id}[{index}] carries credential id {cred_id:?}, \
+                     but the entries there were added as {added:?}"
+                )
+            }
+        })
 }
 
 /// The guest's linear memory.
@@ -446,12 +453,13 @@ fn read_cstr(c: &mut Caller<'_, State>, ptr: i32) -> Result<String> {
     String::from_utf8(text.to_vec()).context("matcher passed a string that is no UTF-8")
 }
 
-/// Write `value` NUL-padded into a fixed-width ABI field.
-fn write_padded(buf: &mut [u8], offset: usize, width: usize, value: &str) {
-    let src = value.as_bytes();
-    let n = src.len().min(width.saturating_sub(1));
-    if let (Some(dst), Some(src)) = (buf.get_mut(offset..offset + n), src.get(..n)) {
-        // Both slices hold `n` bytes, the length `copy_from_slice` requires.
-        dst.copy_from_slice(src);
+/// `value` NUL-padded into a fixed-width ABI field, cut to leave the last
+/// byte NUL.
+fn padded<const WIDTH: usize>(value: &str) -> [u8; WIDTH] {
+    let mut field = [0u8; WIDTH];
+    let room = WIDTH.saturating_sub(1);
+    for (slot, byte) in field.iter_mut().zip(value.bytes().take(room)) {
+        *slot = byte;
     }
+    field
 }
