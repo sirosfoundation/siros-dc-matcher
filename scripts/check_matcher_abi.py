@@ -30,6 +30,7 @@ import argparse
 import sys
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from typing import ClassVar
 
 from repo_paths import PathRefused, existing_file
 from wasm_binary import (
@@ -115,7 +116,7 @@ class CalledFunction:
 
     name: str
     signature: Signature
-    kind = ExternKind.FUNC
+    kind: ClassVar[ExternKind] = ExternKind.FUNC
 
 
 @dataclass(frozen=True)
@@ -123,7 +124,7 @@ class AccessedMemory:
     """An export the host reads and writes."""
 
     name: str
-    kind = ExternKind.MEMORY
+    kind: ClassVar[ExternKind] = ExternKind.MEMORY
 
 
 # The host calls `_start` with no arguments and reads `memory`.

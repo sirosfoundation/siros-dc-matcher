@@ -48,7 +48,7 @@ TARGET_FIELDS = ("environ_get", "environ_sizes_get")
 
 
 class StripError(ValueError):
-    """A module this script does not rewrite."""
+    """A module outside the shape this script rewrites."""
 
 
 # ---- instructions -------------------------------------------------------
@@ -87,7 +87,7 @@ STEP_OVER: dict[Immediate, Callable[[Reader], object]] = {
 
 
 def opcodes(codes: Iterable[int], *immediates: Immediate) -> dict[int, tuple[Immediate, ...]]:
-    return {code: immediates for code in codes}
+    return dict.fromkeys(codes, immediates)
 
 
 OPCODES = {
@@ -159,14 +159,14 @@ def copy_instruction(reader: Reader, renumber: Renumbering, out: bytearray) -> i
     start = reader.offset
     opcode = reader.byte()
     immediates = immediates_of(reader, opcode, start)
-    out += reader.since(start)
+    out.extend(reader.since(start))
     for immediate in immediates:
         if immediate is FUNCTION:
-            out += encode_u32(renumber(reader.u32()))
+            out.extend(encode_u32(renumber(reader.u32())))
         else:
             operand_start = reader.offset
             STEP_OVER[immediate](reader)
-            out += reader.since(operand_start)
+            out.extend(reader.since(operand_start))
     return opcode
 
 
