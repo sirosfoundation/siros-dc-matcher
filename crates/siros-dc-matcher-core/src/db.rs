@@ -116,42 +116,31 @@ pub struct Claim {
 }
 
 /// Why a blob could not be read.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum DecodeError {
     /// The bytes end inside an item.
+    #[error("credential blob ends inside an item")]
     Truncated,
     /// The bytes are no CBOR at this offset.
+    #[error("credential blob is no CBOR at byte {0}")]
     Syntax(usize),
     /// The CBOR is not shaped like a database: where, when the reader knows, and what it found.
+    #[error(
+        "credential blob is no database{at}: {found}",
+        at = .0.map_or_else(String::new, |offset| format!(" at byte {offset}")),
+        found = .1
+    )]
     Shape(Option<usize>, String),
     /// Items nest deeper than the reader allows.
+    #[error("credential blob nests too deeply")]
     TooDeep,
     /// The blob's version is one this matcher does not understand.
     ///
     /// Carries the version so a diagnostic can say *which*, which is the
     /// difference between "the wallet is newer than the matcher" and "the blob
     /// is corrupt".
+    #[error("credential blob version {0} is newer than this matcher")]
     UnsupportedVersion(u32),
-}
-
-impl core::fmt::Display for DecodeError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::Truncated => write!(f, "credential blob ends inside an item"),
-            Self::Syntax(offset) => write!(f, "credential blob is no CBOR at byte {offset}"),
-            Self::Shape(Some(offset), found) => {
-                write!(
-                    f,
-                    "credential blob is no database at byte {offset}: {found}"
-                )
-            }
-            Self::Shape(None, found) => write!(f, "credential blob is no database: {found}"),
-            Self::TooDeep => write!(f, "credential blob nests too deeply"),
-            Self::UnsupportedVersion(v) => {
-                write!(f, "credential blob version {v} is newer than this matcher")
-            }
-        }
-    }
 }
 
 impl CredentialDatabase {

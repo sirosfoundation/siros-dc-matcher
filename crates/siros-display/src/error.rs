@@ -6,7 +6,8 @@ use crate::locale::LocaleError;
 use crate::text::TextError;
 
 /// Why display refuses an input.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum DisplayError {
     /// Text to show is unsafe or too long. The code is its own.
     Text(TextError),
@@ -79,45 +80,60 @@ pub enum DisplayError {
 }
 
 /// Why text is no numerical colour value of CSS Color Module Level 3, Section 4.2.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum ColourFault {
     /// The member is no string.
+    #[error("the member is no string")]
     NotString,
     /// The text after `#` is other than three or six hexadecimal digits.
+    #[error("the text after `#` is other than three or six hexadecimal digits")]
     Hexadecimal,
     /// The text has no `(`, or does not end with `)`.
+    #[error("the text has no `(`, or does not end with `)`")]
     Notation,
     /// The function is none of `rgb`, `rgba`, `hsl` and `hsla` with its number of arguments; it
     /// has this many.
+    #[error("the function is none of `rgb`, `rgba`, `hsl` and `hsla` with its number of arguments; it has this many")]
     Function(usize),
     /// The argument at this position is no `<integer>`, `<number>` or `<percentage>` as its
     /// place takes.
+    #[error("the argument at this position is no `<integer>`, `<number>` or `<percentage>` as its place takes")]
     Argument(usize),
 }
 
 /// The rule an array of metadata entries, or one of its entries, breaks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum EntryFault {
     /// The member is no array, or an empty one where it must hold an entry.
+    #[error("the member is no array, or an empty one where it must hold an entry")]
     NotArray,
     /// An entry is no JSON object.
+    #[error("an entry is no JSON object")]
     EntryNotObject,
     /// An entry lacks a member it requires.
+    #[error("an entry lacks a member it requires")]
     MemberMissing,
     /// A member of an entry has the wrong JSON type.
+    #[error("a member of an entry has the wrong JSON type")]
     MemberType,
 }
 
 /// The rule a `logo` breaks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum LogoFault {
     /// The logo is no JSON object.
+    #[error("the logo is no JSON object")]
     NotObject,
     /// `uri` is absent, or no `https:` URL with an authority or `data:` URI of visible ASCII.
+    #[error(
+        "`uri` is absent, or no `https:` URL with an authority or `data:` URI of visible ASCII"
+    )]
     Uri,
     /// `uri#integrity` is no non-empty string of visible ASCII and spaces.
+    #[error("`uri#integrity` is no non-empty string of visible ASCII and spaces")]
     Integrity,
     /// `alt_text` is no string.
+    #[error("`alt_text` is no string")]
     AltText,
 }
 
@@ -160,7 +176,3 @@ impl DisplayError {
         }
     }
 }
-
-siros_codec::display_code!(DisplayError);
-
-impl std::error::Error for DisplayError {}

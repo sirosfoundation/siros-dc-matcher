@@ -44,7 +44,8 @@ impl Person {
 pub struct SemanticIdentifier(String);
 
 /// Why a certificate gives no semantics identifier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum SemanticIdError {
     /// The certificate policies extension does not decode.
     #[cfg(feature = "crypto")]
@@ -95,10 +96,6 @@ impl SemanticIdError {
         }
     }
 }
-
-siros_codec::display_code!(SemanticIdError);
-
-impl std::error::Error for SemanticIdError {}
 
 impl SemanticIdentifier {
     /// The semantics identifier `text` of a `person`.

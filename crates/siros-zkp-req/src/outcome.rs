@@ -37,54 +37,69 @@ impl fmt::Display for ErrorCode {
 }
 
 /// What breaks the `meta` member a source format defines (Section 1.1).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum TypeValueFault {
     /// The member breaks its rule.
+    #[error("the member breaks its rule")]
     Member(MemberFault),
     /// The `type_values` list at this position breaks the rule of a non-empty array of
     /// strings.
+    #[error(
+        "the `type_values` list at this position breaks the rule of a non-empty array of strings"
+    )]
     List(ArrayIndex, MemberFault),
 }
 
 /// Why a member does not hold an identifier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum IdentifierFault<E> {
     /// The member is absent.
+    #[error("the member is absent")]
     Absent,
     /// The member is not a string.
+    #[error("the member is not a string")]
     NotString,
     /// The string breaks the identifier's syntax.
+    #[error("the string breaks the identifier's syntax")]
     Syntax(E),
 }
 
 /// Why a `return` member holds no handle. An absent `return` marks an assertion.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum ReturnFault {
     /// The member is not a string.
+    #[error("the member is not a string")]
     NotString,
     /// The string breaks the handle's syntax.
+    #[error("the string breaks the handle's syntax")]
     Syntax(ReturnHandleError),
 }
 
 /// Why an entry of `_req_sets` is no option (Section 2.1).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum OptionFault {
     /// The option is not an array.
+    #[error("the option is not an array")]
     NotArray,
     /// The option is empty.
+    #[error("the option is empty")]
     Empty,
     /// The entry at this position is not an unsigned integer.
+    #[error("the entry at this position is not an unsigned integer")]
     NotInteger(ArrayIndex),
     /// The entry at this position is no index of `_req`.
+    #[error("the entry at this position is no index of `_req`")]
     OutOfRange(ArrayIndex),
     /// The option names this `_req` item a second time.
+    #[error("the option names this `_req` item a second time")]
     Repeated(ItemIndex),
 }
 
 /// A rule of `zkp_req` that a request breaks, with what breaks it. Each one makes the request
 /// invalid ([`ErrorCode::InvalidRequest`]). The rules of OpenID4VP 1.0, Section 6 are DCQL's,
 /// which parses the query first.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum RequestRule {
     /// `format` is not `zkp_req`.
     FormatNotZkpReq,
@@ -171,7 +186,3 @@ impl RequestRule {
         }
     }
 }
-
-siros_codec::display_code!(RequestRule);
-
-impl std::error::Error for RequestRule {}

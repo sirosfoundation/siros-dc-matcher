@@ -1,7 +1,5 @@
 //! The refusals of reading and of disclosing, each with a stable code and its cause.
 
-use std::fmt;
-
 use siros_codec::cbor::CborError;
 use siros_codec::member::MemberFault;
 use siros_codec::Base64Error;
@@ -9,12 +7,14 @@ use siros_codec::Base64Error;
 use crate::names::{DigestId, NameSpace};
 
 /// Why a stored credential is no mdoc [`Mdoc::parse`](crate::Mdoc::parse) reads.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("mso_mdoc: {}: {:?}", self.code(), self)]
 pub enum MdocError {
     /// The text is not base64url without padding.
-    Encoding(Base64Error),
+    Encoding(#[source] Base64Error),
     /// The bytes are not one CBOR item the strict reader accepts.
-    Cbor(CborError),
+    #[error("mso_mdoc: cbor: {0}")]
+    Cbor(#[source] CborError),
     /// The top level is no `IssuerSigned`, `Document` or one-document `DeviceResponse`.
     Envelope(EnvelopeFault),
     /// `issuerAuth` is not an untagged `COSE_Sign1` with a protected header, a payload and a
@@ -54,133 +54,175 @@ pub enum MdocError {
 }
 
 /// Why the top level is no envelope [`Mdoc::parse`](crate::Mdoc::parse) reads.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum EnvelopeFault {
     /// `documents` holds this many documents, where one is read.
+    #[error("`documents` holds this many documents, where one is read")]
     Documents(usize),
     /// The `Document` has no `issuerSigned`.
+    #[error("the `Document` has no `issuerSigned`")]
     IssuerSigned,
 }
 
 /// Why `issuerAuth` is no `COSE_Sign1`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum IssuerAuthFault {
     /// `IssuerSigned` has no `issuerAuth`.
+    #[error("`IssuerSigned` has no `issuerAuth`")]
     Absent,
     /// It is not an array of four items.
+    #[error("it is not an array of four items")]
     NotSign1,
     /// The protected header is not a byte string.
+    #[error("the protected header is not a byte string")]
     Protected,
     /// The payload is not a byte string.
+    #[error("the payload is not a byte string")]
     Payload,
     /// The signature is not a byte string.
+    #[error("the signature is not a byte string")]
     Signature,
 }
 
 /// Why the protected header names no algorithm.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum AlgorithmFault {
     /// The header is not one CBOR item.
+    #[error("the header is not one CBOR item")]
     Header(CborError),
     /// The header has no integer under label 1.
+    #[error("the header has no integer under label 1")]
     Absent,
 }
 
 /// Why the payload is no MSO.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum PayloadFault {
     /// The payload is not one CBOR item.
+    #[error("the payload is not one CBOR item")]
     Cbor(CborError),
     /// It is not a byte string under tag 24.
+    #[error("it is not a byte string under tag 24")]
     NotTagged,
     /// The tagged bytes are not one CBOR item.
+    #[error("the tagged bytes are not one CBOR item")]
     Mso(CborError),
 }
 
 /// Why the `docType` is refused.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum DocTypeFault {
     /// The MSO has no `docType` text.
+    #[error("the MSO has no `docType` text")]
     Mso,
     /// The `Document` has no `docType` text.
+    #[error("the `Document` has no `docType` text")]
     Document,
     /// The `Document` names another `docType` than its MSO.
+    #[error("the `Document` names another `docType` than its MSO")]
     Mismatch,
 }
 
 /// Why a member names nothing this crate knows.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum NameFault {
     /// It is absent or not text.
+    #[error("it is absent or not text")]
     Member(MemberFault),
     /// It names none of the values this crate reads.
+    #[error("it names none of the values this crate reads")]
     Unknown,
 }
 
 /// Why `valueDigests` is refused.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum ValueDigestsFault {
     /// `valueDigests` is no non-empty map.
+    #[error("`valueDigests` is no non-empty map")]
     Member(MemberFault),
     /// A namespace is not text.
+    #[error("a namespace is not text")]
     NameSpace,
     /// The namespace's digests are no non-empty map.
+    #[error("the namespace's digests are no non-empty map")]
     Digests(NameSpace, MemberFault),
     /// A `digestID` of the namespace is not an unsigned integer.
+    #[error("a `digestID` of the namespace is not an unsigned integer")]
     DigestId(NameSpace),
     /// The digest under this `digestID` is not a byte string.
+    #[error("the digest under this `digestID` is not a byte string")]
     Digest(NameSpace, DigestId),
     /// The digest under this `digestID` has this many bytes, another length than the
     /// algorithm's.
+    #[error(
+        "the digest under this `digestID` has this many bytes, another length than the algorithm's"
+    )]
     DigestLength(NameSpace, DigestId, usize),
     /// The namespace lists this `digestID` twice.
+    #[error("the namespace lists this `digestID` twice")]
     RepeatedDigestId(NameSpace, DigestId),
     /// The map holds this namespace twice.
+    #[error("the map holds this namespace twice")]
     RepeatedNameSpace(NameSpace),
 }
 
 /// Why `deviceKeyInfo.deviceKey` is refused.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum DeviceKeyFault {
     /// The MSO has no `deviceKeyInfo`.
+    #[error("the MSO has no `deviceKeyInfo`")]
     Info,
     /// `deviceKeyInfo` has no `deviceKey`.
+    #[error("`deviceKeyInfo` has no `deviceKey`")]
     Absent,
     /// `kty` (label 1) is not 2, EC2.
+    #[error("`kty` (label 1) is not 2, EC2")]
     KeyType,
     /// `crv` (label -1) is not 1, P-256.
+    #[error("`crv` (label -1) is not 1, P-256")]
     Curve,
     /// `x` (label -2) or `y` (label -3) is not a 32-byte string.
+    #[error("`x` (label -2) or `y` (label -3) is not a 32-byte string")]
     Coordinate,
 }
 
 /// Why a list of names in `keyAuthorizations` is refused.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum NamesFault {
     /// It is no non-empty array.
+    #[error("it is no non-empty array")]
     Member(MemberFault),
     /// A name is not text.
+    #[error("a name is not text")]
     NotText,
     /// It holds this name twice.
+    #[error("it holds this name twice")]
     Repeated(String),
 }
 
 /// Why `keyAuthorizations` is refused.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum KeyAuthorizationsFault {
     /// It is not a map.
+    #[error("it is not a map")]
     NotMap,
     /// `nameSpaces`.
+    #[error("`nameSpaces`")]
     NameSpaces(NamesFault),
     /// `dataElements` is no non-empty map.
+    #[error("`dataElements` is no non-empty map")]
     DataElements(MemberFault),
     /// A namespace of `dataElements` is not text.
+    #[error("a namespace of `dataElements` is not text")]
     NameSpace,
     /// The element identifiers of this namespace.
+    #[error("the element identifiers of this namespace")]
     Elements(NameSpace, NamesFault),
     /// This namespace is in `nameSpaces` and in `dataElements`.
+    #[error("this namespace is in `nameSpaces` and in `dataElements`")]
     Overlap(NameSpace),
     /// `dataElements` holds this namespace twice.
+    #[error("`dataElements` holds this namespace twice")]
     RepeatedNameSpace(NameSpace),
 }
 
@@ -208,28 +250,36 @@ impl ValidityTime {
 }
 
 /// Why `validityInfo` is refused.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum ValidityFault {
     /// The MSO has no `validityInfo`.
+    #[error("the MSO has no `validityInfo`")]
     Absent,
     /// This time is absent or no 20-character `tdate`.
+    #[error("this time is absent or no 20-character `tdate`")]
     Time(ValidityTime),
     /// `validFrom` precedes `signed`, or does not precede `validUntil`.
+    #[error("`validFrom` precedes `signed`, or does not precede `validUntil`")]
     Order,
 }
 
 /// Why `nameSpaces` is refused.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum NameSpacesFault {
     /// `nameSpaces` is no non-empty map.
+    #[error("`nameSpaces` is no non-empty map")]
     Member(MemberFault),
     /// A namespace is not text.
+    #[error("a namespace is not text")]
     NameNotText,
     /// The map holds this namespace twice.
+    #[error("the map holds this namespace twice")]
     Repeated(NameSpace),
     /// The namespace's items are no non-empty array.
+    #[error("the namespace's items are no non-empty array")]
     Items(NameSpace, MemberFault),
     /// An item of the namespace is no byte string under tag 24.
+    #[error("an item of the namespace is no byte string under tag 24")]
     NotTagged(NameSpace),
 }
 
@@ -247,11 +297,13 @@ pub enum ItemMember {
 }
 
 /// Why an `IssuerSignedItem` is refused.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum ItemFault {
     /// The tagged bytes are not one CBOR item.
+    #[error("the tagged bytes are not one CBOR item")]
     Cbor(CborError),
     /// This member is absent or of another CBOR type.
+    #[error("this member is absent or of another CBOR type")]
     Member(ItemMember),
 }
 
@@ -281,30 +333,9 @@ impl MdocError {
     }
 }
 
-impl fmt::Display for MdocError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Cbor(e) => write!(f, "mso_mdoc: cbor: {e}"),
-            _ => write!(f, "mso_mdoc: {}: {self:?}", self.code()),
-        }
-    }
-}
-
-impl std::error::Error for MdocError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Encoding(e) => Some(e),
-            Self::Cbor(e)
-            | Self::Algorithm(AlgorithmFault::Header(e))
-            | Self::Payload(PayloadFault::Cbor(e) | PayloadFault::Mso(e))
-            | Self::Item(ItemFault::Cbor(e)) => Some(e),
-            _ => None,
-        }
-    }
-}
-
 /// Why [`Mdoc::disclose`](crate::Mdoc::disclose) refuses a selection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("mso_mdoc disclosure: {}", self.code())]
 pub enum DisclosureError {
     /// A selected element is no item of the mdoc.
     UnknownElement,
@@ -329,11 +360,3 @@ impl DisclosureError {
         }
     }
 }
-
-impl fmt::Display for DisclosureError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "mso_mdoc disclosure: {}", self.code())
-    }
-}
-
-impl std::error::Error for DisclosureError {}

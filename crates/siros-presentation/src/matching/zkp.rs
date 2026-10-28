@@ -37,7 +37,8 @@ pub struct ProofChoice {
 }
 
 /// Why a `zkp_req` query has no candidate whatever the wallet holds (`zkp_req.md`, Section 5).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum ZkpRefusal {
     /// The query breaks a rule of `zkp_req`.
     Query(RequestRule),
@@ -82,12 +83,9 @@ impl ZkpRefusal {
     }
 }
 
-siros_codec::display_code!(ZkpRefusal);
-
-impl std::error::Error for ZkpRefusal {}
-
 /// Why a [`ProofChoice`] gives no option or usable pair of a query.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum ChoiceError {
     /// The query has no option at the choice's position: the choice is another query's.
     OptionUnknown(OptionIndex),
@@ -104,10 +102,6 @@ impl ChoiceError {
         }
     }
 }
-
-siros_codec::display_code!(ChoiceError);
-
-impl std::error::Error for ChoiceError {}
 
 impl ProofChoice {
     /// The option's position among the query's options.

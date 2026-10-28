@@ -39,7 +39,7 @@ mod set;
 mod sets_on_host;
 mod text;
 
-pub use app::{CallingApp, CallingAppError};
+pub use app::CallingApp;
 pub use c8str::{C8Str, C8StrError, C8String, NonZeroChar};
 pub use entry::{
     DelegationType, Field, InlineIssuanceEntry, LegacyDisplay, LegacyEntry, LegacyField,
@@ -47,7 +47,7 @@ pub use entry::{
     VerificationLink,
 };
 #[cfg(target_arch = "wasm32")]
-pub use host::{CredentialsError, Host, HostOptions};
+pub use host::{Host, HostOptions};
 #[cfg(target_arch = "wasm32")]
 pub use levels::{
     Credman, Credman2, Credman3, Credman4, Credman5, Credman6, Credman7, EntryKey, Level, V1, V2,

@@ -122,6 +122,9 @@ binaryen version_116.
   (16 before).
 - **BREAKING (FFI):** `zkp_req_plan` and `ZkpReqPlanError` are removed. Bindings are
   regenerated.
+- **BREAKING (FFI):** `zkp_req_session` panics for a JWK thumbprint of no key in the
+  request, where it returned `ZkpReqError::Host` with `thumbprint_not_in_request`; that code is
+  gone. UniFFI raises the panic as an internal error.
 - The matcher calls the host through the new `android-credman-sys` and
   `android-credman` crates (MIT OR Apache-2.0, from
   APTITUDE-Consortium/dcapi-matcher). `crates/android-credman-sys/ABI.md`
@@ -129,9 +132,10 @@ binaryen version_116.
   returns, and `SetEntry::shown` whether the host shows an entry whole (`Shown`).
 - Below host level 2 the matcher emits nothing; it used to call the
   `credman_v2` functions regardless.
-- On level 2 and above, the matcher emits nothing when the host's inputs are
-  malformed: a read that reports more bytes than it wrote. It used to emit
-  entries from such inputs.
+- On level 2 and above, the matcher traps when the host breaks its ABI: a
+  credential read that reports more bytes than it was asked for, or one that
+  copies nothing before the reported size. It used to emit entries from the
+  first. Release and debug builds trap alike.
 - The registered blob is read until complete; a short
   `ReadCredentialsBuffer` read used to leave its tail zeroed.
 - `siros-dc-matcher-core`'s unused `sink` module is removed.
@@ -208,6 +212,26 @@ binaryen version_116.
   `[]`, the matcher at `1b0fe3d` emitted the one entry of set `siros-0` for the mDL fixture. A
   registration with its diagnostics shown names the parse error in one entry, in set
   `siros-debug-0`.
+- Error types derive `Display` and `Error` with `thiserror`, each with the text it had, and a
+  variant that holds a cause returns it from `source()`.
+- **BREAKING (Rust API):** a broken guarantee panics, with its reason, where an error variant
+  reported it. The variants and their codes are gone:
+  - `siros-oid4vp`: a host whose results do not answer intake's effects
+    (`IntakeError::AnswerMismatch`, `::UnexpectedTrustKey`, `::UnusedAnswer`); an ephemeral
+    key without coordinates and a KDF output shorter than its key (`EncryptionFault::EphemeralKey`,
+    `::KdfLength`). `cose_kdf` returns the `ContentKey`.
+  - `siros-zkp-req-nym-auth`: an attestation tested at another date than its pair's
+    (`Unanswerable::ProofDate`, with `HostError` and `ProveError::Host`); a JWK thumbprint of no
+    key in the request (`KeyNotInRequest`). `CheckedRequest::handover` returns the `Handover`.
+  - `siros-presentation`: a plan that contradicts the matching it was built from
+    (`PresentationError::Inconsistent`, `Inconsistency`); a signing key without the factors
+    `PlanInput` carries (`KeyFactorsMissing`); a claims pointer of the matching that selects
+    nothing (`Pointer`); a `Sign` effect answered twice, an answer to no effect, and a signature
+    of other than 64 bytes (`SignatureError::Repeated`, `::Unknown`, `::Length`).
+    `PresentationError::Disclosure` is `ElementRepeated` (`repeated_selection`), and
+    `Transactions::bind` returns the bindings.
+  - `android-credman`: a host that breaks its ABI (`CredentialsError`, `CallingAppError`).
+    `Host::credentials` returns the blob, and `Host::calling_app` the `CallingApp`.
 - Vector set digest: `db62a22cfaccb912bf717c63d2a107e41e5437caa72e21594ceb3bb395eab431`.
 
 ### Fixed

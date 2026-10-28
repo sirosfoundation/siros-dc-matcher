@@ -41,27 +41,18 @@ fn params() -> NymAuthCircuitParams {
 }
 
 /// Why `circuits.zst` was not loaded.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ArtifactError {
     /// The bytes are not the pinned file.
+    #[error("not the pinned {} ({} bytes)", .0.name, .0.len)]
     Pin(ArtifactPin),
     /// The pinned file does not decompress within its content's length: zstd's message.
+    #[error("the circuits do not decompress: {0}")]
     Decompress(String),
     /// zk-cred-longfellow refused the circuits.
+    #[error("circuits refused: {0}")]
     Circuits(String),
 }
-
-impl fmt::Display for ArtifactError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Pin(pin) => write!(f, "not the pinned {} ({} bytes)", pin.name, pin.len),
-            Self::Decompress(cause) => write!(f, "the circuits do not decompress: {cause}"),
-            Self::Circuits(detail) => write!(f, "circuits refused: {detail}"),
-        }
-    }
-}
-
-impl std::error::Error for ArtifactError {}
 
 /// The decompressed circuits of a `circuits.zst` that matches its pin.
 fn circuits(circuits_zst: &[u8]) -> Result<Vec<u8>, ArtifactError> {

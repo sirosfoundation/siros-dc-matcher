@@ -38,21 +38,12 @@ impl<'a> Matched<'a, '_> {
     ///
     /// When `offer` breaks the presentation component's guarantee: its members and additions
     /// name queries and candidates of the matching it was built from.
-    #[expect(
-        clippy::expect_used,
-        reason = "an offer that names what its matching lacks is a bug of the presentation \
-                  component, and no entry the picker could emit for it is right"
-    )]
     pub(crate) fn shown(
         &self,
         index: OfferIndex,
         offer: &Offer,
     ) -> Result<Vec<Presented<'a>>, Unshown> {
-        // The presentation component's guarantee: an offer's members are of its matching.
-        let bindings = self
-            .transactions
-            .bind(self.answered, offer.members())
-            .expect("an offer's members are of its matching");
+        let bindings = self.transactions.bind(self.answered, offer.members());
         let mut presented = Vec::new();
         for member in offer.members() {
             let (answers, candidates) = self.candidates(member);

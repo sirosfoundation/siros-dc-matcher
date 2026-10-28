@@ -2,18 +2,14 @@
 //! OpenID4VP 1.0, Section 8.5 code the verifier receives.
 
 use siros_credential::EntryRef;
-use siros_dcql::PathError;
 use siros_display::DisplayError;
-use siros_mdoc::DisclosureError;
 use siros_oid4vp::{ErrorCode, ResponseError};
 use siros_sdjwt::KeyBindingError;
 use siros_transaction_data::TransactionDataError;
 use siros_trust::{ChainRefusal, Unadmitted};
-use siros_wallet_state::KeyId;
 use siros_zkp_req_nym_auth::presenter::{ProveError, Unanswerable};
 
 use crate::ids::{AdditionIndex, OfferIndex, SetIndex};
-use crate::inconsistency::Inconsistency;
 use crate::matching::{ChoiceError, Failure};
 use crate::plan::{DigestError, Unproven};
 use crate::respond::{PickError, SignatureError, SubsetError};
@@ -25,14 +21,14 @@ use siros_transaction_data::EntryPosition;
 #[error("{}", self.code())]
 pub enum PresentationError {
     /// The wallet has no offer for the request, and why.
-    NoOffer(Failure<Unadmitted<ChainRefusal>, Unproven>),
+    NoOffer(#[from] Failure<Unadmitted<ChainRefusal>, Unproven>),
     /// An entry of `transaction_data`, or its binding to an offer, breaks a rule. The code is
     /// its own.
-    TransactionData(#[source] TransactionDataError),
+    TransactionData(#[from] TransactionDataError),
     /// The consent view cannot show a credential. The code is the display's.
-    Display(#[source] DisplayError),
+    Display(#[from] DisplayError),
     /// The selection's plan digest does not read.
-    Digest(#[source] DigestError),
+    Digest(#[from] DigestError),
     /// The selection was made on another plan (A4).
     DigestMismatch,
     /// The selection names an offer the plan lacks (A4).
@@ -51,7 +47,7 @@ pub enum PresentationError {
     /// The selection names two subsets for the member of this query (A3).
     SubsetRepeated(QueryId),
     /// A subset of a member's credentials is refused (A3).
-    Subset(#[source] SubsetError),
+    Subset(#[from] SubsetError),
     /// The selection leaves out the credential the transaction entry at `entry` binds to (T4).
     BoundCredentialOmitted {
         /// The entry's position in `transaction_data`.
@@ -60,40 +56,33 @@ pub enum PresentationError {
         credential: EntryRef,
     },
     /// The picked credential picker entries make no selection (K3).
-    Pick(#[source] PickError),
+    Pick(#[from] PickError),
     /// A fulfilment without the wallet's UI chose an offer that needs it (A9).
     WalletDisplayNeeded,
     /// A member's credential names no key pair.
     KeyIdMissing,
     /// A member's credential is an SD-JWT VC bound to no key: it has no `cnf`.
     HolderKeyMissing,
-    /// The host reported no authentication factors for this key, whose KB-JWT carries `amr`
-    /// (H3).
-    KeyFactorsMissing(KeyId),
     /// The time is before 1970-01-01T00:00:00Z, which `iat` cannot carry.
     Time,
     /// The request names its audience neither by an origin nor by a Client Identifier.
     AudienceMissing,
-    /// The plan contradicts itself.
-    Inconsistent(#[source] Inconsistency),
     /// A proof choice gives no option or usable pair of its query.
-    Choice(#[source] ChoiceError),
+    Choice(#[from] ChoiceError),
     /// A nym_auth credential no longer passes its tests, or its seed does not open.
-    Unproven(#[source] Unproven),
+    Unproven(#[from] Unproven),
     /// A nym_auth credential does not answer its option.
-    Unanswerable(#[source] Unanswerable),
-    /// A claims path pointer of the plan selects nothing. The code is its own.
-    Pointer(#[source] PathError),
+    Unanswerable(#[from] Unanswerable),
     /// The KB-JWT claims collide (S4). The code is its own.
-    KeyBinding(#[source] KeyBindingError),
-    /// The mdoc elements are no disclosure (M2, M3). The code is its own.
-    Disclosure(#[source] DisclosureError),
+    KeyBinding(#[from] KeyBindingError),
+    /// The request selects one mdoc element in two claims queries (M2).
+    ElementRepeated,
     /// The nym_auth proof failed. The code is its own.
-    Prove(#[source] ProveError),
+    Prove(#[from] ProveError),
     /// The host's signatures do not answer the `Sign` effects (A5).
-    Signature(#[source] SignatureError),
+    Signature(#[from] SignatureError),
     /// The `vp_token` or its submission could not be built. The code is its own.
-    Response(#[source] ResponseError),
+    Response(#[from] ResponseError),
 }
 
 impl PresentationError {
@@ -118,16 +107,13 @@ impl PresentationError {
             Self::WalletDisplayNeeded => "wallet_display_needed",
             Self::KeyIdMissing => "key_id_missing",
             Self::HolderKeyMissing => "holder_key_missing",
-            Self::KeyFactorsMissing(_) => "key_factors_missing",
             Self::Time => "time_before_epoch",
             Self::AudienceMissing => "audience_missing",
-            Self::Inconsistent(e) => e.code(),
             Self::Choice(e) => e.code(),
             Self::Unproven(e) => e.code(),
             Self::Unanswerable(e) => e.code(),
-            Self::Pointer(e) => e.code(),
             Self::KeyBinding(e) => e.code(),
-            Self::Disclosure(e) => e.code(),
+            Self::ElementRepeated => "repeated_selection",
             Self::Prove(e) => e.code(),
             Self::Signature(e) => e.code(),
             Self::Response(e) => e.code(),
@@ -159,16 +145,13 @@ impl PresentationError {
             | Self::WalletDisplayNeeded
             | Self::KeyIdMissing
             | Self::HolderKeyMissing
-            | Self::KeyFactorsMissing(_)
             | Self::Time
             | Self::AudienceMissing
-            | Self::Inconsistent(_)
             | Self::Choice(_)
             | Self::Unproven(_)
             | Self::Unanswerable(_)
-            | Self::Pointer(_)
             | Self::KeyBinding(_)
-            | Self::Disclosure(_)
+            | Self::ElementRepeated
             | Self::Signature(_)
             | Self::Response(_) => ErrorCode::AccessDenied,
         }
@@ -182,36 +165,4 @@ fn oid4vp_code(code: siros_zkp_req::ErrorCode) -> ErrorCode {
         siros_zkp_req::ErrorCode::VpFormatsNotSupported => ErrorCode::VpFormatsNotSupported,
         siros_zkp_req::ErrorCode::AccessDenied => ErrorCode::AccessDenied,
     }
-}
-
-/// Each cause that is its own variant converts into it, so `?` carries it.
-macro_rules! causes {
-    ($($cause:ty => $variant:ident),* $(,)?) => {
-        $(
-            impl From<$cause> for PresentationError {
-                fn from(cause: $cause) -> Self {
-                    Self::$variant(cause)
-                }
-            }
-        )*
-    };
-}
-
-causes! {
-    Failure<Unadmitted<ChainRefusal>, Unproven> => NoOffer,
-    TransactionDataError => TransactionData,
-    DisplayError => Display,
-    DigestError => Digest,
-    SubsetError => Subset,
-    PickError => Pick,
-    Inconsistency => Inconsistent,
-    ChoiceError => Choice,
-    Unproven => Unproven,
-    Unanswerable => Unanswerable,
-    PathError => Pointer,
-    KeyBindingError => KeyBinding,
-    DisclosureError => Disclosure,
-    ProveError => Prove,
-    SignatureError => Signature,
-    ResponseError => Response,
 }

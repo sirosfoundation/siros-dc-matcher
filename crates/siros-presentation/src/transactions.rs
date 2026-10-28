@@ -15,7 +15,6 @@ use siros_transaction_data::{
 
 use crate::credential::MatchCredential;
 use crate::ids::{CandidateIndex, QueryIndex};
-use crate::inconsistency::Inconsistency;
 use crate::matching::{Answered, Answers, Candidate, Failure};
 use crate::offers::{Member, Offers};
 use crate::request::MatchRequest;
@@ -110,33 +109,40 @@ impl<C: MatchCredential, R> Offered<'_, '_, C, R> {
 
 /// Each member of `members` as the matching answers it, in order.
 ///
-/// # Errors
+/// # Panics
 ///
-/// [`Inconsistency`] for a member or a candidate the matching lacks.
+/// When a member names a query or a candidate `answered` lacks.
+#[expect(
+    clippy::expect_used,
+    reason = "the offers come from `answered`, so their members name its queries and \
+              candidates; another one is a bug of the core, and no plan built on it is sound"
+)]
 pub(crate) fn offered<'w, 'a, C: MatchCredential, R>(
     answered: &'w Answered<'a, C, R>,
     members: &[Member],
-) -> Result<Vec<Offered<'w, 'a, C, R>>, Inconsistency> {
+) -> Vec<Offered<'w, 'a, C, R>> {
     members
         .iter()
         .map(|member| {
             let query = member.query();
-            let answers = answered.answers(query).ok_or(Inconsistency::Query(query))?;
+            let answers = answered
+                .answers(query)
+                .expect("an offer's member names a query of its matching");
             let candidates = member
                 .candidates()
                 .iter()
                 .map(|&index| {
                     let candidate = answers
                         .candidate(index)
-                        .ok_or(Inconsistency::Candidate(query, index))?;
-                    Ok((index, candidate))
+                        .expect("an offer's member names candidates of its query");
+                    (index, candidate)
                 })
-                .try_collect()?;
-            Ok(Offered {
+                .collect();
+            Offered {
                 query,
                 answers,
                 candidates,
-            })
+            }
         })
         .collect()
 }
@@ -316,16 +322,21 @@ impl<D> Transactions<D> {
     /// comes first in its `credential_ids`, then the first presented (OpenID4VP 1.0, Section
     /// 5.1). An entry the wallet decides after selection binds nothing here (K2).
     ///
-    /// # Errors
+    /// # Panics
     ///
-    /// [`Inconsistency`] for a member or a candidate the matching lacks, or an entry the
-    /// request lacks.
+    /// When a member names a query or a candidate `answered` lacks, or a candidate takes an
+    /// entry these transactions lack.
+    #[expect(
+        clippy::expect_used,
+        reason = "the candidacies come from these transactions' entries; an entry they lack is \
+                  a bug of the core, and no binding built on it is sound"
+    )]
     pub fn bind<'t, C: MatchCredential, R>(
         &'t self,
         answered: &Answered<'_, C, R>,
         members: &[Member],
-    ) -> Result<Vec<BoundEntry<'t>>, Inconsistency> {
-        let presented: Vec<(Bound, &'t Candidacy<D>)> = offered(answered, members)?
+    ) -> Vec<BoundEntry<'t>> {
+        let presented: Vec<(Bound, &'t Candidacy<D>)> = offered(answered, members)
             .iter()
             .flat_map(|member| {
                 member
@@ -348,7 +359,7 @@ impl<D> Transactions<D> {
             let entry = self
                 .entries
                 .get(taken.entry().value())
-                .ok_or(Inconsistency::Entry)?;
+                .expect("a candidate takes an entry of its transactions");
             let rank = |query: &QueryId| entry.credential_ids().iter().position(|id| id == query);
             let first = presented
                 .iter()
@@ -365,7 +376,7 @@ impl<D> Transactions<D> {
                 });
             }
         }
-        Ok(bound)
+        bound
     }
 
     /// The offers of `answered` over the candidates the first match leaves.

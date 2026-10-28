@@ -2,8 +2,6 @@
 //! encrypted-response policy of nym_auth (nym_auth catalogue, "Binding" and "Response
 //! confidentiality"), and the session it gives.
 
-use std::fmt;
-
 use serde_json::Value;
 use siros_oid4vp::{ec_jwk_thumbprint, ClientId, Handover, JwkThumbprint, Nonce, Origin};
 
@@ -107,18 +105,6 @@ pub fn check_request(
     })
 }
 
-/// The host chose an encryption key that is not one of the request's.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct KeyNotInRequest;
-
-impl fmt::Display for KeyNotInRequest {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("the JWK thumbprint is of no key in client_metadata.jwks")
-    }
-}
-
-impl std::error::Error for KeyNotInRequest {}
-
 impl CheckedRequest {
     /// `client_id`, with its Client Identifier Prefix.
     #[must_use]
@@ -147,19 +133,22 @@ impl CheckedRequest {
     /// The `Handover` of this request, for the response-encryption key whose JWK SHA-256
     /// Thumbprint is `jwk_thumbprint` (OpenID4VP 1.0, Section 8.3 picks the key).
     ///
-    /// # Errors
+    /// # Panics
     ///
-    /// [`KeyNotInRequest`] when no key of `client_metadata.jwks` has that thumbprint: the
-    /// session binds only values of the validated Request Object.
-    pub fn handover(&self, jwk_thumbprint: &JwkThumbprint) -> Result<Handover, KeyNotInRequest> {
+    /// When no key of `client_metadata.jwks` has that thumbprint.
+    pub fn handover(&self, jwk_thumbprint: &JwkThumbprint) -> Handover {
         let known = self
             .encryption_keys
             .iter()
             .any(|k| ec_jwk_thumbprint(k).as_ref() == Some(jwk_thumbprint));
-        if !known {
-            return Err(KeyNotInRequest);
-        }
-        Ok(match &self.endpoint {
+        // The host picks one of the request's keys (OpenID4VP 1.0, Section 8.3). Another key is
+        // a bug of the host, and the session would bind a value the validated Request Object
+        // does not hold.
+        assert!(
+            known,
+            "the JWK thumbprint is of no key in client_metadata.jwks"
+        );
+        match &self.endpoint {
             Endpoint::Origin(origin) => {
                 Handover::dc_api(origin.as_str(), self.nonce.as_str(), Some(jwk_thumbprint))
             }
@@ -169,6 +158,6 @@ impl CheckedRequest {
                 Some(jwk_thumbprint),
                 uri,
             ),
-        })
+        }
     }
 }

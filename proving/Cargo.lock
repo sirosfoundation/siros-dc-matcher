@@ -1262,6 +1262,7 @@ dependencies = [
  "rustc-hash",
  "serde",
  "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -1271,6 +1272,7 @@ dependencies = [
  "rustc-hash",
  "serde",
  "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -1282,6 +1284,7 @@ dependencies = [
  "sha2",
  "siros-codec",
  "siros-dcql",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -1323,6 +1326,7 @@ dependencies = [
  "siros-codec",
  "siros-zkp-req",
  "siros-zkp-req-nym-auth",
+ "thiserror 2.0.21",
  "zk-cred-longfellow",
  "zstd",
 ]
@@ -1334,6 +1338,7 @@ dependencies = [
  "siros-codec",
  "siros-zkp-req",
  "siros-zkp-req-nym-auth",
+ "thiserror 2.0.21",
  "zk-cred-vega",
  "zstd",
 ]
@@ -1358,6 +1363,7 @@ dependencies = [
  "serde_json",
  "siros-codec",
  "siros-dcql",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -1375,6 +1381,7 @@ dependencies = [
  "siros-oid4vp",
  "siros-trust",
  "siros-zkp-req",
+ "thiserror 2.0.21",
  "x509-cert",
  "zeroize",
 ]

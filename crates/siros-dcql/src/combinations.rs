@@ -251,7 +251,7 @@ fn candidate_products(
     // An odometer over the wheels, the first turning fastest: only the products wanted are
     // built.
     let mut wheels = option.to_vec();
-    let mut products = Vec::with_capacity(take);
+    let mut products = Vec::new();
     for _ in 0..take {
         let mut product = Vec::with_capacity(members);
         for wheel in &wheels {

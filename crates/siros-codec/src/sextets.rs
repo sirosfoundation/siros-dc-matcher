@@ -1,10 +1,9 @@
 //! The decoding the two base64 alphabets share (RFC 4648, Sections 4 and 5): six bits per
 //! character, eight per byte, and zero bits after the last byte.
 
-use std::fmt;
-
 /// Why text is not base64 in the strict form this crate reads.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum Base64Error {
     /// The length is one no encoder produces: for the padded form, not a multiple of four; for
     /// the unpadded form, one more than a multiple of four.
@@ -12,6 +11,7 @@ pub enum Base64Error {
     /// The padded form ends in more than two `=`.
     Padding,
     /// The byte at this offset is outside the alphabet.
+    #[error("{code} at byte {0}", code = self.code())]
     Alphabet(usize),
     /// Bits after the last byte are set: the text is not the one encoding of its bytes.
     TrailingBits,
@@ -29,17 +29,6 @@ impl Base64Error {
         }
     }
 }
-
-impl fmt::Display for Base64Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Alphabet(at) => write!(f, "{} at byte {at}", self.code()),
-            _ => f.write_str(self.code()),
-        }
-    }
-}
-
-impl std::error::Error for Base64Error {}
 
 /// The bytes `body` encodes, each character read by `sextet`.
 pub(crate) fn decode(

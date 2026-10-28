@@ -150,24 +150,30 @@ impl NoQuery {
 }
 
 /// How `data.request` of an `openid4vp-v1-signed` request fails to be a compact JWS.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum CompactFault {
     /// `request` is absent or not a string.
+    #[error("`request` is absent or not a string")]
     NotString,
     /// The string has other than three segments (RFC 7515, Section 7.1).
+    #[error("the string has other than three segments (RFC 7515, Section 7.1)")]
     Segments,
     /// The header segment is empty.
+    #[error("the header segment is empty")]
     EmptyHeader,
     /// The payload segment is empty.
+    #[error("the payload segment is empty")]
     EmptyPayload,
 }
 
 /// Why a JWS payload segment yields no bytes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum PayloadFault {
     /// The segment is longer than the picker decodes.
+    #[error("the segment is longer than the picker decodes")]
     TooLong,
     /// The segment is not unpadded base64url.
+    #[error("the segment is not unpadded base64url")]
     Encoding(Base64Error),
 }
 

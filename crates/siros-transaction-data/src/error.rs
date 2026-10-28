@@ -49,7 +49,8 @@ impl EntryMember {
 }
 
 /// Why an entry of `transaction_data` does not read (T1).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum EntryRefusal {
     /// The entry is not base64url without padding (OpenID4VP 1.0, Sections 1.2 and 5.1).
     NotBase64url(Base64Error),
@@ -103,7 +104,8 @@ impl EntryRefusal {
 }
 
 /// Why transaction data refuses a request.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum TransactionDataError {
     /// The entry at this position does not read.
     Entry(EntryPosition, EntryRefusal),
@@ -153,9 +155,3 @@ impl TransactionDataError {
         }
     }
 }
-
-siros_codec::display_code!(EntryRefusal, TransactionDataError);
-
-impl std::error::Error for EntryRefusal {}
-
-impl std::error::Error for TransactionDataError {}

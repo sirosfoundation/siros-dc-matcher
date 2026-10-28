@@ -30,27 +30,18 @@ use zk_cred_vega::nymauth_vega::engine::statement::{
 const SYSTEM: NymAuthSystem = NymAuthSystem::VegaV1;
 
 /// Why `shapes.zst` was not loaded.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ArtifactError {
     /// The bytes are not the pinned file.
+    #[error("not the pinned {} ({} bytes)", .0.name, .0.len)]
     Pin(ArtifactPin),
     /// The pinned file does not decompress within its content's length: zstd's message.
+    #[error("the shapes do not decompress: {0}")]
     Decompress(String),
     /// zk-cred-vega refused the shapes.
+    #[error("shapes refused: {0}")]
     Shapes(String),
 }
-
-impl fmt::Display for ArtifactError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Pin(pin) => write!(f, "not the pinned {} ({} bytes)", pin.name, pin.len),
-            Self::Decompress(cause) => write!(f, "the shapes do not decompress: {cause}"),
-            Self::Shapes(detail) => write!(f, "shapes refused: {detail}"),
-        }
-    }
-}
-
-impl std::error::Error for ArtifactError {}
 
 /// The prover and verifier keys of the system.
 pub struct VegaNymAuth(Keys);

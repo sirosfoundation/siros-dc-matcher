@@ -28,7 +28,8 @@ pub enum NymAuthSystem {
 }
 
 /// Why a system answers `unsupported` for an option (system rulebooks, Section 2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum Unsupported {
     /// The option has no `pseudonym` item.
     NoPseudonym,
@@ -51,8 +52,6 @@ impl Unsupported {
         }
     }
 }
-
-siros_codec::display_code!(Unsupported);
 
 /// The stable identifier of a pair refusal (`zkp_req`, Section 1.3) for a nym_auth system.
 pub fn pair_code(refusal: &PairRefusal<Unsupported>) -> &'static str {

@@ -16,7 +16,8 @@ use crate::error::PresentationError;
 use crate::matching::{ChoiceError, ProofChoice, ZkpQuery};
 
 /// Why a nym_auth candidate answers no option of its query.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum Unproven {
     /// The credential is no mdoc.
     NotAnMdoc,
@@ -25,21 +26,23 @@ pub enum Unproven {
     /// The credential cannot be read in the nym_auth form: `credential_form`.
     Unreadable(Unreadable),
     /// The admission of the credential's issuer is for another certificate or query.
-    Issuer(OtherIssuer),
+    Issuer(#[from] OtherIssuer),
     /// The credential fails these tests at the proof time.
     Fails(Vec<CredentialCode>),
     /// The issuer delivered no usable `secret_seed`.
-    Seed(NoSeed),
+    Seed(#[from] NoSeed),
     /// Each option with a usable pair refuses the credential, in the Verifier's order.
     Options(Vec<OptionRefusal>),
 }
 
 /// Why an option of a nym_auth query refuses a credential.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum OptionRefusal {
     /// The option's pair is not usable again.
+    #[error("the option's pair is not usable again")]
     Choice(ChoiceError),
     /// An item of the option fails for the credential.
+    #[error("an item of the option fails for the credential")]
     Unanswerable(Unanswerable),
 }
 
@@ -59,10 +62,6 @@ impl Unproven {
     }
 }
 
-siros_codec::display_code!(Unproven);
-
-impl std::error::Error for Unproven {}
-
 impl From<Unusable> for Unproven {
     fn from(unusable: Unusable) -> Self {
         match unusable {
@@ -70,18 +69,6 @@ impl From<Unusable> for Unproven {
             Unusable::Unreadable(unreadable) => Self::Unreadable(unreadable),
             Unusable::Fails(failures) => Self::Fails(failures.codes().to_vec()),
         }
-    }
-}
-
-impl From<OtherIssuer> for Unproven {
-    fn from(error: OtherIssuer) -> Self {
-        Self::Issuer(error)
-    }
-}
-
-impl From<NoSeed> for Unproven {
-    fn from(error: NoSeed) -> Self {
-        Self::Seed(error)
     }
 }
 

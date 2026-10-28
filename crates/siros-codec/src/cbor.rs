@@ -9,26 +9,31 @@
 //! The writer emits the core deterministic encoding of RFC 8949, Section 4.2.1: shortest heads,
 //! definite lengths, and map keys sorted by their encoded bytes.
 
-use std::fmt;
 use std::str::Utf8Error;
 
 /// The deepest nesting the reader accepts.
 pub const MAX_DEPTH: usize = 32;
 
 /// Why bytes are not one CBOR item the reader accepts.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum CborError {
     /// The input ends inside an item.
+    #[error("CBOR item is truncated")]
     Truncated,
     /// Bytes follow the item.
+    #[error("bytes follow the CBOR item")]
     TrailingBytes,
     /// An encoding the reader refuses, named by [`Unsupported`].
+    #[error("unsupported CBOR encoding")]
     Unsupported(Unsupported),
     /// A text string is not UTF-8.
-    InvalidUtf8(Utf8Error),
+    #[error("CBOR text is not UTF-8")]
+    InvalidUtf8(#[source] Utf8Error),
     /// A map has the same key twice.
+    #[error("CBOR map repeats a key")]
     DuplicateKey,
     /// Arrays, maps and tags nest deeper than [`MAX_DEPTH`].
+    #[error("CBOR nests too deeply")]
     TooDeep,
 }
 
@@ -56,32 +61,6 @@ impl CborError {
             Self::InvalidUtf8(_) => "cbor_invalid_utf8",
             Self::DuplicateKey => "cbor_duplicate_key",
             Self::TooDeep => "cbor_too_deep",
-        }
-    }
-}
-
-impl fmt::Display for CborError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Truncated => "CBOR item is truncated",
-            Self::TrailingBytes => "bytes follow the CBOR item",
-            Self::Unsupported(_) => "unsupported CBOR encoding",
-            Self::InvalidUtf8(_) => "CBOR text is not UTF-8",
-            Self::DuplicateKey => "CBOR map repeats a key",
-            Self::TooDeep => "CBOR nests too deeply",
-        })
-    }
-}
-
-impl std::error::Error for CborError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::InvalidUtf8(error) => Some(error),
-            Self::Truncated
-            | Self::TrailingBytes
-            | Self::Unsupported(_)
-            | Self::DuplicateKey
-            | Self::TooDeep => None,
         }
     }
 }
@@ -211,6 +190,13 @@ struct Reader<'a> {
 }
 
 impl<'a> Reader<'a> {
+    /// The next byte.
+    fn byte(&mut self) -> Result<u8, CborError> {
+        let byte = *self.bytes.get(self.at).ok_or(CborError::Truncated)?;
+        self.at += 1;
+        Ok(byte)
+    }
+
     fn take(&mut self, n: usize) -> Result<&'a [u8], CborError> {
         let end = self.at.checked_add(n).ok_or(CborError::Truncated)?;
         let out = self.bytes.get(self.at..end).ok_or(CborError::Truncated)?;
@@ -220,7 +206,7 @@ impl<'a> Reader<'a> {
 
     /// The next head.
     fn head(&mut self) -> Result<Head, CborError> {
-        let first = *self.take(1)?.first().ok_or(CborError::Truncated)?;
+        let first = self.byte()?;
         let (major, info) = (Major::of(first), first & 0x1f);
         let width = match info {
             0..=23 => {

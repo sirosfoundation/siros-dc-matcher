@@ -17,7 +17,7 @@ use crate::verifier_id::VerifierId;
 #[cfg(feature = "request")]
 pub use answer::{Answer, Unanswerable};
 #[cfg(feature = "request")]
-pub use proving::{HostError, Prepared, ProveError};
+pub use proving::{Prepared, ProveError};
 
 /// The session a presentation is bound to.
 #[derive(Debug, Clone, PartialEq, Eq)]

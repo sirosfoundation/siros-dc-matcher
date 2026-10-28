@@ -19,6 +19,7 @@ use serde_json::json;
 use siros_picker_testhost::{run, Invocation};
 
 mod corpus;
+mod credential_reads;
 mod differential;
 mod families;
 mod key_free;

@@ -1,12 +1,11 @@
 //! Why text is not a wallet state the core reads. Each error has a stable code.
 
-use std::fmt;
-
 use siros_codec::json::JsonTextError;
 use siros_codec::member::MemberFault;
 
 /// Why text is not the `S` of a WalletStateContainer (privatedata 3.1, Section 6).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum WalletStateError {
     /// The text is not a JSON object of the members `S` gives them.
     Malformed(JsonTextError),
@@ -18,6 +17,7 @@ pub enum WalletStateError {
     CredentialEntry(JsonTextError),
     /// A member of Section 6.0 of a credential entry breaks its rule. The number members are
     /// non-negative integers of 64 bits; the others are strings.
+    #[error("{code}: {member}", code = self.code(), member = .0.name())]
     CredentialMember(Member, MemberFault),
     /// Two credential entries share a `credentialId`.
     RepeatedCredentialId,
@@ -79,49 +79,61 @@ impl Member {
 }
 
 /// Why a member that holds an array is refused.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum ArrayFault {
     /// The member is absent.
+    #[error("the member is absent")]
     Absent,
     /// The member holds no array.
+    #[error("the member holds no array")]
     NotArray(JsonTextError),
 }
 
 /// The rule `metadata` breaks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum MetadataFault {
     /// `metadata` is not an array.
+    #[error("`metadata` is not an array")]
     NotArray(JsonTextError),
     /// An entry is not an object.
+    #[error("an entry is not an object")]
     EntryNotObject(JsonTextError),
     /// An entry has no non-empty string `type`.
+    #[error("an entry has no non-empty string `type`")]
     Type(TypeFault),
     /// An entry has no `value`.
+    #[error("an entry has no `value`")]
     Value,
 }
 
 /// Why a `metadata` entry has no `type`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum TypeFault {
     /// The entry has no `type`.
+    #[error("the entry has no `type`")]
     Absent,
     /// `type` is not a string.
+    #[error("`type` is not a string")]
     NotString(JsonTextError),
     /// `type` is the empty string.
+    #[error("`type` is the empty string")]
     Empty,
 }
 
 /// The rule `presentations` breaks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum PresentationsFault {
     /// `presentations` is absent or not an array.
+    #[error("`presentations` is absent or not an array")]
     NotArray(ArrayFault),
     /// An entry lacks one of the six members of `new_presentation`, or one of them has the
     /// wrong type: `presentationId` and `transactionId` non-negative integers of 64 bits,
     /// `usedCredentialIds` an array of them, `presentationTimestampSeconds` an integer, and
     /// the strings `data` and `audience`.
+    #[error("an entry lacks one of the six members of `new_presentation`, or one of them has the wrong type: `presentationId` and `transactionId` non-negative integers of 64 bits, `usedCredentialIds` an array of them, `presentationTimestampSeconds` an integer, and the strings `data` and `audience`")]
     Record(JsonTextError),
     /// A `presentationTimestampSeconds` is outside the years 0000 to 9999.
+    #[error("a `presentationTimestampSeconds` is outside the years 0000 to 9999")]
     Timestamp,
 }
 
@@ -141,14 +153,3 @@ impl WalletStateError {
         }
     }
 }
-
-impl fmt::Display for WalletStateError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::CredentialMember(member, _) => write!(f, "{}: {}", self.code(), member.name()),
-            _ => f.write_str(self.code()),
-        }
-    }
-}
-
-impl std::error::Error for WalletStateError {}

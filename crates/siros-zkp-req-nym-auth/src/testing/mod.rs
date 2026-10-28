@@ -324,7 +324,7 @@ pub fn session(query: &Value, nonce: &str) -> Session {
     .unwrap();
     let thumbprint = ec_jwk_thumbprint(&encryption_jwk()).unwrap();
     Session {
-        handover: checked.handover(&thumbprint).unwrap(),
+        handover: checked.handover(&thumbprint),
         verifier_id: VerifierId::x509_san_dns(checked.client_id(), Intermediary::Absent).unwrap(),
     }
 }

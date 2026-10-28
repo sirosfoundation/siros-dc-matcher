@@ -12,7 +12,8 @@ use crate::catalogue::Config;
 pub struct VerifierId(String);
 
 /// Why the `verifier_id` of the fixed form cannot be obtained. Each makes the query invalid.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum VerifierIdRule {
     /// The form is `semantic` and no semantic identifier comes from an authenticated source.
     SemanticIdMissing,
@@ -40,10 +41,6 @@ impl VerifierIdRule {
         }
     }
 }
-
-siros_codec::display_code!(VerifierIdRule);
-
-impl std::error::Error for VerifierIdRule {}
 
 /// Whether the Verifier's registration certificate names an intermediary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -132,7 +129,8 @@ macro_rules! bytes32 {
 }
 
 /// Bytes of this length, where the value has 32.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("bytes of this length, where the value has 32")]
 pub struct LengthError(pub usize);
 
 bytes32!(

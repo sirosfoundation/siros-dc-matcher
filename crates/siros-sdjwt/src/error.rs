@@ -1,8 +1,6 @@
 //! Why a stored SD-JWT or a key binding is refused. Each error has a stable code and carries
 //! its cause.
 
-use std::fmt;
-
 use siros_codec::json::JsonFault;
 use siros_codec::Base64Error;
 
@@ -10,73 +8,98 @@ use crate::alg::Digest;
 use crate::tree::DisclosureId;
 
 /// Why a base64url segment encodes no JSON value.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum EncodedJsonFault {
     /// The segment is not base64url without padding.
+    #[error("the segment is not base64url without padding")]
     Base64(Base64Error),
     /// The bytes are no JSON value, or an object repeats a member name (RFC 7519, Section 4).
+    #[error(
+        "the bytes are no JSON value, or an object repeats a member name (RFC 7519, Section 4)"
+    )]
     Json(JsonFault),
 }
 
 /// Why the issuer JWT is no compact JWS of a JSON header and payload (RFC 7515, Section 7.1).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum IssuerJwtFault {
     /// It has this many `.`-separated segments, where a JWS has three.
+    #[error("it has this many `.`-separated segments, where a JWS has three")]
     Segments(usize),
     /// The signature segment is empty.
+    #[error("the signature segment is empty")]
     SignatureEmpty,
     /// The signature segment is not base64url without padding.
+    #[error("the signature segment is not base64url without padding")]
     Signature(Base64Error),
     /// The header segment encodes no JSON value.
+    #[error("the header segment encodes no JSON value")]
     Header(EncodedJsonFault),
     /// The header is not a JSON object.
+    #[error("the header is not a JSON object")]
     HeaderNotObject,
     /// The payload segment encodes no JSON value.
+    #[error("the payload segment encodes no JSON value")]
     Payload(EncodedJsonFault),
     /// The payload is not a JSON object.
+    #[error("the payload is not a JSON object")]
     PayloadNotObject,
 }
 
 /// Why a disclosure is none of the two forms of Sections 4.2.1 and 4.2.2.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum DisclosureFault {
     /// The text encodes no JSON value.
+    #[error("the text encodes no JSON value")]
     Encoding(EncodedJsonFault),
     /// The value is not a JSON array.
+    #[error("the value is not a JSON array")]
     NotArray,
     /// The array has this many elements, where a disclosure has two or three.
+    #[error("the array has this many elements, where a disclosure has two or three")]
     Length(usize),
     /// The salt is not a string.
+    #[error("the salt is not a string")]
     Salt,
     /// The claim name is not a string.
+    #[error("the claim name is not a string")]
     Name,
 }
 
 /// Why `_sd_alg` names no supported algorithm.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum SdAlgFault {
     /// It is not a string.
+    #[error("it is not a string")]
     NotString,
     /// It names this algorithm, outside `sha-256`, `sha-384` and `sha-512`.
+    #[error("it names this algorithm, outside `sha-256`, `sha-384` and `sha-512`")]
     Unknown(String),
 }
 
 /// A reserved claim name outside its role (Sections 4.1, 4.1.1 and 7.1, step 3.c.ii.2).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum ReservedFault {
     /// An `_sd` member is not an array.
+    #[error("an `_sd` member is not an array")]
     SdNotArray,
     /// An `_sd` member holds an entry other than a digest string.
+    #[error("an `_sd` member holds an entry other than a digest string")]
     SdDigest,
     /// An object outside an array element has a `...` member.
+    #[error("an object outside an array element has a `...` member")]
     Ellipsis,
     /// An object below the payload's top level has an `_sd_alg` member.
+    #[error("an object below the payload's top level has an `_sd_alg` member")]
     NestedSdAlg,
     /// A disclosure names this reserved claim: `_sd`, `...` or `_sd_alg`.
+    #[error("a disclosure names this reserved claim: `_sd`, `...` or `_sd_alg`")]
     Disclosed(String),
     /// An array element holds `...` beside another member.
+    #[error("an array element holds `...` beside another member")]
     ElementMembers,
     /// An array element's `...` is not a digest string.
+    #[error("an array element's `...` is not a digest string")]
     ElementDigest,
 }
 
@@ -91,7 +114,8 @@ pub enum Placement {
 }
 
 /// Why text is not a stored SD-JWT (RFC 9901, Sections 4 and 7.1).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}: {:?}", self.code(), self)]
 pub enum ParseError {
     /// The issuer JWT is not three base64url segments whose header and payload are JSON objects
     /// with unique member names.
@@ -136,15 +160,19 @@ siros_codec::position!(
 );
 
 /// Why an `x5c` header parameter is no chain of certificates (RFC 7515, Section 4.1.6).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum X5cError {
     /// It is not an array.
+    #[error("it is not an array")]
     NotArray,
     /// The array is empty.
+    #[error("the array is empty")]
     Empty,
     /// The certificate at this position is not a string.
+    #[error("the certificate at this position is not a string")]
     NotString(X5cIndex),
     /// The certificate at this position is not base64 with padding.
+    #[error("the certificate at this position is not base64 with padding")]
     Base64(X5cIndex, Base64Error),
 }
 
@@ -167,16 +195,9 @@ impl ParseError {
     }
 }
 
-impl fmt::Display for ParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: {self:?}", self.code())
-    }
-}
-
-impl std::error::Error for ParseError {}
-
 /// Why claims do not form a KB-JWT payload.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}: {:?}", self.code(), self)]
 pub enum KeyBindingError {
     /// An extra claim has this name, which Section 4.3 gives a required claim: `iat`, `aud`,
     /// `nonce` or `sd_hash`.
@@ -194,11 +215,3 @@ impl KeyBindingError {
         }
     }
 }
-
-impl fmt::Display for KeyBindingError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: {self:?}", self.code())
-    }
-}
-
-impl std::error::Error for KeyBindingError {}

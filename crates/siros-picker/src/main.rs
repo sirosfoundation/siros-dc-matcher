@@ -13,7 +13,9 @@
 //! than merely discouraged, and why the release profile aborts instead of
 //! unwinding. An input that does not read is a diagnostic. A broken guarantee
 //! of another component is a bug that no entry set recovers from: it panics,
-//! each site under an `#[expect]` that names the guarantee.
+//! each site under an `#[expect]` that names the guarantee. The host's
+//! guarantees are among them: `android-credman` turns a host that breaks its
+//! ABI into a panic, and an input too large to allocate traps.
 //!
 //! # Two host behaviours every emitter must respect
 //!
@@ -67,11 +69,7 @@ fn main() {
         return;
     };
     let request = host.request();
-    // Without the registration there is nothing to offer, and no debug flag
-    // to report the failure with.
-    let Ok(registration) = host.credentials() else {
-        return;
-    };
+    let registration = host.credentials();
     let input = Input {
         request: &request,
         registration: &registration,

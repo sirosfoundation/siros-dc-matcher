@@ -3,8 +3,6 @@
 //! only `req_set`, `results` and the prover-supplied values from the presentation, and hands
 //! the proof to a system's verifier.
 
-use std::fmt;
-
 use serde_json::Value;
 use siros_codec::cbor::Value as Cbor;
 use siros_codec::date::DateTime;
@@ -69,67 +67,85 @@ pub struct Verified {
 }
 
 /// Why the Verifier's own query is unusable: `request`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum OwnQueryFault {
     /// DCQL refuses it (OpenID4VP 1.0, Section 6).
+    #[error("DCQL refuses it (OpenID4VP 1.0, Section 6)")]
     Dcql(QueryError),
     /// It breaks a rule of `zkp_req` or of the catalogue.
+    #[error("it breaks a rule of `zkp_req` or of the catalogue")]
     Invalid(InvalidRequest),
     /// It asks for another credential type than the nym_auth attestation.
+    #[error("it asks for another credential type than the nym_auth attestation")]
     OtherType,
 }
 
 /// Why `proof` or its `inputs` break the proof backend's format or Section 3:
 /// `proof_encoding`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ProofEncodingFault {
     /// `proof` is no `Proof`.
+    #[error("`proof` is no `Proof`")]
     Envelope(EncodingError),
     /// `zk_proof` has a length the system's proof backend does not read.
+    #[error("`zk_proof` has a length the system's proof backend does not read")]
     ZkProofLength,
     /// `inputs` holds other members than `issuer_key_set` and `proof_time`.
+    #[error("`inputs` holds other members than `issuer_key_set` and `proof_time`")]
     Inputs,
     /// `inputs` lacks this member.
+    #[error("`inputs` lacks this member")]
     InputMissing(InputName),
     /// `issuer_key_set` is no array of byte strings.
+    #[error("`issuer_key_set` is no array of byte strings")]
     IssuerKeySet,
     /// `proof_time` is no `tdate`: text under tag 0.
+    #[error("`proof_time` is no `tdate`: text under tag 0")]
     ProofTime,
 }
 
 /// Why the pseudonym of `results` is refused: `results`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum ResultsFault {
     /// `results` has no value under the `pseudonym` item's handle.
+    #[error("`results` has no value under the `pseudonym` item's handle")]
     Absent,
     /// The value is not a byte string.
+    #[error("the value is not a byte string")]
     NotBytes,
     /// The byte string is no 32-byte pseudonym.
+    #[error("the byte string is no 32-byte pseudonym")]
     Length(LengthError),
 }
 
 /// Why `issuer_key_set` is refused.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum IssuerKeySetError {
     /// It holds this many certificates, where the systems take one.
+    #[error("it holds this many certificates, where the systems take one")]
     Count(usize),
     /// The certificate is not one of the systems' form.
+    #[error("the certificate is not one of the systems' form")]
     Certificate(DocumentSignerError),
     /// The certificate has no path to the Verifier's `trust_anchors` at its clock (TR3).
+    #[error("the certificate has no path to the Verifier's `trust_anchors` at its clock (TR3)")]
     Untrusted(PathRefusal),
 }
 
 /// Why `proof_time` is refused.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum ProofTimeError {
     /// It is not exactly `YYYY-MM-DDThh:mm:ssZ`, a real UTC second.
+    #[error("it is not exactly `YYYY-MM-DDThh:mm:ssZ`, a real UTC second")]
     Malformed,
     /// It lies beyond the tolerance of the Verifier's clock.
+    #[error("it lies beyond the tolerance of the Verifier's clock")]
     Tolerance,
 }
 
 /// Why a presentation is rejected.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}: {:?}", self.code(), self)]
 pub enum Rejection {
     /// The Verifier's own query is unusable.
     Request(OwnQueryFault),
@@ -170,14 +186,6 @@ impl Rejection {
         }
     }
 }
-
-impl fmt::Display for Rejection {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: {self:?}", self.code())
-    }
-}
-
-impl std::error::Error for Rejection {}
 
 /// A presentation that follows the draft's structure for the Verifier's own request: steps 1
 /// to 5 of `zkp_req`, Section 4.1, `Proof` and its `inputs` (system rulebooks, Section 3), the

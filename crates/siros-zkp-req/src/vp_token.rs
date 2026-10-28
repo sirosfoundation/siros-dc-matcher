@@ -8,10 +8,11 @@ use siros_dcql::{Multiplicity, QueryId};
 use crate::ids::PresentationIndex;
 
 /// Why a `vp_token` gives no presentations for a query.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", self.code())]
 pub enum VpTokenError {
     /// The strict reader refuses the text.
-    NotJson(JsonFault),
+    NotJson(#[source] JsonFault),
     /// The JSON value is no object.
     NotObject,
     /// The object has no entry for the query's `id`.
@@ -32,6 +33,7 @@ pub enum VpTokenError {
         /// Its position in the entry.
         index: PresentationIndex,
         /// What breaks the encoding.
+        #[source]
         error: Base64Error,
     },
 }
@@ -49,23 +51,6 @@ impl VpTokenError {
             Self::MultipleNotAllowed => "presentations_multiple_not_allowed",
             Self::NotString { .. } => "presentation_not_string",
             Self::NotBase64url { .. } => "presentation_not_base64url",
-        }
-    }
-}
-
-siros_codec::display_code!(VpTokenError);
-
-impl std::error::Error for VpTokenError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::NotJson(fault) => Some(fault),
-            Self::NotBase64url { error, .. } => Some(error),
-            Self::NotObject
-            | Self::QueryIdMissing
-            | Self::NotArray
-            | Self::Empty
-            | Self::MultipleNotAllowed
-            | Self::NotString { .. } => None,
         }
     }
 }

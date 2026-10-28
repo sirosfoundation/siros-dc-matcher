@@ -495,7 +495,7 @@ pub fn decrypt_cwt(submission: &Submission) -> Cbor {
         get(epk, &int(-2)).as_bytes().unwrap(),
         get(epk, &int(-3)).as_bytes().unwrap(),
     );
-    let cek = cose_kdf(&z, ContentEncryption::A128Gcm).unwrap();
+    let cek = cose_kdf(&z, ContentEncryption::A128Gcm);
     let aad = cbor(&Cbor::Array(vec![
         Cbor::Text("Encrypt".into()),
         Cbor::Bytes(protected.clone()),

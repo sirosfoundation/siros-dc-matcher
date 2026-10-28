@@ -40,6 +40,7 @@ all: matcher bindings
 # ── The matcher binary ───────────────────────────────────────────────
 
 MATCHER_WASM := $(BUILD_DIR)/wasm32-wasip1/wasm-release/matcher.wasm
+MATCHER_STUBBED := $(BUILD_DIR)/wasm32-wasip1/wasm-release/matcher.stubbed.wasm
 
 # Panic locations embed the path of every dependency's source file, which
 # includes the builder's $CARGO_HOME. Without remapping, the same commit built
@@ -93,8 +94,8 @@ matcher:
 	# that). Whether it lacks these two is not established; stubbing them
 	# out as local no-ops is cheap insurance against ever finding out the
 	# hard way. See the script for what it rewrites and how.
-	python3 scripts/strip_wasi_environ.py $(MATCHER_WASM) $(MATCHER_WASM).tmp
-	mv $(MATCHER_WASM).tmp $(MATCHER_WASM)
+	python3 scripts/strip_wasi_environ.py $(MATCHER_WASM) $(MATCHER_STUBBED)
+	mv $(MATCHER_STUBBED) $(MATCHER_WASM)
 	wasm-opt -Oz $(WASM_OPT_FEATURES) $(MATCHER_WASM) -o $(MATCHER_WASM).tmp
 	mv $(MATCHER_WASM).tmp $(MATCHER_WASM)
 	@ls -l $(MATCHER_WASM)

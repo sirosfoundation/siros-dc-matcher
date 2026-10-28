@@ -120,7 +120,11 @@ fn invalid(code: &str) -> ZkpReqError {
 /// # Errors
 ///
 /// [`ZkpReqError::InvalidRequest`] for a rule of the policy or of the verifier identity, and
-/// [`ZkpReqError::Host`] for a thumbprint of no key in the request.
+/// [`ZkpReqError::Host`] for a thumbprint that is not 32 bytes.
+///
+/// # Panics
+///
+/// When the thumbprint is of no key in the request.
 #[uniffi::export]
 pub fn zkp_req_session(
     request_object_json: String,
@@ -147,9 +151,7 @@ pub fn zkp_req_session(
             .try_into()
             .map_err(|_| host("thumbprint_length"))?,
     );
-    let handover = checked
-        .handover(&thumbprint)
-        .map_err(|_| host("thumbprint_not_in_request"))?;
+    let handover = checked.handover(&thumbprint);
     let verifier_id = match verifier_id {
         FfiVerifierIdForm::Semantic {
             semantic_identifier,

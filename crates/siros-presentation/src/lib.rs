@@ -41,7 +41,6 @@
 mod credential;
 mod display_rule;
 mod ids;
-mod inconsistency;
 mod matching;
 mod offers;
 mod pick;
@@ -53,7 +52,6 @@ pub use display_rule::{
     Choice, DisplayFacts, HostDisplay, Presentability, Rows, TransactionData, WalletDisplay,
 };
 pub use ids::{AdditionIndex, CandidateIndex, OfferIndex, OptionIndex, QueryIndex, SetIndex};
-pub use inconsistency::Inconsistency;
 pub use matching::{
     Answer, Answered, Answers, Asked, Candidate, ChoiceError, Claims, Excluded, Exclusion, Failure,
     Matching, ProofChoice, QueryRefusal, ZkpQuery, ZkpRefusal,

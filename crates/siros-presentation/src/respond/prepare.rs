@@ -6,7 +6,7 @@ use rand_core::CryptoRngCore;
 use serde_json::Value;
 use siros_credential::{Credential, Parsed, UsableCredential};
 use siros_dcql::mdoc_components;
-use siros_mdoc::{ElementId, Mdoc, SessionTranscript};
+use siros_mdoc::{DisclosureError, ElementId, Mdoc, SessionTranscript};
 use siros_oid4vp::{Presentation, VerifiedRequest};
 use siros_sdjwt::{Audience, BeforeEpoch, KbNonce, NumericDate, SdJwt};
 use siros_transaction_data::{Amr, Binding, Jti, KbJwtInputs};
@@ -17,7 +17,6 @@ use super::forms::{DeviceResponse, Form};
 use super::selection::Chosen;
 use super::sign::{key_id, Sign, SignId, SigningInput};
 use crate::error::PresentationError;
-use crate::inconsistency::Inconsistency;
 use siros_dcql::HolderBinding;
 
 use crate::matching::{Answer, Candidate, Claims, ProofChoice};
@@ -70,9 +69,14 @@ impl<'p, 'a> Chosen<'p, 'a> {
     ///
     /// # Errors
     ///
-    /// [`PresentationError`]: a member whose credential names no key pair or holder key, a key
-    /// without the factors a transaction requires, a nym_auth credential that no longer passes
-    /// its tests, or a presentation its format refuses.
+    /// [`PresentationError`]: a member whose credential names no key pair or holder key, a
+    /// nym_auth credential that no longer passes its tests, or a presentation its format
+    /// refuses.
+    ///
+    /// # Panics
+    ///
+    /// When the host reported no factors for a key whose KB-JWT carries `amr` (H3), and when
+    /// the plan contradicts the matching it was built from.
     pub fn prepare(
         self,
         rng: &mut impl CryptoRngCore,
@@ -82,16 +86,16 @@ impl<'p, 'a> Chosen<'p, 'a> {
         // keep every candidate an entry is bound to.
         let mut bindings = planned
             .transactions
-            .bind(&planned.answered, self.offer.members())?;
+            .bind(&planned.answered, self.offer.members());
         for addition in &self.additions {
             bindings.extend(
                 planned
                     .transactions
-                    .bind(&planned.answered, addition.members())?,
+                    .bind(&planned.answered, addition.members()),
             );
         }
-        let offer = offered(&planned.answered, &self.members)?;
-        let added = offered(&planned.answered, &self.added)?;
+        let offer = offered(&planned.answered, &self.members);
+        let added = offered(&planned.answered, &self.added);
         let mut signs = Vec::new();
         let members = offer
             .iter()
@@ -159,20 +163,35 @@ impl<'p, 'a> Chosen<'p, 'a> {
             Ok(KbJwtInputs::new(
                 Jti::new(jti),
                 self.planned.input.request.response_mode(),
-                self.amr(&key_id(credential)?)?,
+                self.amr(&key_id(credential)?),
             ))
         })
     }
 
     /// The factors the host reported for the key `kid`.
-    fn amr(&self, kid: &KeyId) -> Result<Amr, PresentationError> {
-        self.planned
+    ///
+    /// # Panics
+    ///
+    /// When the host reported no factors for `kid`.
+    #[expect(
+        clippy::panic,
+        reason = "PlanInput carries the factors of each signing key (H3); a key without them is \
+                  a bug of the host, and the KB-JWT's `amr` would be false"
+    )]
+    fn amr(&self, kid: &KeyId) -> Amr {
+        match self
+            .planned
             .input
             .key_factors
             .iter()
             .find(|(key, _)| key == kid)
-            .map(|(_, amr)| amr.clone())
-            .ok_or_else(|| PresentationError::KeyFactorsMissing(kid.clone()))
+        {
+            Some((_, amr)) => amr.clone(),
+            None => panic!(
+                "the host reported no authentication factors for the key {}",
+                kid.as_str()
+            ),
+        }
     }
 
     /// The presentation of `claims` of `credential`, the KB-JWT carrying `extra`.
@@ -191,6 +210,15 @@ impl<'p, 'a> Chosen<'p, 'a> {
 
     /// The SD-JWT VC's selected disclosures (S3), and its KB-JWT when the query requires holder
     /// binding.
+    ///
+    /// # Panics
+    ///
+    /// When a pointer of `claims` selects nothing in `sd_jwt`.
+    #[expect(
+        clippy::expect_used,
+        reason = "the matching selected the pointers of `claims` by resolving them over this \
+                  SD-JWT's claim tree; one that selects nothing now is a bug of the core"
+    )]
     fn sd_jwt(
         &self,
         sd_jwt: &SdJwt,
@@ -198,7 +226,9 @@ impl<'p, 'a> Chosen<'p, 'a> {
         extra: &[(String, Value)],
         id: SignId,
     ) -> Result<Form<'p>, PresentationError> {
-        let presentation = sd_jwt.select(claims.pointers())?;
+        let presentation = sd_jwt
+            .select(claims.pointers())
+            .expect("the matching's pointers select claims of the SD-JWT");
         if claims.holder_binding() == HolderBinding::Optional {
             return Ok(Form::Ready(Presentation::text(
                 presentation.as_str().to_owned(),
@@ -217,6 +247,20 @@ impl<'p, 'a> Chosen<'p, 'a> {
 
     /// The mdoc's selected elements, and the DeviceAuthentication its device key signs over the
     /// SessionTranscript of the request's `Handover` (A7).
+    ///
+    /// # Errors
+    ///
+    /// [`PresentationError::ElementRepeated`] when the claims select one element twice.
+    ///
+    /// # Panics
+    ///
+    /// When a pointer of `claims` is no element of `mdoc`.
+    #[expect(
+        clippy::expect_used,
+        clippy::panic,
+        reason = "the matching selected the pointers of `claims` as elements of this mdoc; one \
+                  that is no element now is a bug of the core"
+    )]
     fn mdoc(
         &self,
         mdoc: &'p Mdoc,
@@ -227,14 +271,24 @@ impl<'p, 'a> Chosen<'p, 'a> {
             .pointers()
             .iter()
             .map(|pointer| {
-                let (name_space, identifier) = mdoc_components(pointer)?;
-                Ok::<_, PresentationError>(ElementId {
+                let (name_space, identifier) = mdoc_components(pointer)
+                    .expect("the matching's pointers name a namespace and an element");
+                ElementId {
                     name_space,
                     identifier,
-                })
+                }
             })
-            .try_collect()?;
-        let disclosure = mdoc.disclose(&elements, Vec::new())?;
+            .collect();
+        // The request may name one element in two claims queries; the other refusals of
+        // `disclose` need an element the matching did not select, or `DeviceSigned` elements,
+        // which this presentation has none of.
+        let disclosure = match mdoc.disclose(&elements, Vec::new()) {
+            Ok(disclosure) => disclosure,
+            Err(DisclosureError::RepeatedSelection) => {
+                return Err(PresentationError::ElementRepeated)
+            }
+            Err(other) => panic!("the matching's elements are no disclosure of the mdoc: {other}"),
+        };
         let transcript =
             SessionTranscript::new(self.planned.input.request.handover().session_transcript());
         let input = SigningInput::new(disclosure.signing_input(&transcript).as_bytes().to_vec());
@@ -243,6 +297,16 @@ impl<'p, 'a> Chosen<'p, 'a> {
 
     /// The nym_auth statement of `choice` by `candidate`'s credential, admitted as the candidate
     /// carries it, in the request's session.
+    ///
+    /// # Panics
+    ///
+    /// When the request is no nym_auth request, or `member`'s query has no nym_auth query.
+    #[expect(
+        clippy::expect_used,
+        reason = "the matching answers with a proof only for a nym_auth query of a request that \
+                  meets the nym_auth policy; a proof without both is a bug of the core, and no \
+                  statement built on it is sound"
+    )]
     fn proof(
         &self,
         member: &Offered<'p, 'a>,
@@ -255,11 +319,11 @@ impl<'p, 'a> Chosen<'p, 'a> {
             .planned
             .nym_auth
             .as_ref()
-            .map_err(|refusal| Inconsistency::NymAuthRequest(*refusal))?;
+            .expect("a proof answers a request that meets the nym_auth policy");
         let zkp = member
             .answers
             .zkp()
-            .ok_or(Inconsistency::ZkpQuery(member.query))?;
+            .expect("a proof answers a query the matching read as nym_auth");
         let answer = nym_answer(
             credential,
             candidate.admission(),

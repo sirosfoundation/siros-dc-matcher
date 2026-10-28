@@ -23,7 +23,8 @@ macro_rules! identifier {
         pub struct $name(String);
 
         $(#[$error_doc])*
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+        #[error("{}", self.code())]
         pub enum $error {
             /// The text is empty.
             Empty,
@@ -41,10 +42,6 @@ macro_rules! identifier {
                 }
             }
         }
-
-        crate::display_code!($error);
-
-        impl std::error::Error for $error {}
 
         impl $name {
             #[doc = concat!("The ", $what, " `text`.")]
