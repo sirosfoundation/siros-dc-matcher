@@ -18,7 +18,7 @@ use crate::parameters::ParameterFault;
 #[error("{}", self.code())]
 pub enum IntakeError {
     /// The authorization request URI has no query of form-encoded parameters, each once.
-    NotAnAuthorizationRequest(FormFault),
+    NotAnAuthorizationRequest(#[source] FormFault),
     /// `client_id` is missing or not a string (Section 5.2; A.2 for signed DC API requests).
     ClientIdMissing,
     /// Both `request` and `request_uri` are present (RFC 9101, Section 5).
@@ -37,7 +37,7 @@ pub enum IntakeError {
     /// The Request URI answered with more bytes than the fetch allowed.
     FetchTooLarge,
     /// A JWS breaks its serialization.
-    JwsMalformed(JwsFault),
+    JwsMalformed(#[source] JwsFault),
     /// The JWS `alg` is not `ES256`.
     AlgorithmUnsupported,
     /// The JWS header has `crit` (RFC 7515, Section 4.1.11).
@@ -59,7 +59,7 @@ pub enum IntakeError {
     /// An unsigned request uses a prefix other than `redirect_uri` (Section 5.9.3).
     UnsignedNeedsRedirectUri,
     /// `x5c` breaks its rules.
-    CertificateChainInvalid(ChainFault),
+    CertificateChainInvalid(#[source] ChainFault),
     /// No dNSName SAN of the leaf certificate is the `x509_san_dns` value.
     SanMismatch,
     /// The SHA-256 of the leaf certificate is not the `x509_hash` value.
@@ -69,9 +69,9 @@ pub enum IntakeError {
     /// The host's trust answer carries no JWK for a key it was asked to resolve.
     KeyNotResolved,
     /// The JWK of the host's trust answer is no P-256 key.
-    ResolvedKeyInvalid(JwkFault),
+    ResolvedKeyInvalid(#[source] JwkFault),
     /// The `jwt` Header Parameter is not a Verifier Attestation JWT (Section 12).
-    AttestationInvalid(AttestationFault),
+    AttestationInvalid(#[source] AttestationFault),
     /// The attestation's `sub` is not the `verifier_attestation` value.
     AttestationSubjectMismatch,
     /// The attestation's `exp` has passed, or its `nbf` has not come.
@@ -122,7 +122,7 @@ pub enum IntakeError {
     EncryptionKeyMissing,
     /// No key of `jwks` is a usable P-256 `ECDH-ES` encryption key, and the first that names
     /// P-256 is no P-256 key: its fault.
-    EncryptionKeyInvalid(JwkFault),
+    EncryptionKeyInvalid(#[source] JwkFault),
     /// `encrypted_response_enc_values_supported` names no `enc` of the Response Mode's
     /// envelope: `A128GCM` or `A256GCM` for a JWE, these or `A192GCM` for a `COSE_Encrypt`.
     EncryptionUnsupported,
@@ -142,7 +142,7 @@ pub enum FormFault {
     Escape,
     /// A decoded name or value is not UTF-8.
     #[error("a decoded name or value is not UTF-8")]
-    NotUtf8(Utf8Error),
+    NotUtf8(#[source] Utf8Error),
 }
 
 /// The rule a JWS breaks (RFC 7515, Sections 7.1 and 7.2).
@@ -153,7 +153,7 @@ pub enum JwsFault {
     Segments,
     /// A segment is not unpadded base64url.
     #[error("a segment is not unpadded base64url")]
-    Encoding(Base64Error),
+    Encoding(#[source] Base64Error),
     /// The protected header is not a JSON object.
     #[error("the protected header is not a JSON object")]
     Header,
@@ -169,7 +169,7 @@ pub enum JwsFault {
     TrustChain,
     /// The fetched Request Object is not UTF-8 text.
     #[error("the fetched Request Object is not UTF-8 text")]
-    NotUtf8(Utf8Error),
+    NotUtf8(#[source] Utf8Error),
 }
 
 /// Why a JWS is refused: its serialization, its algorithm, or a critical extension.
@@ -177,7 +177,7 @@ pub enum JwsFault {
 pub enum JwsError {
     /// The serialization breaks a rule.
     #[error("the serialization breaks a rule")]
-    Malformed(JwsFault),
+    Malformed(#[source] JwsFault),
     /// `alg` is not `ES256`.
     #[error("`alg` is not `ES256`")]
     AlgorithmUnsupported,
@@ -197,16 +197,16 @@ pub enum ChainFault {
     NotString,
     /// A certificate is not base64 with padding.
     #[error("a certificate is not base64 with padding")]
-    Encoding(Base64Error),
+    Encoding(#[source] Base64Error),
     /// The leaf is not a DER X.509 certificate.
     #[error("the leaf is not a DER X.509 certificate")]
-    LeafNotCertificate(der::Error),
+    LeafNotCertificate(#[source] der::Error),
     /// The leaf's key is not a P-256 key.
     #[error("the leaf's key is not a P-256 key")]
-    LeafKey(LeafKeyFault),
+    LeafKey(#[source] LeafKeyFault),
     /// The leaf's SubjectAltName extension does not decode.
     #[error("the leaf's SubjectAltName extension does not decode")]
-    SubjectAltName(der::Error),
+    SubjectAltName(#[source] der::Error),
 }
 
 /// Why a leaf certificate's key is no P-256 key (RFC 5480).
@@ -220,7 +220,7 @@ pub enum LeafKeyFault {
     CurveAbsent,
     /// The parameters are no OBJECT IDENTIFIER.
     #[error("the parameters are no OBJECT IDENTIFIER")]
-    Curve(der::Error),
+    Curve(#[source] der::Error),
     /// The named curve is this one, where the wallet takes `prime256v1`.
     #[error("the named curve is this one, where the wallet takes `prime256v1`")]
     OtherCurve(ObjectIdentifier),
@@ -252,7 +252,7 @@ pub enum JwkFault {
     CoordinateAbsent(Coordinate),
     /// The coordinate is not unpadded base64url.
     #[error("the coordinate is not unpadded base64url")]
-    CoordinateEncoding(Coordinate, Base64Error),
+    CoordinateEncoding(Coordinate, #[source] Base64Error),
     /// The coordinate has this many bytes, where P-256 takes 32.
     #[error("the coordinate has this many bytes, where P-256 takes 32")]
     CoordinateLength(Coordinate, usize),
@@ -283,13 +283,13 @@ pub enum AttestationClaim {
 pub enum ClaimsFault {
     /// The payload is no JSON object.
     #[error("the payload is no JSON object")]
-    NotObject(JsonTextError),
+    NotObject(#[source] JsonTextError),
     /// The claim breaks its rule.
     #[error("the claim breaks its rule")]
-    Claim(AttestationClaim, MemberFault),
+    Claim(AttestationClaim, #[source] MemberFault),
     /// `cnf.jwk` is no P-256 key.
     #[error("`cnf.jwk` is no P-256 key")]
-    Key(JwkFault),
+    Key(#[source] JwkFault),
 }
 
 /// The rule the `jwt` Header Parameter of a `verifier_attestation` request breaks (Section 12).
@@ -300,13 +300,13 @@ pub enum AttestationFault {
     Absent,
     /// `jwt` is not a JWS this wallet reads.
     #[error("`jwt` is not a JWS this wallet reads")]
-    Jws(JwsError),
+    Jws(#[source] JwsError),
     /// The attestation's `typ` is not `verifier-attestation+jwt`.
     #[error("the attestation's `typ` is not `verifier-attestation+jwt`")]
     Typ,
     /// The attestation's claims break a rule.
     #[error("the attestation's claims break a rule")]
-    Claims(ClaimsFault),
+    Claims(#[source] ClaimsFault),
 }
 
 /// A request parameter that holds JSON (Section 5.1).

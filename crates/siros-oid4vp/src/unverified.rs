@@ -44,9 +44,9 @@ pub enum NoQuery {
     /// signed one: the label and the shape disagree.
     ShapeDoesNotMatchProtocol,
     /// `data.request` of a signed request is no compact JWS.
-    NotACompactJws(CompactFault),
+    NotACompactJws(#[source] CompactFault),
     /// The payload segment is no unpadded base64url the picker decodes.
-    PayloadNotBase64url(PayloadFault),
+    PayloadNotBase64url(#[source] PayloadFault),
     /// The payload decoded, but is not JSON.
     PayloadNotJson(#[source] JsonTextError),
     /// The payload is JSON but carries no `dcql_query`.
@@ -174,7 +174,7 @@ pub enum PayloadFault {
     TooLong,
     /// The segment is not unpadded base64url.
     #[error("the segment is not unpadded base64url")]
-    Encoding(Base64Error),
+    Encoding(#[source] Base64Error),
 }
 
 /// One DC API request entry, read without verification (OpenID4VP 1.0, Appendix A).
