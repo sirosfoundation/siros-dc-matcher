@@ -15,10 +15,13 @@ rust-version.workspace = true
 json = ["dep:serde", "serde_json/raw_value"]
 
 [dependencies]
-rustc-hash = { workspace = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+
+[[test]]
+name = "json"
+required-features = ["json"]
 
 [lints]
 workspace = true

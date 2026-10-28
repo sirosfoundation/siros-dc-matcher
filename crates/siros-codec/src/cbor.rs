@@ -12,8 +12,6 @@
 
 use std::str::Utf8Error;
 
-use rustc_hash::FxHashSet;
-
 /// The deepest nesting the reader accepts.
 pub const MAX_DEPTH: usize = 32;
 
@@ -22,21 +20,15 @@ pub const MAX_DEPTH: usize = 32;
 /// sequence, or in the box of its tag. A vector grows as its items decode: from four slots,
 /// doubling when full. It holds at most twice the slots it fills, or four for one item, and the
 /// vectors it outgrew hold as many again on an allocator that never frees: four slots per item.
-/// The duplicate check of a map adds [`KEY_SET_PER_KEY`] per key, and a key and its value take
-/// two bytes at least.
+/// The duplicate check of a map sorts a slice of each key's encoding in a vector of the map's
+/// size, which the sort leaves as it is, and a key and its value take two bytes at least.
 ///
-/// 127 bytes on wasm32 (an `Item` of 24 bytes, a slice of 8) and 243 on a 64-bit target (48
+/// 100 bytes on wasm32 (an `Item` of 24 bytes, a slice of 8) and 200 on a 64-bit target (48
 /// and 16).
-pub const HEAP_PER_BYTE: usize = 4 * size_of::<Item<'static>>() + KEY_SET_PER_KEY.div_ceil(2);
-
-/// The most heap bytes the duplicate check of a map allocates per key. Its hash set holds a
-/// slice of each key's encoding and a control byte per bucket, in a table of four buckets or
-/// more that doubles when it fills: fewer than five buckets per key over every table it
-/// outgrew. Each table adds a group of control bytes, 16 at most, and the first serves one key.
-pub const KEY_SET_PER_KEY: usize = 5 * (size_of::<&[u8]>() + 1) + 16;
+pub const HEAP_PER_BYTE: usize = 4 * size_of::<Item<'static>>() + size_of::<&[u8]>() / 2;
 
 /// The longest input the reader decodes: its items then take at most `isize::MAX` heap bytes,
-/// the most one allocation holds. 16,909,320 bytes on wasm32.
+/// the most one allocation holds. 21,474,836 bytes on wasm32.
 pub const MAX_INPUT: usize = match (isize::MAX as usize).checked_div(HEAP_PER_BYTE) {
     Some(bytes) => bytes,
     None => 0,
@@ -349,22 +341,32 @@ impl<'a> Reader<'a> {
         Ok(Kind::Array(items))
     }
 
-    /// The map of the `argument` entries that follow, each key once: one hash set insertion
-    /// per key. The vector grows as they decode.
+    /// The map of the `argument` entries that follow, each key once. The vector grows as they
+    /// decode.
     fn map(&mut self, argument: u64, depth: usize) -> Result<Kind<'a>, CborError> {
         let n = self.length(argument)?;
         let mut entries = Vec::new();
-        let mut keys = FxHashSet::default();
         for _ in 0..n {
             let key = self.item(depth + 1)?;
-            if !keys.insert(key.raw) {
-                return Err(CborError::DuplicateKey);
-            }
             let value = self.item(depth + 1)?;
             entries.push((key, value));
         }
+        distinct_keys(&entries)?;
         Ok(Kind::Map(entries))
     }
+}
+
+/// Checks that the keys of `entries` differ. Their encodings sorted once, a repeated key lies
+/// next to its first: `sort_unstable` takes O(n log n) comparisons for `n` keys, whatever the
+/// keys, and allocates nothing.
+fn distinct_keys(entries: &[(Item<'_>, Item<'_>)]) -> Result<(), CborError> {
+    let mut keys: Vec<&[u8]> = Vec::with_capacity(entries.len());
+    keys.extend(entries.iter().map(|(key, _)| key.raw));
+    keys.sort_unstable();
+    if keys.windows(2).any(|pair| matches!(pair, [a, b] if a == b)) {
+        return Err(CborError::DuplicateKey);
+    }
+    Ok(())
 }
 
 /// The item of major type 7 that `head` starts.

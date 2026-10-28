@@ -346,7 +346,7 @@ binaryen version_116.
 ### Added
 
 - `siros-codec`, the encodings every wallet core crate shares: a strict CBOR reader (definite
-  lengths, no duplicate keys, found with one hash set insertion per key, no trailing bytes, at most
+  lengths, no duplicate keys, found by one sort of their encodings, no trailing bytes, at most
   `cbor::MAX_DEPTH` (32) levels, input of at most `cbor::MAX_INPUT` bytes, whose items take at most
   `cbor::HEAP_PER_BYTE` heap bytes per byte of it), of one item or of a CBOR sequence
   (`cbor::decode_sequence`, RFC 8742), and a deterministic writer; unpadded base64url and the padded
@@ -354,16 +354,17 @@ binaryen version_116.
   CBOR's `full-date` and `tdate`; the ES256 signature value (`signature::Es256Signature`); an
   `https` URL (`url::HttpsUrl`); and `json::JsonTextError`, what serde_json reports of text that is
   no JSON. With the feature `json` it holds the strict JSON reader, `Json::parse_unique`: one value,
-  members in document order, each member name once per object, every number with the text its writer
-  chose (`JsonNumber`), at most `json::MAX_DEPTH` (64) levels, and at most `json::MAX_TEXT` bytes,
-  whose values take at most `json::HEAP_PER_BYTE` heap bytes per byte. It refuses with a
-  `JsonFault`: text too long first, then a text fault anywhere in the bytes, then the first, in
-  document order, of a number beyond binary64, nesting too deep and a member name an object repeats.
-  `siros-wallet-state` reads the wallet state with its own reader, where a repeated name keeps its
-  last value, as `JSON.parse` in `wallet-frontend` does. The crate holds the internals the
-  components share: `member::MemberFault` with its `ArrayIndex`, `chain::CertificateChain` (the DER
-  chain an mdoc `x5chain` and an `x5c` carry), the `position!` and `text_value!` macros that declare
-  value newtypes, and `display_code!`, which shows an error by its stable code.
+  members in document order, each member name once per object, found by one sort of the object's
+  names, every number with the text its writer chose (`JsonNumber`), at most `json::MAX_DEPTH` (64)
+  levels, and at most `json::MAX_TEXT` bytes, whose values take at most `json::HEAP_PER_BYTE` heap
+  bytes per byte. It refuses with a `JsonFault`: text too long first, then a text fault anywhere in
+  the bytes, then the first, in document order, of a number beyond binary64, nesting too deep and a
+  member name an object repeats. `siros-wallet-state` reads the wallet state with its own reader,
+  where a repeated name keeps its last value, as `JSON.parse` in `wallet-frontend` does. The crate
+  holds the internals the components share: `member::MemberFault` with its `ArrayIndex`,
+  `chain::CertificateChain` (the DER chain an mdoc `x5chain` and an `x5c` carry), the `position!`
+  and `text_value!` macros that declare value newtypes, and `display_code!`, which shows an error by
+  its stable code.
 - `siros-mdoc`, ISO/IEC 18013-5 mdocs: the stored credential and the device signature's
   signing input (`device_signing_input`, a
   `SigStructure` whose `digest` the device key signs). Names and values are types: `DocType`

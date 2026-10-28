@@ -132,13 +132,13 @@ The reader refuses, with a `RegistrationError` that names the part and the cause
 - a definition of no UTF-8, no projection, or another language than the facts';
 - an icon, an index, names or a table longer than a buffer of the platform holds (`isize::MAX`
   bytes), an index of more entries than a buffer holds, facts or records of a type longer than
-  `cbor::MAX_INPUT` of siros-codec (16,909,320 bytes on wasm32), and a definition longer than
+  `cbor::MAX_INPUT` of siros-codec (21,474,836 bytes on wasm32), and a definition longer than
   `json::MAX_TEXT` (10,275,041 bytes on wasm32).
 
 The reader reads a part into a buffer of the part's length, which lies within the blob.
-Decoding a CBOR part allocates at most `cbor::HEAP_PER_BYTE` bytes per byte of it: 127 on wasm32
-and 243 on a 64-bit target. A vector of items grows as they decode, from four slots, and a map
-keeps a hash set of its keys. Reading a definition allocates at most `json::HEAP_PER_BYTE` bytes
+Decoding a CBOR part allocates at most `cbor::HEAP_PER_BYTE` bytes per byte of it: 100 on wasm32
+and 200 on a 64-bit target. A vector of items grows as they decode, from four slots, and a map
+sorts a slice of each key's encoding once to find a repeated key. Reading a definition allocates at most `json::HEAP_PER_BYTE` bytes
 per byte: 209 on wasm32 and 241 on a 64-bit target. The values of a part thus take at most
 `isize::MAX` bytes.
 

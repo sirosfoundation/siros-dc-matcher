@@ -2,7 +2,6 @@
 
 use std::fmt;
 
-use rustc_hash::FxHashSet;
 use serde::de::{Deserialize, Deserializer, MapAccess, Visitor};
 use serde_json::value::RawValue;
 use serde_json::Number;
@@ -28,16 +27,14 @@ pub const HEAP_PER_BYTE: usize = max(ARRAY_PER_BYTE, OBJECT_PER_BYTE) + 1 + 2 * 
 /// and its separator take two bytes at least. 80 bytes on wasm32 and 112 on a 64-bit target.
 const ARRAY_PER_BYTE: usize = 2 * (size_of::<&RawValue>() + size_of::<Json>());
 
-/// The heap bytes of objects per byte of text: four slots of each vector per member, a set of
-/// the member names, and a member and its separator take five bytes at least. The set holds a
-/// name and a control byte per bucket, in a table of four buckets or more that doubles when it
-/// fills: fewer than five buckets per name over every table it outgrew, and a group of 16
-/// control bytes at most per table. 67 bytes on wasm32 and 104 on a 64-bit target.
-const OBJECT_PER_BYTE: usize = (4
-    * (size_of::<(String, &RawValue)>() + size_of::<(String, Json)>())
-    + 5 * (size_of::<&str>() + 1)
-    + 16)
-    .div_ceil(5);
+/// The heap bytes of objects per byte of text: four slots per member of the vector serde_json
+/// reads the members into, one of the vector this reader holds them in, and one of the names it
+/// sorts to find a repeat; a member and its separator take five bytes at least. 28 bytes on
+/// wasm32 and 50 on a 64-bit target.
+const OBJECT_PER_BYTE: usize = (4 * size_of::<(String, &RawValue)>()
+    + size_of::<(String, Json)>()
+    + size_of::<(&str, usize)>())
+.div_ceil(5);
 
 /// The longest text the reader reads: its values then take at most `isize::MAX` heap bytes, the
 /// most one allocation holds. 10,275,041 bytes on wasm32.
@@ -183,17 +180,7 @@ fn value(raw: &RawValue, depth: usize) -> Result<Json, JsonFault> {
         Some(b'{') => {
             let depth = nested(depth)?;
             let Members(members) = serde_json::from_slice(bytes).map_err(text)?;
-            let mut names = FxHashSet::default();
-            let members = members
-                .iter()
-                .map(|(name, raw)| {
-                    if !names.insert(name.as_str()) {
-                        return Err(JsonFault::RepeatedMember(name.clone()));
-                    }
-                    Ok((name.clone(), value(raw, depth)?))
-                })
-                .collect::<Result<_, JsonFault>>()?;
-            Ok(Json::Object(members))
+            object(&members, depth).map(Json::Object)
         }
         Some(b'[') => {
             let depth = nested(depth)?;
@@ -218,6 +205,45 @@ fn value(raw: &RawValue, depth: usize) -> Result<Json, JsonFault> {
             Err(_) => Err(JsonFault::Read(ReadFault::NumberUnrepresentable)),
         },
     }
+}
+
+/// The members of an object, `members` as the document writes them, each name once, the
+/// values `depth` levels below the document.
+///
+/// # Errors
+///
+/// [`JsonFault`]: the first in document order of a fault of a value and a name that repeats one
+/// before it. The names read before a fault, or all of them at the object's end, sorted once
+/// find the earliest repeat: O(n log n) comparisons for `n` names, whatever the names.
+fn object(members: &[(String, &RawValue)], depth: usize) -> Result<Vec<(String, Json)>, JsonFault> {
+    let mut names: Vec<(&str, usize)> = Vec::with_capacity(members.len());
+    let mut object = Vec::with_capacity(members.len());
+    for (at, (name, raw)) in members.iter().enumerate() {
+        // A member's name comes before its value in the document.
+        names.push((name, at));
+        match value(raw, depth) {
+            Ok(value) => object.push((name.clone(), value)),
+            Err(fault) => return Err(first_repeat(&mut names).unwrap_or(fault)),
+        }
+    }
+    match first_repeat(&mut names) {
+        Some(repeat) => Err(repeat),
+        None => Ok(object),
+    }
+}
+
+/// The refusal of the earliest name of `names`, each with its position, that repeats a name
+/// before it. Sorted, the names fall into runs of one name in order of position.
+fn first_repeat(names: &mut [(&str, usize)]) -> Option<JsonFault> {
+    names.sort_unstable();
+    names
+        .windows(2)
+        .filter_map(|pair| match pair {
+            [(first, _), (repeat, at)] if first == repeat => Some((*at, *repeat)),
+            _ => None,
+        })
+        .min_by_key(|(at, _)| *at)
+        .map(|(_, name)| JsonFault::RepeatedMember(name.to_owned()))
 }
 
 /// The depth of a value inside an object or array at `depth`.
