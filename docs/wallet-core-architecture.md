@@ -51,7 +51,7 @@ Key words: MUST, MUST NOT, SHOULD and MAY as in RFC 2119.
   - a delivered secret (privatedata §5A);
   - a derived secret;
   - a nym_auth undisclosable attribute (`ssc`, `psc`, `secret_seed`, `birth_date`).
-- **R-G7 Determinism.** With the same inputs and the same effect results, every operation MUST give the same output. Randomness enters only as an effect result.
+- **R-G7 Determinism.** With the same inputs and the same effect results, every operation MUST give the same output. Randomness enters only as an input or an effect result.
 - **R-G8 Rules in code.** Matching rules MUST be code, versioned with the binary. No rule MAY travel as data in the picker registration.
 - **R-G9 Build constraints.**
   - Everything the picker links MUST build with Rust 1.82.
@@ -352,8 +352,8 @@ A component MUST NOT depend on a component of its own or a higher layer, except 
 - **F4.** `secret_seed` MUST stay inside the process from the wallet state to the proof.
 - **F5. HTTP.** `siros-http` MUST apply these rules, and so MUST every host that does its own HTTP:
   - every request: `https` only, public addresses only, a 10-second timeout, and no cookies, credentials or headers that identify the wallet (OpenID4VP §15.6, §15.8);
-  - the request object: a `GET` of `request_uri`, or for `request_uri_method=post` a `POST` of the form parameters intake states, with `Accept: application/oauth-authz-req+jwt` (§5.10); no redirects (RFC 9101 §10.4.1); status 200 and the media type `application/oauth-authz-req+jwt` (§5.10.1, §5.10.2); at most 256 KiB read, as UTF-8 text;
-  - a submission: a `POST` of its body to the `response_uri`, as `application/x-www-form-urlencoded` form parameters or an `application/cwt` `COSE_Encrypt`; the reply: status 200 and `application/json` (§8.2), at most 64 KiB read;
+  - the request object: a `GET` of `request_uri`, or for `request_uri_method=post` a `POST` of the form parameters intake states, with `Content-Type: application/x-www-form-urlencoded`; `Accept: application/oauth-authz-req+jwt` (§5.10); no redirects (RFC 9101 §10.4.1); status 200 and the media type `application/oauth-authz-req+jwt` (§5.10.1, §5.10.2); at most 256 KiB read, as UTF-8 text;
+  - a submission: a `POST` of its body to the `response_uri`, as `application/x-www-form-urlencoded` form parameters or an `application/cwt` `COSE_Encrypt`; no redirects, since a 307 or 308 resends the body to another URI (§8.2, §14.3.1; RFC 9700 §4.12); the reply: status 200 and `application/json` (§8.2), at most 64 KiB read;
   - held metadata, outside presentations: a signed credential metadata JWT with `Accept: application/jwt` and the wallet's language in `Accept-Language`, following redirects, the final URL being the URL that served it (Proof Metadata §8); a URL answering 404 is recorded as serving no document.
 
 ### 4.15 Picker
