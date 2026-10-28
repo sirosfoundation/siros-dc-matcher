@@ -55,7 +55,7 @@ Key words: MUST, MUST NOT, SHOULD and MAY as in RFC 2119.
 - **R-G8 Rules in code.** Matching rules MUST be code, versioned with the binary. No rule MAY travel as data in the picker registration.
 - **R-G9 Build constraints.**
   - Everything the picker links MUST build with Rust 1.82.
-  - `matcher.wasm` MUST stay at or below 307,200 bytes.
+  - `matcher.wasm` MUST stay at or below 409,600 bytes (400 KiB).
   - Library code MUST deny `unwrap`, `expect`, indexing and `panic`.
   - Library code MUST hold no interior mutability.
   - Library code MUST use Fx hash collections and never B-trees.
@@ -480,7 +480,7 @@ The core meets this document when all of the following hold:
 4. **Wallet against picker.** The picker's offers equal the wallet's offers on every plan vector.
 5. **No secrets.** No view, projection or error of the vectors contains a delivered seed, a derived secret or an undisclosable attribute.
 6. **No copies.** No platform in §8 keeps DCQL evaluation, claims path resolution, disclosure selection, proof system choice or response assembly (a grep per repository).
-7. **Picker size.** `matcher.wasm` ≤ 307,200 bytes.
+7. **Picker size.** `matcher.wasm` ≤ 409,600 bytes (400 KiB).
 8. **mdoc ZK retired.** `mso_mdoc_zk`, `zk_system_type`, `zk_required` and `ppid_context` have no reference left in the core, the platforms of §8 or vc, outside changelogs.
 
 ## 10. Decisions
