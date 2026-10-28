@@ -199,8 +199,8 @@ pub enum QueryTextError {
     #[error("{code}: {0}", code = self.code())]
     Json(#[source] serde_json::Error),
     /// The JSON value is no usable DCQL query.
-    #[error("{0}")]
-    Query(#[source] QueryError),
+    #[error(transparent)]
+    Query(QueryError),
 }
 
 impl QueryTextError {
