@@ -1,9 +1,11 @@
 //! Transaction data in the plan (PaSO Core, Section 7.4; OpenID4VP 1.0, Sections 5.1 and 8.5):
-//! the honest path from signed credential metadata to the consent view, Annex A.5's offers, the
-//! next entry for a credential that supports no type of the first, and a refusal per plan rule
-//! with the error the verifier receives.
+//! the honest path from signed credential metadata to the KB-JWT, Annex A.5's offers, the next
+//! entry for a credential that supports no type of the first, and a refusal per plan rule with
+//! the error the verifier receives.
 
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
+use siros_codec::base64url;
 use siros_oid4vp::ErrorCode;
 use siros_presentation::testing::paso::{approval, entry, paso_wallet, APPROVAL};
 use siros_presentation::PresentationError;
@@ -13,8 +15,8 @@ use siros_transaction_data::{
 };
 
 use crate::host::{holding_absent, label_text};
-use crate::verifier::{b64, client_metadata, dc_api_signed, dc_api_unsigned, NONCE};
-use crate::wallet::{ready, sd_jwt, Held, Wallet, VCT};
+use crate::verifier::{b64, client_metadata, dc_api_signed, dc_api_unsigned, decrypt_jwe, NONCE};
+use crate::wallet::{ready, respond, sd_jwt, Held, Wallet, VCT};
 
 /// The parameters of a DC API request for the `given_name` of each query of `queries`, all
 /// required, carrying `transaction_data`.
@@ -33,8 +35,16 @@ fn params(queries: &[(&str, &str)], transaction_data: &[String]) -> Value {
     })
 }
 
+/// The claims of the KB-JWT the response of `input` sends for `pid`.
+fn kb_jwt_claims(input: &siros_presentation::PlanInput<'_>) -> Value {
+    let payload = decrypt_jwe(respond(input).submission());
+    let sent = payload["vp_token"]["pid"][0].as_str().unwrap();
+    let body = sent.rsplit('~').next().unwrap().split('.').nth(1).unwrap();
+    serde_json::from_slice(&base64url::decode(body).unwrap()).unwrap()
+}
+
 #[test]
-fn signed_credential_metadata_defines_the_entry_view() {
+fn signed_credential_metadata_binds_the_entry_into_the_kb_jwt() {
     let wallet = paso_wallet(json!({APPROVAL: approval()}));
     let approval = entry(APPROVAL, "pid", json!({"what": "Pay 10.00 EUR"}));
     let request = dc_api_signed(&params(&[("pid", VCT)], std::slice::from_ref(&approval)));
@@ -57,6 +67,17 @@ fn signed_credential_metadata_defines_the_entry_view() {
         view.affirmative_action_label().map(label_text).as_deref(),
         Some("Approve")
     );
+
+    let claims = kb_jwt_claims(&input);
+    assert_eq!(
+        claims["transaction_data_hashes"],
+        json!([b64(&Sha256::digest(approval.as_bytes()))])
+    );
+    // B.3.3.1: `_alg` only when the entry carries one; the TS12 claims only under a TS12
+    // rulebook.
+    for absent in ["transaction_data_hashes_alg", "jti", "response_mode", "amr"] {
+        assert!(claims.get(absent).is_none(), "{absent}");
+    }
 }
 
 /// PaSO Core, Annex A.5 through the plan: four offers, each with one of the two payment

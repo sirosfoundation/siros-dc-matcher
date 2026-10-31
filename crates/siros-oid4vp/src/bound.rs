@@ -1,5 +1,5 @@
-//! The size bound of a text the host hands back for the core to parse: a Request Object. The
-//! host reads at most the bound.
+//! The size bound of a text the host hands back for the core to parse: a Request Object and a
+//! Verifier's reply. The host reads at most the bound of each.
 
 /// A text longer than the parse of its kind takes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]

@@ -1,15 +1,19 @@
 //! A9: an offer needs the wallet's display unless every member is presentable without its UI,
 //! the request carries no transaction data, every row shows whole and nothing is left to
-//! choose, neither an addition nor a subset.
+//! choose, neither an addition nor a subset; a background fulfilment of an offer that needs it is refused with `access_denied`.
 
 use serde_json::{json, Value};
 use siros_codec::cbor::Value as Cbor;
-use siros_oid4vp::VerifiedRequest;
-use siros_presentation::WalletDisplay;
+use siros_oid4vp::{Outcome, PostParameters, Submission, VerifiedRequest};
+use siros_presentation::{
+    Fulfilment, HostDisplay, OfferIndex, PresentationError, Selection, WalletDisplay,
+};
 use siros_zkp_req_nym_auth::testing::{query, Spec};
 
 use crate::sd_jwt::{payment, type_metadata};
-use crate::verifier::{client_metadata, redirect_signed, redirect_unsigned, NONCE, STATE};
+use crate::verifier::{
+    client_metadata, decrypt_jwe, redirect_signed, redirect_unsigned, Rng, NONCE, STATE,
+};
 use crate::wallet::{mdoc, nym_auth, ready, sd_jwt, Held, Wallet, MDL, MDL_NS, VCT};
 
 fn pid() -> Value {
@@ -75,6 +79,23 @@ fn wallet(background: bool) -> Wallet {
     wallet
 }
 
+/// The `error` of a refusal posted in the form of the request's Response Mode.
+fn error_of(request: &VerifiedRequest, refusal: &Submission) -> String {
+    if request.encryption().is_some() {
+        return decrypt_jwe(refusal)["error"].as_str().unwrap().to_owned();
+    }
+    let Submission::Post(post) = refusal else {
+        panic!("a POST")
+    };
+    let PostParameters::Form(parameters) = post.parameters() else {
+        panic!("direct_post, got {post:?}")
+    };
+    let Outcome::Error(code) = parameters.outcome() else {
+        panic!("an error, got {parameters:?}")
+    };
+    code.as_str().to_owned()
+}
+
 #[test]
 fn an_offer_needs_the_wallet_display_unless_a9_holds() {
     let mdl = json!({"id": "mdl", "format": "mso_mdoc", "meta": {"doctype_value": MDL},
@@ -128,5 +149,33 @@ fn an_offer_needs_the_wallet_display_unless_a9_holds() {
         let planned = ready(&input).unwrap();
         let offer = &planned.view().offers()[0];
         assert_eq!(offer.wallet_display(), display, "{case}");
+
+        let selection = Selection::new(
+            *planned.view().digest(),
+            OfferIndex::new(0),
+            Vec::new(),
+            Vec::new(),
+        );
+        let background = planned.choose(&selection, Fulfilment::Background(HostDisplay::Full));
+        match display {
+            WalletDisplay::NotNeeded => {
+                assert!(background.is_ok(), "{case}");
+                // K4: an offer the host showed only in part needs the wallet's display.
+                let skipped =
+                    planned.choose(&selection, Fulfilment::Background(HostDisplay::Skipped));
+                assert_eq!(
+                    skipped.err(),
+                    Some(PresentationError::WalletDisplayNeeded),
+                    "{case}"
+                );
+            }
+            WalletDisplay::Needed => {
+                let error = background.err().unwrap();
+                assert_eq!(error, PresentationError::WalletDisplayNeeded, "{case}");
+                let refusal =
+                    siros_presentation::refusal(&request, error.error_code(), &mut Rng(1)).unwrap();
+                assert_eq!(error_of(&request, &refusal), "access_denied", "{case}");
+            }
+        }
     }
 }

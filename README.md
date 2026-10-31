@@ -1,8 +1,8 @@
 # siros-dc-matcher
 
-The SIROS wallet core, a Rust workspace: the components a wallet matches
+The SIROS wallet core, a Rust workspace: the components a wallet presents
 credentials with over OpenID4VP 1.0 and the W3C Digital Credentials API, from
-request intake to the consent view — DCQL, SD-JWT VC and ISO mdoc, issuer trust,
+request intake to the response — DCQL, SD-JWT VC and ISO mdoc, issuer trust,
 display, transaction data on the PaSO model, `zkp_req` proofs and the
 presentation component — together with the credential picker Android's
 Credential Manager runs (`matcher.wasm`), Kotlin and Swift bindings, and the
@@ -123,7 +123,7 @@ CI also enforces four things a green build does not imply:
   table and the WASI functions the host provides.
 - **A 409,600-byte (400 KiB) size budget** for `matcher.wasm`, which runs in someone else's
   process. The picker runs the wallet's matching and transaction data selection over the
-  registration (K2): with images passed through and `wasm-opt -Oz` it measures 392,579 bytes,
+  registration (K2): with images passed through and `wasm-opt -Oz` it measures 392,580 bytes,
   and the measured alternatives that drop parts of K2 were declined. Raising the budget takes a
   line in `.github/workflows/ci.yml` and a reason.
 - **Browser imports.** The browser presenter's module imports only wasm-bindgen's modules, the
@@ -170,17 +170,17 @@ Two profile details are load-bearing and easy to undo:
 |---|---|---|
 | [`siros-codec`](crates/siros-codec) | any | The encodings every wallet core crate shares: strict CBOR and JSON, unpadded base64url, the padded base64 of `x5c`, CBOR's dates, the ES256 signature value and the `https` URL; and the internals the components share. |
 | [`siros-dcql`](crates/siros-dcql) | any | OpenID4VP 1.0 DCQL: one parse that enforces Section 6, `trusted_authorities` (§6.1.1), claims path pointers (§7) over any claim tree, selection (§6.4), and the request vocabulary the wallet core shares. No I/O, no platform. Published to crates.io. |
-| [`siros-sdjwt`](crates/siros-sdjwt) | any | SD-JWT VC (RFC 9901): the stored credential and its claim tree. |
-| [`siros-mdoc`](crates/siros-mdoc) | any | ISO/IEC 18013-5 mdocs: the stored credential with its MSO, and the device signature's signing input. |
-| [`siros-oid4vp`](crates/siros-oid4vp) | any | OpenID4VP 1.0: the request as the picker reads it (`UnverifiedRequest`), the mdoc `Handover`, and, with `crypto`, request intake to a verified request. |
+| [`siros-sdjwt`](crates/siros-sdjwt) | any | SD-JWT VC (RFC 9901): the stored credential and its claim tree, disclosure selection, and the presentation with its KB-JWT. |
+| [`siros-mdoc`](crates/siros-mdoc) | any | ISO/IEC 18013-5 mdocs: the stored credential with its MSO, element selection, the `DeviceResponse`, and the device signature's signing input. |
+| [`siros-oid4vp`](crates/siros-oid4vp) | any | OpenID4VP 1.0: the request as the picker reads it (`UnverifiedRequest`), the mdoc `Handover`, and, with `crypto`, request intake to a verified request, the `vp_token`, its submission as data the host transmits, response encryption, and the Verifier's reply. |
 | [`siros-zkp-req`](crates/siros-zkp-req) | any | The `zkp_req` protocol layer: the query and its options, the usable pair, the presentation and the `vp_token`, the Verifier's structural checks. |
 | [`siros-zkp-req-nym-auth`](crates/siros-zkp-req-nym-auth) | any | The nym_auth catalogue and its Longfellow and Vega systems: session binding, credential checks, the request policy, the presenter and verifier around a host's prover. |
 | [`siros-trust`](crates/siros-trust) | any | Issuer trust (§4.18): the trust store, issuer chains, and the resolution of `trusted_authorities` into the admission of an issuer. Without `chain`, the admission rule the picker runs over the issuer facts. |
-| [`siros-wallet-state`](crates/siros-wallet-state) | any | The decrypted wallet state `S` of the private data container. |
+| [`siros-wallet-state`](crates/siros-wallet-state) | any | The decrypted wallet state `S` of the private data container, and the presentation record the host appends. |
 | [`siros-credential`](crates/siros-credential) | any | The format-independent credential: typed claims, claims path pointers, validity, the instance of a batch, the claim tree the registration carries, and, with `chain`, the issuer chain. |
 | [`siros-display`](crates/siros-display) | any | Display metadata and its locale, credential cards, claim labels and rows, display text, purpose lines, proof statement rows and picker fields. |
-| [`siros-transaction-data`](crates/siros-transaction-data) | any | `transaction_data` on the PaSO model, with the four EC TS12 types as built-in rulebooks: type definitions and their sources, payload conformance, images, rendering and selection. Without `wallet`, the selection for the picker. |
-| [`siros-presentation`](crates/siros-presentation) | any | The plan of a request over the wallet's credentials and its consent view. Without `wallet`, the matching for the picker. |
+| [`siros-transaction-data`](crates/siros-transaction-data) | any | `transaction_data` on the PaSO model, with the four EC TS12 types as built-in rulebooks: type definitions and their sources, payload conformance, images, rendering, selection and the KB-JWT claims. Without `wallet`, the selection for the picker. |
+| [`siros-presentation`](crates/siros-presentation) | any | The plan of a request over the wallet's credentials, its consent view, and the response to the user's selection. Without `wallet`, the matching for the picker. |
 | [`siros-registration`](crates/siros-registration) | any | The picker's registration: the projection of the wallet's credentials, in a binary layout the wallet writes (feature `wallet`) and the picker reads at offsets through `Read + Seek`. |
 | [`siros-picker`](crates/siros-picker) | `wasm32-wasip1` | The credential picker over the presentation component's matching. Ships `matcher.wasm`. |
 | [`android-credman`](crates/android-credman) | any | The host ABI as types: nullability, version gating, set shape, the picked entry. |

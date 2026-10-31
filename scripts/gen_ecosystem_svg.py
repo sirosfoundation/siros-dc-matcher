@@ -49,7 +49,8 @@ BANDS = [
         ],
     ]),
     ("l3", "L3", "presentation", [[
-        ("siros-presentation", "plan · offers · consent view"),
+        ("siros-presentation",
+         "plan · offers · consent view · selection · signing inputs · vp_token · record"),
     ]]),
     ("l2", "L2", "wallet model", [[
         ("siros-wallet-state", "decrypted private data"),
@@ -60,7 +61,7 @@ BANDS = [
     ("l1", "L1", "protocols · formats · trust", [
         [
             ("siros-dcql", "DCQL · on crates.io"),
-            ("siros-oid4vp", "OpenID4VP request intake"),
+            ("siros-oid4vp", "OpenID4VP intake, response"),
             ("siros-sdjwt", "SD-JWT VC"),
             ("siros-mdoc", "ISO mdoc"),
         ],
@@ -188,7 +189,7 @@ def render() -> str:
 
     note = ("Dependencies point down the layers. The core is pure and offline: the host supplies its "
             "inputs, resolves the URLs it lists, transmits the bodies it returns, and answers its "
-            "Trust effects.")
+            "Sign and Trust effects.")
     out.append(f'<text class="note" x="32" y="{height - 16}">{escape(note)}</text>')
 
     head = [

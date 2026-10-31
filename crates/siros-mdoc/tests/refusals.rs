@@ -1,5 +1,5 @@
-//! One refusal per construction rule of `Mdoc::parse`. The honest input each fixture edits is
-//! accepted: each fixture breaks only its rule.
+//! One refusal per construction rule of `Mdoc::parse` and `Mdoc::disclose`. The honest inputs
+//! each fixture edits are accepted: each fixture breaks only its rule.
 
 use sha2::{Digest, Sha256};
 use siros_codec::base64url;
@@ -7,9 +7,10 @@ use siros_codec::cbor::{CborError, Unsupported, Value};
 use siros_codec::member::MemberFault;
 use siros_codec::Base64Error;
 use siros_mdoc::{
-    AlgorithmFault, DeviceKeyFault, DigestId, DocTypeFault, EnvelopeFault, IssuerAuthFault,
-    ItemFault, ItemMember, KeyAuthorizationsFault, Mdoc, MdocError, NameFault, NameSpace,
-    NameSpacesFault, PayloadFault, ValidityFault, ValueDigestsFault,
+    AlgorithmFault, DeviceKeyFault, DeviceSignedElement, DigestId, DisclosureError, DocTypeFault,
+    ElementId, ElementIdentifier, EnvelopeFault, IssuerAuthFault, ItemFault, ItemMember,
+    KeyAuthorizationsFault, Mdoc, MdocError, NameFault, NameSpace, NameSpacesFault, PayloadFault,
+    ValidityFault, ValueDigestsFault,
 };
 
 const DOC_TYPE: &str = "org.example.doc.1";
@@ -165,6 +166,7 @@ fn assemble(parts: &Parts) -> String {
 enum Got {
     Accepted,
     Mdoc(MdocError),
+    Disclosure(DisclosureError),
 }
 
 fn read(data: &str) -> Got {
@@ -176,6 +178,30 @@ fn edited(edit: impl FnOnce(&mut Parts)) -> Got {
     edit(&mut parts);
     read(&assemble(&parts))
 }
+
+fn disclosed(elements: &[(&str, &str)], device_signed: &[(&str, &str)]) -> Got {
+    let mdoc = Mdoc::parse(&assemble(&honest())).unwrap();
+    let elements: Vec<ElementId> = elements
+        .iter()
+        .map(|&(name_space, identifier)| ElementId {
+            name_space,
+            identifier,
+        })
+        .collect();
+    let device_signed = device_signed
+        .iter()
+        .map(|&(name_space, identifier)| DeviceSignedElement {
+            name_space: NameSpace::new(name_space),
+            identifier: ElementIdentifier::new(identifier),
+            value: Value::Bytes(vec![0x7e; 32]),
+        })
+        .collect();
+    mdoc.disclose(&elements, device_signed)
+        .map_or_else(Got::Disclosure, |_| Got::Accepted)
+}
+
+const HONEST_SELECTION: [(&str, &str); 1] = [(NAME_SPACE, "given_name")];
+const HONEST_DEVICE_SIGNED: [(&str, &str); 2] = [(SIGNED, "payment_hash"), (PARTLY, "tx_hash")];
 
 #[test]
 fn each_rule_refuses_its_fixture() {
@@ -294,8 +320,35 @@ fn each_rule_refuses_its_fixture() {
             edited(|p| p.digests[1].1 = Value::Bytes(vec![0; 32])),
             Got::Mdoc(MdocError::ItemDigest),
         ),
+        (
+            "unknown_element",
+            disclosed(&[(NAME_SPACE, "birth_date")], &[]),
+            Got::Disclosure(DisclosureError::UnknownElement),
+        ),
+        (
+            "repeated_selection",
+            disclosed(&[HONEST_SELECTION[0], HONEST_SELECTION[0]], &[]),
+            Got::Disclosure(DisclosureError::RepeatedSelection),
+        ),
+        (
+            "unauthorized_device_element",
+            disclosed(&HONEST_SELECTION, &[(PARTLY, "amount")]),
+            Got::Disclosure(DisclosureError::Unauthorized),
+        ),
+        (
+            "repeated_device_element",
+            disclosed(
+                &HONEST_SELECTION,
+                &[HONEST_DEVICE_SIGNED[0], HONEST_DEVICE_SIGNED[0]],
+            ),
+            Got::Disclosure(DisclosureError::RepeatedDeviceElement),
+        ),
     ];
     assert_eq!(edited(|_| {}), Got::Accepted);
+    assert_eq!(
+        disclosed(&HONEST_SELECTION, &HONEST_DEVICE_SIGNED),
+        Got::Accepted
+    );
     let failures: Vec<String> = cases
         .into_iter()
         .filter(|(_, got, want)| got != want)

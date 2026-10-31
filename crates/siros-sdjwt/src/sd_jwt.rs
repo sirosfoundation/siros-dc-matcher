@@ -20,8 +20,20 @@ use crate::tree::{DisclosureId, Object};
 /// disclosure is referenced, no reserved claim name is used, and `_sd_alg` names a supported
 /// algorithm.
 pub struct SdJwt {
+    issuer_jwt: IssuerJwt,
     x5c: Option<CertificateChain>,
+    alg: HashAlg,
     claims: Object,
+}
+
+/// The issuer-signed JWT as stored: three base64url segments, its header and payload JSON
+/// objects.
+pub(crate) struct IssuerJwt(String);
+
+impl IssuerJwt {
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 /// The `x5c` header parameter of the issuer-signed JWT (RFC 7515, Section 4.1.6): a non-empty
@@ -65,20 +77,25 @@ impl SdJwt {
         let mut pending = FxHashMap::default();
         for (position, text) in disclosures.into_iter().enumerate() {
             let id = DisclosureId::new(position);
-            let content = disclosure(text).map_err(|fault| ParseError::Disclosure {
+            let (encoded, content) = disclosure(text).map_err(|fault| ParseError::Disclosure {
                 disclosure: id,
                 fault,
             })?;
             let digest = alg.digest(text.as_bytes());
             if pending
-                .insert(digest.clone(), Pending::new(id, content))
+                .insert(digest.clone(), Pending::new(id, encoded, content))
                 .is_some()
             {
                 return Err(ParseError::RepeatedDigest(digest));
             }
         }
         let claims = process::claims(payload, pending)?;
-        Ok(Self { x5c, claims })
+        Ok(Self {
+            issuer_jwt: IssuerJwt(issuer_jwt.to_owned()),
+            x5c,
+            alg,
+            claims,
+        })
     }
 
     /// The processed payload: every claim the credential holds, `_sd_alg` removed.
@@ -92,6 +109,14 @@ impl SdJwt {
     #[must_use]
     pub fn x5c(&self) -> Option<&CertificateChain> {
         self.x5c.as_ref()
+    }
+
+    pub(crate) fn issuer_jwt(&self) -> &IssuerJwt {
+        &self.issuer_jwt
+    }
+
+    pub(crate) fn alg(&self) -> HashAlg {
+        self.alg
     }
 }
 
@@ -151,7 +176,7 @@ fn sd_alg(payload: &[(String, Json)]) -> Result<HashAlg, SdAlgFault> {
 }
 
 /// The disclosure `text` and what it reveals (Sections 4.2.1 and 4.2.2).
-fn disclosure(text: &str) -> Result<Content, DisclosureFault> {
+fn disclosure(text: &str) -> Result<(Base64Url, Content), DisclosureFault> {
     let encoded = Base64Url::parse(text)
         .map_err(|e| DisclosureFault::Encoding(EncodedJsonFault::Base64(e)))?;
     let Json::Array(items) = Json::parse_unique(encoded.bytes())
@@ -170,5 +195,5 @@ fn disclosure(text: &str) -> Result<Content, DisclosureFault> {
         (Some(_), Some(_), _, None) => return Err(DisclosureFault::Salt),
         _ => return Err(DisclosureFault::Length(length)),
     };
-    Ok(content)
+    Ok((encoded, content))
 }

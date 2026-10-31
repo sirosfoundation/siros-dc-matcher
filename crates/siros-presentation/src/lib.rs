@@ -1,16 +1,21 @@
 //! Presentation for the SIROS wallet core. Phase 1 maps a request and the wallet state to the
-//! plan and its consent view.
+//! plan and its consent view; phase 2 maps the user's selection to the response and the
+//! presentation record.
 //!
 //! | Requirement | API |
 //! | --- | --- |
 //! | A1: the format table, `meta`, holder binding, usable credentials, no undisclosable nym_auth attribute; why a request has no offer | [`Matching::new`] over [`MatchCredential`]s, [`Failure`] |
 //! | A2: `zkp_req` matching as one selection, then the usable attestation and the opened seed | [`ZkpQuery`], [`Matching::answer`]; the wallet's tests in [`plan`] |
-//! | A3: offers over the eligible candidates, optional additions (one option per set), all-optional sets | [`Offers::of`] |
+//! | A3: offers over the eligible candidates, optional additions (one option per set), all-optional sets, the subset of a `multiple` member by `credentialId` | [`Offers::of`], [`Selection`] with [`Subset`] |
 //! | Transaction data selection (PaSO Core, Section 7.4): the targeted queries in one credential set whose alternatives are transposable; each candidate takes its first compatible entry, a candidate with none excluded; an entry no chosen credential takes unused; the transaction metadata the host holds as input | [`plan`], [`PlanInput::held`], [`CredentialView::transaction`] |
-//! | A4: the digest of what the user consents to | [`ConsentView::digest`] |
-//! | A9: the wallet's display | [`WalletDisplay::of`] |
-//! | T4: each transaction entry bound to one credential, named by `credentialId` and instance in the view and the digest, with the source and rulebook of its definition | [`CredentialView::entry`], [`CredentialView::transaction`] |
-//! | K3: the offer, Credential Query and `credentialId` a credential picker entry carries for the wallet | [`Pick`] |
+//! | A4: the digest of what the user consents to; the selection parsed against the recomputed plan | [`ConsentView::digest`], [`PlanDigest::parse`], [`Selection`], [`Planned::choose`] gives a [`Chosen`] |
+//! | A5: every signing input a `Sign` effect; the signatures parsed against them, each verifying under its key | [`Chosen::prepare`] gives [`Sign`]s, [`Prepared::finish`] |
+//! | A6: the SD-JWT `aud` | [`Chosen::prepare`] |
+//! | A7: the SessionTranscript of the request's `Handover` | [`Chosen::prepare`] |
+//! | A8: one `vp_token`; `access_denied` on a decline; the record names the instances used | [`Prepared::finish`], [`Planned::decline`] |
+//! | A9: the wallet's display, and its refusal in a background fulfilment | [`WalletDisplay::of`], [`Fulfilment`] |
+//! | T4: each transaction entry bound to one credential, named by `credentialId` and instance in the view and the digest, with the source and rulebook of its definition; phase 2 binds by it; a selection that leaves it out refused | [`CredentialView::entry`], [`CredentialView::transaction`], [`PresentationError::BoundCredentialOmitted`] |
+//! | K3: the selection from the credential picker's picked entries, checked against the plan | [`Pick`], [`Planned::picked`] |
 //! | N2: the nym_auth request of a verified request, its `verifier_id` from the request's certificate | [`siros_zkp_req_nym_auth::request::NymAuthRequest`], built by [`plan`] from [`PlanInput::verifier_id`] |
 //!
 //! Without the default feature `wallet` the crate holds the matching ([`Matching`], [`Offers`],
@@ -18,8 +23,8 @@
 //! It builds with Rust 1.82 and links no crypto, prover or display resolution.
 //!
 //! The crate performs no I/O. The plan takes the transaction metadata the host holds as input,
-//! and carries each transaction image to the consent view for the UI to resolve. The time is an
-//! input.
+//! and carries each transaction image to the consent view for the UI to resolve; phase 2 asks the
+//! host for each signature, randomness comes from the caller's CSPRNG, and the time is an input.
 
 #![deny(missing_docs)]
 // Links to the items of `wallet` resolve with it, where rustdoc checks them.
@@ -58,7 +63,7 @@ pub use credential::{KeyHolding, MatchCredential};
 pub use display_rule::{
     Choice, DisplayFacts, HostDisplay, Presentability, Rows, TransactionData, WalletDisplay,
 };
-pub use ids::{CandidateIndex, OfferIndex, OptionIndex, QueryIndex, SetIndex};
+pub use ids::{AdditionIndex, CandidateIndex, OfferIndex, OptionIndex, QueryIndex, SetIndex};
 pub use inconsistency::Inconsistency;
 pub use matching::{
     Answer, Answered, Answers, Asked, AskedType, Candidate, ChoiceError, Claims, Excluded,
@@ -73,6 +78,8 @@ pub use transactions::{BoundEntry, NoOffer, RequestEntries, TransactionSource, T
 mod error;
 #[cfg(feature = "wallet")]
 mod plan;
+#[cfg(feature = "wallet")]
+mod respond;
 #[cfg(feature = "test-fixtures")]
 pub mod testing;
 
@@ -80,6 +87,11 @@ pub mod testing;
 pub use error::PresentationError;
 #[cfg(feature = "wallet")]
 pub use plan::{
-    plan, AdditionView, BoundTransaction, ConsentView, CredentialView, MemberView, NoSeed,
-    OfferView, OptionRefusal, PlanDigest, PlanInput, Planned, Shown, Unproven,
+    plan, refusal, AdditionView, BoundTransaction, ConsentView, CredentialView, DigestError,
+    MemberView, NoSeed, OfferView, OptionRefusal, PlanDigest, PlanInput, Planned, Shown, Unproven,
+};
+#[cfg(feature = "wallet")]
+pub use respond::{
+    Chosen, Fulfilment, PickError, Prepared, Response, Selection, Sign, SignId, SignatureError,
+    Subset, SubsetError,
 };

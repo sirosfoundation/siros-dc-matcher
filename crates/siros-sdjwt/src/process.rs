@@ -2,6 +2,7 @@
 //! steps 3 to 5) into its claim tree.
 
 use rustc_hash::{FxHashMap, FxHashSet};
+use siros_codec::base64url::Base64Url;
 use siros_codec::json::Json;
 
 use crate::alg::Digest;
@@ -18,16 +19,21 @@ const SD_ALG: &str = "_sd_alg";
 /// A disclosure not yet referenced by a digest.
 pub(crate) struct Pending {
     id: DisclosureId,
+    encoded: Base64Url,
     content: Content,
 }
 
 impl Pending {
-    pub(crate) fn new(id: DisclosureId, content: Content) -> Self {
-        Self { id, content }
+    pub(crate) fn new(id: DisclosureId, encoded: Base64Url, content: Content) -> Self {
+        Self {
+            id,
+            encoded,
+            content,
+        }
     }
 
     fn disclosure(self) -> (Disclosure, Content) {
-        (Disclosure::new(self.id), self.content)
+        (Disclosure::new(self.id, self.encoded), self.content)
     }
 }
 

@@ -33,6 +33,7 @@ pub struct ConsentView<'a> {
 
 /// An offer as the user sees it.
 pub struct OfferView {
+    offer: Offer,
     purpose: Option<String>,
     members: Vec<MemberView>,
     additions: Vec<AdditionView>,
@@ -130,6 +131,11 @@ impl<'a> ConsentView<'a> {
 }
 
 impl OfferView {
+    /// The offer of the plan the view shows.
+    pub(crate) fn offer(&self) -> &Offer {
+        &self.offer
+    }
+
     /// The `purpose` of the credential sets the offer satisfies, as one line.
     pub fn purpose(&self) -> Option<&str> {
         self.purpose.as_deref()
@@ -154,6 +160,11 @@ impl OfferView {
     /// entries carry.
     pub fn wallet_display(&self) -> WalletDisplay {
         WalletDisplay::of(&self.facts)
+    }
+
+    /// What A9 judges the offer by, the host showing everything its entries carry.
+    pub(crate) fn facts(&self) -> DisplayFacts {
+        self.facts
     }
 }
 
@@ -283,6 +294,7 @@ fn offer_view(offer: &Offer, sources: &Sources<'_, '_>) -> Result<OfferView, Pre
         host: HostDisplay::Full,
     };
     Ok(OfferView {
+        offer: offer.clone(),
         purpose: purpose::line(offer.purposes()),
         members,
         additions,

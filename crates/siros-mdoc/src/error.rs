@@ -1,4 +1,4 @@
-//! The refusals of reading, each with a stable code and its cause.
+//! The refusals of reading and of disclosing, each with a stable code and its cause.
 
 use siros_codec::cbor::CborError;
 use siros_codec::member::MemberFault;
@@ -342,6 +342,34 @@ impl MdocError {
             Self::Item(_) => "item",
             Self::RepeatedElement => "repeated_element",
             Self::ItemDigest => "item_digest",
+        }
+    }
+}
+
+/// Why [`Mdoc::disclose`](crate::Mdoc::disclose) refuses a selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("mso_mdoc disclosure: {}", self.code())]
+pub enum DisclosureError {
+    /// A selected element is no item of the mdoc.
+    UnknownElement,
+    /// An element is selected twice.
+    RepeatedSelection,
+    /// The MSO's `KeyAuthorizations` do not authorize a `DeviceSigned` element (OpenID4VP 1.0,
+    /// B.2.1).
+    Unauthorized,
+    /// A `DeviceSigned` element is given twice.
+    RepeatedDeviceElement,
+}
+
+impl DisclosureError {
+    /// A stable identifier.
+    #[must_use]
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::UnknownElement => "unknown_element",
+            Self::RepeatedSelection => "repeated_selection",
+            Self::Unauthorized => "unauthorized_device_element",
+            Self::RepeatedDeviceElement => "repeated_device_element",
         }
     }
 }

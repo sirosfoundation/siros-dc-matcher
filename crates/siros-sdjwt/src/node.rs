@@ -8,10 +8,11 @@ use siros_dcql::{ClaimNode, Lookup};
 use crate::sd_jwt::SdJwt;
 use crate::tree::{Claim, ClaimValue, Element, Object};
 
-/// A node of the claim tree.
+/// A node of the claim tree, with the disclosures on its path from the root, root first.
 #[derive(Clone)]
 pub struct Node<'a> {
     value: NodeValue<'a>,
+    path: Vec<&'a str>,
 }
 
 /// What a [`Node`] holds.
@@ -28,6 +29,7 @@ impl SdJwt {
     pub fn root(&self) -> Node<'_> {
         Node {
             value: NodeValue::Payload(self.claims()),
+            path: Vec::new(),
         }
     }
 }
@@ -36,6 +38,12 @@ impl<'a> Node<'a> {
     /// The payload or the claim this node holds.
     pub fn value(&self) -> NodeValue<'a> {
         self.value
+    }
+
+    /// The disclosures on the path from the root to this node, root first. A claim's own
+    /// disclosure comes last.
+    pub(crate) fn path(&self) -> &[&'a str] {
+        &self.path
     }
 
     pub(crate) fn shape(&self) -> Shape<'a> {
@@ -47,8 +55,11 @@ impl<'a> Node<'a> {
 
     /// The node of `claim`, a child of this node.
     fn child(&self, claim: &'a Claim) -> Self {
+        let mut path = self.path.clone();
+        path.extend(claim.disclosure_text());
         Self {
             value: NodeValue::Claim(claim),
+            path,
         }
     }
 }

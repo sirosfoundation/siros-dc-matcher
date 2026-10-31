@@ -32,8 +32,8 @@ browser module call the same functions.
 
 ## Flow
 
-The wallet's plan (`siros-presentation`) runs the Holder's side up to the consent screen, and the
-presenter (`Prepared`) the rest; `testing::prepared` runs it all in the tests.
+The wallet's plan (`siros-presentation`) runs the Holder's side; `testing::prepared` runs it in
+the tests.
 
 ```
 Wallet (the plan)                                   host                  prover (a backend)
@@ -178,7 +178,7 @@ artifacts from their reference copies.
 `zkp_req_vp_token_cbor`, and `zkp_req_verify` with a host-implemented `FfiProofVerifier` and the
 verifier's DER `trust_anchors`. `ZkpReqError` carries the request's `error_code`
 (`invalid_request`, `access_denied`) and a stable `code`. Indexes are `u64`. Proofs come from
-the presenter's `Prepared`, which proves in-process through a `NymAuthProver`.
+the wallet's plan (`siros-presentation`), which proves in-process through a `NymAuthProver`.
 
 ### Browser
 

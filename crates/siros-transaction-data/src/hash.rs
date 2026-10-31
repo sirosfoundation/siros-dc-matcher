@@ -1,9 +1,12 @@
 //! The transaction data profile of OpenID4VP 1.0, B.3.3.1: the request member
+//! `transaction_data_hashes_alg` and the KB-JWT claims `transaction_data_hashes` and
 //! `transaction_data_hashes_alg`.
 
 use sha2::{Digest, Sha256, Sha384, Sha512};
+use siros_codec::base64url::{self, Base64Url};
 use siros_codec::json::Json;
 use siros_codec::member::ArrayIndex;
+use siros_oid4vp::TransactionDataItem;
 
 /// A hash algorithm of the IANA Named Information Hash Algorithm Registry that this wallet
 /// computes, weakest first.
@@ -28,6 +31,14 @@ impl HashAlg {
             Self::Sha384 => "sha-384",
             Self::Sha512 => "sha-512",
         }
+    }
+
+    /// The element of `transaction_data_hashes` for `entry`, the string the request carried:
+    /// base64url of the hash over its bytes. The string is hashed as received, without
+    /// base64url decoding (B.3.3.1).
+    #[must_use]
+    pub fn hash(self, entry: &TransactionDataItem) -> Base64Url {
+        base64url::encode(&self.digest(entry.as_str().as_bytes()))
     }
 
     /// The digest of `bytes`.
@@ -141,6 +152,15 @@ impl Accepted {
             .find_map(|name| HashAlg::named(name))
             .map(Self::Listed)
             .ok_or(HashesAlgFault::Unsupported)
+    }
+
+    /// The algorithm of the hash: the first the verifier lists that this wallet computes, else
+    /// `sha-256` (B.3.3.1).
+    pub(crate) fn alg(&self) -> HashAlg {
+        match self {
+            Self::Default => HashAlg::Sha256,
+            Self::Listed(alg) => *alg,
+        }
     }
 
     /// Whether the KB-JWT names the algorithm.

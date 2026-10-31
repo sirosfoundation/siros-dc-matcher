@@ -1,5 +1,5 @@
 //! `application/x-www-form-urlencoded`: the query of an authorization request URI, and the
-//! parameters a `request_uri_method=post` request carries.
+//! parameters a `request_uri_method=post` request and a `direct_post` response carry.
 
 use std::fmt;
 

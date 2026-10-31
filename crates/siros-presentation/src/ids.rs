@@ -1,4 +1,4 @@
-//! The identifiers and positions the plan and its view carry.
+//! The identifiers and positions the plan, its view and the selection carry.
 
 siros_codec::position!(
     /// The position of a Credential Query in the DCQL query's `credentials`.
@@ -23,4 +23,9 @@ siros_codec::position!(
 siros_codec::position!(
     /// The position of an offer in the consent view.
     pub OfferIndex
+);
+
+siros_codec::position!(
+    /// The position of an addition among the additions of an offer in the consent view.
+    pub AdditionIndex
 );

@@ -1,4 +1,5 @@
-//! Why a stored SD-JWT is refused. Each error has a stable code and carries its cause.
+//! Why a stored SD-JWT or a key binding is refused. Each error has a stable code and carries
+//! its cause.
 
 use siros_codec::json::JsonFault;
 use siros_codec::Base64Error;
@@ -191,6 +192,27 @@ impl ParseError {
             Self::UnreferencedDisclosure(_) => "disclosure_unreferenced",
             Self::TooDeep => "claims_too_deep",
             Self::X5c(_) => "issuer_jwt_x5c_malformed",
+        }
+    }
+}
+
+/// Why claims do not form a KB-JWT payload.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{}: {:?}", self.code(), self)]
+pub enum KeyBindingError {
+    /// An extra claim has this name, which Section 4.3 gives a required claim: `iat`, `aud`,
+    /// `nonce` or `sd_hash`.
+    RequiredClaim(String),
+    /// Two extra claims have this name.
+    RepeatedClaim(String),
+}
+
+impl KeyBindingError {
+    /// A stable identifier.
+    #[must_use]
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::RequiredClaim(_) | Self::RepeatedClaim(_) => "kb_jwt_claim_collision",
         }
     }
 }

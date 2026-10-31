@@ -27,6 +27,26 @@ pub struct PresentationRecord {
 }
 
 impl PresentationRecord {
+    /// The record of the presentation `data`, sent to `audience` at `timestamp`, which used the
+    /// credential entries `used_credential_ids`.
+    pub fn new(
+        presentation_id: PresentationId,
+        transaction_id: TransactionId,
+        data: String,
+        used_credential_ids: Vec<CredentialId>,
+        timestamp: DateTime,
+        audience: String,
+    ) -> Self {
+        Self {
+            presentation_id,
+            transaction_id,
+            data,
+            used_credential_ids,
+            timestamp,
+            audience,
+        }
+    }
+
     /// `usedCredentialIds`: the credential entries the presentation used.
     pub fn used_credential_ids(&self) -> &[CredentialId] {
         &self.used_credential_ids

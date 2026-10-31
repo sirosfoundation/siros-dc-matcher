@@ -7,13 +7,16 @@
 //! | [`semantic`] | The semantics identifier of a Wallet-Relying Party's certificate | ETSI TS 119 475, 5.1.3, 5.1.5 |
 //! | [`intake`] | Intake of redirect and DC API requests to a [`VerifiedRequest`] (P1, P3) | 5, 5.9, 5.10, A |
 //! | [`verified`] | The verified request and its verifier | 5, 8.3 |
+//! | [`response`] | `vp_token`, submissions, error submissions, the direct post reply (P4 to P6) | 8 |
 //!
-//! Intake needs the `crypto` feature. Without it the crate holds what the picker links, and
-//! builds with Rust 1.82.
+//! Intake and the response need the `crypto` feature. Without it the crate holds what the
+//! picker links, and builds with Rust 1.82.
 //!
 //! The crate is pure and offline. Intake names the Request Object of a request by reference
 //! and each trust evaluation it needs as an [`intake::Effect`], and the host answers with the
-//! text it obtained or its verdict. Randomness comes from the caller's CSPRNG.
+//! text it obtained or its verdict. A [`Submission`] is the response as data, which the host
+//! transmits; [`Reply::parse`] reads the body the Verifier answers a direct post with.
+//! Randomness comes from the caller's CSPRNG.
 
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
@@ -53,6 +56,8 @@ pub mod intake;
 #[cfg(feature = "crypto")]
 mod jose;
 #[cfg(feature = "crypto")]
+pub mod response;
+#[cfg(feature = "crypto")]
 mod values;
 #[cfg(feature = "crypto")]
 pub mod verified;
@@ -83,6 +88,12 @@ pub use intake::{
 };
 pub use request::{
     AttestationFormat, RequestSignature, ResponseMode, TransactionDataInvalid, TransactionDataItem,
+};
+#[cfg(feature = "crypto")]
+pub use response::{
+    concat_kdf, cose_kdf, ContentKey, CoseEncrypt, DcApiData, EncryptionFault, Jwe, Outcome, Post,
+    PostBody, PostParameters, Presentation, RedirectUri, Reply, ReplyFault, ResponseError,
+    ResponseParameters, Submission, VpToken, VpTokenJson,
 };
 #[cfg(feature = "crypto")]
 pub use values::{AttestationIssuer, Kid, Origin, TrustChain, WalletNonce};

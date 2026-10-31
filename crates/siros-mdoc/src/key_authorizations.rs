@@ -40,6 +40,19 @@ impl KeyAuthorizations {
             data_elements,
         })
     }
+
+    /// Whether the device key may sign `identifier` of `name_space`. [`Mdoc::disclose`]
+    /// refuses each `DeviceSigned` element this does not authorize.
+    ///
+    /// [`Mdoc::disclose`]: crate::Mdoc::disclose
+    #[must_use]
+    pub fn authorizes(&self, name_space: &NameSpace, identifier: &ElementIdentifier) -> bool {
+        self.name_spaces.contains(name_space)
+            || self
+                .data_elements
+                .get(name_space)
+                .is_some_and(|identifiers| identifiers.contains(identifier))
+    }
 }
 
 /// `dataElements`, none of whose namespaces `name_spaces` authorizes whole.

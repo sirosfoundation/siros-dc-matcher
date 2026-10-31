@@ -15,7 +15,9 @@ mod support;
 
 use serde_json::{json, Value};
 use siros_oid4vp::{
-    ClientIdPrefix, Effect, EffectResult, IntakeState, KeyMaterial, Kid, Origin, RequestUriMethod,
+    ClientIdPrefix, ContentEncryption, Effect, EffectResult, ErrorCode, IntakeError, IntakeState,
+    KeyMaterial, Kid, Origin, PostBody, Presentation, RedirectUri, Reply, RequestUriMethod,
+    ResponseMode, State, Submission, TrustSubject,
 };
 use support::*;
 
@@ -27,6 +29,77 @@ fn identity_query() -> Value {
         "meta": {"vct_values": ["https://credentials.example.com/identity_credential"]},
         "claims": [{"path": ["last_name"]}, {"path": ["first_name"]}]
     }]})
+}
+
+/// SOURCE: Section 8.2, the Request Object with Response Mode `direct_post`, sent as parameters
+/// by value: a `redirect_uri` client's request is unsigned (Section 5.9.3). `dcql_query` is
+/// that of Section 5.4; the presentation is that of Section 8.1.1.
+///
+/// Stated: the response is a POST of `vp_token` and `state` to the Response URI, and the
+/// Response URI's reply sends the user agent to its `redirect_uri`.
+#[test]
+fn direct_post_by_value() {
+    let query = identity_query().to_string();
+    let uri = authorization_uri(&[
+        ("client_id", "redirect_uri:https://client.example.org/post"),
+        ("response_uri", "https://client.example.org/post"),
+        ("response_type", "vp_token"),
+        ("response_mode", "direct_post"),
+        ("dcql_query", &query),
+        ("nonce", "n-0S6_WzA2Mj"),
+        ("state", "eyJhb...6-sVA"),
+    ]);
+    let state = IntakeState::redirect(&uri, formats(), now(), &mut Rng(1));
+    let host = Host::trusting();
+    let (request, effects) = run(state, |e| host.answer(e)).unwrap();
+
+    let client_id = request.verifier().client_id().unwrap();
+    assert_eq!(client_id.prefix(), ClientIdPrefix::RedirectUri);
+    assert_eq!(client_id.value(), "https://client.example.org/post");
+    assert_eq!(request.response_mode(), ResponseMode::DirectPost);
+    assert_eq!(request.state().map(State::as_str), Some("eyJhb...6-sVA"));
+    let [Effect::Trust(trust)] = effects.as_slice() else {
+        panic!("one trust effect, got {effects:?}")
+    };
+    assert_eq!(trust.subject(), &TrustSubject::Client(client_id.clone()));
+    assert_eq!(trust.key(), &KeyMaterial::None);
+
+    let presentation = Presentation::text("eyJhbGci...QMA".into());
+    let token = request
+        .vp_token(vec![(
+            query_id("some_identity_credential"),
+            vec![presentation],
+        )])
+        .unwrap();
+    let Submission::Post(post) = token.submission(&mut Rng(2)).unwrap() else {
+        panic!("a POST")
+    };
+    assert_eq!(
+        post.response_uri().as_str(),
+        "https://client.example.org/post"
+    );
+    assert_eq!(post.mode(), ResponseMode::DirectPost);
+    let PostBody::Form(body) = post.body() else {
+        panic!("form parameters")
+    };
+    let fields = form(body.as_str());
+    let field = |name: &str| fields.iter().find(|(n, _)| n == name).unwrap().1.clone();
+    assert_eq!(field("state"), "eyJhb...6-sVA");
+    assert_eq!(
+        serde_json::from_str::<Value>(&field("vp_token")).unwrap(),
+        json!({"some_identity_credential": ["eyJhbGci...QMA"]})
+    );
+    assert_eq!(fields.len(), 2);
+
+    // SOURCE: Section 8.2, the response of the Response URI to the wallet.
+    let reply = Reply::parse(
+        br#"{"redirect_uri": "https://client.example.org/cb#response_code=091535f699ea575c7937fa5f0f454aee"}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        reply.redirect_uri().map(RedirectUri::as_str),
+        Some("https://client.example.org/cb#response_code=091535f699ea575c7937fa5f0f454aee")
+    );
 }
 
 /// SOURCE: Section 5.4, the request by reference with `request_uri_method=post`, and Section
@@ -100,6 +173,165 @@ fn request_uri_post() {
         effects.as_slice(),
         [Effect::RequestObject(_), Effect::Trust(_)]
     ));
+}
+
+/// SOURCE: Section 8.3, the request asking for an encrypted response with four keys in
+/// `client_metadata.jwks`, sent over the DC API unsigned.
+///
+/// Stated: the response is encrypted to the first key, `kid` `ac`, with `ECDH-ES` and
+/// `A128GCM`, and the JWE header names both and the key.
+#[test]
+fn encrypted_response_key_choice() {
+    let data = json!({
+        "response_type": "vp_token",
+        "response_mode": "dc_api.jwt",
+        "nonce": "xyz123ltcaccescbwc777",
+        "dcql_query": {"credentials": [{
+            "id": "my_credential",
+            "format": "dc+sd-jwt",
+            "meta": {"vct_values": ["https://credentials.example.com/identity_credential"]},
+            "claims": [
+                {"path": ["last_name"]},
+                {"path": ["first_name"]},
+                {"path": ["address", "postal_code"]}
+            ]
+        }]},
+        "client_metadata": {
+            "jwks": {"keys": [
+                {"kty": "EC", "kid": "ac", "use": "enc", "crv": "P-256", "alg": "ECDH-ES",
+                 "x": "YO4epjifD-KWeq1sL2tNmm36BhXnkJ0He-WqMYrp9Fk",
+                 "y": "Hekpm0zfK7C-YccH5iBjcIXgf6YdUvNUac_0At55Okk"},
+                {"kty": "OKP", "kid": "jc", "use": "enc", "crv": "X25519", "alg": "ECDH-ES",
+                 "x": "WPX7wnwq10hFNK9aDSyG1QlLswE_CJY14LdhcFUIVVc"},
+                {"kty": "EC", "kid": "lc", "use": "enc", "crv": "P-384", "alg": "ECDH-ES",
+                 "x": "iHytgLNtXjEyYMAIGwfgjINZRmLfObYbmjPhkaPD8OiTkJtRHjegTNdH31Mxg4nV",
+                 "y": "MizXWSqNB7sSt_SNjg3spvaJnmjB-LpxsPpLUaea33rvINL3Mq-gEaANErRQpbLx"},
+                {"kty": "OKP", "kid": "bc", "use": "enc", "crv": "X448", "alg": "ECDH-ES",
+                 "x": "pK5IRpLlX-8XcsRYWHejpzkfsHoDOmAYuBzAC7aTpewWOw_QFHSa64t9p2kuommI8JQQLohS2AIA"}
+            ]},
+            "encrypted_response_enc_values_supported": ["A128GCM", "A128CBC-HS256"]
+        }
+    });
+    let state = IntakeState::dc_api(
+        &dc_api("openid4vp-v1-unsigned", data),
+        Origin::new("https://verifier.example.com"),
+        now(),
+    );
+    let host = Host::trusting();
+    let (request, _) = run(state, |e| host.answer(e)).unwrap();
+    let encryption = request.encryption().unwrap();
+    assert_eq!(encryption.kid().map(Kid::as_str), Some("ac"));
+    assert_eq!(encryption.enc(), ContentEncryption::A128Gcm);
+    assert_eq!(request.response_mode(), ResponseMode::DcApiJwt);
+
+    let token = request
+        .vp_token(vec![(
+            query_id("my_credential"),
+            vec![Presentation::text("eyJhb...YMetA".into())],
+        )])
+        .unwrap();
+    let jwe = dc_api_jwe(&token.submission(&mut Rng(4)).unwrap());
+    let header: Value = serde_json::from_slice(
+        &siros_codec::base64url::decode(jwe.split('.').next().unwrap()).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(header["alg"], "ECDH-ES");
+    assert_eq!(header["enc"], "A128GCM");
+    assert_eq!(header["kid"], "ac");
+    assert_eq!(header["epk"]["kty"], "EC");
+    assert_eq!(header["epk"]["crv"], "P-256");
+}
+
+/// SOURCE: Appendix A.2, the unsigned request over the DC API; `client_metadata` holds
+/// `vp_formats_supported` and `dcql_query` the query of Section 5.4.
+///
+/// Stated: the request carries no `client_id`, the verifier is the origin, and the response
+/// is the object `{vp_token}` within `data` (A.4).
+#[test]
+fn unsigned_dc_api() {
+    let data = json!({
+        "response_type": "vp_token",
+        "response_mode": "dc_api",
+        "nonce": "n-0S6_WzA2Mj",
+        "client_metadata": {"vp_formats_supported": {"dc+sd-jwt": {}}},
+        "dcql_query": identity_query()
+    });
+    let origin = "https://verifier.example.com";
+    let state = IntakeState::dc_api(
+        &dc_api("openid4vp-v1-unsigned", data),
+        Origin::new(origin),
+        now(),
+    );
+    let host = Host::trusting();
+    let (request, effects) = run(state, |e| host.answer(e)).unwrap();
+    assert_eq!(request.verifier().client_id(), None);
+    assert_eq!(request.verifier().display(), origin);
+    assert_eq!(request.origin().map(Origin::as_str), Some(origin));
+    let [Effect::Trust(trust)] = effects.as_slice() else {
+        panic!("one trust effect, got {effects:?}")
+    };
+    assert_eq!(trust.subject(), &TrustSubject::Origin(Origin::new(origin)));
+
+    let token = request
+        .vp_token(vec![(
+            query_id("some_identity_credential"),
+            vec![Presentation::text("a~b~".into())],
+        )])
+        .unwrap();
+    let submission = token.submission(&mut Rng(5)).unwrap();
+    assert_eq!(submission.mode(), ResponseMode::DcApi);
+    assert_eq!(
+        dc_api_data(&submission),
+        json!({"vp_token": {"some_identity_credential": ["a~b~"]}})
+    );
+}
+
+/// SOURCE: Appendix A.3.2.1, the payload of a signed request in the JWS Compact Serialization,
+/// signed with ES256 under a certificate for `rp.example.com`; `dcql_query` is that of
+/// Section 5.4.
+///
+/// Stated: the request verifies from an origin in `expected_origins`; from any other the
+/// wallet returns an error, `invalid_request` (A.2), as `{"error": …}` (A.4).
+#[test]
+fn signed_dc_api() {
+    let key = key(9);
+    let certificate = certificate(&key, &["rp.example.com"]);
+    let payload = json!({
+        "expected_origins": ["https://origin1.example.com", "https://origin2.example.com"],
+        "client_id": "x509_san_dns:rp.example.com",
+        "client_metadata": {"jwks": {"keys": [{
+            "kty": "EC", "crv": "P-256",
+            "x": "MKBCTNIcKUSDii11ySs3526iDZ8AiTo7Tu6KPAqv7D4",
+            "y": "4Etl6SRW2YiLUrN5vfvVHuhp7x8PxltmWWlbbM4IFyM",
+            "use": "enc", "kid": "1"
+        }]}},
+        "response_type": "vp_token",
+        "response_mode": "dc_api",
+        "nonce": "n-0S6_WzA2Mj",
+        "dcql_query": identity_query()
+    });
+    let request = dc_api(
+        "openid4vp-v1-signed",
+        json!({"request": sign(&x5c_header(&certificate), &payload, &key)}),
+    );
+    let host = Host::trusting();
+
+    let state = IntakeState::dc_api(&request, Origin::new("https://origin1.example.com"), now());
+    let (verified, _) = run(state, |e| host.answer(e)).unwrap();
+    assert_eq!(
+        verified.verifier().client_id().unwrap().as_str(),
+        "x509_san_dns:rp.example.com"
+    );
+    assert_eq!(verified.response_mode(), ResponseMode::DcApi);
+
+    let state = IntakeState::dc_api(&request, Origin::new("https://attacker.example"), now());
+    let error = run(state.clone(), |e| host.answer(e)).unwrap_err();
+    assert_eq!(error, IntakeError::OriginNotExpected);
+    assert_eq!(error.error_code(), ErrorCode::InvalidRequest);
+    assert_eq!(
+        state.error_submission(error).as_ref().map(dc_api_data),
+        Some(json!({"error": "invalid_request"}))
+    );
 }
 
 /// SOURCE: Appendix A.3.2.2, the payload and a protected header of a request in the JWS JSON
