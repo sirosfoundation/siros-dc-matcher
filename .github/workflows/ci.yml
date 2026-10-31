@@ -16,9 +16,12 @@ env:
   CARGO_TERM_COLOR: always
   # The matcher runs in the credential picker with a hard time budget, and it
   # ships inside every wallet APK. Google's own matcher is ~139 KB and
-  # Multipaz's ~277 KB; 300 KB is the ceiling we hold ourselves to. Raise this
-  # deliberately, in the same PR as the change that needs it.
-  WASM_SIZE_BUDGET: 307200
+  # Multipaz's ~277 KB. 400 KiB is the ceiling we hold ourselves to: the picker
+  # runs the wallet's matching and transaction data selection over the
+  # registration (K2), and measures 392,579 bytes with images passed through and
+  # `wasm-opt -Oz`. Raise this deliberately, in the same PR as the change that
+  # needs it.
+  WASM_SIZE_BUDGET: 409600
 
 jobs:
   test:
@@ -26,10 +29,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      # The test host's integration tests build and run the real matcher.wasm,
-      # so the target has to be present for `cargo test` to mean anything.
+      # The test host's integration tests build and run the real matcher.wasm
+      # with `make matcher`, so the target and the pinned wasm-opt have to be
+      # present for `cargo test` to mean anything.
       - uses: ./.github/actions/rust-toolchain
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - run: make wasm-opt
       - run: cargo test --locked --workspace --all-features
 
   fmt:
@@ -50,15 +55,15 @@ jobs:
       - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
       # The binary that actually ships is the wasm one; host-target lints alone
       # would not cover the cfg(target_arch = "wasm32") ABI code at all.
-      - run: cargo clippy --locked -p siros-dc-matcher-wasm --target wasm32-wasip1 --profile wasm-release -- -D warnings
+      - run: cargo clippy --locked -p siros-picker --target wasm32-wasip1 --profile wasm-release -- -D warnings
       # The host calls of the credman crates exist on wasm32 only.
       - run: cargo clippy --locked -p android-credman-sys -p android-credman --target wasm32-wasip1 -- -D warnings
-      # Only the DC API matcher panics. The clippy steps above enforce the
-      # lints each other crate root denies outside its tests; the script fails
-      # on a root without them and on an allow of them outside the tests, and
-      # finds the panics no lint covers.
+      # Only the DC API matcher panics. The clippy steps, here and in the proving
+      # job, enforce the lints each other crate root denies outside its tests;
+      # the script fails on a root without them and on an allow of them outside
+      # the tests, and finds the panics no lint covers.
       - name: No panic outside the tests and the matcher
-        run: python3 scripts/check_panic_sites.py Cargo.toml
+        run: python3 scripts/check_panic_sites.py Cargo.toml proving/Cargo.toml
 
   wasm:
     name: Build matcher.wasm
@@ -68,8 +73,11 @@ jobs:
       - uses: ./.github/actions/rust-toolchain
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       # `make matcher`, so the module checked below is the one that ships —
-      # a bare `cargo build` leaves the `environ_*` imports in, and then the
-      # ABI check and the size budget both measure a file no wallet runs.
+      # a bare `cargo build` leaves the `environ_*` imports in and skips
+      # wasm-opt, and then the ABI check and the size budget both measure a
+      # file no wallet runs. `make wasm-opt` installs the one binaryen version
+      # `make matcher` accepts.
+      - run: make wasm-opt
       - run: make matcher
 
       # The host links a module whose imports it lacks, and the matcher traps
@@ -215,19 +223,37 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
       # siros-dcql is on crates.io, so its `rust-version` is a promise to
-      # people outside this repository. -core and -wasm inherit the same floor
-      # because they are what runs inside the credential picker, where the
+      # people outside this repository. siros-picker and siros-registration inherit the same
+      # floor because they are what runs inside the credential picker, where the
       # toolchain is whatever the wallet's build uses, not ours.
       #
-      # -ffi and -testhost are deliberately excluded: they declare 1.88 in
+      # The zkp_req crates are in the matcher, so they hold the same floor.
+      # The wallet core crates hold it too: the picker links the presentation component and
+      # what it builds on. -core holds it for the FFI.
+      #
+      # siros-oid4vp holds it without `crypto`, the part the matcher links;
+      # `crypto` builds with the pinned toolchain. siros-presentation holds it
+      # without `wallet`: the matching for the picker. siros-transaction-data
+      # holds it without `wallet`, the selection over a registration, and with
+      # it. siros-trust holds it without `chain`, the admission rule for the
+      # picker, and with it.
+      #
+      # -ffi and siros-picker-testhost are deliberately excluded: they declare 1.88 in
       # their own manifests. Checking them here would only re-discover that.
       - name: The 1.82 crates build on 1.82
         run: |
           cargo check --locked --all-features \
-            -p siros-dcql -p siros-dc-matcher-core -p siros-dc-matcher-wasm \
-            -p android-credman-sys -p android-credman
+            -p siros-codec -p siros-dcql -p siros-dc-matcher-core -p siros-picker \
+            -p android-credman-sys -p android-credman \
+            -p siros-zkp-req -p siros-zkp-req-nym-auth -p siros-sdjwt -p siros-mdoc \
+            -p siros-wallet-state -p siros-credential -p siros-display -p siros-transaction-data \
+            -p siros-trust -p siros-registration
+          cargo check --locked -p siros-oid4vp
+          cargo check --locked -p siros-trust
+          cargo check --locked -p siros-presentation --no-default-features
+          cargo check --locked -p siros-transaction-data --no-default-features
           cargo check --locked --all-features --target wasm32-wasip1 \
-            -p siros-dc-matcher-wasm -p android-credman-sys -p android-credman
+            -p siros-picker -p android-credman-sys -p android-credman
 
   semver:
     name: siros-dcql API matches its version
@@ -259,3 +285,95 @@ jobs:
       # an unpublished workspace sibling. That is easy to add by accident and
       # only fails at release time otherwise.
       - run: cargo publish --locked --dry-run -p siros-dcql
+
+  # The proof backends and what links them live in the proving workspace:
+  # zk-cred-longfellow and zk-cred-vega need a Cargo newer than 1.82.
+  proving:
+    name: Proving workspace
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: proving
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: ./.github/actions/rust-toolchain
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: proving
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - run: cargo test --locked --workspace
+      # Real proofs of both systems, verified by the Verifier.
+      - run: scripts/fetch-artifacts.sh
+      - run: cargo test --locked --release -p siros-zkp-proving-e2e -- --ignored
+
+  browser:
+    name: Build the browser presenter
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: proving
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: ./.github/actions/rust-toolchain
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: proving
+      # zstd-sys compiles C for wasm32 with clang.
+      - run: cargo clippy --locked -p siros-zkp-req-wasm --target wasm32-unknown-unknown -- -D warnings
+      - run: cargo build --locked -p siros-zkp-req-wasm --target wasm32-unknown-unknown --release
+
+      # A browser instantiates the module with wasm-bindgen's glue, which
+      # provides wasm-bindgen's import modules and nothing else. A dependency
+      # that imports `env` or WASI (getrandom without a JS backend, C code)
+      # builds, and then fails at instantiation in the page.
+      - name: The module imports only wasm-bindgen's modules
+        run: |
+          python3 - target/wasm32-unknown-unknown/release/siros_zkp_req_wasm.wasm <<'PY'
+          import sys
+          d = open(sys.argv[1], "rb").read()
+          if d[:8] != b"\0asm\1\0\0\0":
+              sys.exit("not a wasm module")
+          def leb(i):
+              n = shift = 0
+              while True:
+                  b = d[i]; i += 1
+                  n |= (b & 0x7f) << shift; shift += 7
+                  if b < 0x80:
+                      return n, i
+          def name(i):
+              n, i = leb(i)
+              return d[i:i + n].decode(), i + n
+          def limits(i):
+              flags, i = leb(i)
+              _, i = leb(i)
+              return leb(i)[1] if flags & 1 else i
+          modules, i = set(), 8
+          while i < len(d):
+              section = d[i]
+              size, i = leb(i + 1)
+              if section == 2:
+                  count, k = leb(i)
+                  for _ in range(count):
+                      module, k = name(k)
+                      _, k = name(k)
+                      kind, k = d[k], k + 1
+                      if kind == 0:
+                          _, k = leb(k)
+                      elif kind == 1:
+                          k = limits(k + 1)
+                      elif kind == 2:
+                          k = limits(k)
+                      elif kind == 3:
+                          k += 2
+                      else:
+                          sys.exit(f"import kind {kind}")
+                      modules.add(module)
+              i += size
+          allowed = {"__wbindgen_placeholder__", "__wbindgen_externref_xform__"}
+          if not modules <= allowed:
+              sys.exit("the module imports " + ", ".join(sorted(modules - allowed)))
+          print("import modules:", ", ".join(sorted(modules)))
+          PY

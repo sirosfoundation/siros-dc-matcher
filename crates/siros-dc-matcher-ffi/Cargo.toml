@@ -1,7 +1,7 @@
 [package]
 name = "siros-dc-matcher-ffi"
 version = "0.11.0"
-description = "Kotlin/Swift bindings for the SIROS DC API matcher"
+description = "Kotlin/Swift bindings for the SIROS DC API matcher and the zkp_req session, vp_token and verifier"
 publish = false
 edition.workspace = true
 license.workspace = true
@@ -29,12 +29,20 @@ bindgen = ["uniffi/cli"]
 [dependencies]
 siros-dc-matcher-core = { workspace = true }
 siros-dcql = { workspace = true }
+siros-display = { workspace = true }
+siros-oid4vp = { workspace = true }
+siros-codec = { workspace = true }
+siros-trust = { workspace = true, features = ["chain"] }
+siros-zkp-req = { workspace = true }
+siros-zkp-req-nym-auth = { workspace = true, features = ["credential"] }
 serde_json = { workspace = true }
 uniffi = { version = "0.28", features = ["build"] }
 thiserror = { workspace = true }
 
 [dev-dependencies]
 siros-dc-matcher-core = { workspace = true, features = ["test-fixtures"] }
+siros-zkp-req-nym-auth = { workspace = true, features = ["test-fixtures"] }
+p256 = { version = "0.13.2", default-features = false, features = ["ecdsa", "std"] }
 
 [lints]
 workspace = true

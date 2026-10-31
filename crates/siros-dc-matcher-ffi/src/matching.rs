@@ -24,15 +24,10 @@
 //! the symptom is the usual one for this component: nothing appears, and
 //! nothing says why.
 
-use std::collections::HashMap;
-
 use siros_dc_matcher_core::db::CredentialDatabase;
 use siros_dc_matcher_core::evaluator::{credentials, resolve, ProfilePolicy};
-use siros_dc_matcher_core::request::{self, RequestContext};
-use siros_dc_matcher_core::zkp_req;
-use siros_dcql::{execute, DcqlQuery};
-
-use crate::FfiCapability;
+use siros_dcql::{execute, DcqlQuery, Satisfaction};
+use siros_oid4vp::UnverifiedRequest;
 
 /// How many combinations to return at most.
 ///
@@ -85,27 +80,18 @@ pub struct FfiMatchedCredential {
     ///
     /// Each is a path: for ISO mdoc, `[namespace, element_identifier]`.
     pub claims: Vec<Vec<String>>,
-    /// The capability chosen to satisfy this query, if its format needed one.
+    /// For a `zkp_req` query: a JSON object `{"circuit": {...},
+    /// "proof_backend": "...", "req_set": n, "items": [...]}` holding the
+    /// circuit this wallet chose (its registered capability: `system` and
+    /// string `params`), the proof backend of the pair, and the answered
+    /// option (`zkp_req`, Sections 1.3 and 2.1): its index in `_req_sets`,
+    /// absent without them, and its `_req` indexes. `None` for every other
+    /// format.
     ///
-    /// Returned rather than left to the caller because the engine has already
-    /// decided. Working it out again means parsing the request a second time,
-    /// in a second implementation, and possibly reaching a different answer.
-    pub capabilities: Vec<FfiCapability>,
-    /// `meta` entries the wallet needs at presentation time but which do not
-    /// affect matching — `ppid_context` above all, which both SDKs read today.
-    ///
-    /// A pseudonym context changes what is produced, not which credential can
-    /// produce it, so it is carried rather than matched on.
-    pub meta: HashMap<String, String>,
-    /// For a `zkp_req` query: a JSON object `{"circuit": {...}, "plan":
-    /// {...}}` holding the circuit this wallet chose (its registered
-    /// capability: `system` and string `params`) and the request as the
-    /// matcher normalised it. `None` for every other format.
-    ///
-    /// JSON strings, not records, so the planner's shape can follow the
-    /// rulebook without a binding regeneration each time. The plan's `raw`
-    /// member is the verifier's request as sent and is **not authenticated**
-    /// here. A `zkp_req` match has an empty `claims`.
+    /// A JSON string, not a record, so its shape can follow the draft without
+    /// a binding regeneration each time. Everything in it comes from the
+    /// verifier's request, which is **not authenticated** here. A `zkp_req`
+    /// match has an empty `claims`.
     pub zkp_req: Option<String>,
 }
 
@@ -208,9 +194,10 @@ pub fn match_dc_api_request(
     // which meant the two entry points disagreed about what a request is: the
     // picker would offer a credential for a signed request that this path
     // declined. One reader, or they drift again.
-    let found = request::first_supported_context_in(&parsed, &db.profile, None)
-        .and_then(|context| Some((context.matching_query()?, context)));
-    let (query, context) = match found {
+    let registered = |label: &str| db.profile.parser_for(label).is_some();
+    let found = UnverifiedRequest::first_registered(request_json.as_bytes(), &registered)
+        .map(|unverified| (unverified.query().clone(), unverified));
+    let (query, unverified) = match found {
         Some(found) => found,
         None => {
             let offered: Vec<String> = requests
@@ -222,19 +209,17 @@ pub fn match_dc_api_request(
             // not base64url, not JSON, or shaped for a different label — the
             // two have to be told apart, or a caller debugging a malformed
             // signed request is sent to look at its protocol list.
-            return Err(
-                if offered.iter().any(|p| db.profile.parser_for(p).is_some()) {
-                    MatchError::Request {
-                        reason: request::diagnose(request_json.as_bytes(), &db.profile),
-                    }
-                } else {
-                    MatchError::UnsupportedProtocol { offered }
-                },
-            );
+            return Err(if offered.iter().any(|p| registered(p)) {
+                MatchError::Request {
+                    reason: siros_oid4vp::diagnose(request_json.as_bytes(), &registered),
+                }
+            } else {
+                MatchError::UnsupportedProtocol { offered }
+            });
         }
     };
 
-    Ok(evaluate(&db, &query, &context))
+    Ok(evaluate(&db, &query, unverified.client_metadata()))
 }
 
 /// Match a bare DCQL query.
@@ -252,90 +237,12 @@ pub fn match_dcql(blob: Vec<u8>, dcql_json: String) -> Result<FfiMatchOutcome, M
     match_dcql_with_context(blob, dcql_json, None)
 }
 
-/// Why a `zkp_req` query could not be planned.
-#[derive(Debug, thiserror::Error, uniffi::Error)]
-pub enum ZkpReqPlanError {
-    /// The query is structurally broken: the planner's verdict, unchanged.
-    ///
-    /// This says the request is malformed, never that it cannot be served.
-    #[error("invalid zkp_req request ({code}): {reason}")]
-    InvalidRequest {
-        /// A stable identifier for the defect, the planner's own code:
-        /// `query_not_parseable`, `req_missing_or_empty`, `req_ambiguous`,
-        /// `item_missing_function_id`, `item_missing_handle`,
-        /// `param_wrong_type`, `param_invalid_full_date`, `duplicate_handle`,
-        /// `claims_present`, `claim_sets_present`, `req_sets_present`,
-        /// `invalid_meta` or `invalid_client_metadata`. Match on this, not on
-        /// `reason`.
-        code: String,
-        /// The planner's message, for logs. Its wording may change.
-        reason: String,
-    },
-}
-
-/// Plan a `zkp_req` credential query, without a blob.
-///
-/// `credential_query_json` is one Credential Query object (an element of
-/// `dcql_query.credentials`), not the whole `dcql_query`. In either rulebook
-/// shape: `req` beside `meta`, or `claims: {"_req": [...]}`.
-/// `client_metadata_json` is the request's `client_metadata`, if it has one.
-///
-/// This is the function the matcher itself calls (`zkp_req::plan` in the
-/// core crate), so the plan a wallet reads here is the plan matching used. It
-/// judges structure only; whether the request can be served is the wallet's.
-///
-/// # The plan JSON
-///
-/// A JSON object with exactly these members; this shape is stable, and the
-/// same object is the `plan` member of [`FfiMatchedCredential::zkp_req`]:
-///
-/// - `functions`: array, in request order, of `{function_id, handle, params}`.
-///   `function_id` is `id` in a `req` item and `fn_id` in a `_req` item;
-///   `handle` is `return` or `id` respectively. `params` is a flat object:
-///   the declared params that were present, plus every other param unchanged.
-///   Values of declared params are strings, and `full-date` ones are
-///   validated.
-/// - `system_filter`: `{proof_systems?, system_ids?}`, the verifier's
-///   `proof_system_values` and `system_id_values` (from either form of
-///   `vp_formats_supported.zkp_req`). A member is absent when the verifier
-///   did not send it; a present empty list is passed through, not rejected.
-/// - `meta_doctype`: `meta.doctype_value`, or `null`.
-/// - `raw`: the credential query exactly as parsed, so members this version
-///   does not know survive. It is verifier-supplied and unauthenticated.
-///
-/// Normative cases for both the plan and every rejection are the vectors in
-/// `crates/siros-dc-matcher-core/tests/vectors/zkp_req/`.
-///
-/// # Errors
-///
-/// [`ZkpReqPlanError::InvalidRequest`] with the planner's code and reason
-/// (`ZkpReqPlanException` in Kotlin). Input that is not JSON is the
-/// `query_not_parseable` or `invalid_client_metadata` code.
-#[uniffi::export]
-pub fn zkp_req_plan(
-    credential_query_json: String,
-    client_metadata_json: Option<String>,
-) -> Result<String, ZkpReqPlanError> {
-    let plan =
-        zkp_req::plan(&credential_query_json, client_metadata_json.as_deref()).map_err(|e| {
-            ZkpReqPlanError::InvalidRequest {
-                code: e.code().to_owned(),
-                reason: e.to_string(),
-            }
-        })?;
-    serde_json::to_string(&plan).map_err(|e| ZkpReqPlanError::InvalidRequest {
-        code: "plan_not_serializable".to_owned(),
-        reason: e.to_string(),
-    })
-}
-
 /// Match a bare DCQL query, with the request's `client_metadata`.
 ///
 /// What [`match_dcql`] does, for a caller that also has the verifier's
 /// `client_metadata` (as JSON). A `zkp_req` query is matched against the
-/// circuit lists in its `vp_formats_supported`; with `None` those are absent
-/// and impose no constraint. A `zkp_req` query with `claims` as an object
-/// (the rulebook example shape) is accepted here although it is not DCQL.
+/// lists in its `vp_formats_supported.zkp_req`, which `zkp_req`, Section 1.2
+/// requires: with `None`, no `zkp_req` query matches.
 ///
 /// # Errors
 ///
@@ -353,27 +260,8 @@ pub fn match_dcql_with_context(
         .map(|text| serde_json::from_str::<serde_json::Value>(&text).map_err(request_err))
         .transpose()?;
 
-    let strict = DcqlQuery::from_json(&dcql_json);
-    let context = RequestContext::from_dcql(raw, client_metadata).map_err(|e| {
-        request_err(
-            strict
-                .as_ref()
-                .err()
-                .map_or_else(|| e.to_string(), ToString::to_string),
-        )
-    })?;
-    let query = match strict {
-        Ok(query) => query,
-        // The identifier checks `from_json` makes still apply to anything that
-        // is DCQL; only a `zkp_req` query DCQL cannot represent is let past.
-        Err(e) if context.dcql_query.is_some() => return Err(request_err(e)),
-        Err(e) => {
-            let query = context.matching_query().ok_or_else(|| request_err(&e))?;
-            query.validate().map_err(request_err)?;
-            query
-        }
-    };
-    Ok(evaluate(&db, &query, &context))
+    let query = DcqlQuery::parse(&raw).map_err(request_err)?;
+    Ok(evaluate(&db, &query, client_metadata.as_ref()))
 }
 
 fn decode(blob: &[u8]) -> Result<CredentialDatabase, MatchError> {
@@ -394,95 +282,72 @@ fn request_err(e: impl core::fmt::Display) -> MatchError {
 fn evaluate(
     db: &CredentialDatabase,
     query: &DcqlQuery,
-    context: &RequestContext,
+    client_metadata: Option<&serde_json::Value>,
 ) -> FfiMatchOutcome {
     let held = credentials(db);
-    let policy = ProfilePolicy::new(&db.profile).with_context(context);
+    let policy = ProfilePolicy::new(&db.profile).with_client_metadata(client_metadata);
     let result = execute(query, &held, &policy);
     let enumerated = result.combinations(MAX_COMBINATIONS);
-    let dropped_count = u32::try_from(enumerated.dropped.count()).unwrap_or(u32::MAX);
+    let dropped_count = u32::try_from(enumerated.dropped().count()).unwrap_or(u32::MAX);
 
-    let member = |query_id: &String, candidate: &siros_dcql::Candidate| {
-        // Resolved by core, not here: the matcher binary derives exactly the
-        // same details for its picker metadata, and two derivations are how
-        // the two would come to disagree about which capability satisfied a
-        // query.
+    let member = |query_id: &str, candidate: &siros_dcql::Candidate| {
         let resolved = query
             .credential(query_id)
             .map(|cq| resolve(&policy, cq, candidate));
         FfiMatchedCredential {
-            query_id: query_id.clone(),
-            credential_id: candidate.credential_id.clone(),
+            query_id: query_id.to_owned(),
+            credential_id: candidate.credential_id().as_str().to_owned(),
             claims: resolved
                 .as_ref()
                 .map(|r| r.claims.clone())
-                .unwrap_or_default(),
-            capabilities: resolved
-                .as_ref()
-                .map(|r| {
-                    r.capabilities
-                        .iter()
-                        .map(|c| FfiCapability {
-                            system: c.system.clone(),
-                            params: c
-                                .params
-                                .iter()
-                                .map(|(k, v)| (k.clone(), v.clone()))
-                                .collect(),
-                        })
-                        .collect()
-                })
                 .unwrap_or_default(),
             zkp_req: resolved
                 .as_ref()
                 .and_then(|r| r.zkp_req.as_ref())
                 .map(|selection| selection.to_json().to_string()),
-            meta: resolved
-                .map(|r| r.meta.into_iter().collect())
-                .unwrap_or_default(),
         }
     };
 
     let matches = result
-        .matches
+        .matches()
         .iter()
         .map(|query_match| FfiQueryMatch {
-            query_id: query_match.query_id.clone(),
+            query_id: query_match.query_id().to_string(),
             credentials: query_match
-                .candidates
+                .candidates()
                 .iter()
-                .map(|candidate| member(&query_match.query_id, candidate))
+                .map(|candidate| member(query_match.query_id(), candidate))
                 .collect(),
         })
         .collect();
 
     let combinations = enumerated
-        .combinations
+        .combinations()
         .iter()
         .map(|combination| FfiCombination {
             members: combination
-                .members
+                .members()
                 .iter()
                 .map(|(query_id, candidate)| member(query_id, candidate))
                 .collect(),
             purposes: combination
-                .purposes
+                .purposes()
                 .iter()
-                .map(siros_dc_matcher_core::purpose::display)
+                .map(siros_display::purpose::display)
                 .collect(),
         })
         .collect();
 
     FfiMatchOutcome {
         matches,
-        satisfiable: result.satisfiable,
+        satisfiable: result.satisfaction() == Satisfaction::Satisfiable,
         combinations,
         dropped: dropped_count,
         // Exact only if the engine's count was exact *and* it survived the
         // narrowing. A clamped value reported as exact would say u32::MAX
         // combinations were dropped and mean it — the same overstated
         // precision this field exists to prevent, reintroduced by the cast.
-        dropped_is_exact: enumerated.dropped.is_exact()
-            && usize::try_from(dropped_count) == Ok(enumerated.dropped.count()),
+        dropped_is_exact: enumerated.dropped().is_exact()
+            && usize::try_from(dropped_count) == Ok(enumerated.dropped().count()),
     }
 }

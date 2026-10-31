@@ -3,11 +3,24 @@ resolver = "2"
 members = [
     "crates/android-credman-sys",
     "crates/android-credman",
+    "crates/siros-codec",
+    "crates/siros-credential",
     "crates/siros-dcql",
+    "crates/siros-display",
+    "crates/siros-mdoc",
+    "crates/siros-oid4vp",
+    "crates/siros-presentation",
+    "crates/siros-registration",
     "crates/siros-dc-matcher-core",
-    "crates/siros-dc-matcher-wasm",
+    "crates/siros-picker",
     "crates/siros-dc-matcher-ffi",
-    "crates/siros-dc-matcher-testhost",
+    "crates/siros-picker-testhost",
+    "crates/siros-sdjwt",
+    "crates/siros-transaction-data",
+    "crates/siros-trust",
+    "crates/siros-wallet-state",
+    "crates/siros-zkp-req",
+    "crates/siros-zkp-req-nym-auth",
 ]
 
 [workspace.package]
@@ -15,15 +28,30 @@ edition = "2021"
 license = "BSD-2-Clause"
 repository = "https://github.com/sirosfoundation/siros-dc-matcher"
 authors = ["SIROS Foundation"]
-# Held by everything that ships inside the credential picker — siros-dcql,
-# -core, -wasm and the two android-credman crates — and checked on 1.82 in
-# CI. The -ffi and -testhost crates override this upward: uniffi's bindgen
-# chain and wasmtime both need more.
+# Held by everything that ships inside the credential picker — siros-picker, siros-registration,
+# siros-presentation without `wallet` and the wallet core crates it builds on, siros-dcql,
+# siros-oid4vp without `crypto`, the two zkp_req crates, siros-trust and the two
+# android-credman crates — and by -core, siros-mdoc and siros-sdjwt, and checked on 1.82 in
+# CI. -ffi and siros-picker-testhost override this upward: uniffi's bindgen chain and
+# wasmtime both need more.
 rust-version = "1.82"
 
 [workspace.dependencies]
-siros-dcql = { version = "0.11.0", path = "crates/siros-dcql" }
+siros-codec = { path = "crates/siros-codec" }
+siros-credential = { path = "crates/siros-credential" }
+siros-dcql = { version = "0.12.0", path = "crates/siros-dcql" }
+siros-display = { path = "crates/siros-display", default-features = false }
+siros-mdoc = { path = "crates/siros-mdoc" }
+siros-oid4vp = { path = "crates/siros-oid4vp" }
+siros-presentation = { path = "crates/siros-presentation", default-features = false }
+siros-registration = { path = "crates/siros-registration" }
+siros-sdjwt = { path = "crates/siros-sdjwt" }
+siros-transaction-data = { path = "crates/siros-transaction-data", default-features = false }
+siros-trust = { path = "crates/siros-trust", default-features = false }
+siros-wallet-state = { path = "crates/siros-wallet-state" }
 siros-dc-matcher-core = { path = "crates/siros-dc-matcher-core" }
+siros-zkp-req = { path = "crates/siros-zkp-req" }
+siros-zkp-req-nym-auth = { path = "crates/siros-zkp-req-nym-auth", default-features = false }
 android-credman = { path = "crates/android-credman", version = "0.1.0" }
 
 # Strings that are UTF-8 and NUL-terminated at once: the string type of the
@@ -37,6 +65,9 @@ ciborium = "0.2"
 # default hasher seeds itself from WASI `random_get`, which the Credential
 # Manager host does not provide; FxHash needs no seed.
 rustc-hash = "2.1.3"
+# Iterator adapters. Only those without a hash map: std's hasher seeds itself from WASI
+# `random_get`, which the picker's host lacks.
+itertools = "0.12.1"
 # Every error type derives `Display` and `Error` with it.
 thiserror = "2"
 
@@ -67,3 +98,20 @@ strip = "debuginfo"
 inherits = "release"
 panic = "abort"
 strip = true
+
+# The zkp_req tests sign and verify ES256 and X.509 by the hundred. Without
+# optimisation, these crates take most of the suite's time: the refusal table
+# runs in 1.00 s as built by default and in 0.21 s with this, measured back to
+# back on the same machine load.
+[profile.dev.package.p256]
+opt-level = 3
+[profile.dev.package.primeorder]
+opt-level = 3
+[profile.dev.package.elliptic-curve]
+opt-level = 3
+[profile.dev.package.crypto-bigint]
+opt-level = 3
+[profile.dev.package.ecdsa]
+opt-level = 3
+[profile.dev.package.sha2]
+opt-level = 3

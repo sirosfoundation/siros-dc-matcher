@@ -31,6 +31,7 @@ inferred, and its Evidence column gives the strength.
 | **AX** | androidx registry types: [`VerificationEntryDisplayProperties.kt`][AX-entry], [`VerificationFieldDisplayProperties.kt`][AX-field], [`InlineIssuanceEntry.kt`][AX-inline], [`DelegationType.kt`][AX-deleg], [`RegisterCredentialsRequest.kt`][AX-req], [`ProviderGetCredentialRequest.kt`][AX-select] | androidx `2b7ce630` | The registry side of the same display data, and what the wallet receives on selection |
 | **MP** | OpenWallet Foundation Multipaz C++ matcher [`CredentialDatabase.cpp`][MP] | multipaz `5c15239f` | A production matcher's calls |
 | **SD** | Device findings of this repository: [`docs/abi.md`][SD-doc] lines 31–50, commits [`3d61ac7`][SD-icon] and [`6cd02c9`][SD-badge] | siros-dc-matcher `ac573c2` | Observed on a Pixel through logcat and the share sheet |
+| **PW** | The repository owner's Paradym wallet: [`registerCredentials.ts`][PW] and commit [`d751f7b4`][PW-svg] "added svg support for dc api icons" | paradym-wallet `98980691` (`feat/eudi-payment-transaction-data`), `d751f7b4` (`fix/svg_in_dc_api`) | Observed on a device by the owner: an SVG icon is not shown, the PNG the wallet rasterises from it is |
 | **EP** | Elpaso wallet [patch 0003][EP] on Google's C matcher | elpaso `4f89c660` | Observed on a device |
 | **SP** | Sphereon matcher [`matcher-build/src/lib.rs`][SP] | mobile-wallet `19bcf497` | A third-party matcher's calls |
 | **SR** | This repository's released `matcher.wasm`, [v0.8.0][SR] to v0.11.0, which import `wasi_snapshot_preview1.random_get` (read with a parser), and the repository owner's device report on them | releases 2026-10-14 to 2026-10-20 | Observed on a device: they load, and the host lacks `random_get` |
@@ -52,6 +53,7 @@ and CMWallet's issues, where
 | Empty string versus NULL | Different. An empty `disclaimer` or `warning` is a present, blank element: the picker draws the badge or note with nothing in it. NULL draws nothing. | SD [`6cd02c9`][SD-badge]: every entry carried a warning triangle while these were `""`; NULL removed it. GR maps an empty Rust string to NULL for every optional string ([`credman.rs`][GR-credman] lines 108–411) |
 | Images | A pointer and a byte length. An optional image is absent as NULL with length 0. | GC passes `NULL, 0` for the bank and provider icons ([lines 91–106][GC-pay]) and `0, 0` for an inline-issuance entry without icon ([lines 387–388][GC-inline]) |
 | A NULL image with a non-zero length | Outside the contract. | Unconfirmed: conservative |
+| Image formats | PNG or JPEG. An SVG is not shown. | **PW device**: no SVG icon showed until the wallet rasterised it to PNG ([`d751f7b4`][PW-svg]; [lines 114–146][PW-svg-now]). PW registers PNG and JPEG Data URLs alone, resized to 120 pixels on the long side ([lines 25–27][PW-icon], [150–162][PW-resize]). AX types the icon as a `Bitmap` ([lines 45–47][AX-entry]) |
 | Ownership | The host reads every argument during the call. The matcher may free or reuse its buffers when the call returns. | SD: this repository frees every string right after each call and saw correct titles, fields and disclaimers on a Pixel. A host that kept pointers into linear memory would read reused bytes |
 | Out-pointers | Every `uint32_t*`, `void*` and `CallingAppInfo*` must be non-null and point to memory the matcher owns, large enough for what the host writes. Address 0 is valid linear memory in WebAssembly, so a NULL out-pointer makes the host write over the matcher's own data. | H; WebAssembly memory model. Conservative |
 | Entry point | The host calls the export `_start` with no arguments and reads the export `memory`. | SD (`docs/abi.md` "Exports"); GR [`bin/presentation.rs`][GR-start] exports `_start` for `wasm32-unknown-unknown` "Credman expects this as the entry point" |
@@ -185,7 +187,7 @@ checks the same WebAssembly signatures.
 | `ReadCredentialsBuffer` | `buffer` | required; holds `len` bytes | H |
 | | `offset` | byte offset into the blob | H |
 | | `len` | bytes asked for | H |
-| | return | bytes copied; may be less than `len`. A matcher keeps reading until it has the whole blob | GT fake returns `min(len, size − offset)` and 0 past the end ([lines 149–153][GT]) |
+| | return | bytes copied; may be less than `len`. A matcher keeps reading until it has the bytes it asked for | GT fake returns `min(len, size − offset)` and 0 past the end ([lines 149–153][GT]) |
 | `GetWasmVersion` | `version` | required out-pointer | H |
 | `GetCallingAppInfo` | `info` | required; a whole 768-byte struct. Each field is NUL-terminated when shorter than the field. A field the host fills to the brim has no terminator, and the bytes are expected to be UTF-8; `android-credman` reads each field up to its NUL or its end, and panics on bytes that are not UTF-8. An array field cannot be NULL, so an empty `origin` stands for none | H (layout); field encoding unconfirmed: conservative |
 
@@ -196,8 +198,8 @@ checks the same WebAssembly signatures.
 | `AddEntrySet` | `set_id` | required; unique within the invocation | unconfirmed | SD: declaring an id twice discards the whole output. GR builds a distinct id per combination ([`reporter.rs` lines 296–325][GR-reporter]). GC repeats ids (§7). AX returns it to the wallet as `credentialSetId` ([lines 44–64][AX-select]) |
 | | `set_length` | ≥ 1: the number of positions | — | GC, GR, MP pass the number of slots. 0 is conservative-forbidden |
 | `AddEntryToSet` | `cred_id` | required; distinct among the alternatives of one position | — | GT keys entries by position, then id ([`test_runner.cc` lines 161–171][GT]). AX returns it to the wallet as `credentialId` ([lines 87–95][AX-select]) |
-| | `icon`, `icon_len` | required: the host drops an entry without an icon. A 64×64 PNG shows; a 4×4 PNG was dropped | — | **SD device**: "`WasmRuntime: Null icon for icon`" and no entry; the PNG sizes ([`docs/abi.md` lines 36–42][SD-doc]) |
-| | `title` | required | unconfirmed | AX non-null; GR NULL when empty (§7) |
+| | `icon`, `icon_len` | required: the host drops an entry without an icon. A 64×64 PNG shows; a 4×4 PNG was dropped. PNG or JPEG (§2) | — | **SD device**: "`WasmRuntime: Null icon for icon`" and no entry; the PNG sizes ([`docs/abi.md` lines 36–42][SD-doc]). **PW device**: a 120-pixel PNG shows |
+| | `title` | required | unconfirmed | AX non-null; GR NULL when empty (§7). PW passes the credential's display name, else a fallback title in the wallet's language, and as `subtitle` the issuer's name, else a fallback ([lines 278–288][PW-title]) |
 | | `subtitle` | nullable | unconfirmed | AX nullable; GR NULL when empty |
 | | `disclaimer` | nullable | drawn as a blank note | **SD device** ([`6cd02c9`][SD-badge]); GC passes an absent `explainer` as NULL ([line 135][GC-v2]); MP NULL ([line 413][MP]) |
 | | `warning` | nullable | drawn as a blank badge | **SD device**; GC NULL ([line 135][GC-v2]); MP NULL ([line 414][MP]) |
@@ -352,6 +354,12 @@ Run on a current Pixel with `adb logcat | grep WasmRuntime` open.
 [SD-doc]: https://github.com/sirosfoundation/siros-dc-matcher/blob/ac573c2843afeb3d4d9d19924aa81572cabbd304/docs/abi.md#L31-L50
 [SD-icon]: https://github.com/sirosfoundation/siros-dc-matcher/commit/3d61ac791f1f004914e0bbf732704cfc445755ce
 [SD-badge]: https://github.com/sirosfoundation/siros-dc-matcher/commit/6cd02c9913da9ddca9a1d5fd0a73b0dc2730afbb
+[PW]: https://github.com/APTITUDE-Consortium/paradym-wallet/blob/98980691466fb89c2bf3a1685f2a2db69ddcddf5/packages/sdk/src/dcApi/registerCredentials.ts
+[PW-svg]: https://github.com/APTITUDE-Consortium/paradym-wallet/commit/d751f7b4d0c8353d7e298b99daa72855eceb998a
+[PW-svg-now]: https://github.com/APTITUDE-Consortium/paradym-wallet/blob/98980691466fb89c2bf3a1685f2a2db69ddcddf5/packages/sdk/src/dcApi/registerCredentials.ts#L114-L146
+[PW-icon]: https://github.com/APTITUDE-Consortium/paradym-wallet/blob/98980691466fb89c2bf3a1685f2a2db69ddcddf5/packages/sdk/src/dcApi/registerCredentials.ts#L25-L27
+[PW-resize]: https://github.com/APTITUDE-Consortium/paradym-wallet/blob/98980691466fb89c2bf3a1685f2a2db69ddcddf5/packages/sdk/src/dcApi/registerCredentials.ts#L150-L162
+[PW-title]: https://github.com/APTITUDE-Consortium/paradym-wallet/blob/98980691466fb89c2bf3a1685f2a2db69ddcddf5/packages/sdk/src/dcApi/registerCredentials.ts#L278-L288
 [EP]: https://github.com/digitallabor-berlin/elpaso/blob/4f89c660b1d19fa801e863ac16e6352f560af500/matcher/patches/0003-non-payment-sca-entry-fallback.patch
 [SP]: https://github.com/Sphereon-Opensource/mobile-wallet/blob/19bcf4972db4a1a15fb5ac2a260bb719bdd21ab6/matcher-build/src/lib.rs#L19-L37
 [SR]: https://github.com/sirosfoundation/siros-dc-matcher/releases/tag/v0.8.0

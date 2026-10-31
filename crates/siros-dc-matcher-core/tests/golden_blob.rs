@@ -21,21 +21,29 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use siros_dc_matcher_core::db::{Claim, Credential, CredentialDatabase, IconRef, VERSION};
-use siros_dc_matcher_core::profile::{Capability, MatchProfile};
+use siros_dc_matcher_core::profile::{
+    Capability, MatchProfile, FUNCTIONS_PARAM, SYSTEM_ID_PARAM, ZKP_REQ_CAPABILITY,
+};
 
-/// A blob exercising every field the format has, including the ZK path.
+/// A blob exercising every field the format has, a registered circuit included.
 ///
 /// Deliberately not minimal: a golden vector that omits a field cannot detect
 /// that field's encoding changing.
 fn reference_database() -> CredentialDatabase {
     let mut capabilities = BTreeMap::new();
     capabilities.insert(
-        "zk_system".to_string(),
+        ZKP_REQ_CAPABILITY.to_string(),
         vec![Capability {
             system: "longfellow-libzk-v1".into(),
             params: BTreeMap::from([
-                ("num_attributes".to_string(), "4".to_string()),
-                ("version".to_string(), "3".to_string()),
+                (
+                    SYSTEM_ID_PARAM.to_string(),
+                    "urn:circuits:longfellow:nym_auth:v1".to_string(),
+                ),
+                (
+                    FUNCTIONS_PARAM.to_string(),
+                    "age_check,pseudonym".to_string(),
+                ),
             ]),
         }],
     );

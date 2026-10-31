@@ -1,0 +1,207 @@
+//! What an offer shows (A3, T4): each credential of its members with its claim or proof
+//! statement fields and the transaction entry bound to it, after its additions' rows show.
+
+use std::io::{Read, Seek};
+
+use siros_dcql::QueryId;
+use siros_display::Field;
+use siros_presentation::{Answer, Answered, Answers, Candidate, Offer, OfferIndex, Transactions};
+use siros_registration::{Icon, Registration, RegistrationError};
+use siros_transaction_data::Deferral;
+
+use crate::candidates::Requested;
+use crate::diagnostics::Unshown;
+use crate::fields::TransactionShown;
+use crate::matching::NoChoice;
+
+/// The matching an offer shows from.
+pub(crate) struct Matched<'a, 'r, 'id> {
+    pub(crate) answered: &'a Answered<'r, &'a Requested<'id>, NoChoice>,
+    pub(crate) transactions: &'a Transactions<Deferral>,
+}
+
+/// One credential of an offer as its entry shows it.
+pub(crate) struct Presented<'a, 'id> {
+    pub(crate) credential: &'a Requested<'id>,
+    pub(crate) query: QueryId,
+    pub(crate) fields: Vec<Field>,
+    pub(crate) transaction: TransactionShown,
+}
+
+/// A credential of an offer as its entry shows it, with the icon read from the registration.
+pub(crate) struct Emitted<'a, 'id> {
+    pub(crate) presented: Presented<'a, 'id>,
+    pub(crate) icon: Icon,
+}
+
+/// An offer the picker shows, and each credential of its members, `C`: a [`Presented`], then an
+/// [`Emitted`].
+pub(crate) struct ShownOffer<'o, C> {
+    pub(crate) offer: &'o Offer,
+    pub(crate) credentials: Vec<C>,
+}
+
+impl<'o, 'a, 'id> ShownOffer<'o, Presented<'a, 'id>> {
+    /// The offer with the icon of each credential's card, read from `registration`.
+    ///
+    /// # Errors
+    ///
+    /// [`RegistrationError`] when the source fails.
+    pub(crate) fn with_icons<R: Read + Seek>(
+        self,
+        registration: &mut Registration<'id, R>,
+    ) -> Result<ShownOffer<'o, Emitted<'a, 'id>>, RegistrationError> {
+        let credentials = self
+            .credentials
+            .into_iter()
+            .map(|presented| {
+                let icon = registration.icon(*presented.credential.card().icon())?;
+                Ok(Emitted { presented, icon })
+            })
+            .collect::<Result<_, RegistrationError>>()?;
+        Ok(ShownOffer {
+            offer: self.offer,
+            credentials,
+        })
+    }
+}
+
+impl<'a, 'id> Matched<'a, '_, 'id> {
+    /// Each candidate of each member of `offer`, the matching's offer at `index`, as its entry
+    /// shows it, with the transaction entry bound to it (T4).
+    ///
+    /// # Errors
+    ///
+    /// [`Unshown::Display`] when the claims or proof statements of a member or of an addition
+    /// do not show: the wallet's plan leaves the offer out alike, and the other offers stay.
+    ///
+    /// # Panics
+    ///
+    /// When `offer` breaks the presentation component's guarantee: its members and additions
+    /// name queries and candidates of the matching it was built from, and its candidates take
+    /// entries of the transactions.
+    #[expect(
+        clippy::panic,
+        reason = "an offer that names what its matching or transactions lack is a bug of the \
+                  presentation component, and no entry the picker could emit for it is right"
+    )]
+    pub(crate) fn shown(
+        &self,
+        index: OfferIndex,
+        offer: &Offer,
+    ) -> Result<Vec<Presented<'a, 'id>>, Unshown> {
+        // The presentation component's guarantee. `let … else` keeps the error's `Debug`
+        // formatting out of the module.
+        let Ok(bindings) = self.transactions.bind(self.answered, offer.members()) else {
+            panic!("an offer's members name its matching's queries, candidates and entries");
+        };
+        let mut presented = Vec::new();
+        for member in offer.members() {
+            let (answers, candidates) = self.candidates(member);
+            for candidate in candidates {
+                let credential: &'a Requested<'id> = candidate.credential();
+                let transaction = match bindings.iter().find(|b| b.binds(answers, candidate)) {
+                    Some(binding) => TransactionShown::of(binding.taken())
+                        .map_err(|error| Unshown::Display(index, error.code()))?,
+                    None => TransactionShown::Nothing,
+                };
+                presented.push(Presented {
+                    credential,
+                    query: answers.id().clone(),
+                    fields: fields(index, answers, credential, candidate.answer())?,
+                    transaction,
+                });
+            }
+        }
+        for member in offer
+            .additions()
+            .iter()
+            .flat_map(|addition| addition.members())
+        {
+            let (answers, candidates) = self.candidates(member);
+            for candidate in candidates {
+                fields(index, answers, candidate.credential(), candidate.answer()).map(drop)?;
+            }
+        }
+        Ok(presented)
+    }
+
+    /// The answers of `member`'s query and its candidates.
+    ///
+    /// # Panics
+    ///
+    /// When `member` names a query or a candidate the matching lacks.
+    #[expect(
+        clippy::expect_used,
+        reason = "a member that names what its matching lacks is a bug of the presentation \
+                  component, and no entry the picker could emit for it is right"
+    )]
+    fn candidates(
+        &self,
+        member: &siros_presentation::Member,
+    ) -> (
+        &'a Answers<'a, &'a Requested<'id>, NoChoice>,
+        Vec<&'a Candidate<&'a Requested<'id>>>,
+    ) {
+        // The presentation component's guarantee: an offer's members name queries and
+        // candidates of the matching it was built from.
+        let answers = self
+            .answered
+            .answers(member.query())
+            .expect("an offer's query is a query of its matching");
+        let candidates = member
+            .candidates()
+            .iter()
+            .map(|&candidate| {
+                answers
+                    .candidate(candidate)
+                    .expect("an offer's candidate is a candidate of its query")
+            })
+            .collect();
+        (answers, candidates)
+    }
+}
+
+/// The fields of what `credential` answers for `answers`: the rows of the claims it discloses,
+/// or the proof statement rows of the `zkp_req` option it answers.
+///
+/// # Errors
+///
+/// [`Unshown::Display`] for claims or statements that do not show.
+///
+/// # Panics
+///
+/// When a proof answer's query has no `zkp_req` query or no option of its choice.
+#[expect(
+    clippy::expect_used,
+    clippy::panic,
+    reason = "a proof answer without its query's `zkp_req` option is a bug of the presentation \
+              component, and no proof rows the picker could show for it are right"
+)]
+fn fields(
+    index: OfferIndex,
+    answers: &Answers<'_, &Requested<'_>, NoChoice>,
+    credential: &Requested<'_>,
+    answer: &Answer,
+) -> Result<Vec<Field>, Unshown> {
+    match answer {
+        Answer::Claims(claims) => credential
+            .labels()
+            .rows(credential.claims(), claims.pointers())
+            .map(|rows| rows.iter().map(Field::of_claim).collect())
+            .map_err(|error| Unshown::Display(index, error.code())),
+        Answer::Proof(choice) => {
+            // The presentation component's guarantee: a proof answer belongs to a `zkp_req`
+            // query, and its choice is an option of that query.
+            let zkp = answers
+                .zkp()
+                .expect("a proof answer's query is a zkp_req query");
+            // `let … else` keeps the error's `Debug` formatting out of the module.
+            let Ok(option) = zkp.option(choice) else {
+                panic!("a proof answer's choice is an option of its query");
+            };
+            siros_display::proof::rows(zkp.query().query(), option)
+                .map_err(|error| Unshown::Display(index, error.code()))
+        }
+    }
+}

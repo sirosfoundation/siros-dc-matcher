@@ -1,19 +1,12 @@
-//! Kotlin and Swift access to the credential blob and the matching engine.
+//! Kotlin and Swift access to the v1 credential blob of `siros-dc-matcher-core`, its matching
+//! engine, and the `zkp_req` session, `vp_token` and verifier ([`zkp_req`]).
 //!
-//! Two callers need this. The Kotlin SDK builds the blob it registers, and
-//! matches again after the user has selected an entry. iOS has no WASM matcher
-//! concept at all — when its OS-level Digital Credentials API integration
-//! lands, matching happens in-process, and this is what it will call.
+//! The Kotlin SDK builds the blob it registers, and matches again after the user has selected
+//! an entry. The credential picker, `matcher.wasm`, reads the registration of
+//! `siros-registration`. iOS matches in-process.
 //!
-//! # Why the types are mirrored rather than shared
-//!
-//! The natural thing would be to put `#[derive(uniffi::Record)]` on
-//! [`siros_dc_matcher_core`]'s own types. It is not done, because UniFFI does
-//! not build for `wasm32-wasip1` and `core` is on the matcher's critical path.
-//! Deriving there would drag UniFFI into the binary that ships inside the
-//! picker. Mirroring a handful of records here is the cheaper half of that
-//! trade, and [`SirosBlobBuilder`] keeps the mirrored surface small by owning
-//! the profile itself.
+//! The records here mirror [`siros_dc_matcher_core`]'s types, and [`SirosBlobBuilder`] keeps
+//! the mirrored surface small by owning the profile itself.
 
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
@@ -40,9 +33,10 @@ use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 use siros_dc_matcher_core::db::{Claim, Credential, CredentialDatabase, IconRef};
-use siros_dc_matcher_core::profile::{Capability, MatchProfile, ZKP_REQ_CAPABILITY, ZK_CAPABILITY};
+use siros_dc_matcher_core::profile::{Capability, MatchProfile, ZKP_REQ_CAPABILITY};
 
 pub mod matching;
+pub mod zkp_req;
 
 uniffi::setup_scaffolding!();
 
@@ -108,19 +102,12 @@ pub struct FfiCredential {
     pub claims: Vec<FfiClaim>,
 }
 
-/// Something this wallet can produce beyond what it stores, such as a ZK proof
-/// over an mdoc.
+/// A `zkp_req` circuit this wallet can prove with.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct FfiCapability {
-    /// System identifier, e.g. `longfellow-libzk-v1`.
+    /// Proof system, e.g. `longfellow-libzk-v1`.
     pub system: String,
-    /// Parameters that must also agree for the capability to apply.
-    ///
-    /// Supply the real ones. A ZK circuit is built for a fixed attribute
-    /// count, so a request naming the right system with the wrong
-    /// `num_attributes` is one this wallet cannot satisfy — and omitting the
-    /// parameter turns that into a failure after the user has consented,
-    /// rather than an entry that was never offered.
+    /// The circuit's parameters, which [`SirosBlobBuilder::add_zkp_req_system`] describes.
     pub params: std::collections::HashMap<String, String>,
 }
 
@@ -140,7 +127,6 @@ pub struct SirosBlobBuilder {
 struct BuilderState {
     credentials: Vec<FfiCredential>,
     icons: Vec<(String, Vec<u8>)>,
-    zk_systems: Vec<FfiCapability>,
     zkp_req_systems: Vec<FfiCapability>,
     debug: bool,
 }
@@ -190,14 +176,6 @@ impl SirosBlobBuilder {
         let mut s = self.state();
         s.icons.retain(|(existing, _)| existing != &id);
         s.icons.push((id, bytes));
-    }
-
-    /// Declare a ZK proof system this wallet can actually produce.
-    ///
-    /// Without this, a `mso_mdoc_zk` request matches nothing — which is the
-    /// correct outcome for a wallet that cannot produce the proof.
-    pub fn add_zk_system(&self, capability: FfiCapability) {
-        self.state().zk_systems.push(capability);
     }
 
     /// Register a `zkp_req` circuit this wallet can prove with.
@@ -287,8 +265,8 @@ impl SirosBlobBuilder {
                 None => None,
             };
             credentials.push(Credential {
-                id: c.id.clone(),
-                format: c.format.clone(),
+                id: c.id.as_str().into(),
+                format: c.format.as_str().into(),
                 doctype: c.doctype.clone(),
                 vct: c.vct.clone(),
                 title: c.title.clone(),
@@ -309,23 +287,6 @@ impl SirosBlobBuilder {
 
         let mut profile = MatchProfile::siros_default();
         profile.debug = s.debug;
-        if !s.zk_systems.is_empty() {
-            profile.capabilities.insert(
-                ZK_CAPABILITY.to_string(),
-                s.zk_systems
-                    .iter()
-                    .map(|c| Capability {
-                        system: c.system.clone(),
-                        params: c
-                            .params
-                            .iter()
-                            .map(|(k, v)| (k.clone(), v.clone()))
-                            .collect(),
-                    })
-                    .collect(),
-            );
-        }
-
         if !s.zkp_req_systems.is_empty() {
             profile.capabilities.insert(
                 ZKP_REQ_CAPABILITY.to_string(),
@@ -425,39 +386,6 @@ mod tests {
             }
             other => panic!("expected UnknownIcon, got {other:?}"),
         }
-    }
-
-    /// Without a declared ZK system there is no capability, so a mso_mdoc_zk
-    /// request has nothing to satisfy it. That is the correct outcome for a
-    /// wallet that cannot produce the proof.
-    #[test]
-    fn zk_capability_appears_only_when_declared() {
-        let b = SirosBlobBuilder::new();
-        b.add_credential(credential("cred-1", None));
-        let db = CredentialDatabase::from_cbor(&b.build().unwrap()).unwrap();
-        assert!(db.profile.capabilities.is_empty());
-
-        let b = SirosBlobBuilder::new();
-        b.add_credential(credential("cred-1", None));
-        b.add_zk_system(FfiCapability {
-            system: "longfellow-libzk-v1".into(),
-            params: std::collections::HashMap::from([("num_attributes".into(), "4".into())]),
-        });
-        let db = CredentialDatabase::from_cbor(&b.build().unwrap()).unwrap();
-        let systems = db.profile.capabilities.get("zk_system").unwrap();
-        assert_eq!(systems[0].system, "longfellow-libzk-v1");
-        // The parameter must survive: it is what distinguishes a circuit this
-        // wallet has from one it does not.
-        assert_eq!(systems[0].params.get("num_attributes").unwrap(), "4");
-    }
-
-    /// The ZK format rule is present by default, and maps onto plain mdoc.
-    #[test]
-    fn default_profile_routes_zk_requests_to_mdoc_storage() {
-        let p = MatchProfile::siros_default();
-        assert!(p.format_matches("mso_mdoc_zk", "mso_mdoc"));
-        assert!(!p.format_matches("mso_mdoc_zk", "dc+sd-jwt"));
-        assert!(!p.format_matches("something-new", "mso_mdoc"));
     }
 }
 

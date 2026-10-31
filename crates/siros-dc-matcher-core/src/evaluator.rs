@@ -9,30 +9,19 @@
 //! This module supplies that half from the registered [`MatchProfile`], which
 //! is why a new credential format costs a re-registration rather than a
 //! release of the matcher binary.
-//!
-//! # The ZK path
-//!
-//! `mso_mdoc_zk` is the reason the indirection exists. A verifier asking for
-//! it is asking for a proof *about* an ordinary `mso_mdoc` credential —
-//! producing that proof is a presentation-time transform, not a storage
-//! format, so there is no separate ZK credential on the device to find. The
-//! profile maps the requested format onto the stored one and attaches a
-//! capability requirement, so the entry is offered only when this wallet can
-//! actually produce the proof the verifier named.
-
-use std::collections::BTreeMap;
 
 use serde_json::Value;
-use siros_dcql::{Credential as _, CredentialQuery, PathComponent, PathError};
-
-use crate::circuit_capabilities::{Capabilities, RequestedItem};
-use crate::db::{Claim, Credential, CredentialDatabase};
-use crate::profile::{
-    Capability, MatchProfile, Op, UnknownFormat, CAPABILITIES_PARAM, CREDENTIAL_TYPE_PARAM,
-    FUNCTIONS_PARAM, SYSTEM_ID_PARAM, ZKP_REQ_CAPABILITY, ZKP_REQ_FORMAT,
+use siros_dcql::{
+    ClaimPath, Credential as _, CredentialFormat, CredentialQuery, CredentialRef,
+    CryptographicBinding, PathComponent, PathError,
 };
-use crate::request::RequestContext;
-use crate::zkp_req::{self, Plan};
+
+use crate::db::{Claim, Credential, CredentialDatabase};
+use crate::profile::{MatchProfile, Op, UnknownFormat, ZKP_REQ_FORMAT};
+
+mod zkp_req;
+
+pub use zkp_req::ZkpReqSelection;
 
 /// A credential from the registered blob, wrapped so DCQL can evaluate it.
 ///
@@ -45,11 +34,11 @@ pub struct BlobCredential<'a> {
 }
 
 impl siros_dcql::Credential for BlobCredential<'_> {
-    fn id(&self) -> &str {
+    fn id(&self) -> &CredentialRef {
         &self.credential.id
     }
 
-    fn format(&self) -> &str {
+    fn format(&self) -> &CredentialFormat {
         &self.credential.format
     }
 
@@ -64,8 +53,8 @@ impl siros_dcql::Credential for BlobCredential<'_> {
     /// type without holder binding ever becomes registrable, the blob needs a
     /// field and this needs to read it; answering `true` on its behalf would
     /// hand a verifier exactly what it said it would not accept.
-    fn has_cryptographic_holder_binding(&self) -> bool {
-        true
+    fn binding(&self) -> CryptographicBinding {
+        CryptographicBinding::Bound
     }
 
     /// Resolve a claims path pointer against the claims the wallet registered.
@@ -84,11 +73,12 @@ impl siros_dcql::Credential for BlobCredential<'_> {
     /// currently issues puts a requestable claim inside one. Widening this
     /// means giving the blob real value structure, which is a wire-format
     /// change and deliberately not smuggled in here.
-    fn claim(&self, path: &[PathComponent]) -> Result<Vec<Value>, PathError> {
-        if path.is_empty() {
-            return Err(PathError::Malformed);
-        }
-        let wanted: Option<Vec<&str>> = path.iter().map(PathComponent::as_key).collect();
+    fn claim(&self, path: &ClaimPath) -> Result<Vec<Value>, PathError> {
+        let wanted: Option<Vec<&str>> = path
+            .components()
+            .iter()
+            .map(PathComponent::as_key)
+            .collect();
         let Some(wanted) = wanted else {
             // A pointer this blob cannot express is not a malformed query —
             // the verifier may be asking something perfectly valid of a
@@ -107,36 +97,6 @@ impl siros_dcql::Credential for BlobCredential<'_> {
     }
 }
 
-/// Whether a trigger's capability is required, or merely preferred.
-///
-/// Optional unless the request explicitly demands it: a verifier naming proof
-/// systems and saying nothing more is listing what it accepts, not what it
-/// insists on. Only an explicit `true` in the flag the profile names makes the
-/// capability a condition of being offered at all.
-fn trigger_is_required(trigger: &crate::profile::MetaTrigger, query: &CredentialQuery) -> bool {
-    // No flag configured: the trigger's presence is the requirement, as it was
-    // before there was a flag at all.
-    let Some(flag) = trigger.required_flag.as_deref() else {
-        return true;
-    };
-    // Absent or false means optional; only an explicit `true` demands the
-    // capability. That is the opposite of the safer-looking default, and it is
-    // deliberate: `zk_system_type` is replacing the `mso_mdoc_zk` format
-    // suffix as the way to ask for a proof, so during that migration a
-    // verifier sends the systems it accepts without yet sending a flag. Read
-    // as "required", those requests would stop being offered to every wallet
-    // that cannot prove — which is the population the migration exists to keep
-    // serving. A verifier that means "mandatory" says so.
-    //
-    // Anything other than a JSON boolean is not a `false`, and not a claim
-    // that a proof is optional either, so it reads as absent.
-    query
-        .meta
-        .get(flag)
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-}
-
 /// A stored claim's value as JSON, for DCQL `values` comparison.
 ///
 /// Values are stored as strings, but a verifier writes `"values": [true]` or
@@ -151,338 +111,26 @@ fn claim_value(claim: &Claim) -> Value {
 /// Evaluates a [`MatchProfile`] as a DCQL [`siros_dcql::Policy`].
 pub struct ProfilePolicy<'a> {
     profile: &'a MatchProfile,
-    context: Option<&'a RequestContext>,
-}
-
-/// The circuit a `zkp_req` query will be answered with, and what it asked.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ZkpReqSelection<'a> {
-    /// The wallet's circuit capability chosen for this request.
-    pub capability: &'a Capability,
-    /// The normalised request, as the planner read it.
-    pub plan: Plan,
-}
-
-impl ZkpReqSelection<'_> {
-    /// `{"circuit": <capability>, "plan": <plan>}`, the one JSON form both the
-    /// picker metadata and the FFI carry.
-    ///
-    /// The plan includes `raw`, the request as sent: it is verifier-supplied
-    /// and unauthenticated, and is passed on for the wallet, which verifies the
-    /// request, to interpret.
-    #[must_use]
-    pub fn to_json(&self) -> Value {
-        serde_json::json!({
-            "circuit": self.capability,
-            "plan": self.plan,
-        })
-    }
+    client_metadata: Option<&'a Value>,
 }
 
 impl<'a> ProfilePolicy<'a> {
     /// Evaluate against this profile.
     ///
-    /// Without a request context a `zkp_req` query matches nothing: what it
-    /// asks for is not in the typed DCQL query, so there is nothing to plan.
-    /// See [`Self::with_context`].
+    /// Without the verifier's `client_metadata` a `zkp_req` query matches nothing: `zkp_req`,
+    /// Section 1.2 matches it against the lists there. See [`Self::with_client_metadata`].
     pub fn new(profile: &'a MatchProfile) -> Self {
         Self {
             profile,
-            context: None,
+            client_metadata: None,
         }
     }
 
-    /// Evaluate with the request the query came from.
-    ///
-    /// `zkp_req` is matched against its planned request and the verifier's
-    /// `client_metadata`, neither of which the typed query carries.
+    /// Evaluate with the request's `client_metadata`, when it has one.
     #[must_use]
-    pub fn with_context(mut self, context: &'a RequestContext) -> Self {
-        self.context = Some(context);
+    pub fn with_client_metadata(mut self, client_metadata: Option<&'a Value>) -> Self {
+        self.client_metadata = client_metadata;
         self
-    }
-
-    /// The circuit and plan for a `zkp_req` query, or `None` if it cannot
-    /// be answered.
-    ///
-    /// `None` covers a structurally invalid request (the planner said so), a
-    /// wallet with no circuit, and a circuit the request rules out. It never
-    /// falls back to claim matching: an invalid `zkp_req` request is a
-    /// request for nothing the matcher understands, and answering it with
-    /// whatever the claims would have selected discloses data nobody asked
-    /// for. The matcher applies no satisfiability rules here; only the
-    /// verifier's own circuit lists and, where a circuit declares them, the
-    /// functions it supports.
-    pub fn zkp_req_selection(&self, query: &CredentialQuery) -> Option<ZkpReqSelection<'a>> {
-        let context = self.context?;
-        let raw = context
-            .dcql_query_raw
-            .get("credentials")?
-            .as_array()?
-            .iter()
-            .find(|c| c.get("id").and_then(Value::as_str) == Some(query.id.as_str()))?;
-        let client_metadata = context.client_metadata.as_ref().map(Value::to_string);
-        let plan = zkp_req::plan(&raw.to_string(), client_metadata.as_deref()).ok()?;
-        // A request the rulebook calls unsatisfiable is never offered.
-        zkp_req::unsatisfiable(&plan).ok()?;
-
-        let capability = self
-            .profile
-            .capabilities
-            .get(ZKP_REQ_CAPABILITY)?
-            .iter()
-            .find(|capability| self.circuit_serves(capability, &plan))?;
-        Some(ZkpReqSelection { capability, plan })
-    }
-
-    /// Every capability requirement that applies to this query.
-    ///
-    /// Two sources, deliberately. A format rule can require one — `mso_mdoc_zk`
-    /// naming no proof system has asked for a proof without saying which, and
-    /// must not be answered with an ordinary presentation. And a
-    /// [`crate::profile::MetaTrigger`] fires on the *presence* of a `meta`
-    /// key whatever the format, because what actually signals a ZK
-    /// presentation is `zk_system_type`; the `mso_mdoc_zk` format says the
-    /// same thing and is expected to be retired.
-    fn requirements(&self, query: &CredentialQuery) -> Vec<crate::profile::Requirement> {
-        let mut out: Vec<crate::profile::Requirement> = self
-            .profile
-            .format_rule(&query.format)
-            .map(|rule| rule.requires.clone())
-            .unwrap_or_default();
-
-        for trigger in &self.profile.meta_triggers {
-            if !query.meta.contains_key(&trigger.when_meta_present) {
-                continue;
-            }
-            // Named systems, but the verifier said a proof is not required.
-            // The capability is then preferred rather than demanded: the
-            // wallet is offered either way, and resolve() still reports the
-            // system it chose, so a wallet that *can* prove still will.
-            if !trigger_is_required(trigger, query) {
-                continue;
-            }
-            let requirement = crate::profile::Requirement {
-                capability: trigger.capability.clone(),
-                from_meta: trigger.when_meta_present.clone(),
-            };
-            if !out.contains(&requirement) {
-                out.push(requirement);
-            }
-        }
-        out
-    }
-
-    /// Every capability requirement this query could involve, whether or not
-    /// the verifier insists on it.
-    ///
-    /// [`Self::requirements`] answers "what must hold for this to match".
-    /// This answers "what would apply if the wallet can manage it", which is
-    /// what a caller needs in order to report the chosen system for a request
-    /// that names proof systems without requiring one.
-    fn applicable_capabilities(&self, query: &CredentialQuery) -> Vec<crate::profile::Requirement> {
-        let mut out: Vec<crate::profile::Requirement> = self
-            .profile
-            .format_rule(&query.format)
-            .map(|rule| rule.requires.clone())
-            .unwrap_or_default();
-
-        for trigger in &self.profile.meta_triggers {
-            if !query.meta.contains_key(&trigger.when_meta_present) {
-                continue;
-            }
-            let requirement = crate::profile::Requirement {
-                capability: trigger.capability.clone(),
-                from_meta: trigger.when_meta_present.clone(),
-            };
-            if !out.contains(&requirement) {
-                out.push(requirement);
-            }
-        }
-        out
-    }
-
-    /// Whether the wallet can satisfy the capabilities this query requires.
-    ///
-    /// Returns the capabilities that matched, so the caller can tell the wallet
-    /// *which* system was chosen rather than making it work that out again
-    /// after the user has selected the entry.
-    pub fn capability_for(
-        &self,
-        query: &CredentialQuery,
-        format_rule_requires: &[crate::profile::Requirement],
-    ) -> Option<Vec<&'a Capability>> {
-        let mut chosen = Vec::new();
-        for requirement in format_rule_requires {
-            let held = self.profile.capabilities.get(&requirement.capability)?;
-            let requested = query.meta.get(&requirement.from_meta)?.as_array()?;
-
-            // Verifier preference order: the first entry this wallet can
-            // actually satisfy wins, mirroring how claim_sets is handled.
-            let matched = requested
-                .iter()
-                .find_map(|entry| held.iter().find(|c| satisfies(c, entry)))?;
-            chosen.push(matched);
-        }
-        Some(chosen)
-    }
-}
-
-/// Whether a held capability satisfies one entry from the verifier's list.
-///
-/// The wire shape is `{"id": …, "system": …, …params}`: **every** other
-/// top-level key is a parameter. There is no nested `params` object, and
-/// assuming one parses without error while silently reading no parameters at
-/// all — which then matches a circuit this wallet does not have, and fails
-/// after the user has consented.
-///
-/// Parameters constrain a match only where both sides name them.
-///
-/// A parameter the verifier does not mention is not a constraint, and one the
-/// *wallet* does not declare is not one either. That asymmetry is deliberate:
-/// some proof systems declare a nominal capability — "this system, any
-/// attribute count" — and verify fetchability lazily at proof time, so
-/// requiring them to enumerate every circuit up front would reject requests
-/// they can in fact satisfy.
-///
-/// Where the wallet does declare a parameter, it must match exactly. A ZK
-/// circuit is built for a fixed attribute count, so a wallet that knows its
-/// circuits and says `num_attributes: 4` cannot produce a ten-attribute proof,
-/// and an entry offered on that basis fails after the user has consented.
-fn satisfies(held: &Capability, requested: &Value) -> bool {
-    let Some(entry) = requested.as_object() else {
-        return false;
-    };
-    if entry.get("system").and_then(Value::as_str) != Some(held.system.as_str()) {
-        return false;
-    }
-    entry
-        .iter()
-        .filter(|(k, _)| k.as_str() != "id" && k.as_str() != "system")
-        .all(|(key, value)| match held.params.get(key) {
-            Some(ours) => as_text(value).as_deref() == Some(ours.as_str()),
-            // Undeclared on our side: not a constraint.
-            None => true,
-        })
-}
-
-/// The credential types a planned request can mean: its `meta.doctype_value`
-/// and each of its `meta.vct_values`. Empty when `meta` names neither.
-fn requested_types(plan: &Plan) -> Vec<&str> {
-    let meta = plan.raw.get("meta");
-    let doctype = meta
-        .and_then(|m| m.get("doctype_value"))
-        .and_then(Value::as_str);
-    let vcts = meta
-        .and_then(|m| m.get("vct_values"))
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str);
-    let schema = meta
-        .and_then(|m| m.get("schema_id_value"))
-        .and_then(Value::as_str);
-    doctype.into_iter().chain(schema).chain(vcts).collect()
-}
-
-impl ProfilePolicy<'_> {
-    /// Whether a circuit capability can serve a planned `zkp_req` request.
-    ///
-    /// The verifier's lists are constraints only when it sent them
-    /// (`proof_system_values` and `system_id_values` are OPTIONAL). A
-    /// circuit with no `system_id` cannot be named by a verifier that lists
-    /// ids, so it does not satisfy one.
-    ///
-    /// What the circuit says about itself is one of two things. With a
-    /// `capabilities` param, the structured rule of
-    /// [`crate::circuit_capabilities`] decides, and `functions` and
-    /// `credential_type` are not read; a value that does not parse rules the
-    /// circuit out. Without one, a circuit that declares `functions` is
-    /// offered only for requests using those, a circuit with a
-    /// `credential_type` only for a request whose `meta` names that type, and a
-    /// circuit with neither is not filtered, exactly as before.
-    fn circuit_serves(&self, capability: &Capability, plan: &Plan) -> bool {
-        let filter = &plan.system_filter;
-        if let Some(systems) = &filter.proof_systems {
-            if !systems.contains(&capability.system) {
-                return false;
-            }
-        }
-        if let Some(ids) = &filter.system_ids {
-            let ours = capability.params.get(SYSTEM_ID_PARAM);
-            if !ids.iter().any(|id| Some(id) == ours) {
-                return false;
-            }
-        }
-        if let Some(text) = capability.params.get(CAPABILITIES_PARAM) {
-            return self.capabilities_serve(text, plan);
-        }
-        if let Some(ours) = capability.params.get(CREDENTIAL_TYPE_PARAM) {
-            if !requested_types(plan).contains(&ours.as_str()) {
-                return false;
-            }
-        }
-        match capability.params.get(FUNCTIONS_PARAM) {
-            Some(declared) => plan
-                .functions
-                .iter()
-                .all(|f| declared.split(',').any(|d| d.trim() == f.function_id)),
-            None => true,
-        }
-    }
-
-    /// The `capabilities` rule, for one circuit, against one plan.
-    ///
-    /// The credential format a circuit proves over must be one the profile
-    /// maps `zkp_req` onto: the request does not name a stored format, the
-    /// profile's format rule is what says which credentials answer it.
-    fn capabilities_serve(&self, text: &str, plan: &Plan) -> bool {
-        let Ok(capabilities) = Capabilities::parse(text) else {
-            return false;
-        };
-        let Some(rule) = self.profile.format_rule(ZKP_REQ_FORMAT) else {
-            return false;
-        };
-        // The attestation the proof is made over must be the request's
-        // `source_format`, and one the profile stores.
-        let formats: Vec<&str> = rule
-            .stored_formats
-            .iter()
-            .map(String::as_str)
-            .filter(|f| *f == plan.source_format)
-            .collect();
-
-        let mut params = Vec::with_capacity(plan.functions.len());
-        for function in &plan.functions {
-            match serde_json::to_value(&function.params) {
-                Ok(Value::Object(map)) => params.push(map),
-                _ => return false,
-            }
-        }
-        let items: Vec<RequestedItem<'_>> = plan
-            .functions
-            .iter()
-            .zip(&params)
-            .map(|(function, params)| RequestedItem {
-                function_id: &function.function_id,
-                params,
-            })
-            .collect();
-        capabilities.serves(ZKP_REQ_FORMAT, &formats, &requested_types(plan), &items)
-    }
-}
-
-/// A JSON scalar as the text the profile stores it as.
-///
-/// Verifiers write `num_attributes` as a number in some requests and a string
-/// in others; both mean the same circuit, and refusing one of them would
-/// reject a wallet that can genuinely satisfy the request.
-fn as_text(value: &Value) -> Option<String> {
-    match value {
-        Value::String(s) => Some(s.clone()),
-        Value::Number(n) => Some(n.to_string()),
-        Value::Bool(b) => Some(b.to_string()),
-        _ => None,
     }
 }
 
@@ -505,13 +153,17 @@ fn is_nym_auth(credential: &crate::db::Credential) -> bool {
 /// one, or no `claims` at all (which asks for the whole attestation).
 fn discloses_nym_auth_secrets(query: &CredentialQuery) -> bool {
     use siros_dcql::PathComponent;
-    query.claims.is_empty()
-        || query.claims.iter().any(|claim| {
-            claim.path.iter().any(|component| match component {
-                PathComponent::Key(k) => NYM_AUTH_UNDISCLOSABLE.contains(&k.as_str()),
-                PathComponent::Null => true,
-                PathComponent::Index(_) => false,
-            })
+    query.claims().is_empty()
+        || query.claims().iter().any(|claim| {
+            claim
+                .path()
+                .components()
+                .iter()
+                .any(|component| match component {
+                    PathComponent::Key(k) => NYM_AUTH_UNDISCLOSABLE.contains(&k.as_str()),
+                    PathComponent::Null => true,
+                    PathComponent::Index(_) => false,
+                })
         })
 }
 
@@ -519,9 +171,9 @@ impl siros_dcql::Policy<BlobCredential<'_>> for ProfilePolicy<'_> {
     fn matches(&self, query: &CredentialQuery, credential: &BlobCredential<'_>) -> bool {
         let stored = credential.format();
 
-        match self.profile.format_rule(&query.format) {
+        match self.profile.format_rule(query.format().as_str()) {
             Some(rule) => {
-                if !rule.stored_formats.iter().any(|f| f == stored) {
+                if !rule.stored_formats.iter().any(|f| *stored == f.as_str()) {
                     return false;
                 }
             }
@@ -536,28 +188,17 @@ impl siros_dcql::Policy<BlobCredential<'_>> for ProfilePolicy<'_> {
 
         // `zkp_req` is answered from its plan, not from claims, and an
         // invalid or unservable request is no match rather than a fallback.
-        if query.format == ZKP_REQ_FORMAT {
+        if *query.format() == ZKP_REQ_FORMAT {
             match self.zkp_req_selection(query) {
                 // The proof is made over the stored attestation itself.
-                Some(selection) if selection.plan.source_format == stored => {}
+                Some(selection) if selection.query.credential_type().source_format() == *stored => {
+                }
                 _ => return false,
             }
         } else if is_nym_auth(credential.credential) && discloses_nym_auth_secrets(query) {
             // Rulebook, "Non-disclosure of seed commitments": `ssc`, `psc`,
             // `secret_seed` and `birth_date` of a nym_auth attestation are
             // never disclosed. Only `zkp_req` may use them, inside `_req`.
-            return false;
-        }
-
-        // Capability first: it is the cheapest check and the one whose failure
-        // is least visible later. An entry offered without the capability
-        // walks the user through consent and then cannot deliver.
-        //
-        // Both sources, via requirements(): the format rule's own, and any
-        // MetaTrigger fired by a `meta` key being present. A ZK request is
-        // signalled by `zk_system_type`, not by the format.
-        let required = self.requirements(query);
-        if !required.is_empty() && self.capability_for(query, &required).is_none() {
             return false;
         }
 
@@ -579,7 +220,7 @@ fn meta_matches(
     if rule.op == Op::Ignore {
         return true;
     }
-    let Some(requested) = query.meta.get(&rule.meta_key) else {
+    let Some(requested) = query.meta().get(&rule.meta_key) else {
         return true;
     };
     let Some(field) = rule
@@ -610,7 +251,7 @@ fn credential_field<'a>(cred: &'a Credential, field: &str) -> Option<&'a str> {
     match field {
         "doctype" => cred.doctype.as_deref(),
         "vct" => cred.vct.as_deref(),
-        "format" => Some(&cred.format),
+        "format" => Some(cred.format.as_str()),
         _ => None,
     }
 }
@@ -623,22 +264,11 @@ pub fn credentials(db: &CredentialDatabase) -> Vec<BlobCredential<'_>> {
         .collect()
 }
 
-/// What a caller needs about one matched credential, beyond its identity.
-///
-/// Shared because two consumers derive it: the matcher binary, which puts it in
-/// picker metadata, and the FFI, which hands it to a wallet. Deriving it twice
-/// is how the two would come to disagree about which ZK system satisfied a
-/// query — the drift this crate exists to stop.
+/// What the FFI hands a wallet about one matched credential, beyond its identity.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Resolved<'a> {
     /// Exactly the claims to disclose, as path components.
     pub claims: Vec<Vec<String>>,
-    /// The capability chosen to satisfy the query, if its format needed one.
-    pub capabilities: Vec<&'a Capability>,
-    /// `meta` scalars the wallet needs but which did not decide the match —
-    /// `ppid_context` above all, which changes what is produced rather than
-    /// which credential can produce it.
-    pub meta: BTreeMap<String, String>,
     /// For a `zkp_req` query: the circuit chosen and the planned request.
     /// Such a match carries no claims.
     pub zkp_req: Option<ZkpReqSelection<'a>>,
@@ -650,21 +280,9 @@ pub fn resolve<'a>(
     query: &CredentialQuery,
     candidate: &siros_dcql::Candidate,
 ) -> Resolved<'a> {
-    // Every capability that *could* apply, not only the required ones: a
-    // verifier may name proof systems without insisting on one, and a wallet
-    // able to satisfy such a request should still be told which system to use.
-    let applicable = policy.applicable_capabilities(query);
-    let capabilities = if applicable.is_empty() {
-        Vec::new()
-    } else {
-        policy
-            .capability_for(query, &applicable)
-            .unwrap_or_default()
-    };
-
     // A `zkp_req` match discloses nothing: whatever the typed query says
     // about claims, none are selected.
-    let zkp_req = if query.format == ZKP_REQ_FORMAT {
+    let zkp_req = if *query.format() == ZKP_REQ_FORMAT {
         policy.zkp_req_selection(query)
     } else {
         None
@@ -673,7 +291,7 @@ pub fn resolve<'a>(
     let claims = if zkp_req.is_some() {
         &[][..]
     } else {
-        &candidate.claims[..]
+        candidate.claims()
     };
 
     Resolved {
@@ -682,27 +300,12 @@ pub fn resolve<'a>(
             .iter()
             .map(|claim| {
                 claim
-                    .path
+                    .path()
+                    .components()
                     .iter()
                     .filter_map(PathComponent::as_key)
                     .map(str::to_owned)
                     .collect()
-            })
-            .collect(),
-        capabilities,
-        meta: query
-            .meta
-            .iter()
-            .filter_map(|(key, value)| {
-                // Scalars only: a nested object has no single string form, and
-                // inventing one would hand the caller a value it cannot use.
-                let text = match value {
-                    Value::String(s) => s.clone(),
-                    Value::Number(n) => n.to_string(),
-                    Value::Bool(b) => b.to_string(),
-                    _ => return None,
-                };
-                Some((key.clone(), text))
             })
             .collect(),
     }

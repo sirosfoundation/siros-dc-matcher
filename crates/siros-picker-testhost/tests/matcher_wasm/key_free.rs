@@ -1,0 +1,474 @@
+//! The rules of the request parameters and of the Client Identifier that need no key: one
+//! request breaks each, and the wallet's intake and the picker refuse it alike. Each
+//! `verifier_info` rule, and each rule of a Request Object's JWS, is broken in a compact JWS or
+//! request object and in the one signature of a multisigned request. Over the DC API the Wallet ignores `state` and, in
+//! unsigned `data`, a `request_uri` (A.2): both accept those.
+
+use serde_json::{json, Value};
+use siros_codec::cbor::Value as Cbor;
+use siros_oid4vp::{UnverifiedRequest, Verdict};
+use siros_presentation::testing::verifier::{
+    b64, dc_api_intake, dc_api_request, encryption_jwk, intake_with, NONCE, ORIGIN, SIGNER,
+};
+use siros_presentation::testing::wallet::Wallet;
+
+use crate::differential::Case;
+use crate::families::{ask, case, mdl};
+
+/// A DC API request entry that breaks one rule, or keeps every rule.
+struct Row {
+    name: String,
+    protocol: &'static str,
+    data: Value,
+    /// The code of the rule intake and the picker's reader refuse the entry under; `None` for
+    /// an entry both accept.
+    refusal: Option<&'static str>,
+}
+
+/// The parameters every row starts from.
+fn params() -> Value {
+    json!({"response_type": "vp_token", "response_mode": "dc_api", "nonce": NONCE,
+        "dcql_query": {"credentials": [ask("q1", "age_over_18")]}})
+}
+
+/// Unsigned `data`, edited.
+fn unsigned(edit: impl Fn(&mut Value)) -> (&'static str, Value) {
+    let mut data = params();
+    edit(&mut data);
+    ("openid4vp-v1-unsigned", data)
+}
+
+/// The Request Object every signed row starts from: `dc_api.jwt`, its encryption key and
+/// `expected_origins`.
+fn object() -> Value {
+    let mut object = params();
+    object["response_mode"] = json!("dc_api.jwt");
+    object["client_metadata"] = json!({"jwks": {"keys": [encryption_jwk()]}});
+    object["expected_origins"] = json!([ORIGIN]);
+    object
+}
+
+/// A rule of a Request Object's JWS that needs no key, which a row breaks.
+#[derive(Debug, Clone, Copy)]
+enum Broken {
+    Typ,
+    Algorithm,
+    Critical,
+    SignatureLength,
+}
+
+impl Broken {
+    const ALL: [Self; 4] = [
+        Self::Typ,
+        Self::Algorithm,
+        Self::Critical,
+        Self::SignatureLength,
+    ];
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Typ => "with typ JWT",
+            Self::Algorithm => "with alg ES384",
+            Self::Critical => "with crit",
+            Self::SignatureLength => "with a signature of 63 bytes",
+        }
+    }
+
+    /// The code of the refusal of a compact JWS that breaks the rule.
+    fn code(self) -> &'static str {
+        match self {
+            Self::Typ => "typ_mismatch",
+            Self::Algorithm => "algorithm_unsupported",
+            Self::Critical => "critical_header",
+            Self::SignatureLength => "jws_malformed",
+        }
+    }
+
+    fn header(self, header: &mut Value) {
+        match self {
+            Self::Typ => header["typ"] = json!("JWT"),
+            Self::Algorithm => header["alg"] = json!("ES384"),
+            Self::Critical => header["crit"] = json!(["exp"]),
+            Self::SignatureLength => {}
+        }
+    }
+
+    fn signature(self, signature: String) -> String {
+        match self {
+            Self::SignatureLength => b64(&[7; 63]),
+            Self::Typ | Self::Algorithm | Self::Critical => signature,
+        }
+    }
+}
+
+/// The protected header, the payload and the signature of [`SIGNER`]'s JWS of `object` under
+/// `header`, which breaks `broken`.
+fn sign(object: &Value, mut header: Value, broken: Option<Broken>) -> [String; 3] {
+    if let Some(broken) = broken {
+        broken.header(&mut header);
+    }
+    let protected = b64(header.to_string().as_bytes());
+    let payload = b64(object.to_string().as_bytes());
+    let signature = SIGNER.sign(&format!("{protected}.{payload}"));
+    let signature = match broken {
+        Some(broken) => broken.signature(signature),
+        None => signature,
+    };
+    [protected, payload, signature]
+}
+
+/// A compact JWS Request Object of [`SIGNER`] with its `client_id`, edited.
+fn signed(edit: impl Fn(&mut Value)) -> (&'static str, Value) {
+    signed_with(edit, None)
+}
+
+/// A compact JWS Request Object of [`SIGNER`] with its `client_id`, edited, which breaks
+/// `broken`.
+fn signed_with(edit: impl Fn(&mut Value), broken: Option<Broken>) -> (&'static str, Value) {
+    let mut object = object();
+    object["client_id"] = json!(SIGNER.client_id());
+    edit(&mut object);
+    let [protected, payload, signature] = sign(&object, SIGNER.header(), broken);
+    let request = format!("{protected}.{payload}.{signature}");
+    ("openid4vp-v1-signed", json!({"request": request}))
+}
+
+/// A multisigned payload, edited, whose one signature's protected header names [`SIGNER`].
+fn multisigned(edit: impl Fn(&mut Value)) -> (&'static str, Value) {
+    multisigned_with(edit, |_| {}, None)
+}
+
+/// A multisigned payload whose one signature's protected header names [`SIGNER`], edited.
+fn multisigned_header(edit: impl Fn(&mut Value)) -> (&'static str, Value) {
+    multisigned_with(|_| {}, edit, None)
+}
+
+/// A multisigned payload of [`SIGNER`]'s one signature, its object and protected header edited,
+/// which breaks `broken`.
+fn multisigned_with(
+    edit_object: impl Fn(&mut Value),
+    edit_header: impl Fn(&mut Value),
+    broken: Option<Broken>,
+) -> (&'static str, Value) {
+    let mut object = object();
+    edit_object(&mut object);
+    let mut header = SIGNER.header();
+    header["client_id"] = json!(SIGNER.client_id());
+    edit_header(&mut header);
+    let [protected, payload, signature] = sign(&object, header, broken);
+    let signatures = json!([{"protected": protected, "signature": signature}]);
+    (
+        "openid4vp-v1-multisigned",
+        json!({"payload": payload, "signatures": signatures}),
+    )
+}
+
+fn without(member: &'static str) -> impl Fn(&mut Value) {
+    move |data| drop(data.as_object_mut().unwrap().remove(member).unwrap())
+}
+
+fn set(member: &'static str, value: Value) -> impl Fn(&mut Value) {
+    move |data| data[member] = value.clone()
+}
+
+fn verifier_info(attestations: Value) -> impl Fn(&mut Value) {
+    set("verifier_info", attestations)
+}
+
+/// One attestation, `jwt` with `data`, with the members of `extra`.
+fn attestation(extra: Value) -> Value {
+    let mut attestation = json!({"format": "jwt", "data": "x"});
+    let extra = extra.as_object().unwrap().clone();
+    attestation.as_object_mut().unwrap().extend(extra);
+    json!([attestation])
+}
+
+/// A `verifier_info` that keeps its rules, and one that breaks each, with the rule's code.
+fn verifier_info_rules() -> Vec<(&'static str, Value, Option<&'static str>)> {
+    vec![
+        (
+            "naming its query",
+            attestation(json!({"credential_ids": ["q1"]})),
+            None,
+        ),
+        (
+            "no array",
+            json!({"format": "jwt", "data": "x"}),
+            Some("verifier_info_not_array"),
+        ),
+        ("empty", json!([]), Some("verifier_info_empty")),
+        (
+            "an attestation no object",
+            json!(["x"]),
+            Some("verifier_info_not_object"),
+        ),
+        (
+            "an attestation without format",
+            json!([{"data": "x"}]),
+            Some("verifier_info_format"),
+        ),
+        (
+            "an attestation with data a number",
+            json!([{"format": "jwt", "data": 7}]),
+            Some("verifier_info_data"),
+        ),
+        (
+            "an attestation with empty credential_ids",
+            attestation(json!({"credential_ids": []})),
+            Some("verifier_info_credential_ids"),
+        ),
+        (
+            "an attestation naming an unknown query",
+            attestation(json!({"credential_ids": ["q9"]})),
+            Some("verifier_info_credential_id_unknown"),
+        ),
+    ]
+}
+
+fn rows() -> Vec<Row> {
+    let table: Vec<(&str, (&str, Value), Option<&str>)> = vec![
+        ("unsigned, every rule kept", unsigned(|_| {}), None),
+        ("signed, every rule kept", signed(|_| {}), None),
+        ("multisigned, every rule kept", multisigned(|_| {}), None),
+        (
+            "no nonce",
+            unsigned(without("nonce")),
+            Some("nonce_invalid"),
+        ),
+        (
+            "a nonce with a space",
+            unsigned(set("nonce", json!("a b"))),
+            Some("nonce_invalid"),
+        ),
+        (
+            "no response_type",
+            unsigned(without("response_type")),
+            Some("response_type_unsupported"),
+        ),
+        (
+            "response_type id_token",
+            unsigned(set("response_type", json!("id_token"))),
+            Some("response_type_unsupported"),
+        ),
+        (
+            "no response_mode",
+            unsigned(without("response_mode")),
+            Some("response_mode_unsupported"),
+        ),
+        (
+            "direct_post over the DC API",
+            unsigned(set("response_mode", json!("direct_post"))),
+            Some("response_mode_unsupported"),
+        ),
+        (
+            "a signed Request Object with a request_uri",
+            signed(set(
+                "request_uri",
+                json!("https://verifier.example/request"),
+            )),
+            Some("nested_request"),
+        ),
+        (
+            "unsigned client_metadata a string",
+            unsigned(set("client_metadata", json!("x"))),
+            Some("client_metadata_invalid"),
+        ),
+        (
+            "signed client_metadata a string",
+            signed(set("client_metadata", json!("x"))),
+            Some("client_metadata_invalid"),
+        ),
+        (
+            "multisigned client_metadata a string",
+            multisigned(set("client_metadata", json!("x"))),
+            Some("client_metadata_invalid"),
+        ),
+        (
+            "signed without expected_origins",
+            signed(without("expected_origins")),
+            Some("expected_origins_missing"),
+        ),
+        (
+            "multisigned without expected_origins",
+            multisigned(without("expected_origins")),
+            Some("expected_origins_missing"),
+        ),
+        (
+            "signed without client_id",
+            signed(without("client_id")),
+            Some("client_id_missing"),
+        ),
+        (
+            "a pre-registered client",
+            signed(set("client_id", json!("verifier.example"))),
+            Some("client_id_unprefixed"),
+        ),
+        (
+            "an unsupported Client Identifier Prefix",
+            signed(set("client_id", json!("https://verifier.example"))),
+            Some("client_id_prefix_unsupported"),
+        ),
+        (
+            "an empty Client Identifier",
+            signed(set("client_id", json!("x509_san_dns:"))),
+            Some("client_id_value_empty"),
+        ),
+        (
+            "a decentralized_identifier client without a DID",
+            signed(set(
+                "client_id",
+                json!("decentralized_identifier:verifier.example"),
+            )),
+            Some("client_id_not_a_did"),
+        ),
+        (
+            "an x509_san_dns client not ASCII",
+            signed(set("client_id", json!("x509_san_dns:vérifier.example"))),
+            Some("client_id_dns_name"),
+        ),
+        (
+            "a signed redirect_uri client",
+            signed(set(
+                "client_id",
+                json!("redirect_uri:https://verifier.example/cb"),
+            )),
+            Some("signed_redirect_uri"),
+        ),
+        (
+            "a multisigned payload with client_id",
+            multisigned(set("client_id", json!(SIGNER.client_id()))),
+            Some("client_id_in_payload"),
+        ),
+        (
+            "a multisigned payload with verifier_info",
+            multisigned(verifier_info(attestation(json!({})))),
+            Some("verifier_info_in_payload"),
+        ),
+        (
+            "a multisigned header without client_id",
+            multisigned_header(without("client_id")),
+            Some("no_verifiable_signature"),
+        ),
+        (
+            "a multisigned header naming a pre-registered client",
+            multisigned_header(set("client_id", json!("verifier.example"))),
+            Some("no_verifiable_signature"),
+        ),
+        (
+            "a multisigned header naming a redirect_uri client",
+            multisigned_header(set(
+                "client_id",
+                json!("redirect_uri:https://verifier.example/cb"),
+            )),
+            Some("no_verifiable_signature"),
+        ),
+        (
+            "a multisigned request without signatures",
+            (
+                "openid4vp-v1-multisigned",
+                json!({"payload": b64(object().to_string().as_bytes())}),
+            ),
+            Some("jws_malformed"),
+        ),
+        (
+            "unsigned data with a request",
+            unsigned(set("request", json!(SIGNER.compact(&object())))),
+            Some("nested_request"),
+        ),
+        (
+            "state with a space over the DC API",
+            unsigned(set("state", json!("a b"))),
+            None,
+        ),
+        (
+            "state a number over the DC API",
+            unsigned(set("state", json!(7))),
+            None,
+        ),
+        (
+            "a request_uri in unsigned data",
+            unsigned(set(
+                "request_uri",
+                json!("https://verifier.example/request"),
+            )),
+            None,
+        ),
+    ];
+    let verifier_info_rows =
+        verifier_info_rules()
+            .into_iter()
+            .flat_map(|(rule, value, refusal)| {
+                [
+                    (
+                        format!("verifier_info {rule}"),
+                        unsigned(verifier_info(value.clone())),
+                        refusal,
+                    ),
+                    (
+                        format!("a multisigned header's verifier_info {rule}"),
+                        multisigned_header(verifier_info(value)),
+                        refusal,
+                    ),
+                ]
+            });
+    let jws_rows = Broken::ALL.into_iter().flat_map(|broken| {
+        [
+            (
+                format!("a signed JWS {}", broken.name()),
+                signed_with(|_| {}, Some(broken)),
+                Some(broken.code()),
+            ),
+            (
+                format!("a multisigned signature {}", broken.name()),
+                multisigned_with(|_| {}, |_| {}, Some(broken)),
+                Some("no_verifiable_signature"),
+            ),
+        ]
+    });
+    table
+        .into_iter()
+        .map(|(name, request, refusal)| (name.to_owned(), request, refusal))
+        .chain(verifier_info_rows)
+        .chain(jws_rows)
+        .map(|(name, (protocol, data), refusal)| Row {
+            name,
+            protocol,
+            data,
+            refusal,
+        })
+        .collect()
+}
+
+/// The rows as differential cases, over an adult's mDL.
+pub fn cases() -> Vec<Case> {
+    rows()
+        .into_iter()
+        .map(|row| {
+            let wallet = Wallet::new(vec![mdl(1, &[("age_over_18", Cbor::Bool(true))])]);
+            case(&row.name, dc_api_request(row.protocol, row.data), wallet)
+        })
+        .collect()
+}
+
+/// Each row breaks the rule it names for the wallet's intake and for the picker's reader, so
+/// the differential's empty offers on both sides refuse under that rule.
+#[test]
+fn each_row_breaks_the_rule_it_names() {
+    let misread: Vec<String> = rows()
+        .into_iter()
+        .filter_map(|row| {
+            let request = dc_api_request(row.protocol, row.data.clone());
+            let intake = intake_with(dc_api_intake(&request), Verdict::Trusted);
+            let wallet = intake.err().map(|error| error.code());
+            let read = UnverifiedRequest::read(row.protocol, &row.data);
+            let picker = read.err().map(|refusal| refusal.code());
+            (wallet != row.refusal || picker != row.refusal).then(|| {
+                format!(
+                    "{}: wallet {wallet:?}, picker {picker:?}, named {:?}",
+                    row.name, row.refusal
+                )
+            })
+        })
+        .collect();
+    assert!(misread.is_empty(), "{}", misread.join("\n"));
+}

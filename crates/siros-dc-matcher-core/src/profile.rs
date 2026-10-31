@@ -45,87 +45,14 @@ pub enum UnknownFormat {
 
 /// How a requested query format maps onto stored credentials.
 ///
-/// The indirection is the point: `mso_mdoc_zk` is a *presentation-time
-/// transform* of an ordinary `mso_mdoc` credential, not a separate storage
-/// format, so there is no distinct ZK credential on the device to match.
+/// A `zkp_req` presentation is a proof about an ordinary stored `mso_mdoc`
+/// credential, so its query format names a stored format other than itself.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FormatRule {
     /// Format as it appears in the verifier's DCQL query.
     pub query_format: String,
     /// Stored formats this query format may be satisfied from.
     pub stored_formats: Vec<String>,
-    /// Capabilities that must hold before a match is offered.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub requires: Vec<Requirement>,
-}
-
-/// A capability this wallet must actually have for a match to be offered.
-///
-/// Checking this before the picker rather than during presentation is the
-/// whole point: offering an entry the wallet cannot honour walks the user
-/// through a consent screen and then fails.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Requirement {
-    /// Capability name, looked up in the profile's capability map.
-    pub capability: String,
-    /// `meta` key carrying the verifier's acceptable values.
-    pub from_meta: String,
-}
-
-/// A capability required by the *presence* of a `meta` key, whatever format
-/// the verifier asked for.
-///
-/// What actually signals a ZK presentation is `zk_system_type` — a list of the
-/// proof systems the verifier will accept. The `mso_mdoc_zk` format was an
-/// early way of saying the same thing and is expected to be retired, so a
-/// verifier may well send an ordinary `mso_mdoc` query carrying
-/// `zk_system_type`. Keying the capability check on the format would miss
-/// exactly that request: the wallet would be offered, and would then produce a
-/// plain presentation for a verifier expecting a proof.
-///
-/// Format rules keep their own [`FormatRule::requires`] as well. A verifier
-/// naming `mso_mdoc_zk` and *no* system has asked for a proof without saying
-/// which, and must not be answered with an ordinary presentation.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MetaTrigger {
-    /// The `meta` key whose presence turns the requirement on.
-    pub when_meta_present: String,
-    /// Capability name, looked up in the profile's capability map.
-    pub capability: String,
-    /// A `meta` key saying whether the capability is genuinely *required*.
-    ///
-    /// Naming acceptable proof systems does not by itself say whether the
-    /// verifier insists on one. Two readings are possible and the
-    /// specification distinguishes neither: "I require a proof, here are the
-    /// systems I accept", or "I will take a proof if you have one, otherwise
-    /// an ordinary presentation". They differ in who gets offered — under the
-    /// second, a wallet with no proof system should still appear.
-    ///
-    /// Set to `false` in the request, the capability becomes preferred rather
-    /// than required: the wallet is offered either way, and the chosen system
-    /// is still reported when it has one, so it can produce a proof if it can.
-    ///
-    /// Absent from the request means **optional**: only an explicit `true`
-    /// demands the capability. That is the opposite of the safer-looking
-    /// default and it is deliberate. `zk_system_type` is replacing the
-    /// `mso_mdoc_zk` format suffix as the way to ask for a proof, so during
-    /// that migration a verifier names the systems it accepts before it sends
-    /// any flag. Reading those as "required" would stop offering them to every
-    /// wallet that cannot prove — the population the migration exists to keep
-    /// serving. A verifier that means mandatory says so.
-    ///
-    /// Unset *here*, in the profile, still means required: with no flag
-    /// configured the trigger's presence is the requirement, as it was before
-    /// there was a flag at all.
-    ///
-    /// Deliberately a sibling of `zk_system_type` in `meta`, not a key inside
-    /// each entry: every key in an entry other than `id` and `system` is a
-    /// *circuit parameter*, so a per-entry flag would be matched against the
-    /// wallet's declared parameters instead of read. Per-entry would also
-    /// allow contradictions — one system required, another optional — that
-    /// mean nothing.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub required_flag: Option<String>,
 }
 
 /// How one `meta` key constrains a match.
@@ -163,22 +90,13 @@ pub enum Parser {
     IsoMdocApi,
 }
 
-/// What this wallet can actually produce, beyond what it stores.
-///
-/// Checked before an entry is offered, not during presentation. Offering an
-/// entry the wallet cannot honour walks the user through a consent screen and
-/// then fails — the worst possible place to discover a capability gap.
+/// A `zkp_req` circuit this wallet can prove with.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Capability {
-    /// System identifier, e.g. `longfellow-libzk-v1`.
+    /// Proof system, e.g. `longfellow-libzk-v1`.
     pub system: String,
-    /// Parameters that must also agree.
-    ///
-    /// These are not decoration. A ZK circuit is built for a fixed number of
-    /// attributes, so a request naming the right system with the wrong
-    /// `num_attributes` is one this wallet cannot satisfy — and finding that
-    /// out at proof-generation time rather than at match time is how it
-    /// surfaces as an unexplained failure after consent.
+    /// The circuit's parameters: [`SYSTEM_ID_PARAM`], and optionally
+    /// [`FUNCTIONS_PARAM`], [`CREDENTIAL_TYPE_PARAM`] and [`CAPABILITIES_PARAM`].
     #[serde(default)]
     pub params: std::collections::BTreeMap<String, String>,
 }
@@ -200,11 +118,7 @@ pub struct MatchProfile {
     /// How `meta` keys constrain a match.
     #[serde(default)]
     pub meta_rules: Vec<MetaRule>,
-    /// Capabilities required by the presence of a `meta` key, whatever the
-    /// requested format. See [`MetaTrigger`].
-    #[serde(default)]
-    pub meta_triggers: Vec<MetaTrigger>,
-    /// Capabilities, keyed by the name a [`Requirement`] refers to.
+    /// Capabilities, keyed by their family, such as [`ZKP_REQ_CAPABILITY`].
     #[serde(default)]
     pub capabilities: std::collections::BTreeMap<String, Vec<Capability>>,
     /// What to do with a query format no [`FormatRule`] describes.
@@ -224,10 +138,8 @@ impl MatchProfile {
 
     /// Whether a stored format can satisfy a requested one.
     ///
-    /// Not the same question as equality. `mso_mdoc_zk` is satisfied by an
-    /// ordinary `mso_mdoc` credential, because producing a ZK proof is a
-    /// presentation-time transform rather than a storage format — there is no
-    /// separate ZK credential on the device to find.
+    /// Not the same question as equality: `zkp_req` is satisfied by an
+    /// ordinary `mso_mdoc` credential.
     pub fn format_matches(&self, query_format: &str, stored_format: &str) -> bool {
         match self.format_rule(query_format) {
             Some(rule) => rule.stored_formats.iter().any(|f| f == stored_format),
@@ -246,9 +158,6 @@ impl MatchProfile {
             .map(|p| p.parser)
     }
 }
-
-/// Capability name a `mso_mdoc_zk` format rule refers to.
-pub const ZK_CAPABILITY: &str = "zk_system";
 
 /// Capability family for `zkp_req` circuits a wallet can prove with.
 ///
@@ -287,11 +196,6 @@ pub const CAPABILITIES_PARAM: &str = "capabilities";
 /// The format a `zkp_req` query is asked in.
 pub const ZKP_REQ_FORMAT: &str = "zkp_req";
 
-/// `mso_mdoc_zk` maps onto ordinary `mso_mdoc` storage because producing a ZK
-/// proof is a presentation-time transform, not a storage format — there is no
-/// separate ZK credential on the device to find. It carries a capability
-/// requirement so the entry is only offered when the wallet can actually
-/// produce the proof the verifier asked for.
 impl MatchProfile {
     /// The profile SIROS wallets register.
     pub fn siros_default() -> Self {
@@ -319,29 +223,17 @@ impl MatchProfile {
                 FormatRule {
                     query_format: "mso_mdoc".into(),
                     stored_formats: vec!["mso_mdoc".into()],
-                    requires: vec![],
                 },
                 FormatRule {
                     query_format: "dc+sd-jwt".into(),
                     stored_formats: vec!["dc+sd-jwt".into()],
-                    requires: vec![],
-                },
-                FormatRule {
-                    query_format: "mso_mdoc_zk".into(),
-                    stored_formats: vec!["mso_mdoc".into()],
-                    requires: vec![Requirement {
-                        capability: ZK_CAPABILITY.into(),
-                        from_meta: "zk_system_type".into(),
-                    }],
                 },
                 // A `zkp_req` presentation is a proof about an ordinary stored
-                // mdoc, like `mso_mdoc_zk`, but what it needs is not a `meta`
-                // list of systems — the circuit capabilities are checked by the
-                // evaluator against the planned request.
+                // mdoc. The evaluator checks the circuit capabilities against
+                // the planned request.
                 FormatRule {
                     query_format: ZKP_REQ_FORMAT.into(),
                     stored_formats: vec!["mso_mdoc".into()],
-                    requires: vec![],
                 },
             ],
             meta_rules: vec![
@@ -355,24 +247,7 @@ impl MatchProfile {
                     field: Some("vct".into()),
                     op: Op::In,
                 },
-                // Carried through to the wallet rather than used for matching: a
-                // pseudonym context changes what is produced, not which credential
-                // can produce it.
-                MetaRule {
-                    meta_key: "ppid_context".into(),
-                    field: None,
-                    op: Op::Ignore,
-                },
             ],
-            // What signals a ZK presentation is the presence of
-            // `zk_system_type`, not the requested format. `mso_mdoc_zk` says
-            // the same thing and is expected to be retired, so it is still
-            // matched above but is not what the check depends on.
-            meta_triggers: vec![MetaTrigger {
-                when_meta_present: "zk_system_type".into(),
-                capability: ZK_CAPABILITY.into(),
-                required_flag: Some("zk_required".into()),
-            }],
             capabilities: BTreeMap::new(),
             unknown_format: UnknownFormat::Reject,
             debug: false,
@@ -388,31 +263,6 @@ mod tests {
     #[test]
     fn unknown_format_defaults_to_reject() {
         assert_eq!(UnknownFormat::default(), UnknownFormat::Reject);
-    }
-
-    /// A ZK format rule maps onto ordinary mdoc storage and carries a
-    /// capability requirement — the shape the whole profile exists for.
-    #[test]
-    fn zk_format_rule_round_trips() {
-        let json = r#"{"query_format":"mso_mdoc_zk","stored_formats":["mso_mdoc"],
-                       "requires":[{"capability":"zk_system","from_meta":"zk_system_type"}]}"#;
-        let rule: FormatRule = serde_json::from_str(json).unwrap();
-        assert_eq!(rule.stored_formats, ["mso_mdoc"]);
-        assert_eq!(rule.requires[0].from_meta, "zk_system_type");
-    }
-
-    /// The reason this whole indirection exists: a ZK request is satisfied by
-    /// an ordinary mdoc credential.
-    #[test]
-    fn zk_query_format_is_satisfied_by_plain_mdoc_storage() {
-        let mut p = MatchProfile::default();
-        p.formats.push(FormatRule {
-            query_format: "mso_mdoc_zk".into(),
-            stored_formats: vec!["mso_mdoc".into()],
-            requires: vec![],
-        });
-        assert!(p.format_matches("mso_mdoc_zk", "mso_mdoc"));
-        assert!(!p.format_matches("mso_mdoc_zk", "dc+sd-jwt"));
     }
 
     /// An undescribed format is refused by default. The permissive setting

@@ -1,7 +1,7 @@
 [package]
 name = "siros-dc-matcher-core"
 version = "0.11.0"
-description = "The credential blob, match profile, request reading and zkp_req planner of the SIROS DC API matcher"
+description = "The v1 credential blob, match profile, evaluator and circuit capabilities of the SIROS FFI"
 publish = false
 edition.workspace = true
 license.workspace = true
@@ -16,6 +16,10 @@ test-fixtures = []
 
 [dependencies]
 siros-dcql = { workspace = true }
+siros-oid4vp = { workspace = true }
+siros-codec = { workspace = true }
+siros-zkp-req = { workspace = true }
+siros-zkp-req-nym-auth = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 ciborium = { workspace = true }

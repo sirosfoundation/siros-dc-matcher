@@ -17,8 +17,8 @@ use siros_dc_matcher_core::db::CredentialDatabase;
 use siros_dc_matcher_core::evaluator::{credentials, ProfilePolicy};
 use siros_dc_matcher_core::fixtures::{circuit, nym_wallet, NYM_AUTH_DOCTYPE};
 use siros_dc_matcher_core::profile::{CAPABILITIES_PARAM, CREDENTIAL_TYPE_PARAM, SYSTEM_ID_PARAM};
-use siros_dc_matcher_core::request::first_supported_context;
 use siros_dcql::execute;
+use siros_oid4vp::UnverifiedRequest;
 
 // --- the shared vectors ----------------------------------------------------
 
@@ -242,7 +242,13 @@ fn pseudonym(config: &str) -> Value {
 }
 
 fn age() -> Value {
-    json!({"fn_id": "age_check", "return": "age", "params": {"ge": "2008-10-10"}})
+    json!({"fn_id": "age_check", "return": "age", "params": {"range": "18+"}})
+}
+
+/// The Verifier's lists: `zkp_req`, Section 1.2 requires both.
+fn client_metadata(ids: &[&str]) -> Value {
+    json!({"vp_formats_supported": {"zkp_req": {
+        "proof_backend_values": [LONGFELLOW], "system_id_values": ids}}})
 }
 
 fn query(meta: Value, req: Value) -> Value {
@@ -260,21 +266,22 @@ fn nym_query(req: Value) -> Value {
 /// Candidate credential ids for a request.
 fn offered(db: &CredentialDatabase, query: Value) -> Vec<String> {
     let request = json!({"requests": [{"protocol": "openid4vp-v1-unsigned",
-        "data": {"dcql_query": {"credentials": [query]}}}]})
+        "data": {"response_type": "vp_token", "response_mode": "dc_api", "nonce": "n-1",
+                 "dcql_query": {"credentials": [query]},
+                 "client_metadata": client_metadata(&[CIRCUIT])}}]})
     .to_string();
-    let Some(context) = first_supported_context(request.as_bytes(), &db.profile, None) else {
+    let registered = |label: &str| db.profile.parser_for(label).is_some();
+    let Some(context) = UnverifiedRequest::first_registered(request.as_bytes(), &registered) else {
         return vec![];
     };
-    let Some(typed) = context.matching_query() else {
-        return vec![];
-    };
-    let policy = ProfilePolicy::new(&db.profile).with_context(&context);
-    execute(&typed, &credentials(db), &policy)
+    let typed = context.query();
+    let policy = ProfilePolicy::new(&db.profile).with_client_metadata(context.client_metadata());
+    execute(typed, &credentials(db), &policy)
         .query("nym")
         .map(|m| {
-            m.candidates
+            m.candidates()
                 .iter()
-                .map(|c| c.credential_id.clone())
+                .map(|c| c.credential_id().as_str().to_owned())
                 .collect()
         })
         .unwrap_or_default()
@@ -292,8 +299,7 @@ fn nym_auth_capabilities() -> String {
             "config": {"enum": ["known-offender-matching-ssc"]},
             "ver": {"type": "integer"},
             "prf": {"enum": ["sha-256"]}}},
-        {"id": "age_check", "max": 1,
-         "params": {"ge": {"type": "full-date"}, "le": {"type": "full-date"}}}
+        {"id": "age_check", "max": 1, "params": {"range": {"type": "string"}}}
     ]))
 }
 
@@ -342,9 +348,9 @@ fn a_restricted_circuit_for_another_type_is_not_offered_for_the_held_one() {
     assert!(offered(&db, nym_query(json!([age()]))).is_empty());
 }
 
-/// `vct_values` belongs to the reserved `dc+sd-jwt` source format, which
-/// rulebook v0.4 does not define: such a request is unsatisfiable, whatever
-/// the circuit says.
+/// A `dc+sd-jwt` query asks for a proof over an SD-JWT VC; the profile maps
+/// `zkp_req` onto stored `mso_mdoc` credentials only, so nothing is offered,
+/// whatever the circuit says.
 #[test]
 fn a_vct_values_request_is_not_offered() {
     let mut db = with_param(CREDENTIAL_TYPE_PARAM, "urn:vct:a");
@@ -381,21 +387,27 @@ fn capabilities_serve_a_request_they_declare() {
 #[test]
 fn an_enum_miss_is_refused() {
     let db = with_param(CAPABILITIES_PARAM, &nym_auth_capabilities());
-    let req = json!([pseudonym("account-recovery-ssc")]);
-    assert!(offered(&db, nym_query(req)).is_empty());
+    let mut item = pseudonym("account-recovery-ssc");
+    item["params"]["verifier_context"] = json!("account 7");
+    assert!(offered(&db, nym_query(json!([item]))).is_empty());
 }
 
 #[test]
 fn an_unlisted_param_is_refused() {
-    let db = with_param(CAPABILITIES_PARAM, &nym_auth_capabilities());
-    let mut item = pseudonym("known-offender-matching-ssc");
-    item["params"]["verifier_context"] = json!("ctx");
-    assert!(offered(&db, nym_query(json!([item]))).is_empty());
+    let caps = Capabilities::parse(&nym_auth_capabilities()).unwrap();
+    let mut params = Map::new();
+    params.insert("range".into(), json!("18+"));
+    params.insert("unlisted".into(), json!("x"));
+    let items = [RequestedItem {
+        function_id: "age_check",
+        params: &params,
+    }];
+    assert!(!caps.supports(&items));
 }
 
-/// A request that still carries the retired `verifier_id_type` is planned
-/// (the planner is structural), but a circuit that does not list the param does
-/// not serve it: the ordinary unlisted-param rule, nothing special-cased.
+/// A request that still carries the retired `verifier_id_type` breaks the
+/// nym_auth catalogue (a parameter the function does not define), so nothing
+/// is offered before any circuit is consulted.
 #[test]
 fn a_legacy_verifier_id_type_param_is_not_served() {
     let db = with_param(CAPABILITIES_PARAM, &nym_auth_capabilities());
@@ -413,15 +425,32 @@ fn an_undeclared_function_is_refused() {
     assert!(offered(&db, nym_query(req)).is_empty());
 }
 
+/// `max` bounds the items of a function in the option. For nym_auth the
+/// catalogue already refuses a second `age_check` in one option, so the rule is
+/// checked on the capabilities themselves.
 #[test]
 fn max_instances_is_enforced() {
-    let db = with_param(CAPABILITIES_PARAM, &nym_auth_capabilities());
-    let second_age =
-        json!({"fn_id": "age_check", "return": "age2", "params": {"le": "2013-10-09"}});
-    let one = json!([pseudonym("known-offender-matching-ssc"), age()]);
-    let two = json!([pseudonym("known-offender-matching-ssc"), age(), second_age]);
-    assert_eq!(offered(&db, nym_query(one)), ["nym-1"]);
-    assert!(offered(&db, nym_query(two)).is_empty());
+    let caps = Capabilities::parse(&nym_auth_capabilities()).unwrap();
+    let pseudonym_params = pseudonym("known-offender-matching-ssc")["params"]
+        .as_object()
+        .unwrap()
+        .clone();
+    let age_params = age()["params"].as_object().unwrap().clone();
+    let item = |function_id, params| RequestedItem {
+        function_id,
+        params,
+    };
+    let one = [
+        item("pseudonym", &pseudonym_params),
+        item("age_check", &age_params),
+    ];
+    let two = [
+        item("pseudonym", &pseudonym_params),
+        item("age_check", &age_params),
+        item("age_check", &age_params),
+    ];
+    assert!(caps.supports(&one));
+    assert!(!caps.supports(&two));
 }
 
 #[test]
@@ -494,19 +523,21 @@ fn the_verifiers_circuit_lists_still_apply_with_capabilities() {
     let req = json!([pseudonym("known-offender-matching-ssc")]);
     let request = |ids: &[&str]| {
         json!({"requests": [{"protocol": "openid4vp-v1-unsigned", "data": {
+            "response_type": "vp_token", "response_mode": "dc_api", "nonce": "n-1",
             "dcql_query": {"credentials": [nym_query(req.clone())]},
-            "client_metadata": {"vp_formats_supported": {"zkp_req": {
-                "system_id_values": ids}}}}}]})
+            "client_metadata": client_metadata(ids)}}]})
         .to_string()
     };
+    let registered = |label: &str| db.profile.parser_for(label).is_some();
     let run = |ids: &[&str]| {
         let bytes = request(ids);
-        let context = first_supported_context(bytes.as_bytes(), &db.profile, None).unwrap();
-        let typed = context.matching_query().unwrap();
-        let policy = ProfilePolicy::new(&db.profile).with_context(&context);
-        execute(&typed, &credentials(&db), &policy)
+        let context = UnverifiedRequest::first_registered(bytes.as_bytes(), &registered).unwrap();
+        let typed = context.query();
+        let policy =
+            ProfilePolicy::new(&db.profile).with_client_metadata(context.client_metadata());
+        execute(typed, &credentials(&db), &policy)
             .query("nym")
-            .map_or(0, |m| m.candidates.len())
+            .map_or(0, |m| m.candidates().len())
     };
     assert_eq!(run(&[CIRCUIT]), 1);
     assert_eq!(run(&["urn:other"]), 0);
@@ -531,9 +562,8 @@ fn a_registration_without_the_new_params_behaves_as_in_0_8_0() {
         "the fixture grew a param"
     );
 
-    // Unrestricted by type. (Since rulebook v0.4 a request with no type value,
-    // or a function the rulebook does not define, is unsatisfiable before any
-    // circuit is consulted.)
+    // Unrestricted by type. (A request with no type value, or a function the
+    // catalogue does not define, is invalid before any circuit is consulted.)
     for q in [
         nym_query(json!([age()])),
         query(json!({"doctype_value": "anything"}), json!([age()])),

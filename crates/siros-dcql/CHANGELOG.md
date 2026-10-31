@@ -13,21 +13,120 @@ this file.
 
 ## Unreleased
 
-### Added
-
-- `PathError` implements `std::error::Error`.
-
 ### Changed
 
-- `PathError` and `QueryError` derive `Display` and `Error` with
-  `thiserror`, a new dependency. Their text and `QueryError::source` are
-  unchanged.
+- **BREAKING:** `CredentialQuery::id`, `QueryMatch::query_id`, `QueryError::DuplicateCredentialId`
+  and `QueryError::DuplicateClaimId::credential` are a `QueryId`: "a non-empty string consisting
+  of alphanumeric, underscore (_), or hyphen (-) characters" (§6.1). `DcqlQuery::from_json`
+  refuses another id with `QueryError::Id`, which holds the `QueryIdError`; a dotted id is
+  refused.
+  `QueryError::EmptyCredentialId` is gone: `QueryIdError::Empty` covers it. The version is
+  0.12.0.
+- **BREAKING:** a query is constructed only by parsing. The fields of `DcqlQuery`,
+  `CredentialQuery`, `ClaimsQuery` and `CredentialSetQuery` are private and read through
+  accessors of the same names (`credentials()`, `id()`, `format()`, `meta()`, `claims()`,
+  `claim_sets()`, `path()`, `values()`, `options()`, `purpose()`); `DcqlQuery::validate` is
+  gone. `DcqlQuery::parse` reads a JSON value in one pass, and `Deserialize` runs it. A member
+  of the wrong form is `QueryError::Form`, which names the `Member` and its `FormFault`.
+- **BREAKING:** the parse refuses an empty `credentials` (`QueryError::Form` with
+  `FormFault::Empty`), a `claim_sets` option naming an id no claims query has
+  (`QueryError::UnknownClaimId`), a `credential_sets` option naming an id no Credential Query
+  has (`QueryError::UnknownCredentialId`), `claim_sets` without claims
+  (`QueryError::ClaimSetsWithoutClaims`), a claims `path` that is no claims path pointer
+  (`QueryError::ClaimPath` with its `ClaimPathError`), and an `mso_mdoc` claims path other than
+  two strings (`QueryError::MdocPath`).
+- **BREAKING:** a claims path pointer is a `ClaimPath`, at least one `PathComponent`:
+  `ClaimsQuery::path`, `SelectedClaim::path` and `into_path`, `Credential::claim`, `resolve`,
+  `resolve_json` and `mdoc_components` take or give one. `PathError::Malformed` is gone;
+  `PathError::MdocElement` is the error of §7.2.1, with the code `path_malformed`.
+  `PathComponent` has no `Deserialize`; `ClaimPath` deserializes through `ClaimPath::parse`.
+- **BREAKING:** `select_claims` gives `Result<Option<Vec<SelectedClaim>>, PathError>`: a
+  claims path processing error other than an empty selection is an error. With `claim_sets`,
+  the next option is tried, and the first error is given when no option is satisfied.
+  `execute` keeps such a credential out of the candidates and records it in
+  `QueryMatch::refusals`, a `ClaimPathRefusal` each.
+- **BREAKING:** `CredentialQuery::claim_sets` gives the `ClaimOption`s, each with the `ids()`
+  and the `claims()` it names.
+- **BREAKING:** the parse enforces the rest of §6. It refuses a Credential Query without `meta`
+  (REQUIRED, §6.1; `QueryError::Form` with `FormFault::Absent`), and `CredentialQuery::meta`
+  gives the object as sent. It refuses an empty `claims`, `claim_sets` (§6.1), `credential_sets`
+  (§6), `options` (§6.2) or `values` (§6.3), each `FormFault::Empty`; a `values` element other
+  than a string, an integer or a boolean (§6.3, `FormFault::Entry` with its `Position`); and a
+  claims query without `id` in a Credential Query with `claim_sets` (§6.3, `FormFault::Absent`
+  of `ClaimMember::Id`). An absent `claims` asks for no claim; an empty one is refused. A
+  `credential_sets` option that is an empty array is `FormFault::Entry` of
+  `SetMember::Options` (§6.2). `null` is a member of the wrong JSON type wherever §6 defines
+  one (`FormFault::WrongType`, `TrustedAuthorityError::NotArray`); `CredentialSetQuery::purpose`
+  gives the `purpose` as sent, `null` included, since §6.2 defines no such member.
+- **BREAKING:** `DcqlQuery::parse` refuses with a `QueryError`, which is `Clone`, `Eq` and
+  `Hash`; `DcqlQuery::from_json` refuses with a `QueryTextError`: the serde_json error of text
+  that is no JSON, or the `QueryError` of its value. `QueryError::Json` is gone.
+- The text values (`CredentialFormat`, `CredentialRef`, `DocType`, `Vct`, `AuthorityType`,
+  `AuthorityValue`) implement `Borrow<str>`, for map lookups by text.
+- **BREAKING:** `trusted_authorities` parses into `TrustedAuthorities`: a non-empty array of
+  `TrustedAuthority`, each an `AuthorityType` and a non-empty list of `AuthorityValue`s
+  (§6.1.1). A malformed one is `QueryError::TrustedAuthorities` with its
+  `TrustedAuthorityError`; `null` is `NotArray`. An entry's `type` is absent
+  (`TypeAbsent`) or no string (`TypeNotString`); its `values` is absent (`ValuesAbsent`), no
+  array (`ValuesNotArray`), empty (`ValuesEmpty`), or holds a non-string at a `Position`
+  (`ValueNotString`). `TrustedAuthorities` has no `Deserialize`.
+- **BREAKING:** a claims query id, and an id a `claim_sets` option names, is a `ClaimId` (§6.3);
+  another is `QueryError::ClaimId`. A `credential_sets` option names `QueryId`s; another id is
+  `QueryError::Id`. `QueryError::DuplicateClaimId::claim` is a `ClaimId`.
+- **BREAKING:** `multiple`, `require_cryptographic_holder_binding` and `required` read as
+  `CredentialQuery::multiplicity()` (`Multiplicity`), `holder_binding()` (`HolderBinding`) and
+  `CredentialSetQuery::requirement()` (`SetRequirement`); the format is a `CredentialFormat`.
+- **BREAKING:** `Credential::has_cryptographic_holder_binding` is `Credential::binding`, a
+  `CryptographicBinding`.
+- **BREAKING:** the results of `execute` keep their fields private, read through accessors:
+  `QueryResult::matches()`, `satisfaction()` (a `Satisfaction`), `credential_sets()`;
+  `QueryMatch::query_id()`, `candidates()`, `multiplicity()`; `Candidate::credential_id()`,
+  `claims()`; `SelectedClaim::claim_id()` (a `ClaimId`), `path()`, `into_path()`;
+  `Combinations::combinations()`, `dropped()`; `Combination::members()` (keyed by `QueryId`),
+  `purposes()`.
+- **BREAKING:** `PathError::TypeMismatch::at` is a `ComponentIndex`.
+- **BREAKING:** `Credential::id` gives a `CredentialRef` and `Credential::format` a
+  `CredentialFormat`; `Candidate::credential_id` is a `CredentialRef`.
+- Every error has a stable code, which its `Display` writes. The parse finds a repeated id, and
+  resolves the ids a `claim_sets` or `credential_sets` option names, with rustc-hash's
+  `FxHashMap`.
+- `QueryResult::combinations` walks the candidates of each query as an odometer, the first
+  query turning fastest: the order of the combinations is unchanged.
+- The crate depends on `rustc-hash`, `serde`, `serde_json` and `thiserror` only.
+- Every error type derives `Display` and `Error` with `thiserror`, a new dependency, and keeps
+  its text: `PathError`, `QueryIdError`, `ClaimIdError`, `ClaimPathError`,
+  `TrustedAuthorityError`, `QueryError` and `QueryTextError`. `FormFault` and
+  `ClaimPathRefusal` implement `Error`, with the first sentence of their documentation as text.
+  `QueryError::Form` returns its `FormFault` from `source()`, and `ClaimPathRefusal` its
+  `PathError`. `QueryTextError::Query` is transparent: its text and source are its
+  `QueryError`'s.
+- The error texts now print the value they name: `FormFault::Entry`, `ClaimPathRefusal`, and
+  `QueryError`'s `DuplicateClaimId`, `ClaimPath`, `UnknownClaimId` and `MdocPath`.
+
+### Added
+
+- `QueryId`, `QueryIdError` and `QueryError::Id`.
+- `CredentialQuery::parse`, the Credential Query of a JSON value alone, its errors naming it at
+  position 0; and `CredentialQuery::extension`, a member §6.1 leaves undefined, as sent, for
+  the profile of the query's format, such as `zkp_req`'s `_req`. A Credential Query serializes
+  with its extension members.
+- `ClaimId`, `ClaimIdError`, `AuthorityType`, `AuthorityValue`, `TrustedAuthority`,
+  `TrustedAuthorities`, `TrustedAuthorityError`, `CredentialFormat`, `Multiplicity`,
+  `HolderBinding`, `SetRequirement`, `CryptographicBinding`, `Satisfaction`, `ComponentIndex`,
+  `QueryError::code` and `select_claims` at the crate root.
+- `CredentialRef`, `DocType` and `Vct`, the text values a held credential and `meta` carry.
+- `QueryTextError`, `ClaimPath`, `ClaimPathError`, `ClaimOption`, `ClaimPathRefusal`,
+  `Position`, `Member`, `CredentialMember`, `ClaimMember`, `SetMember`, `FormFault`, and
+  `QueryError::Form`, `ClaimPath`, `UnknownClaimId`, `UnknownCredentialId`,
+  `ClaimSetsWithoutClaims` and `MdocPath`.
+- `resolve`, the §7.1.1 processing over any claim tree that implements `ClaimNode` (with
+  `Lookup`); `resolve_json` runs on it. `PathError::code`.
+- `PathError` implements `std::error::Error`.
 
 ### Fixed
 
-- `DcqlQuery::validate` hashes with `rustc-hash`'s `FxHashSet`, whose hasher
-  takes no seed: a `wasm32-wasip1` build runs on a host that lacks WASI
-  `random_get`. The crate depends on `rustc-hash`; its API is unchanged.
+- The crate hashes with `rustc-hash`, whose hasher takes no seed: a `wasm32-wasip1` build runs on
+  a host that lacks WASI `random_get`.
 
 ## 0.11.0 — 2026-10-20
 

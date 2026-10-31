@@ -52,8 +52,7 @@ from pathlib import Path
 from repo_paths import PathRefused, existing_file
 from rust_tokens import Kind, LexError, Token, matching_closer, tokens
 
-MATCHER_CRATES = frozenset({"android-credman-sys", "android-credman", "siros-dc-matcher-wasm",
-                            "siros-picker"})
+MATCHER_CRATES = frozenset({"android-credman-sys", "android-credman", "siros-picker"})
 TEST_HOST_SUFFIX = "-testhost"
 
 # Targets whose code ships. Test, bench and example targets are test code.

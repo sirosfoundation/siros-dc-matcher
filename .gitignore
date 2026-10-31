@@ -1,5 +1,10 @@
 # Rust build artifacts
 /target/
+/proving/target/
+/scripts/readdit-differential/target/
+
+# Circuit artifacts that proving/scripts/fetch-artifacts.sh downloads.
+/proving/artifacts/
 **/*.rs.bk
 
 # UniFFI bindings ARE committed. The Kotlin SDK vendors the generated .kt as

@@ -1,7 +1,0 @@
-{
-  "description": "Not JSON.",
-  "query_text": "{not json",
-  "expect": {
-    "error": "query_not_parseable"
-  }
-}

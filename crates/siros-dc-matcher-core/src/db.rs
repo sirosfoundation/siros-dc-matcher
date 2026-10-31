@@ -1,31 +1,21 @@
-//! The credential blob: what a wallet registers with the platform.
-//!
-//! This is one half of a contract with a moving other end. The wallet writes
-//! this blob today; a matcher binary that shipped months ago reads it inside
-//! the picker. The two update independently — a wallet updates when the user
-//! updates the app, the matcher when the wallet re-registers — so the format
-//! has to survive both directions of version skew.
-//!
-//! Three decisions follow from that:
+//! The v1 credential blob, which the FFI's `SirosBlobBuilder` writes and its in-process match
+//! reads. Its writer and its reader update independently, so the format survives version skew
+//! both ways:
 //!
 //! - **Everything is versioned.** [`CredentialDatabase::version`] is checked
 //!   before anything else is trusted.
-//! - **Unknown fields are ignored, never rejected.** A newer wallet must not
-//!   break an older matcher; the matcher simply does not act on what it cannot
-//!   see.
+//! - **Unknown fields are ignored, never rejected.** A newer writer must not
+//!   break an older reader, which does not act on what it cannot see.
 //! - **Text keys, not integer keys.** Integer keys would be smaller, but the
 //!   blob's size is dominated by claim values and icons, and being able to
 //!   `cbor-diag` a blob recovered from a device is worth more than the bytes.
 //!
 //! # Why claim values are in here
 //!
-//! The matcher has to evaluate a verifier's DCQL query — including its
-//! `values` filters — before any UI is shown, so the values have to be present
-//! before the user has agreed to anything. This is inherent to how the
-//! platform's registry works and is equally true of the stock matcher. It is
-//! stated plainly in the README rather than left to be rediscovered.
+//! The match evaluates a verifier's DCQL query, its `values` filters included.
 
 use serde::{Deserialize, Serialize};
+use siros_dcql::{CredentialFormat, CredentialRef};
 
 use crate::profile::MatchProfile;
 
@@ -62,12 +52,12 @@ pub struct Credential {
     ///
     /// Opaque to the matcher. It must be meaningful to the wallet, and must
     /// not be a value the wallet would mind the platform storing.
-    pub id: String,
+    pub id: CredentialRef,
     /// Storage format, e.g. `mso_mdoc` or `dc+sd-jwt`.
     ///
     /// The format a *verifier asks for* is a separate thing, mapped onto this
     /// by the profile — see [`crate::profile::FormatRule`].
-    pub format: String,
+    pub format: CredentialFormat,
     /// ISO mdoc docType, when this is an mdoc.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub doctype: Option<String>,
@@ -128,9 +118,22 @@ pub struct Claim {
 /// Why a blob could not be read.
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum DecodeError {
-    /// The bytes are not valid CBOR, or not shaped like a database.
-    #[error("credential blob is not valid CBOR")]
-    Malformed,
+    /// The bytes end inside an item.
+    #[error("credential blob ends inside an item")]
+    Truncated,
+    /// The bytes are no CBOR at this offset.
+    #[error("credential blob is no CBOR at byte {0}")]
+    Syntax(usize),
+    /// The CBOR is not shaped like a database: where, when the reader knows, and what it found.
+    #[error(
+        "credential blob is no database{at}: {found}",
+        at = .0.map_or_else(String::new, |offset| format!(" at byte {offset}")),
+        found = .1
+    )]
+    Shape(Option<usize>, String),
+    /// Items nest deeper than the reader allows.
+    #[error("credential blob nests too deeply")]
+    TooDeep,
     /// The blob's version is one this matcher does not understand.
     ///
     /// Carries the version so a diagnostic can say *which*, which is the
@@ -166,12 +169,16 @@ impl CredentialDatabase {
     ///
     /// # Errors
     ///
-    /// [`DecodeError::Malformed`] for anything unparseable, and
-    /// [`DecodeError::UnsupportedVersion`] for a blob from a future wallet.
-    /// Both are ordinary conditions in the picker, not exceptional ones: the
-    /// matcher reports no entries and the user sees no wallet.
+    /// [`DecodeError`]: bytes that are no database, or a blob from a future wallet
+    /// ([`DecodeError::UnsupportedVersion`]).
     pub fn from_cbor(bytes: &[u8]) -> Result<Self, DecodeError> {
-        let db: Self = ciborium::from_reader(bytes).map_err(|_| DecodeError::Malformed)?;
+        let db: Self = ciborium::from_reader(bytes).map_err(|error| match error {
+            // The reader is the byte slice, whose only failure is its end.
+            ciborium::de::Error::Io(_) => DecodeError::Truncated,
+            ciborium::de::Error::Syntax(offset) => DecodeError::Syntax(offset),
+            ciborium::de::Error::Semantic(offset, found) => DecodeError::Shape(offset, found),
+            ciborium::de::Error::RecursionLimitExceeded => DecodeError::TooDeep,
+        })?;
         if db.version > VERSION {
             return Err(DecodeError::UnsupportedVersion(db.version));
         }
@@ -181,9 +188,7 @@ impl CredentialDatabase {
     /// The icon bytes for a credential, if it has one and the reference is
     /// within bounds.
     ///
-    /// Returns `None` rather than panicking on a bad reference. A blob can
-    /// arrive truncated or hand-edited, and an out-of-range icon should cost
-    /// that credential its picture, not the whole picker its entries.
+    /// `None` for a reference outside the icon buffer: it costs that credential its picture.
     pub fn icon_bytes(&self, credential: &Credential) -> Option<&[u8]> {
         let r = credential.icon?;
         let start = r.start as usize;
@@ -196,17 +201,13 @@ impl CredentialDatabase {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use crate::profile::{FormatRule, MetaRule, Op, Requirement};
+    use crate::profile::{FormatRule, MetaRule, Op, ZKP_REQ_FORMAT};
 
     fn sample() -> CredentialDatabase {
         let mut profile = MatchProfile::default();
         profile.formats.push(FormatRule {
-            query_format: "mso_mdoc_zk".into(),
+            query_format: ZKP_REQ_FORMAT.into(),
             stored_formats: vec!["mso_mdoc".into()],
-            requires: vec![Requirement {
-                capability: "zk_system".into(),
-                from_meta: "zk_system_type".into(),
-            }],
         });
         profile.meta_rules.push(MetaRule {
             meta_key: "doctype_value".into(),
@@ -267,10 +268,10 @@ mod tests {
             CredentialDatabase::from_cbor(&bytes),
             Err(DecodeError::UnsupportedVersion(VERSION + 7))
         );
-        assert_eq!(
+        assert!(matches!(
             CredentialDatabase::from_cbor(b"\xff\xff not cbor"),
-            Err(DecodeError::Malformed)
-        );
+            Err(DecodeError::Shape(..))
+        ));
     }
 
     /// Garbage in must not panic: this runs where a trap shows the user

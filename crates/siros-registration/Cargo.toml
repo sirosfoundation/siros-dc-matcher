@@ -1,0 +1,60 @@
+[package]
+name = "siros-registration"
+version = "0.11.0"
+description = "The registration projection of the SIROS wallet core: what the wallet registers with the Android credential picker, read by the picker and written by the wallet"
+publish = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+# Without `wallet`: the reader the credential picker links, checked on 1.82 in CI.
+rust-version.workspace = true
+
+[features]
+# The writer the wallet facades call: the wallet's credentials with their display, transaction
+# data sources and issuer facts, projected.
+wallet = [
+    "siros-credential/chain",
+    "siros-display/credential",
+    "siros-presentation/wallet",
+    "siros-transaction-data/wallet",
+    "siros-trust/chain",
+]
+
+[dependencies]
+serde_json = { workspace = true }
+siros-codec = { workspace = true, features = ["json"] }
+siros-credential = { workspace = true }
+siros-dcql = { workspace = true }
+siros-oid4vp = { workspace = true }
+siros-display = { workspace = true }
+siros-presentation = { workspace = true }
+siros-transaction-data = { workspace = true }
+siros-trust = { workspace = true }
+siros-wallet-state = { workspace = true }
+siros-zkp-req = { workspace = true }
+siros-zkp-req-nym-auth = { workspace = true }
+rustc-hash = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+siros-presentation = { workspace = true, features = ["test-fixtures"] }
+
+[[example]]
+name = "sample_registration"
+required-features = ["wallet"]
+
+[[test]]
+name = "icon"
+required-features = ["wallet"]
+
+[[test]]
+name = "refusals"
+required-features = ["wallet"]
+
+[[test]]
+name = "secrets"
+required-features = ["wallet"]
+
+[lints]
+workspace = true
