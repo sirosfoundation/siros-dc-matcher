@@ -190,7 +190,7 @@ pub enum CoordinateFault {
     #[error("the string is not base64url")]
     Base64(#[source] Base64Error),
     /// The bytes number this many, where a P-256 coordinate has 32.
-    #[error("the bytes number this many, where a P-256 coordinate has 32")]
+    #[error("the bytes number {0}, where a P-256 coordinate has 32")]
     Length(usize),
 }
 

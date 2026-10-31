@@ -47,6 +47,19 @@ pub enum ConfigurationMember {
     Definition,
 }
 
+impl ConfigurationMember {
+    /// The member's name.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Type => "type",
+            Self::VctValues => "vct_values",
+            Self::DoctypeValues => "doctype_values",
+            Self::Definition => "definition",
+        }
+    }
+}
+
 /// Why a configuration does not read.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{}", self.code())]
@@ -69,7 +82,7 @@ pub enum ConfiguredFault {
     #[error("the entry is no JSON object")]
     NotObject,
     /// A member breaks its rule.
-    #[error("a member breaks its rule")]
+    #[error("the member `{}` breaks its rule", .0.as_str())]
     Member(ConfigurationMember, #[source] MemberFault),
     /// `type` is the empty string.
     #[error("`type` is the empty string")]
@@ -81,7 +94,7 @@ pub enum ConfiguredFault {
     #[error("the definition breaks PaSO Proof Metadata, Section 3")]
     Definition(#[source] DefinitionError),
     /// The entry has a member other than its four.
-    #[error("the entry has a member other than its four")]
+    #[error("the entry has the member {0:?}, other than its four")]
     MemberUnknown(String),
 }
 

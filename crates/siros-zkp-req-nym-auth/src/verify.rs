@@ -94,7 +94,7 @@ pub enum ProofEncodingFault {
     #[error("`inputs` holds other members than `issuer_key_set` and `proof_time`")]
     Inputs,
     /// `inputs` lacks this member.
-    #[error("`inputs` lacks this member")]
+    #[error("`inputs` lacks the member `{0}`")]
     InputMissing(InputName),
     /// `issuer_key_set` is no array of byte strings.
     #[error("`issuer_key_set` is no array of byte strings")]

@@ -36,7 +36,7 @@ pub enum PickedMember {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PickedError {
     /// The text is no JSON text: what breaks it, and where its reading stopped.
-    #[error("entry metadata is no JSON text at line {line}, column {column}")]
+    #[error("entry metadata is no JSON text ({kind:?}) at line {line}, column {column}")]
     NotJson {
         /// What breaks the text: its syntax, a value, or its end.
         kind: Category,

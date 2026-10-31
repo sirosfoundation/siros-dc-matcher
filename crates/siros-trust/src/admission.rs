@@ -43,7 +43,7 @@ pub enum Ground {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum Refusal<R> {
     /// The authority's `type` is none of `aki`, `etsi_tl` and `openid_federation`.
-    #[error("the authority's `type` is none of `aki`, `etsi_tl` and `openid_federation`")]
+    #[error("the authority's `type` `{0}` is none of `aki`, `etsi_tl` and `openid_federation`")]
     Type(AuthorityType),
     /// The issuer's reason.
     #[error("the issuer's reason")]
