@@ -210,7 +210,7 @@ pub enum ChainFault {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum LeafKeyFault {
     /// The key's algorithm is this one, where the wallet takes `id-ecPublicKey`.
-    #[error("the key's algorithm is this one, where the wallet takes `id-ecPublicKey`")]
+    #[error("the key's algorithm is {0}, where the wallet takes `id-ecPublicKey`")]
     Algorithm(ObjectIdentifier),
     /// The `id-ecPublicKey` parameters are absent.
     #[error("the `id-ecPublicKey` parameters are absent")]
@@ -219,7 +219,7 @@ pub enum LeafKeyFault {
     #[error("the parameters are no OBJECT IDENTIFIER")]
     Curve(#[source] der::Error),
     /// The named curve is this one, where the wallet takes `prime256v1`.
-    #[error("the named curve is this one, where the wallet takes `prime256v1`")]
+    #[error("the named curve is {0}, where the wallet takes `prime256v1`")]
     OtherCurve(ObjectIdentifier),
     /// The subjectPublicKey BIT STRING has unused bits.
     #[error("the subjectPublicKey BIT STRING has unused bits")]
@@ -238,6 +238,17 @@ pub enum Coordinate {
     Y,
 }
 
+impl Coordinate {
+    /// The member's name.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::X => "x",
+            Self::Y => "y",
+        }
+    }
+}
+
 /// Why a JWK is no public P-256 key (RFC 7518, Section 6.2.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum JwkFault {
@@ -245,13 +256,13 @@ pub enum JwkFault {
     #[error("`kty` is not `EC`, or `crv` is not `P-256`")]
     OtherKey,
     /// The coordinate is absent or not a string.
-    #[error("the coordinate is absent or not a string")]
+    #[error("the coordinate `{}` is absent or not a string", .0.as_str())]
     CoordinateAbsent(Coordinate),
     /// The coordinate is not unpadded base64url.
-    #[error("the coordinate is not unpadded base64url")]
+    #[error("the coordinate `{}` is not unpadded base64url", .0.as_str())]
     CoordinateEncoding(Coordinate, #[source] Base64Error),
     /// The coordinate has this many bytes, where P-256 takes 32.
-    #[error("the coordinate has this many bytes, where P-256 takes 32")]
+    #[error("the coordinate `{name}` has {length} bytes, where P-256 takes 32", name = .0.as_str(), length = .1)]
     CoordinateLength(Coordinate, usize),
     /// The point is not on the curve.
     #[error("the point is not on the curve")]
@@ -275,6 +286,21 @@ pub enum AttestationClaim {
     RedirectUris,
 }
 
+impl AttestationClaim {
+    /// The claim's name.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Iss => "iss",
+            Self::Sub => "sub",
+            Self::Exp => "exp",
+            Self::Nbf => "nbf",
+            Self::Cnf => "cnf",
+            Self::RedirectUris => "redirect_uris",
+        }
+    }
+}
+
 /// Why the claims of a Verifier Attestation JWT are refused (Section 12).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum ClaimsFault {
@@ -282,7 +308,7 @@ pub enum ClaimsFault {
     #[error("the payload is no JSON object")]
     NotObject(#[source] JsonTextError),
     /// The claim breaks its rule.
-    #[error("the claim breaks its rule")]
+    #[error("the claim `{}` breaks its rule", .0.as_str())]
     Claim(AttestationClaim, #[source] MemberFault),
     /// `cnf.jwk` is no P-256 key.
     #[error("`cnf.jwk` is no P-256 key")]

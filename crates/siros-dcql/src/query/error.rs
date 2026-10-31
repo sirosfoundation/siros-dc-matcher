@@ -84,7 +84,7 @@ pub enum FormFault {
     #[error("it is an empty array")]
     Empty,
     /// The entry at this position has another JSON type than §6 gives it.
-    #[error("the entry at this position has another JSON type than §6 gives it")]
+    #[error("the entry at position {0} has another JSON type than §6 gives it")]
     Entry(Position),
 }
 
@@ -127,7 +127,7 @@ pub enum QueryError {
     DuplicateCredentialId(QueryId),
     /// Two claims queries within one credential query share this `id`, which §6.3 requires to be
     /// unique "within the particular claims array".
-    #[error("{code}: {credential}", code = self.code())]
+    #[error("{code}: {credential}, claim id {claim}", code = self.code())]
     DuplicateClaimId {
         /// The `id` of the credential query holding the duplicate.
         credential: QueryId,
@@ -135,7 +135,7 @@ pub enum QueryError {
         claim: ClaimId,
     },
     /// The `path` of a claims query is no claims path pointer (§7).
-    #[error("{code}: {credential}", code = self.code())]
+    #[error("{code}: {credential}, claims[{claim}]", code = self.code())]
     ClaimPath {
         /// The `id` of the credential query holding it.
         credential: QueryId,
@@ -147,7 +147,7 @@ pub enum QueryError {
     },
     /// A `claim_sets` option names this id, which no claims query of the credential query has
     /// (§6.1).
-    #[error("{code}: {credential}", code = self.code())]
+    #[error("{code}: {credential}, claim id {claim}", code = self.code())]
     UnknownClaimId {
         /// The `id` of the credential query.
         credential: QueryId,
@@ -163,7 +163,7 @@ pub enum QueryError {
     UnknownCredentialId(QueryId),
     /// A claims query of an `mso_mdoc` Credential Query has a `path` other than a namespace and
     /// an element identifier, two strings (§7.2.1).
-    #[error("{code}: {credential}", code = self.code())]
+    #[error("{code}: {credential}, claims[{claim}]", code = self.code())]
     MdocPath {
         /// The `id` of the credential query.
         credential: QueryId,

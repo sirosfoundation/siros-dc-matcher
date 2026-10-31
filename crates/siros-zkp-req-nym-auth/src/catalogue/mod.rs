@@ -54,7 +54,7 @@ pub enum VerifierContextError {
     #[error("the text is empty")]
     Empty,
     /// The text has this many bytes, more than 64.
-    #[error("the text has this many bytes, more than 64")]
+    #[error("the text has {0} bytes, more than 64")]
     TooLong(usize),
 }
 

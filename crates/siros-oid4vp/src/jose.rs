@@ -92,11 +92,7 @@ pub(crate) fn p256_key(jwk: &Value) -> Result<PublicKey, JwkFault> {
         return Err(JwkFault::OtherKey);
     }
     let coordinate = |coordinate: Coordinate| {
-        let name = match coordinate {
-            Coordinate::X => "x",
-            Coordinate::Y => "y",
-        };
-        let text = text(name).ok_or(JwkFault::CoordinateAbsent(coordinate))?;
+        let text = text(coordinate.as_str()).ok_or(JwkFault::CoordinateAbsent(coordinate))?;
         let bytes = base64url::decode(text)
             .map_err(|error| JwkFault::CoordinateEncoding(coordinate, error))?;
         match bytes.len() {
