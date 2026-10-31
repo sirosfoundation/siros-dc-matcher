@@ -34,8 +34,8 @@ binaryen version_116.
   as before.
 - The error types of siros-registration, and those this release changes in android-credman,
   siros-credential, siros-display, siros-oid4vp, siros-presentation and
-  siros-transaction-data, derive `thiserror::Error`. Each `Display` text is unchanged, and
-  `source` gives the cause an error wraps.
+  siros-transaction-data, derive `thiserror::Error`, and `source` gives the cause an error
+  wraps.
 - `siros-picker-testhost` refuses a null pointer for a required string, a string without a NUL
   or of no UTF-8, a null image with a length, and a negative read. It captures an entry's
   `metadata` and a field's value as `None` for a null pointer, and counts the registration
