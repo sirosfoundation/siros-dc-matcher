@@ -584,6 +584,10 @@ const MEMBERS: [&str; 5] = [
 ];
 const REQUIRED: [&str; 4] = ["system_id", "proof", "issuer_key_set", "results"];
 
+/// Genuine Longfellow presentations exceed the small request-object budget.
+/// Bound their encoded form separately, before CBOR and native proof handling.
+const MAX_PRESENTATION_INPUT: usize = 2 * 1024 * 1024;
+
 fn check_presentation(
     plan: &Plan,
     index: usize,
@@ -592,8 +596,8 @@ fn check_presentation(
     let Json::Scalar(Value::String(text)) = element else {
         return Err(InvalidResponse::PresentationNotString { index });
     };
-    let bytes =
-        base64url::decode(text).ok_or(InvalidResponse::PresentationNotBase64url { index })?;
+    let bytes = base64url::decode_with_limit(text, MAX_PRESENTATION_INPUT)
+        .ok_or(InvalidResponse::PresentationNotBase64url { index })?;
     let item = decode_cbor(&bytes).map_err(|e| match e {
         CborError::Malformed => InvalidResponse::CborMalformed { index },
         CborError::Indefinite => InvalidResponse::CborIndefiniteLength { index },

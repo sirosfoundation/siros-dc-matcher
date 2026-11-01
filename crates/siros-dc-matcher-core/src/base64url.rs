@@ -29,6 +29,14 @@
 /// ```
 #[must_use]
 pub fn decode(input: &str) -> Option<Vec<u8>> {
+    decode_with_limit(input, MAX_INPUT)
+}
+
+/// Decode with an explicit per-call input ceiling. The default [`decode`]
+/// remains 256 KiB; larger protocol-specific payloads must name their own
+/// bound rather than weakening that default.
+#[must_use]
+pub fn decode_with_limit(input: &str, max_input: usize) -> Option<Vec<u8>> {
     let bytes = input.as_bytes();
 
     // A cap, because the caller's input is verifier-controlled and this runs
@@ -41,7 +49,7 @@ pub fn decode(input: &str) -> Option<Vec<u8>> {
     // 256 KiB of base64 is ~192 KiB decoded. An authorization request object
     // is a few kilobytes; this is generous by two orders of magnitude and
     // still bounded.
-    if bytes.len() > MAX_INPUT {
+    if bytes.len() > max_input {
         return None;
     }
 
