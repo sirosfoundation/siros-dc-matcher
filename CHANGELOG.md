@@ -9,10 +9,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Entries are reconstructed from git history for releases made before this file
 existed.
 
-## Unreleased
+## v0.12.0 — 2026-11-01
 
 `matcher.wasm` is 304,960 bytes against the 307,200-byte budget (303,418 at v0.11.0). The vector
 set digest is unchanged: `9f482d7a3fb87cb1381d0dfb7a2fc396b6cd3c1eba07c5d76f44e47142b751ac`.
+`siros-dcql` and `siros-dc-matcher-core` are versioned 0.12.0 in lockstep with
+`siros-dc-matcher-ffi`.
 
 ### Changed
 
