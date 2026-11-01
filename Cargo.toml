@@ -22,7 +22,7 @@ authors = ["SIROS Foundation"]
 rust-version = "1.82"
 
 [workspace.dependencies]
-siros-dcql = { version = "0.11.0", path = "crates/siros-dcql" }
+siros-dcql = { version = "0.12.0", path = "crates/siros-dcql" }
 siros-dc-matcher-core = { path = "crates/siros-dc-matcher-core" }
 android-credman = { path = "crates/android-credman", version = "0.1.0" }
 

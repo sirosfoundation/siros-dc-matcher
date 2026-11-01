@@ -1750,7 +1750,7 @@ checksum = "38b58827f4464d87d377d175e90bf58eb00fd8716ff0a62f80356b5e61555d0d"
 
 [[package]]
 name = "siros-dc-matcher-core"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "ciborium",
  "rustc-hash",
@@ -1764,7 +1764,7 @@ dependencies = [
 
 [[package]]
 name = "siros-dc-matcher-ffi"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "serde_json",
  "siros-dc-matcher-core",
@@ -1796,7 +1796,7 @@ dependencies = [
 
 [[package]]
 name = "siros-dcql"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "rustc-hash",
  "serde",

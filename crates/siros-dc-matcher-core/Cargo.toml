@@ -1,6 +1,6 @@
 [package]
 name = "siros-dc-matcher-core"
-version = "0.11.0"
+version = "0.12.0"
 description = "The credential blob, match profile, request reading and zkp_req planner of the SIROS DC API matcher"
 publish = false
 edition.workspace = true
