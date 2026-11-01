@@ -11,7 +11,6 @@ authors.workspace = true
 # harness that never ships, so its floor is allowed above the workspace's.
 rust-version = "1.88"
 
-# wasmtime is added in Phase 1 alongside the first real emission path.
 [dependencies]
 anyhow = "1.0.104"
 serde_json = { workspace = true }
@@ -20,3 +19,6 @@ wasmtime-wasi = "30.0.2"
 
 [dev-dependencies]
 siros-dc-matcher-core = { path = "../siros-dc-matcher-core", features = ["test-fixtures"] }
+
+[lints]
+workspace = true

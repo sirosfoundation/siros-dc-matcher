@@ -8,7 +8,8 @@ source it governs is worth nothing.
 
 This repository is an independent implementation of the OpenID4VP DCQL query
 language and of the Android Credential Manager matcher ABI. It is licensed
-BSD-2-Clause.
+BSD-2-Clause, except `crates/android-credman-sys` and `crates/android-credman`:
+MIT OR Apache-2.0, used here under MIT.
 
 The OpenWallet Foundation's [Multipaz](https://github.com/openwallet-foundation-labs/multipaz)
 project ships an Apache-2.0 credential matcher that solves the same problem
@@ -29,9 +30,8 @@ carried over line by line, or comments.
 ### You may
 
 - Use the host ABI — function names, signatures, module names, calling
-  conventions. It is an interface required for interoperability, and we hold it
-  independently: it was extracted from the shipping `.wasm` binary's import and
-  export tables before their header was ever opened.
+  conventions. It is an interface required for interoperability.
+  `android-credman-sys` declares it from Google's reference header.
 - Run Multipaz's matcher binary and compare its output against ours.
 - Commit behaviour observed that way as test vectors. A vector describing what a
   program does is a fact about it.
@@ -48,10 +48,7 @@ carried over line by line, or comments.
   as copying, and considerably harder to catch in review.
 - Copy their comments, or adopt their identifier set wholesale.
 - Vendor their binaries into this repository. Redistributing an Apache-2.0
-  artifact from a BSD-2 tree drags in notice obligations for no benefit — the
-  differential tests fetch the oracle at test time from a pinned upstream
-  commit, or read it from a local checkout via `MULTIPAZ_MATCHER_WASM`, and skip
-  when it is absent.
+  artifact from a BSD-2 tree drags in notice obligations for no benefit.
 
 ### Cite the spec, not the implementation
 
@@ -66,36 +63,31 @@ structural resemblance to the oracle as a blocker.
 
 ## Development
 
-```sh
-cargo test                      # everything, host targets
-cargo clippy --all-targets -- -D warnings
-cargo fmt --all -- --check
-cargo build -p siros-dc-matcher-wasm --target wasm32-wasip1 --release
-```
+[README.md](README.md#build-and-test) gives the commands CI runs.
 
 `siros-dcql` is published to crates.io and therefore may not depend on any other
 crate in this workspace. CI enforces this with `cargo publish --dry-run`; please
 do not work around it.
 
-Two floors are checked separately, because they differ on purpose:
-
-```sh
-# Everything that ships inside the credential picker holds Rust 1.82.
-cargo +1.82 check --locked --all-features \
-  -p siros-dcql -p siros-dc-matcher-core -p siros-dc-matcher-wasm
-
-# siros-dcql's public API against the version it declares.
-# Unlike fmt and clippy this is not part of the toolchain:
-#   cargo install cargo-semver-checks --locked
-cargo semver-checks --package siros-dcql
-```
-
-`cargo +1.82` needs that toolchain present: `rustup toolchain install 1.82`.
+Everything that ships inside the credential picker holds Rust 1.82:
+`siros-dcql`, `siros-dc-matcher-core`, `siros-dc-matcher-wasm`,
+`android-credman-sys` and `android-credman`. The MSRV job checks them on 1.82,
+for the host and for `wasm32-wasip1`.
 
 `siros-dc-matcher-ffi` and `-testhost` declare 1.88 in their own manifests —
 uniffi's bindgen chain and wasmtime both need it — and neither ships in the
 picker. If you raise a floor, raise it in the manifest that owns it and say
 why there.
+
+Only the DC API matcher panics: `android-credman-sys`, `android-credman` and
+`siros-dc-matcher-wasm`, where Credential Manager shows nothing on a trap.
+Each of their panics carries an `#[expect(..., reason)]` that says why it
+cannot recover. A test host runs the matcher in the tests, and its code is
+test code. In every other crate a panic crashes the wallet, so nothing
+panics outside the tests: a type makes the impossible state unrepresentable,
+or the caller receives an error. CI holds each crate to it with clippy and
+`scripts/check_panic_sites.py`, which fails on a new crate until its root
+denies the panic lints outside the tests, as the other roots do.
 
 ## Changelog
 

@@ -11,6 +11,67 @@ existed.
 
 ## Unreleased
 
+`matcher.wasm` is 304,960 bytes against the 307,200-byte budget (303,418 at v0.11.0). The vector
+set digest is unchanged: `9f482d7a3fb87cb1381d0dfb7a2fc396b6cd3c1eba07c5d76f44e47142b751ac`.
+
+### Changed
+
+- The matcher calls the host through the new `android-credman-sys` and
+  `android-credman` crates (MIT OR Apache-2.0, from
+  APTITUDE-Consortium/dcapi-matcher). `crates/android-credman-sys/ABI.md`
+  documents the host ABI.
+- Below host level 2 the matcher emits nothing; it used to call the
+  `credman_v2` functions regardless.
+- On level 2 and above, the matcher traps when the host breaks its ABI: a
+  calling-app field that is not UTF-8, a credential read that reports more
+  bytes than it was asked for, or one that copies nothing before the reported
+  size. It used to emit entries from the first two. Release and debug builds
+  trap alike.
+- The registered blob is read until complete; a short
+  `ReadCredentialsBuffer` read used to leave its tail zeroed.
+- `siros-dc-matcher-core`'s unused `sink` module is removed.
+- Entry metadata is the standard object
+  `{"display_skipped":bool,"host_level":n,"data":{…}}`. The matcher's own
+  members moved under `data`; `host_abi` became `host_level`.
+- A NUL inside a picker string becomes a space; it used to end the string.
+- The error types of `siros-dcql` and `siros-dc-matcher-core` derive
+  `Display` and `Error` with `thiserror`; their text is unchanged.
+  `PathError`, `DecodeError` and `NoQuery` implement `std::error::Error`.
+  `NoQuery::reason` is removed: `NoQuery`'s `Display` gives the same text.
+- Only the DC API matcher panics. `siros-dcql` turns one dial per query to
+  enumerate an option's combinations, where it divided by each query's
+  candidate count. The test host writes the calling-app fields and finds a
+  captured entry without indexing or `copy_from_slice`.
+- `CapabilitiesError` is an enum: `Json` holds the `serde_json::Error` as its
+  source, and `Schema` holds the `SchemaViolation` with the reason the text
+  carried before.
+
+### Fixed
+
+- `matcher.wasm` v0.8.0 to v0.11.0 imported `wasi_snapshot_preview1.random_get`,
+  which the host lacks, and trapped on `zkp_req` requests. The `zkp_req`
+  planner and response checks and `siros-dcql`'s `DcqlQuery::validate` use
+  `rustc-hash`'s `FxHashSet` now. `siros-dcql` gains the `rustc-hash`
+  dependency; its API is unchanged.
+
+### Added
+
+- `scripts/check_matcher_abi.py` checks each import of `matcher.wasm`, with
+  its signature, against the ABI table, and the `_start` and `memory`
+  exports. CI and the release job run it.
+- `clippy.toml` forbids std's `HashMap`, `HashSet` and `RandomState` in the
+  crates that link into `matcher.wasm`.
+- Each crate root but the matcher's and the test host's denies clippy's panic
+  lints outside the tests, and `clippy.toml` names the std methods that panic on an argument
+  and share their name with a method that does not.
+  `scripts/check_panic_sites.py` fails on a root without the lints and on an
+  `allow` of them outside the tests, and finds the panics no lint covers. CI
+  runs both.
+
+### Removed
+
+- `docs/plan.md`, the plan of the first release.
+
 ## v0.11.0 — 2026-10-20
 
 Adopts the `nym_auth` rulebook v0.4. **Breaking** (a minor bump, pre-1.0): the
@@ -21,7 +82,7 @@ are versioned 0.11.0 to match the release; `siros-dcql` has no change.
 Consumers that keep a copy of the vectors (siros-sdk-kotlin, siros-sdk-swift)
 must re-copy `zkp_req`, `zkp_req_response`, `zkp_req_unsat` and `proof_time`
 from the v0.11.0 tag; the vector set digest below identifies them.
-`matcher.wasm` is 303,480 bytes against the 307,200-byte budget.
+`matcher.wasm` is 303,418 bytes against the 307,200-byte budget.
 
 ### Changed
 

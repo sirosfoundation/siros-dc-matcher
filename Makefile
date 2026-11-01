@@ -39,6 +39,7 @@ all: matcher bindings
 # ── The matcher binary ───────────────────────────────────────────────
 
 MATCHER_WASM := $(BUILD_DIR)/wasm32-wasip1/wasm-release/matcher.wasm
+MATCHER_STUBBED := $(BUILD_DIR)/wasm32-wasip1/wasm-release/matcher.stubbed.wasm
 
 # Panic locations embed the path of every dependency's source file, which
 # includes the builder's $CARGO_HOME. Without remapping, the same commit built
@@ -70,14 +71,14 @@ matcher:
 	# rustc's wasm32-wasip1 CRT startup (crt1-command.o) unconditionally
 	# imports wasi_snapshot_preview1.environ_get/environ_sizes_get, whether
 	# or not the program touches env vars - and this one never does. The
-	# Credential Manager host implements only a small WASI subset (it is
-	# known to lack random_get, per UbiqueInnovation/oid4vp-wasm-matcher's
-	# README), and a missing import fails instantiation with no error
-	# surface at all. Whether it lacks these two is not established; stubbing
-	# them out as local no-ops is cheap insurance against ever finding out
-	# the hard way. See the script for what it rewrites and how.
-	python3 scripts/strip_wasi_environ.py $(MATCHER_WASM) $(MATCHER_WASM).tmp
-	mv $(MATCHER_WASM).tmp $(MATCHER_WASM)
+	# Credential Manager host implements only a small WASI subset. It lacks
+	# random_get, and a module importing an absent function still loads but
+	# traps when the call happens (releases v0.8.0 to v0.11.0 did exactly
+	# that). Whether it lacks these two is not established; stubbing them
+	# out as local no-ops is cheap insurance against ever finding out the
+	# hard way. See the script for what it rewrites and how.
+	python3 scripts/strip_wasi_environ.py $(MATCHER_WASM) $(MATCHER_STUBBED)
+	mv $(MATCHER_STUBBED) $(MATCHER_WASM)
 	@ls -l $(MATCHER_WASM)
 
 # ── Binding generation ───────────────────────────────────────────────
@@ -180,7 +181,7 @@ publish-local: aar pom
 	cp $(BUILD_DIR)/$(MAVEN_ARTIFACT)-$(VERSION).pom $(MAVEN_LOCAL_DIR)/$(MAVEN_ARTIFACT)-$(VERSION).pom
 	@echo "Installed org.siros:$(MAVEN_ARTIFACT):$(VERSION) to $(MAVEN_LOCAL_DIR)"
 
-# ── iOS (Phase 7) ────────────────────────────────────────────────────
+# ── iOS ──────────────────────────────────────────────────────────────
 
 ios: $(foreach t,$(IOS_TARGETS) $(IOS_SIM_TARGETS),ios-$(t))
 

@@ -2,9 +2,9 @@
 
 The request side of `docs/zkp_req_response.md`, following the `nym_auth`
 rulebook v0.4 ("DCQL profile and presentation syntax", "Function catalogue").
-Code: `crates/siros-dc-matcher-core/src/zkp_req.rs`. Vectors:
-`tests/vectors/zkp_req/` (structure) and `tests/vectors/zkp_req_unsat/`
-(unsatisfiable requests).
+Code: `crates/siros-dc-matcher-core/src/zkp_req.rs`. Vectors, in
+`crates/siros-dc-matcher-core/tests/vectors/`: `zkp_req/` (structure) and
+`zkp_req_unsat/` (unsatisfiable requests).
 
 ```json
 { "id": "nym_attestation", "format": "zkp_req",
@@ -33,9 +33,7 @@ strings) or a date that is not an RFC 3339 `full-date`
 `claim_sets` (`claim_sets_present`) or `_req_sets` (`req_sets_present`); a
 `meta` that is not an object, has no string `source_format`, or has a type
 value of the wrong type (`invalid_meta`); a `client_metadata` of the wrong
-shape (`invalid_client_metadata`). The pre-v0.4 names (`req`, item `id`,
-`circuit_zk`, `claims._req`, the base64 `input` envelope) are gone, not
-aliased.
+shape (`invalid_client_metadata`).
 
 ## Unsatisfiable requests (`unsatisfiable`)
 

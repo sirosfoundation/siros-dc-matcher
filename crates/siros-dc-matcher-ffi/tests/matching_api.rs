@@ -4,6 +4,9 @@
 //! regression in the shared engine shows up here rather than as a wallet that
 //! silently stops being offered.
 
+// UniFFI's records hold std's HashMap; the crate never links into matcher.wasm.
+#![allow(clippy::disallowed_types)]
+
 use std::collections::HashMap;
 
 use serde_json::json;

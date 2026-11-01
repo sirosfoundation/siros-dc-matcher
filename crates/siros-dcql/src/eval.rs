@@ -16,6 +16,9 @@ use serde_json::Value;
 use crate::path::{PathComponent, PathError};
 use crate::query::{ClaimsQuery, CredentialQuery, CredentialSetQuery, DcqlQuery};
 
+mod products;
+use products::candidate_products;
+
 /// A credential the wallet holds, as far as DCQL is concerned.
 pub trait Credential {
     /// Stable identifier, echoed back in match results.
@@ -402,122 +405,6 @@ impl QueryResult {
             combinations: out,
             dropped,
         }
-    }
-}
-
-/// Up to `budget` ways to answer each query id in `option`, and how many
-/// further ways existed.
-///
-/// One candidate per query, except where the query set §6.1 `multiple`, in
-/// which case that query is answered by *all* of its candidates at once and so
-/// contributes a single way rather than one per credential.
-///
-/// The count is a product of the per-query widths, so it is computed rather
-/// than reached by building every combination and discarding most of them.
-fn candidate_products(
-    result: &QueryResult,
-    option: &[String],
-    budget: usize,
-) -> (Vec<Vec<(String, Candidate)>>, Dropped) {
-    let mut total: usize = 1;
-    // Whether the product ran out of `usize` on the way. Tracked rather than
-    // inferred from `total == usize::MAX`, which a genuine product could also
-    // reach, and clamping is what makes the count a bound instead of a number.
-    let mut overflowed = false;
-    for id in option {
-        let Some(query_match) = result.query(id) else {
-            return (Vec::new(), Dropped::Exact(0));
-        };
-        match total.checked_mul(query_width(query_match)) {
-            Some(product) => total = product,
-            None => {
-                overflowed = true;
-                total = usize::MAX;
-            }
-        }
-    }
-    if total == 0 {
-        return (Vec::new(), Dropped::Exact(0));
-    }
-
-    let take = total.min(budget);
-    let mut products: Vec<Vec<(String, Candidate)>> = Vec::with_capacity(take);
-
-    // How many members each combination will hold: one per query, except a
-    // `multiple` query which contributes all of its candidates. Constant
-    // across the loop below, so it is computed once — a `multiple` query over
-    // many credentials otherwise grows a vector sized for one member each.
-    let members_per_combination: usize = option
-        .iter()
-        .filter_map(|id| result.query(id))
-        .map(|query_match| {
-            if query_match.multiple {
-                query_match.candidates.len()
-            } else {
-                1
-            }
-        })
-        .sum();
-
-    // Index arithmetic rather than a growing cartesian product: the nth
-    // combination is a mixed-radix reading of n across the per-query candidate
-    // counts, so only the ones actually wanted are built.
-    for n in 0..take {
-        let mut remainder = n;
-        let mut members = Vec::with_capacity(members_per_combination);
-        for id in option {
-            let Some(query_match) = result.query(id) else {
-                return (Vec::new(), Dropped::Exact(0));
-            };
-            // A `multiple` query has width 1 and contributes every candidate,
-            // so it consumes none of the mixed-radix index — `% 1` and `/ 1`
-            // would be the no-ops that fall out of the arithmetic anyway.
-            if query_match.multiple {
-                members.extend(
-                    query_match
-                        .candidates
-                        .iter()
-                        .map(|candidate| (id.clone(), candidate.clone())),
-                );
-                continue;
-            }
-            let width = query_match.candidates.len();
-            let Some(candidate) = query_match.candidates.get(remainder % width) else {
-                return (Vec::new(), Dropped::Exact(0));
-            };
-            members.push((id.clone(), candidate.clone()));
-            remainder /= width;
-        }
-        products.push(members);
-    }
-
-    let remaining = total - take;
-    let dropped = if overflowed {
-        Dropped::AtLeast(remaining)
-    } else {
-        Dropped::Exact(remaining)
-    };
-    (products, dropped)
-}
-
-/// How many distinct ways one query can be answered within a combination.
-///
-/// One per candidate normally. A query that set §6.1 `multiple` is answered by
-/// all of its candidates together, which is one way, not none — so a query
-/// with no candidates at all still has width zero and makes the whole product
-/// zero.
-///
-/// Answering a `multiple` query with everything that matches, rather than
-/// enumerating each credential as its own alternative, is the reading under
-/// which the flag does something: "multiple Credentials can be returned for
-/// this Credential Query" (§6.1). It also collapses the combination count
-/// where the permissive reading would multiply it, and the holder still
-/// consents to the combination as a whole.
-fn query_width(query_match: &QueryMatch) -> usize {
-    if query_match.multiple && !query_match.candidates.is_empty() {
-        1
-    } else {
-        query_match.candidates.len()
     }
 }
 

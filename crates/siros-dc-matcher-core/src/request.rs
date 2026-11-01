@@ -31,62 +31,45 @@ use crate::profile::{MatchProfile, Parser};
 /// Carried rather than collapsed into `None` so the debug diagnostic can say
 /// which of these happened. "data has no `dcql_query`" is true of every signed
 /// request and tells the reader nothing about why theirs was declined.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum NoQuery {
     /// The protocol is in the profile, but the entry carried no `data`.
+    #[error("request entry has no `data`")]
     NoData,
     /// `data` had neither `dcql_query` nor anything shaped like a JWS.
+    #[error("data has neither `dcql_query` nor a `request` to decode")]
     NoQueryAndNoRequest,
     /// `data.request` is present but is neither a string nor an object, so
     /// there is nothing to decode — a different problem from its absence.
+    #[error("data.request is neither a JWS string nor a JWS JSON object")]
     RequestNotAJwsOrObject,
     /// A JWS JSON Serialization object is present but carries no string
     /// `payload` — again, present but undecodable rather than absent.
+    #[error("the JWS JSON object has no string `payload` member")]
     JwsObjectHasNoPayload,
     /// The data carries a `request` under a protocol whose shape is an inline
     /// query, or an inline query under a signed one. The label and the shape
     /// disagree, which is a different problem from either being absent.
+    #[error("the request shape does not match the protocol it is labelled with")]
     ShapeDoesNotMatchProtocol,
     /// `data.request` is a string but not a compact JWS.
+    #[error("data.request is not a compact JWS")]
     NotACompactJws,
     /// The payload segment is not unpadded base64url.
+    #[error("JWS payload is not unpadded base64url")]
     PayloadNotBase64url,
     /// The payload decoded, but is not JSON.
+    #[error("JWS payload is not JSON")]
     PayloadNotJson,
     /// The payload is JSON but carries no `dcql_query`.
+    #[error("JWS payload has no `dcql_query`")]
     PayloadHasNoDcqlQuery,
     /// A `dcql_query` was found but does not parse as DCQL.
+    #[error("dcql_query failed to parse: {0}")]
     Malformed(String),
     /// The protocol has no reader in this build.
+    #[error("no parser for this protocol in this build")]
     NoParser,
-}
-
-impl NoQuery {
-    /// One line for the picker's debug entry.
-    #[must_use]
-    pub fn reason(&self) -> String {
-        match self {
-            Self::NoData => "request entry has no `data`".into(),
-            Self::NoQueryAndNoRequest => {
-                "data has neither `dcql_query` nor a `request` to decode".into()
-            }
-            Self::RequestNotAJwsOrObject => {
-                "data.request is neither a JWS string nor a JWS JSON object".into()
-            }
-            Self::JwsObjectHasNoPayload => {
-                "the JWS JSON object has no string `payload` member".into()
-            }
-            Self::ShapeDoesNotMatchProtocol => {
-                "the request shape does not match the protocol it is labelled with".into()
-            }
-            Self::NotACompactJws => "data.request is not a compact JWS".into(),
-            Self::PayloadNotBase64url => "JWS payload is not unpadded base64url".into(),
-            Self::PayloadNotJson => "JWS payload is not JSON".into(),
-            Self::PayloadHasNoDcqlQuery => "JWS payload has no `dcql_query`".into(),
-            Self::Malformed(e) => format!("dcql_query failed to parse: {e}"),
-            Self::NoParser => "no parser for this protocol in this build".into(),
-        }
-    }
 }
 
 /// The first protocol in the request the profile supports *and* can read.
@@ -571,7 +554,7 @@ pub fn diagnose(request: &[u8], profile: &MatchProfile) -> String {
             continue;
         };
         let Some(data) = entry.get("data") else {
-            parts.push(format!("{protocol}: {}", NoQuery::NoData.reason()));
+            parts.push(format!("{protocol}: {}", NoQuery::NoData));
             continue;
         };
         match extract_query(parser, protocol, data) {
@@ -579,7 +562,7 @@ pub fn diagnose(request: &[u8], profile: &MatchProfile) -> String {
                 "{protocol}: dcql_query parsed ({} credential queries) - should not have reached here",
                 q.credentials.len()
             )),
-            Err(e) => parts.push(format!("{protocol}: {}", e.reason())),
+            Err(e) => parts.push(format!("{protocol}: {e}")),
         }
     }
     parts.join(" | ")
