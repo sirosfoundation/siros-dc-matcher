@@ -36,8 +36,6 @@
 #![cfg_attr(not(any(target_arch = "wasm32", test)), allow(dead_code))]
 
 mod picker;
-#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-mod simple_allocator;
 
 // The host calls `_start`, which `wasm32-unknown-unknown` has no CRT to
 // export. The shipped build is `wasm32-wasip1` (see the Makefile); this

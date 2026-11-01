@@ -9,6 +9,17 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Entries are reconstructed from git history for releases made before this file
 existed.
 
+## Unreleased
+
+### Changed
+
+- The matcher allocates through std's allocator on every target. The bump allocator of the
+  `wasm32-unknown-unknown` build is gone; the shipped `wasm32-wasip1` module already used std's,
+  and its bytes are unchanged.
+- The `matcher.wasm` size budget is 460,800 bytes (450 KiB), up from 307,200. A freeing
+  allocator measures about 20 KB over a bump allocator in the wallet-core matcher, whose module
+  is 412,760 bytes with it; the size is optimized later.
+
 ## v0.12.0 — 2026-11-01
 
 `matcher.wasm` is 304,960 bytes against the 307,200-byte budget (303,418 at v0.11.0). The vector

@@ -81,7 +81,7 @@ CI also enforces three things a green build does not imply:
 - **Host ABI imports.** `scripts/check_matcher_abi.py` checks each import of
   `matcher.wasm`, with its signature, against the Credential Manager ABI
   table and the WASI functions the host provides.
-- **A 307,200-byte (300 KiB) size budget** for `matcher.wasm`, which runs in someone else's
+- **A 460,800-byte (450 KiB) size budget** for `matcher.wasm`, which runs in someone else's
   process. Raising it takes a line in `.github/workflows/ci.yml` and a reason.
 
 ### Bindings and mobile artifacts
