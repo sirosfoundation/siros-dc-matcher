@@ -259,3 +259,14 @@ jobs:
       # an unpublished workspace sibling. That is easy to add by accident and
       # only fails at release time otherwise.
       - run: cargo publish --locked --dry-run -p siros-dcql
+
+  core-publishable:
+    name: siros-dc-matcher-core is publishable
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: ./.github/actions/rust-toolchain
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      # The verifier-core release resolves this crate from crates.io. Check
+      # both publication itself and the registry dependency on siros-dcql.
+      - run: cargo publish --locked --dry-run -p siros-dc-matcher-core
