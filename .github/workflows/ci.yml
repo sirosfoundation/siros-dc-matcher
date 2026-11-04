@@ -269,4 +269,6 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       # The verifier-core release resolves this crate from crates.io. Check
       # both publication itself and the registry dependency on siros-dcql.
+      # A release that changes siros-dcql's version must be staged: publish
+      # siros-dcql first, then this crate, or the registry check cannot resolve it.
       - run: cargo publish --locked --dry-run -p siros-dc-matcher-core

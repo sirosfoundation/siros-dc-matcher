@@ -127,7 +127,12 @@ jobs:
   core:
     name: Publish siros-dc-matcher-core to crates.io
     runs-on: ubuntu-latest
+    # siros-dcql must be available before core's packaged verification runs.
+    needs: [crate]
     environment: crates-io
+    # Before the first release, bootstrap this crate once with a crates.io API
+    # token and configure Trusted Publishing for this job/environment. OIDC
+    # cannot create a previously nonexistent crate on its own.
     permissions:
       contents: read
       id-token: write
@@ -313,7 +318,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    needs: [wasm, crate, android, ios]
+    needs: [wasm, crate, core, android, ios]
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
